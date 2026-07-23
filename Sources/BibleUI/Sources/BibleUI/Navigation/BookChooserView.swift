@@ -5,6 +5,12 @@ import BibleCore
 import SwiftData
 import SwordKit
 
+/** Stable layout anchor identities for the app-owned passage chooser popup. */
+private enum PassageChooserPopupAnchor {
+    /// Top-app-bar overflow button used by Android's chooser options menu.
+    static let overflow = "passageChooserOverflowAnchor"
+}
+
 /**
  Describes the next step after selecting a book in Android's passage chooser.
 
@@ -80,6 +86,9 @@ public struct BookChooserView: View {
     /// Dynamic book list derived from the active module's versification.
     let books: [BookInfo]
 
+    /// Optional Android activity title supplied by specialized passage-selection flows.
+    let selectionTitle: String?
+
     /// Whether the flow should include a verse chooser after chapter selection.
     let navigateToVerse: Bool
 
@@ -142,6 +151,8 @@ public struct BookChooserView: View {
 
      - Parameters:
        - books: Book list from the active module's versification.
+       - selectionTitle: Optional activity title such as Speak's beginning/end prompts. A nil value
+         preserves the standard localized `choose_book` title and workspace suffix.
        - navigateToVerse: Whether the flow should include verse selection.
        - currentBook: Current reader book name, used only for selector highlighting.
        - currentChapter: Current reader chapter, used only for selector highlighting.
@@ -158,6 +169,7 @@ public struct BookChooserView: View {
      */
     public init(
         books: [BookInfo],
+        selectionTitle: String? = nil,
         navigateToVerse: Bool = false,
         currentBook: String? = nil,
         currentChapter: Int? = nil,
@@ -171,6 +183,7 @@ public struct BookChooserView: View {
         onSelect: @escaping (String, Int, Int?) -> Void
     ) {
         self.books = books
+        self.selectionTitle = selectionTitle
         self.navigateToVerse = navigateToVerse
         self.currentBook = currentBook
         self.currentChapter = currentChapter
@@ -208,8 +221,17 @@ public struct BookChooserView: View {
         .preferredColorScheme(.dark)
         .tint(.white)
         .onAppear { loadChooserOptionsIfNeeded() }
-        .overlay(alignment: .topTrailing) {
-            chooserOptionsPopupOverlay
+        .androidAnchoredPopupMenu(
+            anchorID: PassageChooserPopupAnchor.overflow,
+            isPresented: $isChooserMenuPresented,
+            menuWidth: 340,
+            estimatedMenuHeight: CGFloat(PassageChooserMenuEntry.androidBookChooserOrder.count) * 48,
+            accessibilityIdentifier: "passageChooserOverflowPopup"
+        ) {
+            PassageChooserOverflowMenuPopup(options: chooserOptions) { option in
+                applyChooserOption(option)
+                isChooserMenuPresented = false
+            }
         }
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
@@ -299,38 +321,6 @@ public struct BookChooserView: View {
     }
 
     /**
-     Draws Android's dark popup menu over the book grid.
-
-     Android's chooser menu is a popup anchored near the top-right toolbar button, not an iOS
-     command menu. The transparent hit target lets taps outside the popup dismiss it without
-     changing chooser state.
-     */
-    @ViewBuilder
-    private var chooserOptionsPopupOverlay: some View {
-        if selectedBook == nil, isChooserMenuPresented {
-            GeometryReader { proxy in
-                ZStack(alignment: .topTrailing) {
-                    Color.black.opacity(0.42)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            isChooserMenuPresented = false
-                        }
-
-                    PassageChooserOverflowMenuPopup(options: chooserOptions) { option in
-                        applyChooserOption(option)
-                        isChooserMenuPresented = false
-                    }
-                    .frame(width: min(max(proxy.size.width - 16, 260), 340))
-                    .padding(.top, PassageChooserAppBar.height + 8)
-                    .padding(.trailing, 8)
-                }
-            }
-            .transition(.opacity)
-            .zIndex(10)
-        }
-    }
-
-    /**
      Applies and persists one Android chooser-menu option.
 
      - Parameter option: Menu option selected by the user.
@@ -378,6 +368,10 @@ public struct BookChooserView: View {
         }
         if let selectedBook {
             return selectedBook.name
+        }
+
+        if let selectionTitle, !selectionTitle.isEmpty {
+            return selectionTitle
         }
 
         return PassageChooserTitle.bookSelectionTitle(
@@ -606,6 +600,7 @@ private struct PassageChooserAppBar: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(String(localized: "more_options", defaultValue: "More options"))
                 .accessibilityIdentifier("passageChooserOverflowButton")
+                .androidPopupMenuAnchor(id: PassageChooserPopupAnchor.overflow)
             } else {
                 Color.clear
                     .frame(width: 52, height: Self.height)
@@ -629,51 +624,38 @@ private struct PassageChooserAppBar: View {
  `PassageChooserOptions`.
  */
 private struct PassageChooserOverflowMenuPopup: View {
+    /// Forced-dark chooser appearance supplied to the shared popup palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Current Android chooser option state used to render row checkmarks.
     let options: PassageChooserOptions
 
     /// Callback invoked with the selected Android menu option.
     let onSelect: (PassageChooserMenuOption) -> Void
 
-    /// Android-like active checkbox tint used by Material dark menus.
-    private let checkedTint = Color(red: 0x80 / 255.0, green: 0xCB / 255.0, blue: 0xC4 / 255.0)
-
     /**
      Renders Android's passage chooser overflow popup.
      */
     var body: some View {
-        VStack(spacing: 0) {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "passageChooserOverflowPopup",
+            backgroundColor: PassageChooserSurfacePalette.background.swiftUIColor,
+            primaryTextColor: .white,
+            secondaryTextColor: .white.opacity(0.82),
+            accentColor: AndroidDialogSurfacePalette.accent(for: .dark)
+        ) {
             ForEach(PassageChooserMenuEntry.androidBookChooserOrder) { entry in
-                Button {
+                AndroidPopupMenuRow(
+                    title: localizedTitle(for: entry),
+                    accessory: .checkbox(isOn: isChecked(entry.option)),
+                    accessibilityIdentifier: "passageChooserMenu.\(entry.localizationKey)",
+                    accessibilityValue: isChecked(entry.option) ? "on" : "off"
+                ) {
                     onSelect(entry.option)
-                } label: {
-                    HStack(spacing: 18) {
-                        Text(localizedTitle(for: entry))
-                            .font(.system(size: 19, weight: .regular))
-                            .foregroundStyle(Color.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-
-                        Spacer(minLength: 12)
-
-                        Image(systemName: isChecked(entry.option) ? "checkmark.square.fill" : "square")
-                            .font(.system(size: 24, weight: .regular))
-                            .foregroundStyle(isChecked(entry.option) ? checkedTint : Color.white)
-                    }
-                    .frame(height: 58)
-                    .padding(.leading, 24)
-                    .padding(.trailing, 18)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(localizedTitle(for: entry))
-                .accessibilityValue(isChecked(entry.option) ? "on" : "off")
-                .accessibilityIdentifier("passageChooserMenu.\(entry.localizationKey)")
             }
         }
-        .background(PassageChooserSurfacePalette.background.swiftUIColor)
-        .shadow(color: Color.black.opacity(0.45), radius: 10, x: 0, y: 6)
-        .accessibilityIdentifier("passageChooserOverflowPopup")
     }
 
     /**

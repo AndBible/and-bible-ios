@@ -80,6 +80,9 @@ struct AIQuickSetupCredentialDialog: View {
     /// SwiftData context used for the provider, model, and default-model transaction.
     @Environment(\.modelContext) private var modelContext
 
+    /// Current appearance used by the shared AppCompat dialog marker.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Selected Android-recommended setup.
     let option: AIRecommendedSetup
     /// Device-local Keychain boundary.
@@ -161,7 +164,11 @@ struct AIQuickSetupCredentialDialog: View {
             )
             .accessibilityIdentifier("aiQuickSetupSaveButton")
         }
-        .accessibilityIdentifier("aiQuickSetupCredentialScreen")
+        .androidAccessibilityIdentityMarker(
+            label: dialogTitle,
+            accessibilityIdentifier: "aiQuickSetupCredentialScreen",
+            surfaceColor: AndroidDialogSurfacePalette.background(for: colorScheme)
+        )
         .onDisappear { apiKey = "" }
     }
 

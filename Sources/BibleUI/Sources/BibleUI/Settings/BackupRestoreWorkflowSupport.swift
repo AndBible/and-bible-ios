@@ -469,8 +469,8 @@ struct BackupExportDocument: FileDocument {
 /**
  Android-style radio row used by the Backup & Restore workflow.
 
- The row is implemented as a button so the whole line toggles the selection, matching Android's
- wide radio-row affordance while staying native SwiftUI.
+ This adapter supplies BackupActivity's generic value type and stable identifiers to the shared
+ `AndroidRadioRow`; it does not reconstruct a feature-local radio indicator.
  */
 struct BackupWorkflowOptionRow<Value: Equatable>: View {
     /// Title shown beside the radio indicator.
@@ -485,6 +485,18 @@ struct BackupWorkflowOptionRow<Value: Equatable>: View {
     /// Currently selected value for the surrounding radio group.
     @Binding var selection: Value
 
+    /// Whether the row accepts input while the parent workflow is idle.
+    let isEnabled: Bool
+
+    /// Owner-resolved primary content color.
+    let foregroundColor: Color
+
+    /// Owner-resolved supporting-text and unchecked-indicator color.
+    let secondaryColor: Color
+
+    /// Global AppCompat accent used by the selected radio indicator.
+    let accentColor: Color
+
     /// Accessibility identifier assigned to the row button.
     let accessibilityIdentifier: String
 
@@ -495,31 +507,17 @@ struct BackupWorkflowOptionRow<Value: Equatable>: View {
      - Failure modes: This view does not throw; accessibility state follows the bound selection.
      */
     var body: some View {
-        Button {
-            selection = value
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: selection == value ? "largecircle.fill.circle" : "circle")
-                    .imageScale(.large)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 24, height: 24)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .foregroundStyle(.primary)
-                    Text(description)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier)
-        .accessibilityAddTraits(selection == value ? .isSelected : [])
+        AndroidRadioRow(
+            title: title,
+            description: description,
+            value: value,
+            selection: $selection,
+            isEnabled: isEnabled,
+            foregroundColor: foregroundColor,
+            secondaryColor: secondaryColor,
+            accentColor: accentColor,
+            accessibilityIdentifier: accessibilityIdentifier
+        )
     }
 }
 

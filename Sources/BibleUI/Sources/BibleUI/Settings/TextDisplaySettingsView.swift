@@ -214,6 +214,12 @@ struct TextDisplayPreferenceEditorDraft: Equatable, Sendable {
  - non-switch editor dialogs stage a draft and mutate `settings` only from OK or Reset
  */
 public struct TextDisplaySettingsView: View {
+    /// App-owned child activities launched from Android preference rows.
+    private enum ActivityDestination {
+        case colors
+        case hiddenLabels
+    }
+
     /// Shared text display settings being edited by the form.
     @Binding var settings: TextDisplaySettings
 
@@ -238,17 +244,32 @@ public struct TextDisplaySettingsView: View {
     /// Parent route invoked by Android's `open_global_settings` row.
     private let onOpenGlobalSettings: (() -> Void)?
 
+    /// Reader/workspace-owned colors shared by this activity and every child activity.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Explicit Android Up action supplied by the reader destination owner.
+    private let onBack: (() -> Void)?
+
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
 
-    /// Current system appearance used by the Android dialog color palette.
-    @Environment(\.colorScheme) private var colorScheme
+    /// Hosting dismissal fallback for standalone settings callers.
+    @Environment(\.dismiss) private var dismiss
+
+    /// Durable Android-compatible recent-setting history shared with window popup menus.
+    @Environment(\.modelContext) private var modelContext
 
     /// Active non-switch preference editor dialog, if one is open.
     @State private var activePreferenceEditor: TextDisplayPreferenceEditorKind?
 
-    /// Local staged editor values that mirror Android dialog widgets.
-    @State private var preferenceEditorDraft = TextDisplayPreferenceEditorDraft(settings: TextDisplaySettings())
+    /// Current full app-owned child activity, replacing native navigation presentation.
+    @State private var activityDestination: ActivityDestination?
+
+    /// Whether Android's full-scope reset confirmation is visible.
+    @State private var showsResetConfirmation = false
+
+    /// Whether Android's scope-specific Text Options help dialog is visible.
+    @State private var showsHelp = false
 
     /// Inclusive Android-backed slider bounds used by `FONTSIZE`.
     static let androidFontSizeRange: ClosedRange<Int> = 1...60
@@ -302,6 +323,46 @@ public struct TextDisplaySettingsView: View {
         )
         self.scope = scope
         self.workspaceName = workspaceName
+        self.onOpenWorkspaceSettings = onOpenWorkspaceSettings
+        self.onOpenGlobalSettings = onOpenGlobalSettings
+        self.onChange = onChange
+        surfacePalette = .standard
+        onBack = nil
+    }
+
+    /**
+     Creates an app-owned reader Text Options activity with explicit owner palette and Up action.
+
+     The reader route uses this initializer so the action bar, rows, nested Colors/Hide Labels
+     activities, and controls all resolve from the same workspace/window palette. The public
+     initializer remains source-compatible for standalone hosts and uses the standard palette.
+
+     - Parameters: Existing public editor inputs plus the owner palette and explicit Back action.
+     - Side effects: none until a user changes a setting or invokes Back.
+     - Failure modes: none.
+     */
+    init(
+        settings: Binding<TextDisplaySettings>,
+        workspaceColor: Binding<Int?>? = nil,
+        navigationTitle: String? = nil,
+        scope: TextDisplaySettingsScope = .global,
+        workspaceName: String? = nil,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: (() -> Void)?,
+        onOpenWorkspaceSettings: (() -> Void)? = nil,
+        onOpenGlobalSettings: (() -> Void)? = nil,
+        onChange: (() -> Void)? = nil
+    ) {
+        self._settings = settings
+        self.workspaceColor = workspaceColor
+        navigationTitleText = navigationTitle ?? String(
+            localized: "global_text_display_settings_title",
+            defaultValue: "Global text options"
+        )
+        self.scope = scope
+        self.workspaceName = workspaceName
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
         self.onOpenWorkspaceSettings = onOpenWorkspaceSettings
         self.onOpenGlobalSettings = onOpenGlobalSettings
         self.onChange = onChange
@@ -378,7 +439,11 @@ public struct TextDisplaySettingsView: View {
     private var bookmarksHideLabelsBinding: Binding<[UUID]?> {
         Binding(
             get: { settings.bookmarksHideLabels },
-            set: { settings.bookmarksHideLabels = $0; onChange?() }
+            set: {
+                settings.bookmarksHideLabels = $0
+                recordRecentSetting(.bookmarksHideLabels)
+                onChange?()
+            }
         )
     }
 
@@ -390,10 +455,18 @@ public struct TextDisplaySettingsView: View {
        - defaultValue: Fallback used when the field is currently `nil`.
      - Returns: A non-optional binding suitable for SwiftUI toggle controls.
      */
-    private func boolBinding(_ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>, default defaultValue: Bool) -> Binding<Bool> {
+    private func boolBinding(
+        _ keyPath: WritableKeyPath<TextDisplaySettings, Bool?>,
+        default defaultValue: Bool,
+        androidType: AndroidTextDisplaySettingType
+    ) -> Binding<Bool> {
         Binding(
             get: { settings[keyPath: keyPath] ?? defaultValue },
-            set: { settings[keyPath: keyPath] = $0; onChange?() }
+            set: {
+                settings[keyPath: keyPath] = $0
+                recordRecentSetting(androidType)
+                onChange?()
+            }
         )
     }
 
@@ -520,13 +593,38 @@ public struct TextDisplaySettingsView: View {
      Builds the Android-ordered text-display preference list.
      */
     public var body: some View {
-        let footnotesBinding = boolBinding(\.showFootNotes, default: false)
-        let xrefsBinding = boolBinding(\.showXrefs, default: false)
-        let justifyTextBinding = boolBinding(\.justifyText, default: false)
+        let footnotesBinding = boolBinding(
+            \.showFootNotes,
+            default: false,
+            androidType: .footnotes
+        )
+        let xrefsBinding = boolBinding(\.showXrefs, default: false, androidType: .xrefs)
+        let justifyTextBinding = boolBinding(\.justifyText, default: false, androidType: .justify)
 
         ZStack(alignment: .topLeading) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+            AndroidActivityScreen(
+                    title: navigationTitleText,
+                    accessibilityIdentifier: "textDisplaySettingsTopAppBar",
+                    palette: surfacePalette,
+                    onBack: close
+                ) {
+                    AndroidActivityTopAppBarActionButton(
+                        icon: .asset("ActivityReset"),
+                        accessibilityLabel: String(localized: "reset_settings", defaultValue: "Reset"),
+                        accessibilityIdentifier: "textDisplaySettingsResetButton",
+                        foregroundColor: surfacePalette.toolbarForegroundColor,
+                        action: { showsResetConfirmation = true }
+                    )
+                    AndroidActivityTopAppBarActionButton(
+                        icon: .asset("DrawerHelp"),
+                        accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                        accessibilityIdentifier: "textDisplaySettingsHelpButton",
+                        foregroundColor: surfacePalette.toolbarForegroundColor,
+                        action: { showsHelp = true }
+                    )
+                } content: {
+                    ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
                     if showsParentSettingsSection {
                         parentSettingsSection
                     }
@@ -545,13 +643,17 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "MORPH",
                             title: androidTitle("MORPH"),
                             summary: androidSummary("MORPH"),
-                            isOn: boolBinding(\.showMorphology, default: false)
+                            isOn: boolBinding(\.showMorphology, default: false, androidType: .morphology)
                         )
                         preferenceSwitchRow(
                             androidKey: "NON_STRONGS_WORD_ITALIC",
                             title: androidTitle("NON_STRONGS_WORD_ITALIC"),
                             summary: androidSummary("NON_STRONGS_WORD_ITALIC"),
-                            isOn: boolBinding(\.nonStrongsWordItalic, default: false)
+                            isOn: boolBinding(
+                                \.nonStrongsWordItalic,
+                                default: false,
+                                androidType: .nonStrongsWordItalic
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "FOOTNOTES",
@@ -563,7 +665,11 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "FOOTNOTES_INLINE",
                             title: androidTitle("FOOTNOTES_INLINE"),
                             summary: androidSummary("FOOTNOTES_INLINE"),
-                            isOn: boolBinding(\.showFootNotesInline, default: false),
+                            isOn: boolBinding(
+                                \.showFootNotesInline,
+                                default: false,
+                                androidType: .footnotesInline
+                            ),
                             isEnabled: footnotesBinding.wrappedValue
                         )
                         preferenceSwitchRow(
@@ -576,48 +682,54 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "EXPAND_XREFS",
                             title: androidTitle("EXPAND_XREFS"),
                             summary: androidSummary("EXPAND_XREFS"),
-                            isOn: boolBinding(\.expandXrefs, default: false),
+                            isOn: boolBinding(
+                                \.expandXrefs,
+                                default: false,
+                                androidType: .expandXrefs
+                            ),
                             isEnabled: xrefsBinding.wrappedValue
                         )
                         preferenceSwitchRow(
                             androidKey: "SECTIONTITLES",
                             title: androidTitle("SECTIONTITLES"),
                             summary: androidSummary("SECTIONTITLES"),
-                            isOn: boolBinding(\.showSectionTitles, default: true)
+                            isOn: boolBinding(
+                                \.showSectionTitles,
+                                default: true,
+                                androidType: .sectionTitles
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "TITLE_SCROLL_BUTTON",
                             title: androidTitle("TITLE_SCROLL_BUTTON"),
                             summary: androidSummary("TITLE_SCROLL_BUTTON"),
-                            isOn: boolBinding(\.showTitleScrollButton, default: false)
+                            isOn: boolBinding(
+                                \.showTitleScrollButton,
+                                default: false,
+                                androidType: .titleScrollButton
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "VERSENUMBERS",
                             title: androidTitle("VERSENUMBERS"),
                             summary: androidSummary("VERSENUMBERS"),
-                            isOn: boolBinding(\.showVerseNumbers, default: true)
+                            isOn: boolBinding(
+                                \.showVerseNumbers,
+                                default: true,
+                                androidType: .verseNumbers
+                            )
                         )
                     }
 
                     preferenceSection(.appearance) {
-                        NavigationLink {
-                            ColorSettingsView(
-                                settings: $settings,
-                                workspaceColor: workspaceColor,
-                                onChange: onChange
-                            )
-                        } label: {
-                            preferenceRowContent(
-                                androidKey: "COLORS",
-                                title: androidTitle("COLORS"),
-                                summary: androidSummary("COLORS")
-                            ) {
-                                rowChevron
-                            }
+                        preferenceActionRow(
+                            androidKey: "COLORS",
+                            title: androidTitle("COLORS"),
+                            summary: androidSummary("COLORS"),
+                            accessibilityIdentifier: "textDisplayColorsLink"
+                        ) {
+                            activityDestination = .colors
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("textDisplayColorsLink")
-                        preferenceDivider()
 
                         preferenceActionRow(
                             androidKey: "FONTSIZE",
@@ -665,13 +777,17 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "REDLETTERS",
                             title: androidTitle("REDLETTERS"),
                             summary: androidSummary("REDLETTERS"),
-                            isOn: boolBinding(\.showRedLetters, default: true)
+                            isOn: boolBinding(\.showRedLetters, default: true, androidType: .redLetters)
                         )
                         preferenceSwitchRow(
                             androidKey: "VERSEPERLINE",
                             title: androidTitle("VERSEPERLINE"),
                             summary: androidSummary("VERSEPERLINE"),
-                            isOn: boolBinding(\.showVersePerLine, default: false)
+                            isOn: boolBinding(
+                                \.showVersePerLine,
+                                default: false,
+                                androidType: .versePerLine
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "JUSTIFY",
@@ -685,13 +801,13 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "HYPHENATION",
                             title: androidTitle("HYPHENATION"),
                             summary: androidSummary("HYPHENATION"),
-                            isOn: boolBinding(\.hyphenation, default: true)
+                            isOn: boolBinding(\.hyphenation, default: true, androidType: .hyphenation)
                         )
                         preferenceSwitchRow(
                             androidKey: "PAGENUMBER",
                             title: androidTitle("PAGENUMBER"),
                             summary: androidSummary("PAGENUMBER"),
-                            isOn: boolBinding(\.showPageNumber, default: false)
+                            isOn: boolBinding(\.showPageNumber, default: false, androidType: .pageNumber)
                         )
                     }
 
@@ -700,7 +816,11 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "INFINITE_SCROLL",
                             title: androidTitle("INFINITE_SCROLL"),
                             summary: androidSummary("INFINITE_SCROLL"),
-                            isOn: boolBinding(\.infiniteScroll, default: true)
+                            isOn: boolBinding(
+                                \.infiniteScroll,
+                                default: true,
+                                androidType: .infiniteScroll
+                            )
                         )
                         preferenceActionRow(
                             androidKey: "PAGE_SCROLL_AMOUNT",
@@ -714,7 +834,7 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "ORDINALS",
                             title: androidTitle("ORDINALS"),
                             summary: androidSummary("ORDINALS"),
-                            isOn: boolBinding(\.showOrdinals, default: false)
+                            isOn: boolBinding(\.showOrdinals, default: false, androidType: .ordinals)
                         )
                     }
 
@@ -723,39 +843,37 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "BOOKMARKS_SHOW",
                             title: androidTitle("BOOKMARKS_SHOW"),
                             summary: androidSummary("BOOKMARKS_SHOW"),
-                            isOn: boolBinding(\.showBookmarks, default: true)
+                            isOn: boolBinding(
+                                \.showBookmarks,
+                                default: true,
+                                androidType: .bookmarksShow
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "MYNOTES",
                             title: androidTitle("MYNOTES"),
                             summary: androidSummary("MYNOTES"),
-                            isOn: boolBinding(\.showMyNotes, default: true)
+                            isOn: boolBinding(\.showMyNotes, default: true, androidType: .myNotes)
                         )
                         preferenceSwitchRow(
                             androidKey: "AI_DOC_MARKERS",
                             title: androidTitle("AI_DOC_MARKERS"),
                             summary: androidSummary("AI_DOC_MARKERS"),
-                            isOn: boolBinding(\.showAiDocMarkers, default: true)
-                        )
-                        NavigationLink {
-                            HiddenBookmarkLabelsView(
-                                labels: userLabels,
-                                hiddenLabelIds: bookmarksHideLabelsBinding,
-                                onChange: onChange
+                            isOn: boolBinding(
+                                \.showAiDocMarkers,
+                                default: true,
+                                androidType: .aiDocumentMarkers
                             )
-                        } label: {
-                            preferenceRowContent(
-                                androidKey: "BOOKMARKS_HIDELABELS",
-                                title: androidTitle("BOOKMARKS_HIDELABELS"),
-                                summary: androidSummary("BOOKMARKS_HIDELABELS"),
-                                detail: hiddenBookmarkLabelsDetail
-                            ) {
-                                rowChevron
-                            }
+                        )
+                        preferenceActionRow(
+                            androidKey: "BOOKMARKS_HIDELABELS",
+                            title: androidTitle("BOOKMARKS_HIDELABELS"),
+                            summary: androidSummary("BOOKMARKS_HIDELABELS"),
+                            detail: hiddenBookmarkLabelsDetail,
+                            accessibilityIdentifier: "textDisplayHiddenBookmarkLabelsLink"
+                        ) {
+                            activityDestination = .hiddenLabels
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsLink")
-                        preferenceDivider()
                     }
 
                     preferenceSection(.readingAndMemorization) {
@@ -763,26 +881,35 @@ public struct TextDisplaySettingsView: View {
                             androidKey: "MARK_AS_READ_BUTTON",
                             title: androidTitle("MARK_AS_READ_BUTTON"),
                             summary: androidSummary("MARK_AS_READ_BUTTON"),
-                            isOn: boolBinding(\.showMarkAsReadButton, default: true)
+                            isOn: boolBinding(
+                                \.showMarkAsReadButton,
+                                default: true,
+                                androidType: .markAsReadButton
+                            )
                         )
                         preferenceSwitchRow(
                             androidKey: "MEMORIZATION_INDICATORS",
                             title: androidTitle("MEMORIZATION_INDICATORS"),
                             summary: androidSummary("MEMORIZATION_INDICATORS"),
-                            isOn: boolBinding(\.showMemorizationIndicators, default: false)
+                            isOn: boolBinding(
+                                \.showMemorizationIndicators,
+                                default: false,
+                                androidType: .memorizationIndicators
+                            )
                         )
                     }
+                    }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
+                .accessibilityIdentifier("textDisplaySettingsScrollView")
             }
-            .accessibilityIdentifier("textDisplaySettingsScrollView")
 
             textDisplaySettingsStateExport
             textDisplayPreferenceEditorOverlay
+            textDisplayActivityOverlay
+            textDisplayResetOverlay
+            textDisplayHelpOverlay
         }
-        .background(textDisplayScreenBackground.ignoresSafeArea())
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationTitle(navigationTitleText)
     }
 
     /**
@@ -843,46 +970,6 @@ public struct TextDisplaySettingsView: View {
     }
 
     /**
-     Platform background for the flat Android-style preference surface.
-
-     - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private var textDisplayScreenBackground: Color {
-        #if os(iOS)
-        Color(.systemBackground)
-        #else
-        Color.clear
-        #endif
-    }
-
-    /**
-     Leading inset for Android-style row dividers.
-
-     - Returns: Horizontal inset that starts dividers at the row text column after the icon gutter.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private var preferenceDividerLeadingInset: CGFloat {
-        AndBibleSettingsPreferenceLayout.dividerLeadingInset
-    }
-
-    /**
-     Chevron accessory used for rows that open another editor.
-
-     - Returns: A secondary chevron image aligned to the trailing edge of a preference row.
-     - Side effects: none.
-     - Failure modes: Missing SF Symbols would render SwiftUI's symbol fallback.
-     */
-    private var rowChevron: some View {
-        Image(systemName: "chevron.right")
-            .font(.body.weight(.semibold))
-            .foregroundStyle(.tertiary)
-            .accessibilityHidden(true)
-    }
-
-    /**
      Accessibility-only state export for UI tests and reader route assertions.
 
      SwiftUI `ScrollView` does not reliably refresh its own accessibility value after child state
@@ -901,6 +988,122 @@ public struct TextDisplaySettingsView: View {
             .accessibilityLabel("textDisplaySettingsScreen")
             .accessibilityValue(accessibilityState)
             .allowsHitTesting(false)
+    }
+
+    /**
+     Presents nested Android activities above the owning Text Options activity.
+
+     Colors and Hide Labels keep their own action bars and return through an explicit Up action;
+     no iOS navigation stack, sheet, or modal transition owns either route.
+
+     - Returns: The selected full app-owned child activity, or no overlay for the root list.
+     - Side effects: Child activity commands mutate their supplied bindings and invoke `onChange`.
+     - Failure modes: none.
+     */
+    @ViewBuilder
+    private var textDisplayActivityOverlay: some View {
+        switch activityDestination {
+        case .colors:
+            ColorSettingsView(
+                settings: $settings,
+                workspaceColor: workspaceColor,
+                surfacePalette: surfacePalette,
+                activityTitle: String(localized: "colors", defaultValue: "Colors"),
+                onBack: { activityDestination = nil },
+                onChange: {
+                    recordRecentSetting(.colors)
+                    onChange?()
+                }
+            )
+            .zIndex(15)
+        case .hiddenLabels:
+            AndroidHiddenLabelsActivityView(
+                labels: allLabels,
+                hiddenLabelIDs: bookmarksHideLabelsBinding,
+                isWindow: scope == .window,
+                surfacePalette: surfacePalette,
+                onDismiss: { activityDestination = nil },
+                onChange: {
+                    recordRecentSetting(.bookmarksHideLabels)
+                    onChange?()
+                }
+            )
+            .zIndex(15)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /** Android's confirmation dialog for clearing every override at the current settings scope. */
+    @ViewBuilder
+    private var textDisplayResetOverlay: some View {
+        if showsResetConfirmation {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    localized: "reset_are_you_sure",
+                    defaultValue: "Are you sure that you want to reset all of these values?"
+                ),
+                actions: [
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .destructive
+                    ) {
+                        resetAllTextDisplaySettings()
+                    },
+                    .init(
+                        id: "no",
+                        title: String(localized: "no", defaultValue: "No"),
+                        style: .normal
+                    ) {
+                        showsResetConfirmation = false
+                    },
+                ],
+                accessibilityIdentifier: "textDisplaySettingsResetDialog"
+            )
+            .zIndex(30)
+        }
+    }
+
+    /** Android's scope-specific Text Options help content in the shared app-owned dialog. */
+    @ViewBuilder
+    private var textDisplayHelpOverlay: some View {
+        if showsHelp {
+            AndroidTextDisplayHelpDialog(scope: scope) {
+                showsHelp = false
+            }
+            .zIndex(30)
+        }
+    }
+
+    /**
+     Applies Android's activity-level reset contract and exits the current scope.
+
+     Android writes an empty `TextDisplaySettings` object so every field inherits from the next
+     owner (or bundled defaults at global scope). Persisting concrete iOS defaults here would break
+     later parent propagation, so this deliberately clears the complete override object.
+
+     - Side effects: Clears current-scope settings, invokes persistence, dismisses confirmation, and
+       closes the activity.
+     - Failure modes: Persistence failures retain the existing soft-failure behavior of `onChange`.
+     */
+    private func resetAllTextDisplaySettings() {
+        settings = TextDisplaySettings()
+        onChange?()
+        showsResetConfirmation = false
+        close()
+    }
+
+    /** Closes the current app-owned activity through its explicit owner or hosting fallback. */
+    private func close() {
+        if activityDestination != nil {
+            activityDestination = nil
+        } else if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 
     /**
@@ -934,51 +1137,7 @@ public struct TextDisplaySettingsView: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            textDisplaySectionHeader(title)
-                .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
-            content()
-        }
-        .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionBottomPadding)
-    }
-
-    /**
-     Builds the shared label/accessory layout for one flat preference row.
-
-     - Parameters:
-       - androidKey: Android preference key used for icon lookup.
-       - title: Primary row title.
-       - summary: Optional secondary row text.
-       - detail: Optional tertiary state text.
-       - isEnabled: Whether text and icon should use enabled emphasis.
-       - accessory: Trailing control or navigation affordance.
-     - Returns: A single preference row content block.
-     - Side effects: Renders Android-sourced icon assets through `textDisplayRowLabel`.
-     - Failure modes: Unknown Android keys render without an icon.
-     */
-    private func preferenceRowContent<Accessory: View>(
-        androidKey: String,
-        title: String,
-        summary: String? = nil,
-        detail: String? = nil,
-        isEnabled: Bool = true,
-        @ViewBuilder accessory: () -> Accessory
-    ) -> some View {
-        HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
-            textDisplayRowLabel(
-                androidKey: androidKey,
-                title: title,
-                summary: summary,
-                detail: detail,
-                isEnabled: isEnabled
-            )
-            .layoutPriority(1)
-
-            accessory()
-        }
-        .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
-        .background(textDisplayScreenBackground)
-        .contentShape(Rectangle())
+        AndroidPreferenceSection(title: title, palette: surfacePalette, content: content)
     }
 
     /**
@@ -1005,19 +1164,15 @@ public struct TextDisplaySettingsView: View {
         accessibilityIdentifier: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            preferenceRowContent(
-                androidKey: androidKey,
-                title: title,
-                summary: summary,
-                detail: detail
-            ) {
-                rowChevron
-            }
-        }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .accessibilityIdentifier(accessibilityIdentifier)
+        AndroidCatalogActionPreferenceRow(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
+            palette: surfacePalette,
+            accessibilityIdentifier: accessibilityIdentifier,
+            action: action
+        )
         preferenceDivider()
     }
 
@@ -1032,8 +1187,8 @@ public struct TextDisplaySettingsView: View {
        - isEnabled: Whether the row can mutate the binding.
        - rowAccessibilityIdentifier: Optional UI-test identifier for the row tap target.
        - switchAccessibilityIdentifier: Optional UI-test identifier for the switch itself.
-     - Returns: A row label and native switch aligned like an Android preference row.
-     - Side effects: Tapping the row label or switch mutates `isOn`.
+     - Returns: One shared app-owned Android switch preference row.
+     - Side effects: Tapping the row mutates `isOn`.
      - Failure modes: Disabled rows ignore taps and keep the binding unchanged.
      */
     @ViewBuilder
@@ -1046,32 +1201,17 @@ public struct TextDisplaySettingsView: View {
         rowAccessibilityIdentifier: String? = nil,
         switchAccessibilityIdentifier: String? = nil
     ) -> some View {
-        HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
-            Button {
-                if isEnabled {
-                    isOn.wrappedValue.toggle()
-                }
-            } label: {
-                textDisplayRowLabel(
-                    androidKey: androidKey,
-                    title: title,
-                    summary: summary,
-                    isEnabled: isEnabled
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier(rowAccessibilityIdentifier ?? "textDisplaySwitchRow-\(androidKey)")
-            .layoutPriority(1)
-            .disabled(!isEnabled)
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .disabled(!isEnabled)
-                .accessibilityIdentifier(switchAccessibilityIdentifier ?? "textDisplaySwitch-\(androidKey)")
-                .accessibilityValue(isOn.wrappedValue ? "on" : "off")
-        }
-        .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
-        .background(textDisplayScreenBackground)
+        AndroidCatalogSwitchPreferenceRow(
+            title: title,
+            summary: summary,
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
+            isOn: isOn,
+            isEnabled: isEnabled,
+            palette: surfacePalette,
+            accessibilityIdentifier: rowAccessibilityIdentifier
+                ?? switchAccessibilityIdentifier
+                ?? "textDisplaySwitchRow-\(androidKey)"
+        )
         preferenceDivider()
     }
 
@@ -1102,20 +1242,17 @@ public struct TextDisplaySettingsView: View {
      - Failure modes: This helper cannot fail.
      */
     private func preferenceDivider() -> some View {
-        Divider()
-            .padding(.leading, preferenceDividerLeadingInset)
+        AndroidPreferenceDivider(palette: surfacePalette)
     }
 
     /**
      Opens a non-switch Android preference editor with a fresh staged draft.
 
      - Parameter editor: Editor selected from the flat row list.
-     - Side effects: Copies the current stored settings into `preferenceEditorDraft` and presents the
-       in-place Android dialog overlay.
+     - Side effects: Presents the shared in-place Android dialog with a fresh staged draft.
      - Failure modes: none; every enum case is renderable by the overlay.
      */
     private func openPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
-        preferenceEditorDraft = TextDisplayPreferenceEditorDraft(settings: settings)
         activePreferenceEditor = editor
     }
 
@@ -1134,558 +1271,42 @@ public struct TextDisplaySettingsView: View {
     @ViewBuilder
     private var textDisplayPreferenceEditorOverlay: some View {
         if let editor = activePreferenceEditor {
-            ZStack {
-                Color.black.opacity(colorScheme == .dark ? 0.45 : 0.32)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        cancelPreferenceEditor()
-                    }
-                    .accessibilityHidden(true)
-
-                makePreferenceEditorDialog(editor)
-                    .padding(.horizontal, 24)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            AndroidTextDisplayPreferenceEditorDialog(
+                editor: editor,
+                settings: $settings,
+                scope: scope,
+                surfacePalette: surfacePalette,
+                onCommit: {
+                    activePreferenceEditor = nil
+                    recordRecentSetting(editor.androidSettingType)
+                    onChange?()
+                },
+                onReset: {
+                    activePreferenceEditor = nil
+                    onChange?()
+                },
+                onCancel: { activePreferenceEditor = nil }
+            )
             .zIndex(20)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("textDisplayPreferenceEditorOverlay")
-            .accessibilityValue(editor.rawValue)
-        }
-    }
-
-    /**
-     Builds one centered AppCompat-style editor dialog.
-
-     - Parameter editor: Active Android preference editor being rendered.
-     - Returns: Dialog chrome with title, field content, and Reset/Cancel/OK actions.
-     - Side effects: Action buttons call reset, cancel, or commit helpers; field controls only mutate
-       `preferenceEditorDraft`.
-     - Failure modes: none; unsupported editor cases would be compile-time switch failures.
-     */
-    private func makePreferenceEditorDialog(_ editor: TextDisplayPreferenceEditorKind) -> some View {
-        VStack(spacing: 0) {
-            Text(preferenceEditorTitle(editor))
-                .font(.headline)
-                .foregroundStyle(dialogPrimaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
-            preferenceEditorDialogContent(editor)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 16)
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
-            HStack(spacing: 16) {
-                Button(String(localized: "reset_generic", defaultValue: "Reset")) {
-                    resetPreferenceEditor(editor)
-                }
-                .accessibilityIdentifier("textDisplayPreferenceEditorResetButton")
-
-                Spacer(minLength: 8)
-
-                Button(String(localized: "cancel")) {
-                    cancelPreferenceEditor()
-                }
-                .accessibilityIdentifier("textDisplayPreferenceEditorCancelButton")
-
-                Button(String(localized: "ok", defaultValue: "OK")) {
-                    commitPreferenceEditor(editor)
-                }
-                .fontWeight(.semibold)
-                .accessibilityIdentifier("textDisplayPreferenceEditorOKButton")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(dialogAccent)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
-        }
-        .frame(maxWidth: 430)
-        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .strokeBorder(dialogSecondaryText.opacity(0.28), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
-        .accessibilityIdentifier("textDisplayPreferenceEditorDialog")
-    }
-
-    /**
-     Dispatches active editor content to the Android-equivalent widget body.
-
-     - Parameter editor: Active preference editor whose controls should be shown.
-     - Returns: Staged controls for the selected editor.
-     - Side effects: Controls mutate only `preferenceEditorDraft`.
-     - Failure modes: none.
-     */
-    @ViewBuilder
-    private func preferenceEditorDialogContent(_ editor: TextDisplayPreferenceEditorKind) -> some View {
-        switch editor {
-        case .strongsMode:
-            dialogChoiceList(
-                options: strongsModeOptions,
-                selection: draftIntBinding(\.strongsMode, fallback: 0)
-            )
-        case .fontSize:
-            VStack(alignment: .leading, spacing: 14) {
-                fontSampleText(size: displayedDraftFontSize)
-                dialogNumericSlider(
-                    title: String(
-                        localized: "font_size_title",
-                        defaultValue: "Font size"
-                    ),
-                    valueText: String.localizedStringWithFormat(
-                        String(localized: "font_size_pt", defaultValue: "%d pt"),
-                        displayedDraftFontSize
-                    ),
-                    binding: draftDoubleBinding(\.fontSize, fallback: TextDisplaySettings.appDefaults.fontSize ?? 16),
-                    range: Double(Self.androidFontSizeRange.lowerBound)...Double(Self.androidFontSizeRange.upperBound),
-                    step: Self.androidNumericSliderStep
-                )
-            }
-        case .fontFamily:
-            VStack(alignment: .leading, spacing: 14) {
-                fontSampleText(size: displayedDraftFontSize)
-                Text(String(localized: "pref_font_family_label", defaultValue: "Font family"))
-                    .font(.callout)
-                    .foregroundStyle(dialogPrimaryText)
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Self.androidFontFamilyOptions()) { option in
-                            fontFamilyChoiceRow(option)
-                            Divider()
-                                .background(dialogSecondaryText.opacity(0.18))
-                        }
-                    }
-                }
-                .frame(maxHeight: 260)
-                .accessibilityIdentifier("textDisplayFontFamilyOptionList")
-            }
-        case .margins:
-            VStack(alignment: .leading, spacing: 16) {
-                dialogNumericSlider(
-                    title: String(localized: "text_display_left_margin_label", defaultValue: "Left margin"),
-                    valueText: millimeterValueText(displayedDraftMarginLeft),
-                    binding: draftDoubleBinding(\.marginLeft, fallback: TextDisplaySettings.appDefaults.marginLeft ?? 3),
-                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
-                    step: Self.androidNumericSliderStep
-                )
-                dialogNumericSlider(
-                    title: String(localized: "text_display_right_margin_label", defaultValue: "Right margin"),
-                    valueText: millimeterValueText(displayedDraftMarginRight),
-                    binding: draftDoubleBinding(\.marginRight, fallback: TextDisplaySettings.appDefaults.marginRight ?? 3),
-                    range: Double(Self.androidMarginRange.lowerBound)...Double(Self.androidMarginRange.upperBound),
-                    step: Self.androidNumericSliderStep
-                )
-                dialogNumericSlider(
-                    title: String(localized: "text_display_max_width_label", defaultValue: "Maximum width of text"),
-                    valueText: millimeterValueText(displayedDraftMaxWidth),
-                    binding: draftDoubleBinding(\.maxWidth, fallback: TextDisplaySettings.appDefaults.maxWidth ?? 170),
-                    range: Double(Self.androidMaxTextWidthRange.lowerBound)...Double(Self.androidMaxTextWidthRange.upperBound),
-                    step: Self.androidNumericSliderStep
-                )
-            }
-        case .topMargin:
-            dialogNumericSlider(
-                title: String(localized: "prefs_top_margin_title", defaultValue: "Top margin"),
-                valueText: millimeterValueText(displayedDraftTopMargin),
-                binding: draftDoubleBinding(\.topMargin, fallback: 0),
-                range: Double(Self.androidTopMarginRange.lowerBound)...Double(Self.androidTopMarginRange.upperBound),
-                step: Self.androidNumericSliderStep
-            )
-        case .lineSpacing:
-            dialogNumericSlider(
-                title: String(localized: "line_spacing_title", defaultValue: "Line spacing"),
-                valueText: String.localizedStringWithFormat(
-                    String(localized: "prefs_line_spacing_pt", defaultValue: "Line spacing %1.1fx"),
-                    Double(displayedDraftLineSpacing) / 10.0
-                ),
-                binding: draftDoubleBinding(\.lineSpacing, fallback: TextDisplaySettings.appDefaults.lineSpacing ?? 16),
-                range: Double(Self.androidLineSpacingRange.lowerBound)...Double(Self.androidLineSpacingRange.upperBound),
-                step: Self.androidNumericSliderStep
-            )
-        case .pageScrollAmount:
-            dialogChoiceList(
-                options: pageScrollAmountOptions,
-                selection: draftIntBinding(\.pageScrollAmount, fallback: 100)
+            .androidDialogAccessibilityIdentity(
+                accessibilityIdentifier: "textDisplayPreferenceEditorOverlay",
+                accessibilityValue: editor.rawValue
             )
         }
     }
 
     /**
-     Resolves the dialog title for one non-switch Android preference.
+     Records one committed text-setting type using Android's shared five-item history.
 
-     - Parameter editor: Active editor selected by the user.
-     - Returns: Android row title used as the dialog title.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
+     - Parameter type: Exact Android enum identity for the setting that changed.
+     - Side effects: Persists `lastDisplaySettings` in the shared app settings store.
+     - Failure modes: Malformed prior JSON is replaced only after a valid new payload is encoded.
      */
-    private func preferenceEditorTitle(_ editor: TextDisplayPreferenceEditorKind) -> String {
-        switch editor {
-        case .strongsMode:
-            return androidTitle("STRONGS")
-        case .fontSize:
-            return androidTitle("FONTSIZE")
-        case .fontFamily:
-            return androidTitle("FONTFAMILY")
-        case .margins:
-            return androidTitle("MARGINSIZE")
-        case .topMargin:
-            return androidTitle("TOPMARGIN")
-        case .lineSpacing:
-            return androidTitle("LINE_SPACING")
-        case .pageScrollAmount:
-            return androidTitle("PAGE_SCROLL_AMOUNT")
-        }
-    }
-
-    /**
-     Builds a single-choice list matching Android `AlertDialog.setSingleChoiceItems`.
-
-     - Parameters:
-       - options: Value/label pairs in Android dialog order.
-       - selection: Staged selection binding.
-     - Returns: Scrollable radio-list rows for the dialog.
-     - Side effects: Row taps mutate only `selection`.
-     - Failure modes: Empty option arrays render an empty scroll region.
-     */
-    private func dialogChoiceList(
-        options: [(value: Int, label: String)],
-        selection: Binding<Int>
-    ) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(options, id: \.value) { option in
-                    Button {
-                        selection.wrappedValue = option.value
-                    } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: selection.wrappedValue == option.value ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(selection.wrappedValue == option.value ? dialogAccent : dialogSecondaryText)
-                            Text(option.label)
-                                .font(.body)
-                                .foregroundStyle(dialogPrimaryText)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("textDisplayPreferenceChoice::\(option.value)")
-                    .accessibilityValue(selection.wrappedValue == option.value ? "selected" : "unselected")
-                    Divider()
-                        .background(dialogSecondaryText.opacity(0.18))
-                }
-            }
-        }
-        .frame(maxHeight: 320)
-    }
-
-    /**
-     Builds one Android-like numeric seekbar row for a staged dialog value.
-
-     - Parameters:
-       - title: User-visible setting label.
-       - valueText: Current value text shown below the slider.
-       - binding: Draft binding mutated by the slider.
-       - range: Inclusive Android seekbar range.
-       - step: Slider increment.
-     - Returns: Labeled slider and current value text.
-     - Side effects: Moving the slider mutates only `preferenceEditorDraft`.
-     - Failure modes: Non-finite values are normalized by `draftDoubleBinding`.
-     */
-    private func dialogNumericSlider(
-        title: String,
-        valueText: String,
-        binding: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(dialogPrimaryText)
-                Text(valueText)
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(dialogSecondaryText)
-            }
-            Slider(value: binding, in: range, step: step)
-        }
-    }
-
-    /**
-     Builds one row in the Android font-family selection list.
-
-     - Parameter option: Font-family option from Android's widget list.
-     - Returns: Tappable row with Android-style first-match selection semantics.
-     - Side effects: Row taps mutate only `preferenceEditorDraft.fontFamily`.
-     - Failure modes: Unknown font family names fall back to SwiftUI's default font rendering.
-     */
-    private func fontFamilyChoiceRow(_ option: TextDisplayFontFamilyOption) -> some View {
-        let selectedIndex = Self.androidFontFamilySelectedIndex(for: preferenceEditorDraft.fontFamily)
-        let isSelected = option.androidIndex == selectedIndex
-        return Button {
-            preferenceEditorDraft.fontFamily = option.value
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(isSelected ? dialogAccent : dialogSecondaryText)
-                Text(option.label)
-                    .font(fontPreview(for: option.value, size: 16))
-                    .foregroundStyle(dialogPrimaryText)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 11)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("textDisplayFontFamilyOption::\(option.androidIndex)")
-        .accessibilityValue(isSelected ? "selected" : "unselected")
-    }
-
-    /**
-     Builds Android's sample text preview for font-size and font-family dialogs.
-
-     - Parameter size: Point size used for the sample.
-     - Returns: Two-line preview text rendered with the draft font family.
-     - Side effects: none.
-     - Failure modes: Unknown Android font-family names fall back to SwiftUI system font rendering.
-     */
-    private func fontSampleText(size: Int) -> some View {
-        Text(String(localized: "prefs_text_size_sample_text", defaultValue: "The quick brown fox jumps over the lazy dog."))
-            .font(fontPreview(for: preferenceEditorDraft.fontFamily ?? "sans-serif", size: CGFloat(size)))
-            .foregroundStyle(dialogSecondaryText)
-            .lineLimit(2)
-            .frame(height: 60, alignment: .bottomLeading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("textDisplayPreferenceEditorSampleText")
-    }
-
-    /**
-     Resolves an Android font-family string to the nearest SwiftUI preview font.
-
-     Android and iOS do not share platform font implementations, but the dialog should preview the
-     broad design family instead of dumping every row into the same system font. Stored values remain
-     the Android strings; this helper affects only visual preview.
-
-     - Parameters:
-       - family: Android font-family value.
-       - size: Point size for the preview font.
-     - Returns: SwiftUI font that approximates the Android family category.
-     - Side effects: none.
-     - Failure modes: Unknown values use the default system design.
-     */
-    private func fontPreview(for family: String, size: CGFloat) -> Font {
-        if family.contains("monospace") || family == "monospace" {
-            return .system(size: size, design: .monospaced)
-        }
-        if family == "serif" {
-            return .system(size: size, design: .serif)
-        }
-        if family == "casual" || family == "cursive" {
-            return .system(size: size, design: .rounded)
-        }
-        return .system(size: size)
-    }
-
-    /**
-     Creates a staged integer binding for single-choice Android dialog rows.
-
-     - Parameters:
-       - keyPath: Draft optional integer field being edited.
-       - fallback: Value used when the draft currently inherits from a parent scope.
-     - Returns: Non-optional binding suitable for radio-list rows.
-     - Side effects: Setting the binding mutates only `preferenceEditorDraft`.
-     - Failure modes: none.
-     */
-    private func draftIntBinding(
-        _ keyPath: WritableKeyPath<TextDisplayPreferenceEditorDraft, Int?>,
-        fallback: Int
-    ) -> Binding<Int> {
-        Binding(
-            get: { preferenceEditorDraft[keyPath: keyPath] ?? fallback },
-            set: { preferenceEditorDraft[keyPath: keyPath] = $0 }
+    private func recordRecentSetting(_ type: AndroidTextDisplaySettingType) {
+        AndroidTextDisplayRecentSettings.record(
+            type,
+            settingsStore: SettingsStore(modelContext: modelContext)
         )
-    }
-
-    /**
-     Creates a staged numeric binding for Android seekbar-style dialog rows.
-
-     - Parameters:
-       - keyPath: Draft optional integer field being edited.
-       - fallback: Value used when the draft currently inherits from a parent scope.
-     - Returns: Slider-compatible binding that stores rounded integer values in the draft.
-     - Side effects: Setting the binding mutates only `preferenceEditorDraft`.
-     - Failure modes: Non-finite slider values preserve the current fallback through
-       `sliderInteger`.
-     */
-    private func draftDoubleBinding(
-        _ keyPath: WritableKeyPath<TextDisplayPreferenceEditorDraft, Int?>,
-        fallback: Int
-    ) -> Binding<Double> {
-        Binding(
-            get: { Double(preferenceEditorDraft[keyPath: keyPath] ?? fallback) },
-            set: { preferenceEditorDraft[keyPath: keyPath] = Self.sliderInteger($0, fallback: fallback) }
-        )
-    }
-
-    /// Draft font size shown in the active dialog.
-    private var displayedDraftFontSize: Int {
-        preferenceEditorDraft.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16
-    }
-
-    /// Draft left margin shown in the active dialog.
-    private var displayedDraftMarginLeft: Int {
-        preferenceEditorDraft.marginLeft ?? TextDisplaySettings.appDefaults.marginLeft ?? 3
-    }
-
-    /// Draft right margin shown in the active dialog.
-    private var displayedDraftMarginRight: Int {
-        preferenceEditorDraft.marginRight ?? TextDisplaySettings.appDefaults.marginRight ?? 3
-    }
-
-    /// Draft maximum text width shown in the active dialog.
-    private var displayedDraftMaxWidth: Int {
-        preferenceEditorDraft.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170
-    }
-
-    /// Draft top margin shown in the active dialog.
-    private var displayedDraftTopMargin: Int {
-        preferenceEditorDraft.topMargin ?? TextDisplaySettings.appDefaults.topMargin ?? 0
-    }
-
-    /// Draft line-spacing value clamped to Android's 10...30 seekbar range.
-    private var displayedDraftLineSpacing: Int {
-        min(
-            max(
-                preferenceEditorDraft.lineSpacing ?? TextDisplaySettings.appDefaults.lineSpacing ?? 16,
-                Self.androidLineSpacingRange.lowerBound
-            ),
-            Self.androidLineSpacingRange.upperBound
-        )
-    }
-
-    /**
-     Formats a millimeter value using Android's value-label convention.
-
-     - Parameter value: Integer millimeter value.
-     - Returns: Localized value string for slider detail text.
-     - Side effects: none.
-     - Failure modes: Missing localization uses the default `"%d mm"` format.
-     */
-    private func millimeterValueText(_ value: Int) -> String {
-        String.localizedStringWithFormat(
-            String(localized: "value_mm", defaultValue: "%d mm"),
-            value
-        )
-    }
-
-    /**
-     Commits the active staged editor values to persisted settings and closes the dialog.
-
-     - Parameter editor: Dialog whose draft field group should be persisted.
-     - Side effects: Mutates `settings`, invokes `onChange`, and dismisses the overlay.
-     - Failure modes: none; draft values are normalized by their controls before commit.
-     */
-    private func commitPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
-        preferenceEditorDraft.commit(editor, scope: scope, to: &settings)
-        activePreferenceEditor = nil
-        onChange?()
-    }
-
-    /**
-     Applies Android's neutral Reset action for the active editor and closes the dialog.
-
-     - Parameter editor: Dialog whose field group should reset.
-     - Side effects: Mutates the draft, commits the reset value into `settings`, invokes `onChange`,
-       and dismisses the overlay.
-     - Failure modes: none.
-     */
-    private func resetPreferenceEditor(_ editor: TextDisplayPreferenceEditorKind) {
-        preferenceEditorDraft.reset(editor, scope: scope)
-        preferenceEditorDraft.commit(editor, scope: scope, to: &settings)
-        activePreferenceEditor = nil
-        onChange?()
-    }
-
-    /**
-     Cancels the active editor without writing staged values.
-
-     - Side effects: Dismisses the overlay and leaves `settings` unchanged.
-     - Failure modes: none.
-     */
-    private func cancelPreferenceEditor() {
-        activePreferenceEditor = nil
-    }
-
-    /// Android-dialog background color for the current system appearance.
-    private var dialogBackground: Color {
-        AndroidDialogSurfacePalette.background(for: colorScheme)
-    }
-
-    /// Android-dialog primary text color for the current system appearance.
-    private var dialogPrimaryText: Color {
-        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
-    }
-
-    /// Android-dialog secondary text color for the current system appearance.
-    private var dialogSecondaryText: Color {
-        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
-    }
-
-    /// Android-dialog accent color for interactive editor actions.
-    private var dialogAccent: Color {
-        AndroidDialogSurfacePalette.accent(for: colorScheme)
-    }
-
-    /**
-     Builds one Android-shaped text-display settings row label using Android dynamic icon metadata.
-
-     - Parameters:
-       - androidKey: `TextDisplaySettings.Types` name from Android `OptionsMenuItems.kt`.
-       - title: Primary row title.
-       - summary: Optional secondary row text.
-       - detail: Optional tertiary state text.
-       - isEnabled: Whether the row should render with enabled or disabled emphasis.
-     - Returns: Shared row label aligned with Android preference geometry.
-     - Side effects: Renders an image from the module bundle when the key has catalog metadata.
-     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
-     */
-    private func textDisplayRowLabel(
-        androidKey: String,
-        title: String,
-        summary: String? = nil,
-        detail: String? = nil,
-        isEnabled: Bool = true
-    ) -> AndBibleSettingsRowLabel {
-        AndBibleSettingsRowLabel(
-            title: title,
-            summary: summary,
-            detail: detail,
-            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
-            isEnabled: isEnabled
-        )
-    }
-
-    /**
-     Builds an Android-shaped text-display section header using the active app accent color.
-
-     - Parameter title: User-visible section title.
-     - Returns: Section header aligned with row text rather than the icon column.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func textDisplaySectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
-        AndBibleSettingsSectionHeader(title: title)
     }
 
     /// Android built-in font families from `FontSizeWidget.kt`, preserving source order and duplicates.
@@ -1765,99 +1386,5 @@ public struct TextDisplaySettingsView: View {
             return exactIndex
         }
         return options.firstIndex(where: { $0.value == "sans-serif" }) ?? 0
-    }
-}
-
-/**
- Nested Android `BOOKMARKS_HIDELABELS` picker backed by the persisted label catalog.
-
- - Parameters:
-   - labels: User-visible labels available for hiding bookmark highlights.
-   - hiddenLabelIds: Optional label IDs written into `TextDisplaySettings.bookmarksHideLabels`.
-   - onChange: Callback invoked after each toggle mutation.
- - Returns: A SwiftUI list of label toggles with Android-style color swatches.
- - Side effects: Toggle changes mutate `hiddenLabelIds` and invoke `onChange`.
- - Failure modes: Missing labels produce an empty-state row instead of failing.
- */
-private struct HiddenBookmarkLabelsView: View {
-    /// User-visible labels available for hidden-bookmark filtering.
-    let labels: [BibleCore.Label]
-
-    /// Optional hidden label IDs persisted in text-display settings.
-    @Binding var hiddenLabelIds: [UUID]?
-
-    /// Callback invoked after a hidden-label mutation.
-    var onChange: (() -> Void)?
-
-    /// Stable set of label IDs visible in the current SwiftData query.
-    private var visibleLabelIds: Set<UUID> {
-        Set(labels.map(\.id))
-    }
-
-    /**
-     Creates a toggle binding for one label while preserving hidden IDs that are not currently
-     visible in the label picker.
-
-     - Parameter label: Label whose hidden state should be edited.
-     - Returns: Toggle binding backed by `hiddenLabelIds`.
-     - Side effects: Writes a normalized hidden-label list and invokes `onChange`.
-     - Failure modes: This helper cannot fail.
-     */
-    private func hiddenBinding(for label: BibleCore.Label) -> Binding<Bool> {
-        Binding(
-            get: { Set(hiddenLabelIds ?? []).contains(label.id) },
-            set: { isHidden in
-                var ids = hiddenLabelIds ?? []
-                let preservedHiddenIds = ids.filter { !visibleLabelIds.contains($0) }
-                let visibleHiddenIds = ids.filter { visibleLabelIds.contains($0) && $0 != label.id }
-                ids = preservedHiddenIds + visibleHiddenIds
-                if isHidden {
-                    ids.append(label.id)
-                }
-                hiddenLabelIds = ids
-                onChange?()
-            }
-        )
-    }
-
-    /**
-     Builds the hidden-label picker list.
-     */
-    var body: some View {
-        List {
-            if labels.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(String(localized: "no_labels", defaultValue: "No labels"))
-                        .font(.body)
-                    Text(
-                        String(
-                            localized: "no_labels_to_hide_summary",
-                            defaultValue: "Create labels before hiding bookmark highlights by label."
-                        )
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 8)
-            } else {
-                ForEach(labels, id: \.id) { label in
-                    Toggle(isOn: hiddenBinding(for: label)) {
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                .fill(Color(argbInt: label.color))
-                                .frame(width: 22, height: 22)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                        .strokeBorder(Color.secondary.opacity(0.35), lineWidth: 1)
-                                )
-                            Text(label.name)
-                        }
-                    }
-                    .accessibilityIdentifier("textDisplayHiddenBookmarkLabel::\(label.id.uuidString)")
-                }
-            }
-        }
-        .accessibilityIdentifier("textDisplayHiddenBookmarkLabelsScreen")
-        .navigationTitle(String(localized: "hide_labels", defaultValue: "Hide labels"))
     }
 }

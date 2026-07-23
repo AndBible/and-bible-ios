@@ -46,24 +46,16 @@ struct AIModelDialogOverlay: View {
     let onChanged: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(colorScheme == .dark ? 0.62 : 0.38)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {}
-                    .accessibilityHidden(true)
-
-                dialogContent
-                    .frame(maxHeight: geometry.size.height * 0.9)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
-            }
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiModelDialogOverlay",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            dialogContent
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("aiModelDialogOverlay")
     }
 
     /// Renders the exact app-owned panel represented by `dialog`.
@@ -151,7 +143,7 @@ private struct AIModelProviderChooserDialog: View {
             )
             .accessibilityIdentifier("aiModelProviderCancelButton")
         }
-        .accessibilityIdentifier("aiModelProviderChooserDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiModelProviderChooserDialog")
     }
 }
 
@@ -159,6 +151,8 @@ private struct AIModelProviderChooserDialog: View {
 private struct AIModelEditorDialog: View {
     /// SwiftData context containing providers, models, usage, and global settings.
     @Environment(\.modelContext) private var modelContext
+    /// Appearance used by shared app-owned dialog controls.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Owning provider identity selected by the Models screen.
     let providerID: UUID
@@ -260,16 +254,17 @@ private struct AIModelEditorDialog: View {
                         pricingFields
 
                         if !isNewModel {
-                            Toggle(
-                                String(
+                            AndroidCheckboxRow(
+                                title: String(
                                     localized: "model_set_default",
                                     defaultValue: "Set as default model"
                                 ),
-                                isOn: $isDefault
+                                isOn: $isDefault,
+                                foregroundColor: AndroidDialogSurfacePalette.primaryText(for: colorScheme),
+                                accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme),
+                                accessibilityIdentifier: "aiModelDefaultToggle"
                             )
-                            .toggleStyle(.switch)
                             .padding(.top, 4)
-                            .accessibilityIdentifier("aiModelDefaultToggle")
                         }
                     } else {
                         ProgressView()
@@ -311,7 +306,7 @@ private struct AIModelEditorDialog: View {
             )
             .accessibilityIdentifier("aiModelSaveButton")
         }
-        .accessibilityIdentifier("aiModelEditorDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiModelEditorDialog")
         .task { await load() }
     }
 
@@ -340,18 +335,19 @@ private struct AIModelEditorDialog: View {
         }
 
         if AIModelCatalog.showsUnsupportedToggle(in: availableModels) {
-            Toggle(
-                String(
+            AndroidCheckboxRow(
+                title: String(
                     localized: "show_also_unsupported_models",
                     defaultValue: "Show also unsupported models"
                 ),
                 isOn: Binding(
                     get: { includesUnsupported },
                     set: updateUnsupportedVisibility
-                )
+                ),
+                foregroundColor: AndroidDialogSurfacePalette.primaryText(for: colorScheme),
+                accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme),
+                accessibilityIdentifier: "aiModelUnsupportedToggle"
             )
-            .toggleStyle(.switch)
-            .accessibilityIdentifier("aiModelUnsupportedToggle")
         }
 
         VStack(alignment: .leading, spacing: 4) {
@@ -758,7 +754,7 @@ private struct AIModelDeleteConfirmationDialog: View {
             )
             .accessibilityIdentifier("aiModelDeleteYesButton")
         }
-        .accessibilityIdentifier("aiModelDeleteConfirmationDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiModelDeleteConfirmationDialog")
     }
 
     /**

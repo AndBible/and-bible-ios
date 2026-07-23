@@ -662,6 +662,108 @@ final class EpubReaderParityTests: XCTestCase {
     }
 
     /**
+     Verifies Android's explicit EPUB Rebuild index action publishes a new immutable generation.
+
+     A real EPUB is installed and kept open while `rebuildSearchIndex` constructs the replacement.
+     The old reader must retain its generation-qualified content and search database, the returned
+     reader and subsequent stable-id opens must use the new generation, and both readers must
+     return the same source hit. Failure means Search could mutate a live reader in place, publish a
+     partial index, or claim success while future opens still select the old generation.
+     */
+    func testExplicitSearchIndexRebuildPublishesNewGenerationWithoutInvalidatingLiveReader() throws {
+        let library = try makeTemporaryDirectory(named: "explicit-search-rebuild-library")
+        let archive = try writeArchive(named: "Rebuild.epub", entries: epub3Entries(
+            title: "Rebuild Search",
+            firstBody: #"<p>immutable rebuild target.</p><img src="../images/cover%20art.png"/>"#,
+            secondBody: #"<p>Second.</p>"#
+        ))
+        let identifier = try EpubReader.install(epubURL: archive, libraryRootURL: library)
+        let originalReader = try XCTUnwrap(EpubReader(
+            identifier: identifier,
+            libraryRootURL: library
+        ))
+        let originalGeneration = originalReader.generationIdentifier
+        let originalContent = try XCTUnwrap(originalReader.content(forKey: "1"))
+
+        let rebuiltReader = try EpubReader.rebuildSearchIndex(
+            identifier: identifier,
+            libraryRootURL: library
+        )
+        let reopenedReader = try XCTUnwrap(EpubReader(
+            identifier: identifier,
+            libraryRootURL: library
+        ))
+
+        XCTAssertNotEqual(rebuiltReader.generationIdentifier, originalGeneration)
+        XCTAssertEqual(reopenedReader.generationIdentifier, rebuiltReader.generationIdentifier)
+        XCTAssertEqual(originalReader.generationIdentifier, originalGeneration)
+        XCTAssertEqual(originalReader.content(forKey: "1"), originalContent)
+        XCTAssertEqual(originalReader.searchResults(query: "immutable").count, 1)
+        XCTAssertEqual(rebuiltReader.searchResults(query: "immutable").count, 1)
+        XCTAssertTrue(originalContent.html.contains("/\(originalGeneration)/"))
+        XCTAssertTrue(
+            rebuiltReader.content(forKey: "1")?.html.contains(
+                "/\(rebuiltReader.generationIdentifier)/"
+            ) == true
+        )
+    }
+
+    /**
+     Verifies Android's Delete search index action preserves the EPUB and supports later rebuilding.
+
+     A live reader remains searchable on its leased generation while the stable identity switches to
+     a replacement with an empty FTS table. The replacement must still browse and render content,
+     and Rebuild index must publish a third generation that restores the same hit. Failure means
+     Delete Index either mutates live readers, deletes the document itself, or cannot be reversed by
+     Android's paired Rebuild action.
+     */
+    func testDeleteSearchIndexPublishesIndexFreeGenerationAndRebuildRestoresHits() throws {
+        let library = try makeTemporaryDirectory(named: "explicit-search-delete-library")
+        let archive = try writeArchive(named: "DeleteIndex.epub", entries: epub3Entries(
+            title: "Delete Search Index",
+            firstBody: #"<p>retained searchable content.</p>"#,
+            secondBody: #"<p>Second.</p>"#
+        ))
+        let identifier = try EpubReader.install(epubURL: archive, libraryRootURL: library)
+        let originalReader = try XCTUnwrap(EpubReader(
+            identifier: identifier,
+            libraryRootURL: library
+        ))
+        let originalGeneration = originalReader.generationIdentifier
+        let originalContent = try XCTUnwrap(originalReader.content(forKey: "1"))
+        XCTAssertEqual(originalReader.description, "DeleteIndex.epub")
+        XCTAssertEqual(originalReader.searchResults(query: "retained").count, 1)
+
+        let indexFreeReader = try EpubReader.deleteSearchIndex(
+            identifier: identifier,
+            libraryRootURL: library
+        )
+        let reopenedIndexFreeReader = try XCTUnwrap(EpubReader(
+            identifier: identifier,
+            libraryRootURL: library
+        ))
+
+        XCTAssertNotEqual(indexFreeReader.generationIdentifier, originalGeneration)
+        XCTAssertEqual(
+            reopenedIndexFreeReader.generationIdentifier,
+            indexFreeReader.generationIdentifier
+        )
+        XCTAssertEqual(originalReader.searchResults(query: "retained").count, 1)
+        XCTAssertEqual(indexFreeReader.searchResults(query: "retained").count, 0)
+        XCTAssertEqual(indexFreeReader.content(forKey: "1")?.key, originalContent.key)
+        XCTAssertEqual(indexFreeReader.content(forKey: "1")?.title, originalContent.title)
+        XCTAssertTrue(indexFreeReader.content(forKey: "1")?.html.contains("retained searchable content") == true)
+
+        let rebuiltReader = try EpubReader.rebuildSearchIndex(
+            identifier: identifier,
+            libraryRootURL: library
+        )
+        XCTAssertNotEqual(rebuiltReader.generationIdentifier, indexFreeReader.generationIdentifier)
+        XCTAssertEqual(rebuiltReader.searchResults(query: "retained").count, 1)
+        XCTAssertEqual(originalReader.searchResults(query: "retained").count, 1)
+    }
+
+    /**
      Verifies failure to switch the stable pointer cannot publish or retain a replacement generation.
 
      A complete prepared generation is renamed inside its writable container while the library root

@@ -63,6 +63,41 @@ private struct ResolvedGenericBookmarkSourceContent {
 }
 
 /**
+ Text segments used by Android's Bookmark list to emphasize the persisted selection.
+
+ Android keeps the text before and after a bookmark selection separate from the selected text, then
+ renders only the selected segment in bold. This value carries that semantic structure into SwiftUI
+ without reparsing generated HTML or resolving bookmark content a second time in the presentation
+ layer.
+
+ Inputs: source text split by verse/anchor plus persisted UTF-16 offsets
+ Outputs: prefix, selected text, suffix, and the normalized complete preview
+ Side effects: none
+ Failure modes: missing source content produces `empty`; invalid offsets are clamped
+ */
+struct BookmarkListTextProjection: Equatable {
+    /// Text before the selected range in the first source segment.
+    let prefix: String
+
+    /// Selected range rendered with emphasis by the Bookmark list.
+    let selectedText: String
+
+    /// Text after the selected range in the final source segment.
+    let suffix: String
+
+    /// Complete normalized row preview matching Android's `fullText` value.
+    let fullText: String
+
+    /// Empty projection used when the persisted source cannot be resolved.
+    static let empty = BookmarkListTextProjection(
+        prefix: "",
+        selectedText: "",
+        suffix: "",
+        fullText: ""
+    )
+}
+
+/**
  Projects reader bookmark, label, My Notes, and StudyPad models into Vue bridge DTOs.
 
  `BibleReaderController` owns navigation state and bridge event routing; this factory owns the
@@ -220,6 +255,49 @@ struct BibleReaderAnnotationPayloadFactory {
         genericBookmarkJSONForStudyPad(
             bookmark,
             resolvedSource: genericSourceContent(for: bookmark)
+        )
+    }
+
+    /**
+     Resolves the exact Bible text presentation used by Android's Bookmark list.
+
+     - Parameter bookmark: Persisted Bible bookmark whose active-module text should be displayed.
+     - Returns: Prefix, selected text, suffix, and full preview with UTF-16 offsets clamped safely.
+     - Side effects: May move the active SWORD module cursor while loading verse text.
+     - Failure modes: Missing modules or unresolved verses return an empty projection.
+     */
+    func bookmarkListTextProjection(_ bookmark: BibleBookmark) -> BookmarkListTextProjection {
+        let bookmarkBook = bookmark.book ?? currentBook
+        let range = bibleBookmarkRangeProjection(
+            bookName: bookmarkBook,
+            sourceStartOrdinal: bookmark.ordinalStart,
+            sourceEndOrdinal: bookmark.ordinalEnd,
+            kjvStartOrdinal: bookmark.kjvOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            ordinalProjection: .activeModule
+        )
+        let hasSourceModule = !sourceModuleMetadata(for: bookmark).initials.isEmpty
+        return Self.bookmarkTextProjection(
+            sourceTexts: loadVerseTexts(for: range),
+            startOffset: bookmark.startOffset,
+            endOffset: bookmark.endOffset,
+            wholeVerse: bookmark.wholeVerse || !hasSourceModule
+        ) ?? .empty
+    }
+
+    /**
+     Resolves the exact generic text presentation used by Android's Bookmark list.
+
+     - Parameter bookmark: Persisted generic bookmark carrying its source identity and offsets.
+     - Returns: Prefix, selected text, suffix, and full preview from the stored source.
+     - Side effects: May move a resolved SWORD source cursor while loading its exact key.
+     - Failure modes: Missing source content returns an empty projection; whole-page sources return
+       Android's first 200 UTF-16 code-unit preview.
+     */
+    func bookmarkListTextProjection(_ bookmark: GenericBookmark) -> BookmarkListTextProjection {
+        genericBookmarkListTextProjection(
+            bookmark: bookmark,
+            sourceTexts: genericSourceContent(for: bookmark)?.selectedTexts ?? []
         )
     }
 
@@ -510,53 +588,117 @@ struct BibleReaderAnnotationPayloadFactory {
         bookmark: GenericBookmark,
         sourceTexts: [String]
     ) -> (text: String, fullText: String, highlightedText: String) {
-        guard let firstText = sourceTexts.first else { return ("", "", "") }
-        let first = firstText as NSString
-        let isWholePage = bookmark.ordinalStart == nil || bookmark.ordinalEnd == nil
-        if isWholePage {
+        let projection = genericBookmarkListTextProjection(
+            bookmark: bookmark,
+            sourceTexts: sourceTexts
+        )
+        guard !projection.fullText.isEmpty else { return ("", "", "") }
+        return (
+            projection.selectedText,
+            projection.fullText,
+            "\(projection.prefix)<b>\(projection.selectedText)</b>\(projection.suffix)"
+        )
+    }
+
+    /**
+     Applies Android's special whole-page preview rule before the shared offset projection.
+
+     - Parameters:
+       - bookmark: Persisted generic bookmark selection metadata.
+       - sourceTexts: Exact ordered source-anchor text.
+     - Returns: Bookmark-list text segments, or `empty` when source text is unavailable.
+     - Side effects: none.
+     - Failure modes: Invalid offsets are clamped by the shared projection helper.
+     */
+    private func genericBookmarkListTextProjection(
+        bookmark: GenericBookmark,
+        sourceTexts: [String]
+    ) -> BookmarkListTextProjection {
+        guard let firstText = sourceTexts.first else { return .empty }
+        if bookmark.ordinalStart == nil || bookmark.ordinalEnd == nil {
+            let first = firstText as NSString
             let preview = first.substring(with: NSRange(location: 0, length: min(200, first.length)))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return (preview, preview, "<b>\(preview)</b>")
+            return BookmarkListTextProjection(
+                prefix: "",
+                selectedText: preview,
+                suffix: "",
+                fullText: preview
+            )
         }
+        return Self.bookmarkTextProjection(
+            sourceTexts: sourceTexts,
+            startOffset: bookmark.startOffset,
+            endOffset: bookmark.endOffset,
+            wholeVerse: bookmark.wholeVerse
+        ) ?? .empty
+    }
 
-        let startOffset = bookmark.wholeVerse
+    /**
+     Slices ordered source text exactly like Android `computeBookmarkTexts`.
+
+     Persisted offsets come from WebView selections and therefore use UTF-16 code units. `NSString`
+     preserves that indexing contract and lets malformed synced offsets clamp without trapping.
+
+     - Parameters:
+       - sourceTexts: Ordered verse or anchor text for the bookmark range.
+       - startOffset: UTF-16 offset into the first source segment.
+       - endOffset: UTF-16 offset into the final source segment.
+       - wholeVerse: Whether the complete first/final segments are selected.
+     - Returns: Structured selection text, or `nil` when no source segments exist.
+     - Side effects: none.
+     - Failure modes: Negative and out-of-range offsets are clamped.
+     */
+    private static func bookmarkTextProjection(
+        sourceTexts: [String],
+        startOffset: Int?,
+        endOffset: Int?,
+        wholeVerse: Bool
+    ) -> BookmarkListTextProjection? {
+        guard let firstText = sourceTexts.first else { return nil }
+        let first = firstText as NSString
+        let clampedStart = wholeVerse
             ? 0
-            : max(0, min(bookmark.startOffset ?? 0, first.length))
-        let prefix = first.substring(with: NSRange(location: 0, length: startOffset))
+            : max(0, min(startOffset ?? 0, first.length))
+        let prefix = first.substring(with: NSRange(location: 0, length: clampedStart))
 
+        let selected: String
+        let suffix: String
         if sourceTexts.count == 1 {
-            let requestedEnd = bookmark.wholeVerse ? first.length : (bookmark.endOffset ?? first.length)
-            let endOffset = max(startOffset, min(max(0, requestedEnd), first.length))
-            let selected = first.substring(
-                with: NSRange(location: startOffset, length: endOffset - startOffset)
+            let requestedEnd = wholeVerse ? first.length : (endOffset ?? first.length)
+            let clampedEnd = max(clampedStart, min(max(0, requestedEnd), first.length))
+            selected = first.substring(
+                with: NSRange(location: clampedStart, length: clampedEnd - clampedStart)
             )
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            let suffix = first.substring(
-                with: NSRange(location: endOffset, length: first.length - endOffset)
+            suffix = first.substring(
+                with: NSRange(location: clampedEnd, length: first.length - clampedEnd)
             )
-            let fullText = "\(prefix)\(selected)\(suffix)"
+        } else {
+            let firstSelection = first.substring(
+                with: NSRange(location: clampedStart, length: first.length - clampedStart)
+            )
+            let last = (sourceTexts.last ?? "") as NSString
+            let requestedEnd = wholeVerse ? last.length : (endOffset ?? last.length)
+            let clampedEnd = max(0, min(requestedEnd, last.length))
+            let lastSelection = last.substring(with: NSRange(location: 0, length: clampedEnd))
+            suffix = last.substring(
+                with: NSRange(location: clampedEnd, length: last.length - clampedEnd)
+            )
+            let middle = sourceTexts.count > 2
+                ? sourceTexts[1..<(sourceTexts.count - 1)].joined(separator: " ")
+                : ""
+            selected = "\(firstSelection)\(middle)\(lastSelection)"
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return (selected, fullText, "\(prefix)<b>\(selected)</b>\(suffix)")
         }
 
-        let firstSelection = first.substring(
-            with: NSRange(location: startOffset, length: first.length - startOffset)
+        return BookmarkListTextProjection(
+            prefix: prefix,
+            selectedText: selected,
+            suffix: suffix,
+            fullText: "\(prefix)\(selected)\(suffix)"
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        let last = (sourceTexts.last ?? "") as NSString
-        let requestedEnd = bookmark.wholeVerse ? last.length : (bookmark.endOffset ?? last.length)
-        let endOffset = max(0, min(requestedEnd, last.length))
-        let lastSelection = last.substring(with: NSRange(location: 0, length: endOffset))
-        let suffix = last.substring(
-            with: NSRange(location: endOffset, length: last.length - endOffset)
-        )
-        let middle = sourceTexts.count > 2
-            ? sourceTexts[1..<(sourceTexts.count - 1)].joined(separator: " ")
-            : ""
-        let selected = "\(firstSelection)\(middle)\(lastSelection)"
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fullText = "\(prefix)\(selected)\(suffix)"
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (selected, fullText, "\(prefix)<b>\(selected)</b>\(suffix)")
     }
 
     /**
@@ -1010,7 +1152,20 @@ struct BibleReaderAnnotationPayloadFactory {
        resolve.
      */
     private func loadVerseText(for range: BookmarkBridgeVerseRangeProjection) -> String {
-        guard let module = activeModule else { return "" }
+        loadVerseTexts(for: range).joined(separator: " ")
+    }
+
+    /**
+     Loads each canonical verse as a separate text segment so bookmark offsets retain Android's
+     first-verse/last-verse semantics.
+
+     - Parameter range: Active-module verse range resolved for bridge and Bookmark-list rendering.
+     - Returns: Non-empty canonical verse strings in ordinal order.
+     - Side effects: Moves the active SWORD module cursor while reading each verse.
+     - Failure modes: Missing modules and unresolved verse ordinals return no segment.
+     */
+    private func loadVerseTexts(for range: BookmarkBridgeVerseRangeProjection) -> [String] {
+        guard let module = activeModule else { return [] }
         var parts: [String] = []
 
         let lowerOrdinal = min(range.start.ordinal, range.end.ordinal)
@@ -1029,7 +1184,7 @@ struct BibleReaderAnnotationPayloadFactory {
                 parts.append(plain)
             }
         }
-        return parts.joined(separator: " ")
+        return parts
     }
 
     /**

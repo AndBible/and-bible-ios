@@ -129,7 +129,10 @@ extension AndBibleUITests {
             "Reading Progress should use reader destination back chrome, not a generic sheet Done button."
         )
 
-        tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(
+            requireElement("readingProgressAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
         waitForElementToDisappear(destination, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -138,11 +141,12 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's dialog-themed History route returns a selected row to its reader pane.
+     Verifies Android's bounded History dialog returns a selected row to its reader pane.
 
-     The Android History activity is dialog-themed and scopes the result to its launching window.
-     The iOS dialog must therefore render its named app-owned surface, omit iOS-only destructive
-     controls, close after selection, and navigate the seeded reader from Genesis 1 to Exodus 2.
+     Android scopes the result to its launching window and closes when the dialog is dismissed. The
+     iOS dialog must therefore render its named app-owned surface, dismiss from its dimmed backdrop,
+     omit iOS-only destructive controls, close after selection, and navigate the seeded reader from
+     Genesis 1 to Exodus 2.
 
      * - Side effects:
      *   - opens the drawer History route using a window-scoped persisted History fixture
@@ -166,7 +170,15 @@ extension AndBibleUITests {
             "Android's History dialog must not expose iOS-only clear-history controls."
         )
 
-        tapElementReliably(requireHistoryRow(containing: "Exodus 2", in: app, timeout: 10), timeout: 10)
+        // Tap the dimmed space left of the bounded card; this must dismiss without navigation.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+        waitForReaderRenderedContentState(containing: "historyDialog=none", in: app, timeout: 10)
+
+        tapReaderNavigationDrawerButton(in: app, timeout: 30)
+        tapElementReliably(requireElement("readerOpenHistoryAction", in: app, timeout: 15), timeout: 15)
+        waitForReaderRenderedContentState(containing: "historyDialog=presented", in: app, timeout: 10)
+
+        tapElementReliably(requireHistoryRow(containing: "Exodus 2:1", in: app, timeout: 10), timeout: 10)
         waitForReaderRenderedContentState(containing: "historyDialog=none", in: app, timeout: 10)
         let updatedReference = waitForReaderReferenceValueToChange(from: initialReference, in: app, timeout: 20)
         XCTAssertTrue(
@@ -243,25 +255,28 @@ extension AndBibleUITests {
      *     matching StudyPad, and a persisted `Exodus 2:1` history row, while the reader itself
      *     starts on `Genesis 1`
      *   - opens StudyPads from the drawer, verifies the seeded row is available in the reader
-     *     destination, and returns to the reader shell
+     *     destination, exercises the shared search/overflow menus and canonical Help dialog,
+     *     opens the full Label Edit activity, and returns to the reader shell
      *   - opens History from the reader menu and selects the seeded row
      *   - opens the bookmark list from the actual reader overflow menu
      *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state, and
      *     returns to the bookmark list
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
      *     `Genesis 1`
-     *   - reopens Bookmarks, selects the seeded label, and opens the matching StudyPad document
+     *   - reopens Bookmarks, selects the seeded label through Android's spinner, verifies the
+     *     filtered rows, and returns through the app-owned activity bar
      * - Failure modes:
      *   - fails if StudyPads regresses to sheet/modal presentation, shows sheet Done chrome, skips
-     *     its Android-style manager screen, or cannot return to the reader destination chrome
+     *     its Android-style manager screen, loses its search/overflow/help/editor controls, lets
+     *     nested editor chrome escape the shared safe area, or cannot return to reader chrome
      *   - fails if the history route regresses or selecting the seeded row does not navigate the
      *     reader to `Exodus 2`
      *   - fails if the bookmark list route regresses to sheet presentation
      *   - fails if the bookmark list, label-assignment screen, or seeded bookmark rows never appear
      *   - fails if Label Assignment cannot dismiss back to the bookmark list
      *   - fails if tapping the seeded bookmark row does not drive the reader back to `Genesis 1`
-     *   - fails if the selected-label StudyPad handoff is no longer visible or no longer opens the
-     *     matching StudyPad document
+     *   - fails if the shared popup label selector does not filter the list like Android or the
+     *     app-owned activity cannot return to the reader
      *
      * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
      * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
@@ -278,8 +293,8 @@ extension AndBibleUITests {
 
         let studyPadsDestination = openReaderActionDestination(
             actionIdentifier: "readerOpenStudyPadsAction",
-            destinationIdentifier: "labelManagerScreen",
-            readinessIdentifiers: ["labelManagerAddButton", "labelManagerStateExport"],
+            destinationIdentifier: "studyPadSelectorScreen",
+            readinessIdentifiers: ["studyPadSelectorAddButton"],
             in: app,
             timeout: 20
         )
@@ -289,8 +304,90 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
         )
-        waitForLabelManagerState(containing: labelManagerRowStateToken("UI Test Seed"), in: app, timeout: 10)
-        tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
+        XCTAssertTrue(
+            app.buttons["UI Test Seed"].waitForExistence(timeout: 10),
+            "Expected the seeded Study Pad row on the Android Study Pad selector activity."
+        )
+
+        let studyPadBackButton = requireElement("studyPadSelectorAppBarBackButton", in: app, timeout: 10)
+        let studyPadSearchModeButton = requireElement(
+            "studyPadSelectorSearchModeButton",
+            in: app,
+            timeout: 10
+        )
+        tapElementReliably(studyPadSearchModeButton, timeout: 10)
+        for identifier in [
+            "studyPadSelectorSearchMode::0",
+            "studyPadSelectorSearchMode::1",
+            "studyPadSelectorSearchMode::2",
+        ] {
+            XCTAssertTrue(
+                requireElement(identifier, in: app, timeout: 10).exists,
+                "Expected Android's complete Study Pad search-mode popup row \(identifier)."
+            )
+        }
+        tapElementReliably(
+            requireElement("studyPadSelectorSearchMode::0", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        tapElementReliably(
+            requireElement("studyPadSelectorOverflowButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            requireElement("studyPadSelectorExportAction", in: app, timeout: 10).exists,
+            "Expected Android's Export Study Pads overflow command."
+        )
+        XCTAssertTrue(
+            requireElement("studyPadSelectorImportAction", in: app, timeout: 10).exists,
+            "Expected Android's Import Study Pads overflow command."
+        )
+        tapElementReliably(
+            requireElement("studyPadSelectorOverflowMenuDismissalLayer", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        tapElementReliably(
+            requireElement("studyPadSelectorHelpButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        let helpDialog = requireElement("androidHelpDialog", in: app, timeout: 10)
+        XCTAssertTrue(helpDialog.exists, "Expected the canonical Android Study Pads Help dialog.")
+        XCTAssertFalse(app.sheets.firstMatch.exists, "Study Pads Help must remain app-owned.")
+        tapElementReliably(
+            requireElement("androidHelpDialogOKButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForElementToDisappear(helpDialog, timeout: 10)
+
+        tapElementReliably(
+            requireElement("studyPadSelectorAddButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        let labelEditor = requireElement("labelEditScreen", in: app, timeout: 10)
+        let editorBackButton = requireElement("androidLabelEditorAppBarBackButton", in: app, timeout: 10)
+        XCTAssertTrue(requireElement("labelEditDoneButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("labelEditNameField", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("labelEditColorButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.sheets.firstMatch.exists, "Label Edit must be a full app-owned activity.")
+        XCTAssertEqual(
+            editorBackButton.frame.minY,
+            studyPadBackButton.frame.minY,
+            accuracy: 2,
+            "Nested Label Edit must use the same shared safe-area app-bar origin as Study Pads."
+        )
+        tapElementReliably(editorBackButton, timeout: 10)
+        waitForElementToDisappear(labelEditor, timeout: 10)
+        XCTAssertTrue(
+            requireElement("studyPadSelectorAddButton", in: app, timeout: 10).exists,
+            "Expected Label Edit Back to return to the existing Study Pads activity."
+        )
+
+        tapElementReliably(
+            studyPadBackButton,
+            timeout: 10
+        )
         waitForElementToDisappear(studyPadsDestination, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -316,13 +413,23 @@ extension AndBibleUITests {
             "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
         )
 
-        tapElementReliably(
-            requireElement("bookmarkListEditLabelsButton::Genesis_1_1", in: app, timeout: 10),
-            timeout: 10
+        XCTAssertTrue(openLabelAssignmentFromBookmarkList(in: app).exists)
+        let seedAssignment = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@",
+                "manageLabelsAssignment::",
+                "UI Test Seed"
+            )
+        ).firstMatch
+        XCTAssertTrue(
+            seedAssignment.waitForExistence(timeout: 10),
+            "Expected the seeded label's shared Manage Labels assignment checkbox."
         )
-        XCTAssertTrue(requireElement("labelAssignmentScreen", in: app, timeout: 10).exists)
-        let seedRow = requireElement("labelAssignmentRow::UI_Test_Seed", in: app, timeout: 10)
-        XCTAssertEqual(seedRow.value as? String, "assigned,notFavourite")
+        XCTAssertEqual(
+            seedAssignment.value as? String,
+            "on",
+            "Expected the seeded label to be assigned when Label Assignment opens."
+        )
         dismissLabelAssignmentToBookmarkList(in: app, timeout: 20)
 
         let bookmarkRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
@@ -338,10 +445,25 @@ extension AndBibleUITests {
         )
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
-        openSeedStudyPadFromBookmarkList(in: app)
-        waitForStudyPadPresentation(in: app, timeout: 20)
-        let studyPadTitle = requireElement("readerStudyPadTitle", in: app, timeout: 10)
-        XCTAssertEqual(studyPadTitle.label, "UI Test Seed")
+        selectBookmarkListLabelFilter("UI_Test_Seed", in: app, timeout: 10)
+        waitForBookmarkListState(
+            containing: "count=1;selectedLabel=UI_Test_Seed",
+            in: app,
+            timeout: 10
+        )
+        XCTAssertTrue(requireBookmarkRow("Genesis_1_1", in: app, timeout: 10).exists)
+        XCTAssertFalse(
+            app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch.exists,
+            "Expected Android's selected-label spinner to exclude the unassigned Exodus bookmark."
+        )
+        tapElementReliably(
+            requireElement("bookmarkListAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForBookmarkListDismissal(in: app, timeout: 10),
+            "Expected the app-owned Bookmark activity bar to return to the reader."
+        )
     }
 
     /**

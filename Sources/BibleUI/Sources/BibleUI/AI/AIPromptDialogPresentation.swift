@@ -172,33 +172,20 @@ struct AIPromptDialogOverlay<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(colorScheme == .dark ? 0.62 : 0.38)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onDismiss)
-                    .accessibilityHidden(true)
-
-                content()
-                    .frame(maxHeight: geometry.size.height * 0.9)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
-            }
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiPromptDialogOverlay",
+            onOutsideTap: onDismiss
+        ) {
+            content()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .zIndex(30)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("aiPromptDialogOverlay")
     }
 }
 
 /** Android AppCompat-shaped prompt dialog surface with an optional action-button region. */
 private struct AIPromptAlertDialogSurface<Content: View, Actions: View>: View {
-    /// Current appearance for Android's explicit dialog palette.
-    @Environment(\.colorScheme) private var colorScheme
-
     /// Optional localized title; message-only dialogs omit the title region.
     let title: String?
     /// Whether Android supplied negative or positive buttons for this dialog.
@@ -209,37 +196,14 @@ private struct AIPromptAlertDialogSurface<Content: View, Actions: View>: View {
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let title, !title.isEmpty {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                    .padding(.bottom, 12)
-            }
-
+        AndroidDialogScaffold(
+            title: title ?? "",
+            showsActionRegion: showsActionRegion
+        ) {
             content()
-
-            if showsActionRegion {
-                HStack(spacing: 6) {
-                    actions()
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-            }
+        } actions: {
+            actions()
         }
-        .frame(maxWidth: 430)
-        .background(
-            AndroidDialogSurfacePalette.background(for: colorScheme),
-            in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 18, x: 0, y: 10)
-        .tint(AndroidDialogSurfacePalette.accent(for: colorScheme))
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -282,7 +246,7 @@ struct AIPromptActionListDialog<Action: Hashable>: View {
         } actions: {
             EmptyView()
         }
-        .accessibilityIdentifier("aiPromptActionListDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiPromptActionListDialog")
     }
 }
 
@@ -331,7 +295,7 @@ struct AIPromptChoiceDialog<Choice: Hashable>: View {
                 action: onCancel
             )
         }
-        .accessibilityIdentifier("aiPromptChoiceDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiPromptChoiceDialog")
     }
 }
 
@@ -385,7 +349,7 @@ struct AIPromptTextInputDialog: View {
                 action: onSave
             )
         }
-        .accessibilityIdentifier("aiPromptTextInputDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiPromptTextInputDialog")
     }
 }
 
@@ -416,6 +380,6 @@ struct AIPromptConfirmationDialog: View {
             AIAndroidDialogAction(title: negativeTitle, action: onCancel)
             AIAndroidDialogAction(title: positiveTitle, action: onConfirm)
         }
-        .accessibilityIdentifier("aiPromptConfirmationDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiPromptConfirmationDialog")
     }
 }

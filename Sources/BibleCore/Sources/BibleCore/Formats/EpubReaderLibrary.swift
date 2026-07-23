@@ -170,6 +170,7 @@ extension EpubReader {
                 initials: reader.initials,
                 sourceFileName: reader.sourceFileName,
                 title: reader.title,
+                description: reader.description,
                 author: reader.author,
                 language: reader.language
             ))

@@ -99,6 +99,7 @@ extension EpubReader {
                 initials: initials,
                 sourceFileName: sourceFileName,
                 title: metadataValue(at: indexURL, key: "title") ?? "",
+                description: metadataValue(at: indexURL, key: "description") ?? sourceFileName,
                 author: metadataValue(at: indexURL, key: "author") ?? "",
                 language: nonEmptyMetadataValue(at: indexURL, key: "language") ?? "en"
             )

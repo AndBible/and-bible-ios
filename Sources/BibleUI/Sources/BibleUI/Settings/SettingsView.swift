@@ -8,6 +8,17 @@ import SwordKit
 import UIKit
 #endif
 
+/** App-owned reader activities reachable from Android Application Preferences shortcuts. */
+enum ApplicationSettingsActivityDestination: String, Identifiable {
+    case globalTextOptions
+    case syncSettings
+    case aiSettings
+    case readingProgressSettings
+
+    /// Stable route identity for accessibility and deterministic owner switching.
+    var id: String { rawValue }
+}
+
 /**
  Top-level application settings screen covering reader behavior, appearance, security, sync, and
  module-backed preference selection.
@@ -17,8 +28,6 @@ The view renders Android-parity application preferences backed by `SettingsStore
 
  Data dependencies:
  - `modelContext` is used to load and persist Android-parity settings through `SettingsStore`
- - `windowManager` identifies the active workspace whose Android accent color is edited from global
-   Text Options
  - `nightMode` and `nightModeMode` are shared global settings owned by the parent
  - `colorScheme` and `openURL` influence night-mode resolution and system-settings actions
 
@@ -33,9 +42,6 @@ public struct SettingsView: View {
     /// SwiftData context used to read and persist settings through `SettingsStore`.
     @Environment(\.modelContext) private var modelContext
 
-    /// Window manager used to resolve the active workspace for Android's global color route.
-    @Environment(WindowManager.self) private var windowManager
-
     /// Current system color scheme used to resolve night-mode behavior.
     @Environment(\.colorScheme) private var colorScheme
 
@@ -44,6 +50,9 @@ public struct SettingsView: View {
 
     /// Dismisses active settings search focus before app-owned decision surfaces appear.
     @Environment(\.dismissSearch) private var dismissSearch
+
+    /// Pops the enclosing reader route when no explicit app-owned Back command was supplied.
+    @Environment(\.dismiss) private var dismiss
 
     /// Shared effective night-mode state used by the reader.
     @Binding var nightMode: Bool
@@ -57,11 +66,35 @@ public struct SettingsView: View {
     /// Reader controller used by feature shortcuts that edit pane-backed reading-progress settings.
     let readingProgressController: BibleReaderController?
 
+    /// Reader/workspace-owned palette shared by the activity bar, preference rows, and controls.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Explicit reader route command used by the app-owned action bar.
+    private let onBack: (() -> Void)?
+
+    /// Reader-owned activity router used by Android Preference shortcut rows.
+    private let onOpenActivity: ((ApplicationSettingsActivityDestination) -> Void)?
+
     /// Current settings search query.
     @State private var settingsSearchText = ""
 
+    /// Whether Android's action-bar search field is expanded.
+    @State private var showsSettingsSearch = false
+
     /// Controls the confirmation prompt for resetting application preferences.
     @State private var showResetConfirmation = false
+
+    /// Active app-owned Android `ListPreference` chooser.
+    @State private var activeListPreferenceDialog: SettingsListPreferenceDialogPresentation?
+
+    /// Active app-owned Android multi-select preference chooser.
+    @State private var activeMultiSelectDialog: SettingsMultiSelectDialogPresentation?
+
+    /// Staged identities edited by the active multi-select preference chooser.
+    @State private var multiSelectDraft: Set<String> = []
+
+    /// Controls the staged Android `EditTextPreference` dialog for the calculator PIN.
+    @State private var showsCalculatorPinDialog = false
 
     /// Installed dictionaries that advertise Greek Strong's definitions.
     @State private var strongsGreekDictionaries: [ModuleInfo] = []
@@ -135,9 +168,6 @@ public struct SettingsView: View {
 
     /// Global font size multiplier percentage applied to reader rendering.
     @State private var fontSizeMultiplier = AppPreferenceRegistry.intDefault(for: .fontSizeMultiplier) ?? 100
-
-    /// Global structured text-display settings edited from Android's root Application Preferences.
-    @State private var globalTextDisplaySettings = TextDisplaySettings.appDefaults
 
     /// Whether the bottom window button bar should hide in fullscreen mode.
     @State private var fullScreenHideButtons =
@@ -246,11 +276,11 @@ public struct SettingsView: View {
     }
 
     /**
-     Menu-backed option for Android `ListPreference` rows rendered with native iOS menus.
+     Value/label option for Android `ListPreference` rows rendered by the shared app-owned dialog.
 
      - Parameters:
        - value: Persisted Android-compatible value written through `SettingsStore`.
-       - title: Localized title shown in the chooser menu.
+       - title: Localized title shown in the chooser dialog.
      - Side effects: none; selecting an option is handled by `settingsMenuRow`.
      - Failure modes: Empty values are allowed for Android defaults such as `locale_pref`.
      */
@@ -263,6 +293,49 @@ public struct SettingsView: View {
 
         /// Stable identity derived from the persisted value.
         var id: String { value }
+    }
+
+    /**
+     Immutable presentation state for one shared Android single-choice preference dialog.
+
+     Inputs are captured from the visible preference row so the dialog keeps Android option order
+     and the exact persisted value. The commit closure owns feature-specific persistence.
+     */
+    private struct SettingsListPreferenceDialogPresentation: Identifiable {
+        /// Stable preference-row identity.
+        let id: String
+
+        /// Localized Android preference title.
+        let title: String
+
+        /// Android-ordered values and labels.
+        let options: [SettingsMenuOption]
+
+        /// Persisted value selected before the dialog opened.
+        let selectedValue: String
+
+        /// Owner commit invoked only after a row selection.
+        let onSelect: (String) -> Void
+    }
+
+    /**
+     Immutable presentation state for one shared Android multi-select preference dialog.
+
+     The owner supplies enabled identities rather than stored identities so inverse preferences can
+     translate at their boundary without changing shared dialog behavior.
+     */
+    private struct SettingsMultiSelectDialogPresentation: Identifiable {
+        /// Stable preference-row identity.
+        let id: String
+
+        /// Localized Android preference title.
+        let title: String
+
+        /// Android-ordered checkbox rows.
+        let rows: [AndroidMultiselectDialogRow<String>]
+
+        /// Owner commit invoked only after OK with enabled identities in visible order.
+        let onConfirm: (Set<String>) -> Void
     }
 
     /**
@@ -475,6 +548,41 @@ public struct SettingsView: View {
         self._nightModeMode = nightModeMode
         self.readingProgressController = readingProgressController
         self.onSettingsChanged = onSettingsChanged
+        surfacePalette = .standard
+        onBack = nil
+        onOpenActivity = nil
+    }
+
+    /**
+     Creates the reader-owned Application Preferences activity.
+
+     - Parameters:
+       - nightMode: Shared effective reader night-mode state.
+       - nightModeMode: Persisted Android night-mode selection.
+       - readingProgressController: Reader controller used by the progress shortcut.
+       - surfacePalette: Workspace/window-resolved activity palette.
+       - onBack: Explicit command that closes the reader destination.
+       - onOpenActivity: Reader owner that replaces Settings with the selected app-owned activity.
+       - onSettingsChanged: Callback used to refresh affected reader content.
+     - Side effects: none until a preference or navigation action is invoked.
+     - Failure modes: none; standalone callers retain the public standard-palette initializer.
+     */
+    init(
+        nightMode: Binding<Bool>,
+        nightModeMode: Binding<String>,
+        readingProgressController: BibleReaderController? = nil,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: (() -> Void)?,
+        onOpenActivity: @escaping (ApplicationSettingsActivityDestination) -> Void,
+        onSettingsChanged: (() -> Void)? = nil
+    ) {
+        self._nightMode = nightMode
+        self._nightModeMode = nightModeMode
+        self.readingProgressController = readingProgressController
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+        self.onOpenActivity = onOpenActivity
+        self.onSettingsChanged = onSettingsChanged
     }
 
     /**
@@ -532,9 +640,6 @@ public struct SettingsView: View {
             }
             .padding(.vertical, 8)
         }
-        .accessibilityIdentifier("settingsForm")
-        .accessibilityValue(settingsAccessibilityValue)
-        .background(settingsScreenBackground.ignoresSafeArea())
     }
 
     /**
@@ -545,36 +650,31 @@ public struct SettingsView: View {
      - Failure Modes: Reset uses registry-backed defaults and falls back through `SettingsStore`.
      */
     private var settingsFormWithPresentation: some View {
-        settingsForm
-            .navigationTitle(settingsNavigationTitleText)
-            .overlay {
-                if showRestartAlert {
-                    AndroidMyDocumentDecisionDialog(title: languageRestartAlertTitleText, message: languageRestartAlertMessageText, actions: [
-                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { showRestartAlert = false }
-                    ])
-                } else if showResetConfirmation {
-                    AndroidMyDocumentDecisionDialog(title: settingsResetTitleText, message: settingsResetMessageText, actions: [
-                        .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { showResetConfirmation = false; resetApplicationPreferences() },
-                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showResetConfirmation = false }
-                    ])
-                } else if showDiscreteHelp {
-                    AndroidMyDocumentDecisionDialog(title: String(localized: "settings_security"), message: discreteHelpMessageText, actions: [
-                        .init(id: "okay", title: String(localized: "okay"), style: .normal) { showDiscreteHelp = false }
-                    ])
+        ZStack(alignment: .topLeading) {
+            AndroidActivitySurface(palette: surfacePalette) {
+                settingsActivityTopAppBar
+            } content: {
+                VStack(spacing: 0) {
+                    if showsSettingsSearch {
+                        settingsSearchBar
+                    }
+
+                    settingsForm
                 }
             }
-            .searchable(
-                text: $settingsSearchText,
-                prompt: settingsSearchPromptText
+
+            AndroidActivityAccessibilityMarker(
+                label: settingsNavigationTitleText,
+                accessibilityIdentifier: "settingsForm",
+                accessibilityValue: settingsAccessibilityValue,
+                surfaceColor: surfacePalette.backgroundColor
             )
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    settingsResetToolbarButton
-                }
-            }
-            .onAppear {
-                loadSettingsState()
-            }
+
+            settingsDialogOverlay
+        }
+        .onAppear {
+            loadSettingsState()
+        }
     }
 
     /**
@@ -643,34 +743,30 @@ public struct SettingsView: View {
                    "settingsStrongsGreekDictionaryLink",
                    in: dictionarySettingsSearchEntries
                ) {
-                NavigationLink {
-                    DictionaryMultiSelectView(
-                        title: String(
-                            localized: "choose_strongs_greek_dictionary_title",
-                            defaultValue: "Strongs Greek dictionary"
-                        ),
+                let title = String(
+                    localized: "choose_strongs_greek_dictionary_title",
+                    defaultValue: "Strongs Greek dictionary"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .strongsGreekDictionary,
+                    title: title,
+                    summary: String(
+                        localized: "choose_strongs_greek_dictionary_summary",
+                        defaultValue: "Choose Strongs dictionary for Greek word definitions"
+                    ),
+                    detail: selectionSummary(
+                        selectedNames: selectedStrongsGreekDictionaryNames,
+                        available: strongsGreekDictionaries
+                    ),
+                    accessibilityIdentifier: "settingsStrongsGreekDictionaryLink"
+                ) {
+                    presentDictionarySelectionDialog(
+                        id: "settingsStrongsGreekDictionary",
+                        title: title,
                         dictionaries: strongsGreekDictionaries,
-                        selectedNames: $selectedStrongsGreekDictionaryNames
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .strongsGreekDictionary,
-                        title: String(
-                            localized: "choose_strongs_greek_dictionary_title",
-                            defaultValue: "Strongs Greek dictionary"
-                        ),
-                        summary: String(
-                            localized: "choose_strongs_greek_dictionary_summary",
-                            defaultValue: "Choose Strongs dictionary for Greek word definitions"
-                        ),
-                        detail: selectionSummary(
-                            selectedNames: selectedStrongsGreekDictionaryNames,
-                            available: strongsGreekDictionaries
-                        )
-                    )
+                        selectedNames: selectedStrongsGreekDictionaryNames
+                    ) { selectedStrongsGreekDictionaryNames = $0 }
                 }
-                .accessibilityIdentifier("settingsStrongsGreekDictionaryLink")
-                .buttonStyle(.plain)
             }
 
             if !strongsHebrewDictionaries.isEmpty,
@@ -678,34 +774,30 @@ public struct SettingsView: View {
                    "settingsStrongsHebrewDictionaryLink",
                    in: dictionarySettingsSearchEntries
                ) {
-                NavigationLink {
-                    DictionaryMultiSelectView(
-                        title: String(
-                            localized: "choose_strongs_hebrew_dictionary_title",
-                            defaultValue: "Strongs Hebrew dictionary"
-                        ),
+                let title = String(
+                    localized: "choose_strongs_hebrew_dictionary_title",
+                    defaultValue: "Strongs Hebrew dictionary"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .strongsHebrewDictionary,
+                    title: title,
+                    summary: String(
+                        localized: "choose_strongs_hebrew_dictionary_summary",
+                        defaultValue: "Choose Strongs dictionary for Hebrew word definitions"
+                    ),
+                    detail: selectionSummary(
+                        selectedNames: selectedStrongsHebrewDictionaryNames,
+                        available: strongsHebrewDictionaries
+                    ),
+                    accessibilityIdentifier: "settingsStrongsHebrewDictionaryLink"
+                ) {
+                    presentDictionarySelectionDialog(
+                        id: "settingsStrongsHebrewDictionary",
+                        title: title,
                         dictionaries: strongsHebrewDictionaries,
-                        selectedNames: $selectedStrongsHebrewDictionaryNames
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .strongsHebrewDictionary,
-                        title: String(
-                            localized: "choose_strongs_hebrew_dictionary_title",
-                            defaultValue: "Strongs Hebrew dictionary"
-                        ),
-                        summary: String(
-                            localized: "choose_strongs_hebrew_dictionary_summary",
-                            defaultValue: "Choose Strongs dictionary for Hebrew word definitions"
-                        ),
-                        detail: selectionSummary(
-                            selectedNames: selectedStrongsHebrewDictionaryNames,
-                            available: strongsHebrewDictionaries
-                        )
-                    )
+                        selectedNames: selectedStrongsHebrewDictionaryNames
+                    ) { selectedStrongsHebrewDictionaryNames = $0 }
                 }
-                .accessibilityIdentifier("settingsStrongsHebrewDictionaryLink")
-                .buttonStyle(.plain)
             }
 
             if !robinsonMorphologyDictionaries.isEmpty,
@@ -713,34 +805,30 @@ public struct SettingsView: View {
                    "settingsRobinsonMorphologyLink",
                    in: dictionarySettingsSearchEntries
                ) {
-                NavigationLink {
-                    DictionaryMultiSelectView(
-                        title: String(
-                            localized: "choose_strongs_greek_morphology_title",
-                            defaultValue: "Robinson Greek morphology"
-                        ),
+                let title = String(
+                    localized: "choose_strongs_greek_morphology_title",
+                    defaultValue: "Robinson Greek morphology"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .robinsonGreekMorphology,
+                    title: title,
+                    summary: String(
+                        localized: "choose_strongs_greek_morphology_summary",
+                        defaultValue: "Choose dictionary for Robinson Greek morphology definitions"
+                    ),
+                    detail: selectionSummary(
+                        selectedNames: selectedRobinsonMorphologyDictionaryNames,
+                        available: robinsonMorphologyDictionaries
+                    ),
+                    accessibilityIdentifier: "settingsRobinsonMorphologyLink"
+                ) {
+                    presentDictionarySelectionDialog(
+                        id: "settingsRobinsonMorphology",
+                        title: title,
                         dictionaries: robinsonMorphologyDictionaries,
-                        selectedNames: $selectedRobinsonMorphologyDictionaryNames
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .robinsonGreekMorphology,
-                        title: String(
-                            localized: "choose_strongs_greek_morphology_title",
-                            defaultValue: "Robinson Greek morphology"
-                        ),
-                        summary: String(
-                            localized: "choose_strongs_greek_morphology_summary",
-                            defaultValue: "Choose dictionary for Robinson Greek morphology definitions"
-                        ),
-                        detail: selectionSummary(
-                            selectedNames: selectedRobinsonMorphologyDictionaryNames,
-                            available: robinsonMorphologyDictionaries
-                        )
-                    )
+                        selectedNames: selectedRobinsonMorphologyDictionaryNames
+                    ) { selectedRobinsonMorphologyDictionaryNames = $0 }
                 }
-                .accessibilityIdentifier("settingsRobinsonMorphologyLink")
-                .buttonStyle(.plain)
             }
 
             if !wordLookupDictionaries.isEmpty,
@@ -748,34 +836,33 @@ public struct SettingsView: View {
                    "settingsWordLookupDictionariesLink",
                    in: dictionarySettingsSearchEntries
                ) {
-                NavigationLink {
-                    DictionaryInverseMultiSelectView(
-                        title: String(
-                            localized: "choose_word_lookup_dictionary_title",
-                            defaultValue: "Word lookup dictionaries"
-                        ),
-                        dictionaries: wordLookupDictionaries,
-                        disabledNames: $disabledWordLookupDictionaryNames
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .disabledWordLookupDictionaries,
-                        title: String(
-                            localized: "choose_word_lookup_dictionary_title",
-                            defaultValue: "Word lookup dictionaries"
-                        ),
-                        summary: String(
-                            localized: "choose_word_lookup_dictionary_summary",
-                            defaultValue: "Choose dictionaries for looking up words"
-                        ),
-                        detail: inverseSelectionSummary(
-                            disabledNames: disabledWordLookupDictionaryNames,
-                            available: wordLookupDictionaries
-                        )
-                    )
+                let title = String(
+                    localized: "choose_word_lookup_dictionary_title",
+                    defaultValue: "Word lookup dictionaries"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .disabledWordLookupDictionaries,
+                    title: title,
+                    summary: String(
+                        localized: "choose_word_lookup_dictionary_summary",
+                        defaultValue: "Choose dictionaries for looking up words"
+                    ),
+                    detail: inverseSelectionSummary(
+                        disabledNames: disabledWordLookupDictionaryNames,
+                        available: wordLookupDictionaries
+                    ),
+                    accessibilityIdentifier: "settingsWordLookupDictionariesLink"
+                ) {
+                    let allNames = Set(wordLookupDictionaries.map(\.name))
+                    presentMultiSelectDialog(
+                        id: "settingsWordLookupDictionaries",
+                        title: title,
+                        rows: dictionaryDialogRows(wordLookupDictionaries, prefix: "settingsWordLookupDictionary"),
+                        selectedValues: allNames.subtracting(disabledWordLookupDictionaryNames)
+                    ) { enabledNames in
+                        disabledWordLookupDictionaryNames = allNames.subtracting(enabledNames)
+                    }
                 }
-                .accessibilityIdentifier("settingsWordLookupDictionariesLink")
-                .buttonStyle(.plain)
             }
         }
     }
@@ -793,51 +880,54 @@ public struct SettingsView: View {
             String(localized: "prefs_behavior_customization_cat", defaultValue: "Application behavior")
         ) {
             if settingsSearchMatchesPreference(.navigateToVersePref, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .navigateToVersePref,
+                    title: String(
+                        localized: "prefs_navigate_to_verse_title",
+                        defaultValue: "Navigate to verse"
+                    ),
+                    summary: String(
+                        localized: "prefs_navigate_to_verse_summary",
+                        defaultValue: "Choose verse (and chapter) when selecting a passage"
+                    ),
+                    isOn: Binding(
                     get: { navigateToVerse },
                     set: { newValue in
                         navigateToVerse = newValue
                         let store = SettingsStore(modelContext: modelContext)
                         store.setBool(.navigateToVersePref, value: newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .navigateToVersePref,
-                        title: String(
-                            localized: "prefs_navigate_to_verse_title",
-                            defaultValue: "Navigate to verse"
-                        ),
-                        summary: String(
-                            localized: "prefs_navigate_to_verse_summary",
-                            defaultValue: "Choose verse (and chapter) when selecting a passage"
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.openLinksInSpecialWindowPref, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .openLinksInSpecialWindowPref,
+                    title: String(
+                        localized: "prefs_open_links_in_special_window_title",
+                        defaultValue: "Links window"
+                    ),
+                    summary: String(
+                        localized: "prefs_open_links_in_special_window_summary",
+                        defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
+                    ),
+                    isOn: Binding(
                     get: { openLinksInSpecialWindow },
                     set: { newValue in
                         openLinksInSpecialWindow = newValue
                         let store = SettingsStore(modelContext: modelContext)
                         store.setBool(.openLinksInSpecialWindowPref, value: newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .openLinksInSpecialWindowPref,
-                        title: String(
-                            localized: "prefs_open_links_in_special_window_title",
-                            defaultValue: "Links window"
-                        ),
-                        summary: String(
-                            localized: "prefs_open_links_in_special_window_summary",
-                            defaultValue: "Open links in special window, for quicker display of cross-references and Strongs"
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.screenKeepOnPref, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .screenKeepOnPref,
+                    title: String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
+                    summary: String(
+                        localized: "prefs_screen_keep_on_summary",
+                        defaultValue: "Prevent screen sleeping while using this app"
+                    ),
+                    isOn: Binding(
                     get: { screenKeepOn },
                     set: { newValue in
                         screenKeepOn = newValue
@@ -845,57 +935,44 @@ public struct SettingsView: View {
                         store.setBool(.screenKeepOnPref, value: newValue)
                         applyScreenKeepOn(newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .screenKeepOnPref,
-                        title: String(localized: "prefs_screen_keep_on_title", defaultValue: "Keep screen on"),
-                        summary: String(
-                            localized: "prefs_screen_keep_on_summary",
-                            defaultValue: "Prevent screen sleeping while using this app"
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.doubleTapToFullscreen, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .doubleTapToFullscreen,
+                    title: String(
+                        localized: "prefs_double_tap_to_fullscreen_title",
+                        defaultValue: "Double-tap to Fullscreen"
+                    ),
+                    summary: String(
+                        localized: "prefs_double_tap_to_fullscreen_summary",
+                        defaultValue: "Enter fullscreen mode by double-tapping window"
+                    ),
+                    isOn: Binding(
                     get: { doubleTapToFullscreen },
                     set: { newValue in
                         doubleTapToFullscreen = newValue
                         let store = SettingsStore(modelContext: modelContext)
                         store.setBool(.doubleTapToFullscreen, value: newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .doubleTapToFullscreen,
-                        title: String(
-                            localized: "prefs_double_tap_to_fullscreen_title",
-                            defaultValue: "Double-tap to Fullscreen"
-                        ),
-                        summary: String(
-                            localized: "prefs_double_tap_to_fullscreen_summary",
-                            defaultValue: "Enter fullscreen mode by double-tapping window"
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.autoFullscreenPref, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .autoFullscreenPref,
+                    title: String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
+                    summary: String(
+                        localized: "auto_fullscreen_summary",
+                        defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
+                    ),
+                    isOn: Binding(
                     get: { autoFullscreen },
                     set: { newValue in
                         autoFullscreen = newValue
                         let store = SettingsStore(modelContext: modelContext)
                         store.setBool(.autoFullscreenPref, value: newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .autoFullscreenPref,
-                        title: String(localized: "auto_fullscreen", defaultValue: "Fullscreen by scrolling"),
-                        summary: String(
-                            localized: "auto_fullscreen_summary",
-                            defaultValue: "Switch automatically to fullscreen when scrolling text. Tip: you can always also switch to full screen by doubletapping screen."
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.toolbarButtonActions, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
@@ -909,26 +986,24 @@ public struct SettingsView: View {
                 }
             }
             if settingsSearchMatchesPreference(.disableTwoStepBookmarking, in: behaviorSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .disableTwoStepBookmarking,
+                    title: String(
+                        localized: "prefs_disable_two_step_bookmarking_title",
+                        defaultValue: "One-step bookmarking"
+                    ),
+                    summary: String(
+                        localized: "prefs_disable_two_step_bookmarking_summary",
+                        defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
+                    ),
+                    isOn: Binding(
                     get: { disableTwoStepBookmarking },
                     set: { newValue in
                         disableTwoStepBookmarking = newValue
                         let store = SettingsStore(modelContext: modelContext)
                         store.setBool(.disableTwoStepBookmarking, value: newValue)
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .disableTwoStepBookmarking,
-                        title: String(
-                            localized: "prefs_disable_two_step_bookmarking_title",
-                            defaultValue: "One-step bookmarking"
-                        ),
-                        summary: String(
-                            localized: "prefs_disable_two_step_bookmarking_summary",
-                            defaultValue: "Show \"Selection\" and \"Verses\" items directly in Bible view Selection menu"
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.bibleViewSwipeMode, in: behaviorSettingsSearchEntries) {
                 settingsMenuRow(
@@ -973,63 +1048,47 @@ public struct SettingsView: View {
     private var securitySettingsSection: some View {
         settingsPreferenceSection(String(localized: "settings_security")) {
             if settingsSearchMatchesPreference(.discreteHelp, in: securitySettingsSearchEntries) {
-                Button {
+                settingsActionPreferenceRow(
+                    preferenceKey: .discreteHelp,
+                    title: String(localized: "discrete_help_title"),
+                    summary: String(localized: "discrete_help_summary"),
+                    accessibilityIdentifier: "discreteHelpButton"
+                ) {
                     dismissSearch()
                     showDiscreteHelp = true
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .discreteHelp,
-                        title: String(localized: "discrete_help_title"),
-                        summary: String(localized: "discrete_help_summary")
-                    )
                 }
-                .accessibilityIdentifier("discreteHelpButton")
             }
 
             if ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode),
                settingsSearchMatchesPreference(.discreteMode, in: securitySettingsSearchEntries) {
-                Toggle(isOn: $discreteMode) {
-                    settingsRowLabel(
-                        preferenceKey: .discreteMode,
-                        title: String(localized: "discrete_mode"),
-                        summary: String(localized: "discrete_mode_description")
-                    )
-                }
-                .accessibilityIdentifier("discreteModeToggle")
+                settingsSwitchRow(
+                    preferenceKey: .discreteMode,
+                    title: String(localized: "discrete_mode"),
+                    summary: String(localized: "discrete_mode_description"),
+                    isOn: $discreteMode,
+                    accessibilityIdentifier: "discreteModeToggle"
+                )
             }
 
             if ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator),
                settingsSearchMatchesPreference(.showCalculator, in: securitySettingsSearchEntries) {
-                Toggle(isOn: $showCalculator) {
-                    settingsRowLabel(
-                        preferenceKey: .showCalculator,
-                        title: String(localized: "show_calculator"),
-                        summary: String(localized: "show_calculator_description")
-                    )
-                }
-                .accessibilityIdentifier("showCalculatorToggle")
+                settingsSwitchRow(
+                    preferenceKey: .showCalculator,
+                    title: String(localized: "show_calculator"),
+                    summary: String(localized: "show_calculator_description"),
+                    isOn: $showCalculator,
+                    accessibilityIdentifier: "showCalculatorToggle"
+                )
             }
 
             if settingsSearchMatchesPreference(.calculatorPin, in: securitySettingsSearchEntries) {
-                HStack(alignment: .top, spacing: 12) {
-                    settingsRowLabel(
-                        preferenceKey: .calculatorPin,
-                        title: String(localized: "calculator_pin"),
-                        summary: String(localized: "calculator_pin_description")
-                    )
-                    Spacer()
-                    TextField(String(localized: "calculator_pin_placeholder"), text: $calculatorPin)
-                        #if os(iOS)
-                        .keyboardType(.numberPad)
-                        #endif
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 100)
-                        .onChange(of: calculatorPin) { _, newValue in
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered != newValue { calculatorPin = filtered }
-                        }
-                }
-                .accessibilityIdentifier("calculatorPinRow")
+                settingsActionPreferenceRow(
+                    preferenceKey: .calculatorPin,
+                    title: String(localized: "calculator_pin"),
+                    summary: String(localized: "calculator_pin_description"),
+                    trailingValue: String(repeating: "•", count: max(calculatorPin.count, 1)),
+                    accessibilityIdentifier: "calculatorPinRow"
+                ) { showsCalculatorPinDialog = true }
             }
         }
     }
@@ -1047,7 +1106,17 @@ public struct SettingsView: View {
             String(localized: "prefs_advanced_settings_cat", defaultValue: "Advanced settings")
         ) {
             if settingsSearchMatchesPreference(.enableBluetoothPref, in: advancedSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .enableBluetoothPref,
+                    title: String(
+                        localized: "prefs_enable_bluetooth_title",
+                        defaultValue: "Enable Bluetooth media buttons"
+                    ),
+                    summary: String(
+                        localized: "prefs_enable_bluetooth_summary",
+                        defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
+                    ),
+                    isOn: Binding(
                     get: { enableBluetoothMediaButtons },
                     set: { newValue in
                         enableBluetoothMediaButtons = newValue
@@ -1055,49 +1124,50 @@ public struct SettingsView: View {
                         store.setBool(.enableBluetoothPref, value: newValue)
                         onSettingsChanged?()
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .enableBluetoothPref,
-                        title: String(
-                            localized: "prefs_enable_bluetooth_title",
-                            defaultValue: "Enable Bluetooth media buttons"
-                        ),
-                        summary: String(
-                            localized: "prefs_enable_bluetooth_summary",
-                            defaultValue: "Handle Bluetooth media buttons to start/stop speaking."
-                        )
-                    )
-                }
+                ))
             }
             if settingsSearchMatchesPreference(.experimentalFeatures, in: advancedSettingsSearchEntries) {
-                NavigationLink {
-                    ExperimentalFeaturesMultiSelectView(
-                        title: String(
-                            localized: "prefs_experimental_features_title",
-                            defaultValue: "Experimental features"
-                        ),
-                        options: Self.experimentalFeatureOptions,
-                        selectedValues: $enabledExperimentalFeatures
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .experimentalFeatures,
-                        title: String(
-                            localized: "prefs_experimental_features_title",
-                            defaultValue: "Experimental features"
-                        ),
-                        summary: String(
-                            localized: "prefs_experimental_features_summary",
-                            defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
-                        ),
-                        detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures)
-                    )
+                let title = String(
+                    localized: "prefs_experimental_features_title",
+                    defaultValue: "Experimental features"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .experimentalFeatures,
+                    title: title,
+                    summary: String(
+                        localized: "prefs_experimental_features_summary",
+                        defaultValue: "Select which experimental features to enable. These features are still in development and may change or be removed"
+                    ),
+                    detail: experimentalFeaturesSummary(selectedValues: enabledExperimentalFeatures),
+                    accessibilityIdentifier: "settingsExperimentalFeaturesLink"
+                ) {
+                    presentMultiSelectDialog(
+                        id: "settingsExperimentalFeatures",
+                        title: title,
+                        rows: Self.experimentalFeatureOptions.map { option in
+                            AndroidMultiselectDialogRow(
+                                id: option.value,
+                                title: Self.localizedExperimentalFeatureTitle(option),
+                                accessibilityIdentifier: "settingsExperimentalFeatureChoice::\(option.value)"
+                            )
+                        },
+                        selectedValues: enabledExperimentalFeatures
+                    ) { enabledExperimentalFeatures = $0 }
                 }
-                .buttonStyle(.plain)
             }
             #if DEBUG
             if settingsSearchMatchesPreference(.showErrorBox, in: advancedSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .showErrorBox,
+                    title: String(
+                        localized: "prefs_show_error_box_title",
+                        defaultValue: "Show Javascript error box"
+                    ),
+                    summary: String(
+                        localized: "prefs_show_error_box_summary",
+                        defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
+                    ),
+                    isOn: Binding(
                     get: { showErrorBox },
                     set: { newValue in
                         showErrorBox = newValue
@@ -1105,66 +1175,44 @@ public struct SettingsView: View {
                         store.setBool(.showErrorBox, value: newValue)
                         onSettingsChanged?()
                     }
-                )) {
-                    settingsRowLabel(
-                        preferenceKey: .showErrorBox,
-                        title: String(
-                            localized: "prefs_show_error_box_title",
-                            defaultValue: "Show Javascript error box"
-                        ),
-                        summary: String(
-                            localized: "prefs_show_error_box_summary",
-                            defaultValue: "Useful for developers when debugging BibleView javascript side errors. This will make the app slower."
-                        )
-                    )
-                }
+                ))
             }
             #endif
 
             #if os(iOS)
             if settingsSearchMatchesPreference(.openLinks, in: advancedSettingsSearchEntries) {
-                Button {
-                    openBibleLinkSystemSettings()
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .openLinks,
-                        title: String(
-                            localized: "open_bible_links_title",
-                            defaultValue: "Open Bible links in AndBible"
-                        ),
-                        summary: String(
-                            localized: "open_bible_links_summary",
-                            defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
-                        )
-                    )
-                }
+                settingsActionPreferenceRow(
+                    preferenceKey: .openLinks,
+                    title: String(
+                        localized: "open_bible_links_title",
+                        defaultValue: "Open Bible links in AndBible"
+                    ),
+                    summary: String(
+                        localized: "open_bible_links_summary",
+                        defaultValue: "When clicking links that refer to AndBible supported Bible URL, open them in AndBible"
+                    ),
+                    accessibilityIdentifier: "settingsOpenBibleLinks"
+                ) { openBibleLinkSystemSettings() }
             }
             #endif
 
             #if DEBUG
             if settingsSearchMatchesPreference(.crashApp, in: advancedSettingsSearchEntries) {
-                Button(role: .destructive) {
-                    triggerDebugCrash()
-                } label: {
-                    settingsRowLabel(
-                        preferenceKey: .crashApp,
-                        title: String(
-                            localized: "crash_app",
-                            defaultValue: "Crash app!"
+                settingsActionPreferenceRow(
+                    preferenceKey: .crashApp,
+                    title: String(localized: "crash_app", defaultValue: "Crash app!"),
+                    summary: debugCrashScheduled
+                        ? String(
+                            localized: "crash_app_scheduled_summary",
+                            defaultValue: "Crash scheduled in 10 seconds."
+                        )
+                        : String(
+                            localized: "crash_app_summary",
+                            defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
                         ),
-                        summary: debugCrashScheduled
-                            ? String(
-                                localized: "crash_app_scheduled_summary",
-                                defaultValue: "Crash scheduled in 10 seconds."
-                            )
-                            : String(
-                                localized: "crash_app_summary",
-                                defaultValue: "Crash app after 10 seconds. Debugging feature, visible only in debug builds."
-                            ),
-                        isEnabled: !debugCrashScheduled
-                    )
-                }
-                .disabled(debugCrashScheduled)
+                    isEnabled: !debugCrashScheduled,
+                    accessibilityIdentifier: "settingsCrashApp"
+                ) { triggerDebugCrash() }
             }
             #endif
         }
@@ -1179,16 +1227,15 @@ public struct SettingsView: View {
     @ViewBuilder
     private var aboutSettingsSection: some View {
         settingsPreferenceSection(String(localized: "settings_about")) {
-            HStack(alignment: .top, spacing: 12) {
-                settingsRowLabel(
-                    preferenceKey: nil,
-                    title: String(localized: "version")
-                )
-                Spacer()
-                Text(AndBibleAppVersionMetadata.current().detailText)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            }
+            AndroidCatalogValuePreferenceRow(
+                title: String(localized: "version"),
+                summary: nil,
+                detail: nil,
+                icon: nil,
+                trailingValue: AndBibleAppVersionMetadata.current().detailText,
+                palette: surfacePalette,
+                accessibilityIdentifier: "settingsVersion"
+            )
         }
     }
 
@@ -1201,7 +1248,7 @@ public struct SettingsView: View {
     @ViewBuilder
     private var noSettingsSearchResultsSection: some View {
         Text(String(localized: "settings_search_no_results", defaultValue: "No settings found"))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
     }
@@ -1221,15 +1268,9 @@ public struct SettingsView: View {
                     title: globalTextDisplaySettingsSearchEntry.title,
                     androidKey: ApplicationSettingsPresentation.globalTextOptions.androidKey,
                     summary: globalTextDisplaySettingsSearchEntry.summary,
-                    accessibilityIdentifier: globalTextDisplaySettingsSearchEntry.identifier
-                ) {
-                    TextDisplaySettingsView(
-                        settings: $globalTextDisplaySettings,
-                        workspaceColor: activeWorkspaceColorBinding,
-                        scope: .global,
-                        onChange: applyGlobalTextDisplaySettingsChange
-                    )
-                }
+                    accessibilityIdentifier: globalTextDisplaySettingsSearchEntry.identifier,
+                    destination: .globalTextOptions
+                )
             }
             if settingsSearchMatchesPreference(.localePref, in: lookAndFeelSettingsSearchEntries) {
                 settingsMenuRow(
@@ -1241,7 +1282,14 @@ public struct SettingsView: View {
                 }
             }
             if settingsSearchMatchesPreference(.monochromeMode, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .monochromeMode,
+                    title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
+                    summary: String(
+                        localized: "prefs_eink_mode_summary",
+                        defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
+                    ),
+                    isOn: Binding(
                         get: { monochromeMode },
                         set: { newValue in
                             monochromeMode = newValue
@@ -1249,19 +1297,17 @@ public struct SettingsView: View {
                             store.setBool(.monochromeMode, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .monochromeMode,
-                        title: String(localized: "prefs_e_ink_mode_title", defaultValue: "Black & white mode"),
-                        summary: String(
-                            localized: "prefs_eink_mode_summary",
-                            defaultValue: "Use application in monochrome mode (no colors), making it more suitable for E-ink devices."
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.disableAnimations, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .disableAnimations,
+                    title: String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
+                    summary: String(
+                        localized: "prefs_disable_animations_summary",
+                        defaultValue: "Disable various animations such as smooth scrolling."
+                    ),
+                    isOn: Binding(
                         get: { disableAnimations },
                         set: { newValue in
                             disableAnimations = newValue
@@ -1269,19 +1315,20 @@ public struct SettingsView: View {
                             store.setBool(.disableAnimations, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .disableAnimations,
-                        title: String(localized: "prefs_disable_animations_title", defaultValue: "Disable animations"),
-                        summary: String(
-                            localized: "prefs_disable_animations_summary",
-                            defaultValue: "Disable various animations such as smooth scrolling."
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.disableClickToEdit, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .disableClickToEdit,
+                    title: String(
+                        localized: "prefs_disable_click_to_edit_title",
+                        defaultValue: "Disable Study Pad click-to-edit"
+                    ),
+                    summary: String(
+                        localized: "prefs_disable_click_to_edit_summary",
+                        defaultValue: "Requires using the edit button to edit notes in the Study Pad."
+                    ),
+                    isOn: Binding(
                         get: { disableClickToEdit },
                         set: { newValue in
                             disableClickToEdit = newValue
@@ -1289,19 +1336,7 @@ public struct SettingsView: View {
                             store.setBool(.disableClickToEdit, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .disableClickToEdit,
-                        title: String(
-                            localized: "prefs_disable_click_to_edit_title",
-                            defaultValue: "Disable Study Pad click-to-edit"
-                        ),
-                        summary: String(
-                            localized: "prefs_disable_click_to_edit_summary",
-                            defaultValue: "Requires using the edit button to edit notes in the Study Pad."
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.notesContentType, in: lookAndFeelSettingsSearchEntries) {
                 settingsMenuRow(
@@ -1317,43 +1352,47 @@ public struct SettingsView: View {
                 }
             }
             if settingsSearchMatchesPreference(.fontSizeMultiplier, in: lookAndFeelSettingsSearchEntries) {
-                VStack(alignment: .leading, spacing: 8) {
-                    settingsRowLabel(
-                        preferenceKey: .fontSizeMultiplier,
-                        title: String(
-                            localized: "pref_font_size_multiplier_title",
-                            defaultValue: "Font size multiplier"
+                AndroidSeekBarPreferenceRow(
+                    title: String(
+                        localized: "pref_font_size_multiplier_title",
+                        defaultValue: "Font size multiplier"
+                    ),
+                    summary: String(
+                        format: String(
+                            localized: "prefs_font_size_multiplier_summary",
+                            defaultValue: "Multiply text font sizes by this number. Current value: %.1fx"
                         ),
-                        summary: String(
-                            format: String(
-                                localized: "prefs_font_size_multiplier_summary",
-                                defaultValue: "Multiply text font sizes by this number. Current value: %.1fx"
-                            ),
-                            Double(fontSizeMultiplier) / 100.0
-                        )
-                    )
-                    Slider(
-                        value: Binding(
-                            get: { Double(fontSizeMultiplier) },
-                            set: { newValue in
-                                let roundedValue = Int((newValue / 10.0).rounded() * 10.0)
-                                fontSizeMultiplier = min(max(roundedValue, 10), 500)
-                                let store = SettingsStore(modelContext: modelContext)
-                                store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
-                                onSettingsChanged?()
-                            }
-                        ),
-                        in: 10...500,
-                        step: 10
-                    )
-                    .padding(
-                        .leading,
-                        AndBibleSettingsRowLabel.iconColumnWidth + AndBibleSettingsRowLabel.contentSpacing
-                    )
-                }
+                        Double(fontSizeMultiplier) / 100.0
+                    ),
+                    icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: AppPreferenceKey.fontSizeMultiplier.rawValue),
+                    value: Binding(
+                        get: { Double(fontSizeMultiplier) },
+                        set: { newValue in
+                            let roundedValue = Int((newValue / 10.0).rounded() * 10.0)
+                            fontSizeMultiplier = min(max(roundedValue, 10), 500)
+                            let store = SettingsStore(modelContext: modelContext)
+                            store.setInt(.fontSizeMultiplier, value: fontSizeMultiplier)
+                            onSettingsChanged?()
+                        }
+                    ),
+                    range: 10...500,
+                    step: 10,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "settingsFontSizeMultiplierSeekBar"
+                )
             }
             if settingsSearchMatchesPreference(.fullScreenHideButtonsPref, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .fullScreenHideButtonsPref,
+                    title: String(
+                        localized: "full_screen_hide_buttons_pref_title",
+                        defaultValue: "Hide window button bar in fullscreen"
+                    ),
+                    summary: String(
+                        localized: "full_screen_hide_buttons_pref_summary",
+                        defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
+                    ),
+                    isOn: Binding(
                         get: { fullScreenHideButtons },
                         set: { newValue in
                             fullScreenHideButtons = newValue
@@ -1361,22 +1400,20 @@ public struct SettingsView: View {
                             store.setBool(.fullScreenHideButtonsPref, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .fullScreenHideButtonsPref,
-                        title: String(
-                            localized: "full_screen_hide_buttons_pref_title",
-                            defaultValue: "Hide window button bar in fullscreen"
-                        ),
-                        summary: String(
-                            localized: "full_screen_hide_buttons_pref_summary",
-                            defaultValue: "When switching to fullscreen mode, hide automatically window button bar that is on the bottom of the screen"
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.hideWindowButtons, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .hideWindowButtons,
+                    title: String(
+                        localized: "hide_window_buttons_title",
+                        defaultValue: "Hide window buttons"
+                    ),
+                    summary: String(
+                        localized: "hide_window_buttons_summary",
+                        defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
+                    ),
+                    isOn: Binding(
                         get: { hideWindowButtons },
                         set: { newValue in
                             hideWindowButtons = newValue
@@ -1384,22 +1421,20 @@ public struct SettingsView: View {
                             store.setBool(.hideWindowButtons, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .hideWindowButtons,
-                        title: String(
-                            localized: "hide_window_buttons_title",
-                            defaultValue: "Hide window buttons"
-                        ),
-                        summary: String(
-                            localized: "hide_window_buttons_summary",
-                            defaultValue: "Window buttons that are displayed on right side of the Bible views are hidden. Window navigation bar on the bottom is still displayed and you may open window popup menu by long-clicking them."
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.hideBibleReferenceOverlay, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .hideBibleReferenceOverlay,
+                    title: String(
+                        localized: "hide_bible_reference_overlay_title",
+                        defaultValue: "Hide Bible reference overlay"
+                    ),
+                    summary: String(
+                        localized: "hide_bible_reference_overlay_summary",
+                        defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
+                    ),
+                    isOn: Binding(
                         get: { hideBibleReferenceOverlay },
                         set: { newValue in
                             hideBibleReferenceOverlay = newValue
@@ -1407,22 +1442,20 @@ public struct SettingsView: View {
                             store.setBool(.hideBibleReferenceOverlay, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .hideBibleReferenceOverlay,
-                        title: String(
-                            localized: "hide_bible_reference_overlay_title",
-                            defaultValue: "Hide Bible reference overlay"
-                        ),
-                        summary: String(
-                            localized: "hide_bible_reference_overlay_summary",
-                            defaultValue: "Do not show the semi-transparent Bible reference overlay when app is in fullscreen mode"
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.showActiveWindowIndicator, in: lookAndFeelSettingsSearchEntries) {
-                Toggle(isOn: Binding(
+                settingsSwitchRow(
+                    preferenceKey: .showActiveWindowIndicator,
+                    title: String(
+                        localized: "active_window_indicator_title",
+                        defaultValue: "Show active window indicator"
+                    ),
+                    summary: String(
+                        localized: "active_window_indicator_summary",
+                        defaultValue: "Highlight window corners to help recognising which window is active"
+                    ),
+                    isOn: Binding(
                         get: { showActiveWindowIndicator },
                         set: { newValue in
                             showActiveWindowIndicator = newValue
@@ -1430,113 +1463,61 @@ public struct SettingsView: View {
                             store.setBool(.showActiveWindowIndicator, value: newValue)
                             onSettingsChanged?()
                         }
-                    )) {
-                    settingsRowLabel(
-                        preferenceKey: .showActiveWindowIndicator,
-                        title: String(
-                            localized: "active_window_indicator_title",
-                            defaultValue: "Show active window indicator"
-                        ),
-                        summary: String(
-                            localized: "active_window_indicator_summary",
-                            defaultValue: "Highlight window corners to help recognising which window is active"
-                        )
-                    )
-                }
+                    ))
             }
             if settingsSearchMatchesPreference(.disableBibleBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
-                NavigationLink {
-                    BookmarkModalActionsInverseMultiSelectView(
-                        title: String(
-                            localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
-                            defaultValue: "One-tap actions (Bibles)"
-                        ),
+                let title = String(
+                    localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
+                    defaultValue: "One-tap actions (Bibles)"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .disableBibleBookmarkModalButtons,
+                    title: title,
+                    summary: String(
+                        localized: "prefs_in_window_bookmark_modal_buttons_description",
+                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                    ),
+                    detail: inverseSelectionSummary(
+                        disabledValues: disabledBibleBookmarkModalButtons,
+                        options: Self.bibleBookmarkModalActionOptions
+                    ),
+                    accessibilityIdentifier: "settingsBibleBookmarkModalActions"
+                ) {
+                    presentBookmarkActionSelectionDialog(
+                        id: "settingsBibleBookmarkModalActions",
+                        title: title,
                         options: Self.bibleBookmarkModalActionOptions,
-                        disabledValues: $disabledBibleBookmarkModalButtons
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .disableBibleBookmarkModalButtons,
-                        title: String(
-                            localized: "prefs_in_window_bible_bookmark_modal_buttons_title",
-                            defaultValue: "One-tap actions (Bibles)"
-                        ),
-                        summary: String(
-                            localized: "prefs_in_window_bookmark_modal_buttons_description",
-                            defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
-                        ),
-                        detail: inverseSelectionSummary(
-                            disabledValues: disabledBibleBookmarkModalButtons,
-                            options: Self.bibleBookmarkModalActionOptions
-                        )
-                    )
+                        disabledValues: disabledBibleBookmarkModalButtons
+                    ) { disabledBibleBookmarkModalButtons = $0 }
                 }
-                .buttonStyle(.plain)
             }
             if settingsSearchMatchesPreference(.disableGenBookmarkModalButtons, in: lookAndFeelSettingsSearchEntries) {
-                NavigationLink {
-                    BookmarkModalActionsInverseMultiSelectView(
-                        title: String(
-                            localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
-                            defaultValue: "One-tap actions (Other)"
-                        ),
+                let title = String(
+                    localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
+                    defaultValue: "One-tap actions (Other)"
+                )
+                settingsActionPreferenceRow(
+                    preferenceKey: .disableGenBookmarkModalButtons,
+                    title: title,
+                    summary: String(
+                        localized: "prefs_in_window_bookmark_modal_buttons_description",
+                        defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
+                    ),
+                    detail: inverseSelectionSummary(
+                        disabledValues: disabledGenBookmarkModalButtons,
+                        options: Self.genBookmarkModalActionOptions
+                    ),
+                    accessibilityIdentifier: "settingsGeneralBookmarkModalActions"
+                ) {
+                    presentBookmarkActionSelectionDialog(
+                        id: "settingsGeneralBookmarkModalActions",
+                        title: title,
                         options: Self.genBookmarkModalActionOptions,
-                        disabledValues: $disabledGenBookmarkModalButtons
-                    )
-                } label: {
-                    settingsSelectionRow(
-                        preferenceKey: .disableGenBookmarkModalButtons,
-                        title: String(
-                            localized: "prefs_in_window_gen_bookmark_modal_buttons_title",
-                            defaultValue: "One-tap actions (Other)"
-                        ),
-                        summary: String(
-                            localized: "prefs_in_window_bookmark_modal_buttons_description",
-                            defaultValue: "When a text is tapped, one-tap action window is shown. Which action buttons should be shown?"
-                        ),
-                        detail: inverseSelectionSummary(
-                            disabledValues: disabledGenBookmarkModalButtons,
-                            options: Self.genBookmarkModalActionOptions
-                        )
-                    )
+                        disabledValues: disabledGenBookmarkModalButtons
+                    ) { disabledGenBookmarkModalButtons = $0 }
                 }
-                .buttonStyle(.plain)
             }
         }
-    }
-
-    /**
-     Workspace accent-color binding for Android's global Text Options color route.
-
-     Android displays `workspace_color` for every non-window color editor. The global iOS route
-     therefore edits the active workspace's metadata instead of incorrectly placing the color in
-     inheritable global text settings. Fetching by identifier keeps the mutation in this view's
-     `ModelContext`, even when `WindowManager` was created with a different context.
-
-     - Returns: Binding that resolves missing values to Android's `#ff444444` default.
-     - Side Effects: Setting the binding mutates and saves the active workspace row.
-     - Failure Modes: A missing/deleted active workspace renders the default and ignores writes;
-       fetch and save failures use the repository's established soft-failure behavior.
-     */
-    private var activeWorkspaceColorBinding: Binding<Int?> {
-        Binding(
-            get: {
-                guard let workspaceID = windowManager.activeWorkspace?.id else {
-                    return Workspace.defaultWorkspaceColor
-                }
-                return WorkspaceStore(modelContext: modelContext)
-                    .workspace(id: workspaceID)?
-                    .workspaceColor ?? Workspace.defaultWorkspaceColor
-            },
-            set: { newValue in
-                guard let workspaceID = windowManager.activeWorkspace?.id,
-                      let workspace = WorkspaceStore(modelContext: modelContext).workspace(id: workspaceID) else {
-                    return
-                }
-                workspace.workspaceColor = newValue ?? Workspace.defaultWorkspaceColor
-                try? modelContext.save()
-            }
-        )
     }
 
     /// Whether any module-backed dictionary preference sections should be shown.
@@ -1611,20 +1592,170 @@ public struct SettingsView: View {
     }
 
     /**
-     Builds the toolbar reset action used by Application preferences.
+     Builds Android's app-owned Application Preferences action bar.
 
-     - Side Effects: Sets local confirmation state so the destructive reset runs only after the alert.
-     - Failure Modes: none.
+     Search expands an owner-themed activity field and Reset remains guarded by the shared decision
+     dialog. Both actions use catalog assets rather than native navigation-bar symbols.
+     */
+    private var settingsActivityTopAppBar: some View {
+        AndroidActivityTopAppBar(
+            title: settingsNavigationTitleText,
+            accessibilityIdentifier: "settingsTopAppBar",
+            backgroundColor: surfacePalette.toolbarBackgroundColor,
+            foregroundColor: surfacePalette.toolbarForegroundColor,
+            onBack: performBack
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("DrawerSearch"),
+                accessibilityLabel: settingsSearchPromptText,
+                accessibilityIdentifier: "settingsSearchButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                showsSettingsSearch.toggle()
+                if !showsSettingsSearch {
+                    settingsSearchText = ""
+                }
+            }
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityReset"),
+                accessibilityLabel: String(localized: "reset_settings", defaultValue: "Reset"),
+                accessibilityIdentifier: "settingsResetButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                showResetConfirmation = true
+            }
+        }
+    }
+
+    /** Owner-themed Android search row shown only while action-bar search is expanded. */
+    private var settingsSearchBar: some View {
+        HStack(spacing: 8) {
+            AndroidActivityTextInput(
+                placeholder: settingsSearchPromptText,
+                text: $settingsSearchText,
+                foregroundColor: surfacePalette.foregroundColor,
+                backgroundColor: surfacePalette.secondaryForegroundColor.opacity(0.08),
+                borderColor: surfacePalette.inactiveBorderColor,
+                accessibilityIdentifier: "settingsSearchField"
+            )
+
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityClose"),
+                accessibilityLabel: String(localized: "clear", defaultValue: "Clear"),
+                accessibilityIdentifier: "settingsSearchClearButton",
+                foregroundColor: surfacePalette.foregroundColor
+            ) {
+                settingsSearchText = ""
+            }
+        }
+        .padding(.horizontal, 8)
+        .background(surfacePalette.backgroundColor)
+    }
+
+    /**
+     Presents every Application Preferences decision through shared app-owned Android windows.
+
+     The ordered chain guarantees one modal owner at a time. Cancel and outside taps discard staged
+     list/multi-select/PIN edits; commits invoke the preference-specific persistence closure once.
      */
     @ViewBuilder
-    private var settingsResetToolbarButton: some View {
-        Button {
-            showResetConfirmation = true
-        } label: {
-            Image(systemName: "arrow.counterclockwise")
+    private var settingsDialogOverlay: some View {
+        if showRestartAlert {
+            AndroidDecisionDialog(title: languageRestartAlertTitleText, message: languageRestartAlertMessageText, actions: [
+                .init(id: "okay", title: String(localized: "ok"), style: .normal) { showRestartAlert = false }
+            ])
+        } else if showResetConfirmation {
+            AndroidDecisionDialog(title: settingsResetTitleText, message: settingsResetMessageText, actions: [
+                .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { showResetConfirmation = false; resetApplicationPreferences() },
+                .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showResetConfirmation = false }
+            ])
+        } else if showDiscreteHelp {
+            AndroidDecisionDialog(title: String(localized: "settings_security"), message: discreteHelpMessageText, actions: [
+                .init(id: "okay", title: String(localized: "okay"), style: .normal) { showDiscreteHelp = false }
+            ])
+        } else if let presentation = activeListPreferenceDialog {
+            AndroidSingleChoiceDialog(
+                title: presentation.title,
+                selectedValue: presentation.selectedValue,
+                options: presentation.options.map {
+                    AndroidSingleChoiceOption(id: $0.id, value: $0.value, title: $0.title)
+                },
+                accessibilityIdentifier: "\(presentation.id)Dialog",
+                onSelect: { value in
+                    presentation.onSelect(value)
+                    activeListPreferenceDialog = nil
+                },
+                onCancel: { activeListPreferenceDialog = nil }
+            )
+        } else if let presentation = activeMultiSelectDialog {
+            AndroidDialogWindow(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "\(presentation.id)DialogWindow",
+                onOutsideTap: dismissMultiSelectDialog
+            ) {
+                AndroidMultiselectDialogContent(
+                    title: presentation.title,
+                    rows: presentation.rows,
+                    selectedIDs: $multiSelectDraft,
+                    isBusy: false,
+                    accessibilityIdentifier: "\(presentation.id)Dialog",
+                    accessibilityPrefix: presentation.id,
+                    onCancel: dismissMultiSelectDialog,
+                    onConfirm: { selectedValues in
+                        presentation.onConfirm(Set(selectedValues))
+                        dismissMultiSelectDialog()
+                    }
+                )
+            }
+        } else if showsCalculatorPinDialog {
+            AndroidEditTextPreferenceDialog(
+                title: String(localized: "calculator_pin"),
+                initialText: calculatorPin,
+                placeholder: String(localized: "calculator_pin_placeholder"),
+                isSecure: true,
+                accessibilityIdentifier: "calculatorPinDialog",
+                validator: calculatorPinValidationMessage,
+                onCancel: { showsCalculatorPinDialog = false },
+                onSave: { value in
+                    calculatorPin = value
+                    showsCalculatorPinDialog = false
+                }
+            )
         }
-        .accessibilityLabel(String(localized: "reset", defaultValue: "Reset"))
-        .accessibilityIdentifier("settingsResetButton")
+    }
+
+    /** Closes the Application Preferences activity through its reader owner or navigation host. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
+    }
+
+    /** Discards the current multi-select draft and closes its shared Android dialog. */
+    private func dismissMultiSelectDialog() {
+        activeMultiSelectDialog = nil
+        multiSelectDraft = []
+    }
+
+    /**
+     Validates Android's calculator PIN before the staged `EditTextPreference` commit.
+
+     - Parameter value: User-entered PIN draft.
+     - Returns: Localized error text for empty/non-numeric input, otherwise nil.
+     - Side effects: none.
+     - Failure modes: arbitrarily long numeric PINs remain valid, matching Android's unrestricted
+       numeric preference storage.
+     */
+    private func calculatorPinValidationMessage(_ value: String) -> String? {
+        guard !value.isEmpty, value.allSatisfy(\.isNumber) else {
+            return String(
+                localized: "calculator_pin_digits_only",
+                defaultValue: "Enter a PIN using numbers only."
+            )
+        }
+        return nil
     }
 
     /// Message content aligned with Android's `discrete_help` AlertDialog.
@@ -1650,10 +1781,9 @@ public struct SettingsView: View {
                     title: syncEntry.title,
                     androidKey: syncShortcut.androidKey,
                     summary: syncEntry.summary,
-                    accessibilityIdentifier: syncEntry.identifier
-                ) {
-                    SyncSettingsView()
-                }
+                    accessibilityIdentifier: syncEntry.identifier,
+                    destination: .syncSettings
+                )
             }
 
             let aiShortcut = ApplicationSettingsPresentation.aiSettingsShortcut
@@ -1663,11 +1793,9 @@ public struct SettingsView: View {
                     title: aiEntry.title,
                     androidKey: aiShortcut.androidKey,
                     summary: aiEntry.summary,
-                    accessibilityIdentifier: aiEntry.identifier
-                ) {
-                    AISettingsView(swordManager: readingProgressController?.swordManager)
-                        .accessibilityIdentifier("aiSettingsScreen")
-                }
+                    accessibilityIdentifier: aiEntry.identifier,
+                    destination: .aiSettings
+                )
             }
 
             let readingProgressShortcut = ApplicationSettingsPresentation.readingProgressSettingsShortcut
@@ -1678,11 +1806,9 @@ public struct SettingsView: View {
                     title: readingProgressEntry.title,
                     androidKey: readingProgressShortcut.androidKey,
                     summary: readingProgressEntry.summary,
-                    accessibilityIdentifier: readingProgressEntry.identifier
-                ) {
-                    ReadingProgressSettingsView(controller: readingProgressController)
-                        .accessibilityIdentifier("readingProgressSettingsScreen")
-                }
+                    accessibilityIdentifier: readingProgressEntry.identifier,
+                    destination: .readingProgressSettings
+                )
             }
         }
     }
@@ -2128,127 +2254,199 @@ public struct SettingsView: View {
     }
 
     /**
-     Builds the common title/summary/detail row used by selection-style settings links.
+     Builds one reusable app-owned Android switch preference.
+
+     - Parameters: Android key/copy, mutable value, enabled state, and stable accessibility identity.
+     - Returns: Shared full-row switch behavior using the owner palette and catalog icon.
+     - Side effects: Tapping writes through `isOn`; the binding owner performs persistence.
+     - Failure modes: Missing catalog icons retain the shared aligned empty icon column.
      */
-    @ViewBuilder
-    private func settingsSelectionRow(
-        preferenceKey: AppPreferenceKey? = nil,
+    private func settingsSwitchRow(
+        preferenceKey: AppPreferenceKey,
         title: String,
-        summary: String,
-        detail: String
+        summary: String? = nil,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true,
+        accessibilityIdentifier: String? = nil
     ) -> some View {
-        settingsRowLabel(
-            preferenceKey: preferenceKey,
+        AndroidCatalogSwitchPreferenceRow(
             title: title,
             summary: summary,
-            detail: detail
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: preferenceKey.rawValue),
+            isOn: isOn,
+            isEnabled: isEnabled,
+            palette: surfacePalette,
+            accessibilityIdentifier: accessibilityIdentifier ?? "settingsSwitch::\(preferenceKey.rawValue)"
         )
     }
 
     /**
-     Builds one Settings navigation row using the same `NavigationLink` semantics as production.
-     *
-     * This preserves the native list-row interaction model instead of routing navigation through
-     * test-only state toggles.
+     Builds one reusable app-owned Android action preference.
+
+     Action rows centralize palette, icon, summary/detail hierarchy, and hit geometry; callers retain
+     navigation or command ownership through `action`.
      */
-    @ViewBuilder
-    private func settingsNavigationLink<Destination: View>(
+    private func settingsActionPreferenceRow(
+        preferenceKey: AppPreferenceKey? = nil,
+        androidKey: String? = nil,
+        title: String,
+        summary: String? = nil,
+        detail: String? = nil,
+        trailingValue: String? = nil,
+        isEnabled: Bool = true,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let icon = preferenceKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0.rawValue) }
+            ?? androidKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0) }
+        return AndroidCatalogActionPreferenceRow(
+            title: title,
+            summary: summary,
+            detail: detail,
+            icon: icon,
+            trailingValue: trailingValue,
+            isEnabled: isEnabled,
+            palette: surfacePalette,
+            accessibilityIdentifier: accessibilityIdentifier,
+            action: action
+        )
+    }
+
+    /**
+     Opens the shared Android multi-select preference dialog with a staged selection.
+
+     - Parameters: Stable identity, localized title, ordered rows, enabled identities, and commit.
+     - Side effects: Replaces any prior draft and activates one dialog presentation.
+     - Failure modes: Empty row arrays still show Cancel/OK and commit an empty set only after OK.
+     */
+    private func presentMultiSelectDialog(
+        id: String,
+        title: String,
+        rows: [AndroidMultiselectDialogRow<String>],
+        selectedValues: Set<String>,
+        onConfirm: @escaping (Set<String>) -> Void
+    ) {
+        multiSelectDraft = selectedValues
+        activeMultiSelectDialog = SettingsMultiSelectDialogPresentation(
+            id: id,
+            title: title,
+            rows: rows,
+            onConfirm: onConfirm
+        )
+    }
+
+    /**
+     Opens an Android dictionary `MultiSelectListPreference` while preserving empty-means-all storage.
+
+     - Parameters: Dialog identity/title, installed dictionaries, stored names, and owner commit.
+     - Side effects: Stages the effective enabled set and normalizes an all-selected result to empty.
+     - Failure modes: Duplicate module names collapse to one persisted identity, matching Set storage.
+     */
+    private func presentDictionarySelectionDialog(
+        id: String,
+        title: String,
+        dictionaries: [ModuleInfo],
+        selectedNames: Set<String>,
+        onConfirm: @escaping (Set<String>) -> Void
+    ) {
+        let allNames = Set(dictionaries.map(\.name))
+        presentMultiSelectDialog(
+            id: id,
+            title: title,
+            rows: dictionaryDialogRows(dictionaries, prefix: id),
+            selectedValues: selectedNames.isEmpty ? allNames : selectedNames
+        ) { enabledNames in
+            onConfirm(enabledNames == allNames ? [] : enabledNames)
+        }
+    }
+
+    /** Creates Android-ordered shared checkbox rows from installed dictionary metadata. */
+    private func dictionaryDialogRows(
+        _ dictionaries: [ModuleInfo],
+        prefix: String
+    ) -> [AndroidMultiselectDialogRow<String>] {
+        dictionaries.map { dictionary in
+            AndroidMultiselectDialogRow(
+                id: dictionary.name,
+                title: dictionary.name,
+                accessibilityIdentifier: "\(prefix)Choice::\(dictionary.name)"
+            )
+        }
+    }
+
+    /**
+     Opens an inverse Android bookmark-action preference using enabled rows as the dialog contract.
+
+     Stored disabled identities are translated only at this owner boundary, keeping the shared
+     multi-select component reusable and matching Android's `InverseMultiSelectListPreference`.
+     */
+    private func presentBookmarkActionSelectionDialog(
+        id: String,
+        title: String,
+        options: [BookmarkModalActionOption],
+        disabledValues: Set<String>,
+        onConfirm: @escaping (Set<String>) -> Void
+    ) {
+        let allValues = Set(options.map(\.value))
+        presentMultiSelectDialog(
+            id: id,
+            title: title,
+            rows: options.map { option in
+                AndroidMultiselectDialogRow(
+                    id: option.value,
+                    title: Self.localizedBookmarkModalActionTitle(option),
+                    accessibilityIdentifier: "\(id)Choice::\(option.value)"
+                )
+            },
+            selectedValues: allValues.subtracting(disabledValues)
+        ) { enabledValues in
+            onConfirm(allValues.subtracting(enabledValues))
+        }
+    }
+
+    /**
+     Builds one Android Preference shortcut routed by the reader's app-owned activity owner.
+
+     - Parameters: Android row copy/identity plus the destination route selected by the source app.
+     - Returns: Shared action preference; standalone hosts without a router render it disabled.
+     - Side effects: Invokes `onOpenActivity` once after a valid row tap.
+     - Failure modes: A missing router leaves the row visible but inert instead of falling back to
+       native iOS navigation presentation.
+     */
+    private func settingsNavigationLink(
         title: String,
         preferenceKey: AppPreferenceKey? = nil,
         androidKey: String? = nil,
         summary: String? = nil,
         accessibilityIdentifier: String,
-        @ViewBuilder destination: @escaping () -> Destination
+        destination: ApplicationSettingsActivityDestination
     ) -> some View {
-        NavigationLink(destination: destination) {
-            settingsNavigationRow(
-                title: title,
-                preferenceKey: preferenceKey,
-                androidKey: androidKey,
-                summary: summary
-            )
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityLabel(title)
-            .accessibilityIdentifier(accessibilityIdentifier)
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-
-    /**
-     Builds a single-line navigation row used by nested settings links.
-     *
-     * - Parameter title: User-visible title shown in the row.
-     * - Returns: Row content suitable for use as a `NavigationLink` label inside the settings form.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    @ViewBuilder
-    private func settingsNavigationRow(
-        title: String,
-        preferenceKey: AppPreferenceKey? = nil,
-        androidKey: String? = nil,
-        summary: String? = nil
-    ) -> some View {
-        settingsRowLabel(
+        settingsActionPreferenceRow(
             preferenceKey: preferenceKey,
             androidKey: androidKey,
             title: title,
-            summary: summary
-        )
-    }
-
-    /**
-     Builds one Android-shaped settings row label for native SwiftUI controls.
-
-     - Parameters:
-       - preferenceKey: Optional Android preference key used to resolve source icon metadata.
-       - androidKey: Optional raw Android key for action rows not represented by `AppPreferenceKey`.
-       - title: Primary row title.
-       - summary: Optional secondary row text.
-       - detail: Optional tertiary state text.
-       - isEnabled: Whether the row should render with enabled or disabled emphasis.
-     - Returns: Shared row label aligned with Android preference geometry.
-     - Side effects: Renders an image from the module bundle when `preferenceKey` has catalog metadata.
-     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
-     */
-    private func settingsRowLabel(
-        preferenceKey: AppPreferenceKey?,
-        androidKey: String? = nil,
-        title: String,
-        summary: String? = nil,
-        detail: String? = nil,
-        isEnabled: Bool = true
-    ) -> AndBibleSettingsRowLabel {
-        let icon = preferenceKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0.rawValue) } ??
-            androidKey.flatMap { AndBibleIconCatalog.settingsIcon(forAndroidKey: $0) }
-        return AndBibleSettingsRowLabel(
-            title: title,
             summary: summary,
-            detail: detail,
-            icon: icon,
-            isEnabled: isEnabled
-        )
+            isEnabled: onOpenActivity != nil,
+            accessibilityIdentifier: accessibilityIdentifier
+        ) {
+            onOpenActivity?(destination)
+        }
     }
 
     /**
-     Builds one Android-style list-preference row backed by a native iOS menu.
+     Builds one Android `ListPreference` row backed by the shared app-owned single-choice dialog.
 
-     Android `ListPreference` rows render as compact title/summary rows and open a chooser when
-     tapped. SwiftUI's default `Picker` style expands selected values inline inside a `ScrollView`,
-     which creates large blue standalone labels and breaks the Android settings rhythm. This helper
-     keeps the row visually stable while still using native menu affordances and checkmarks, and
-     exposes one stable accessibility identifier so UI tests can detect accidental picker reverts.
+     The row and dialog use shared Android geometry and preserve the source option order. Native
+     `Menu` and `Picker` presentation are intentionally absent because they change interaction,
+     typography, and anchoring on iOS.
 
      - Parameters:
        - preference: Android `ListPreference` presentation contract used for icon lookup, row
          copy, search identity, and accessibility context.
-       - options: Menu options using Android-compatible persisted values.
+       - options: Dialog options using Android-compatible persisted values.
        - selectedValue: Current normalized persisted value.
        - onSelect: Callback invoked with the selected persisted value.
-     - Returns: Menu-backed row matching Android `ListPreference` layout.
+     - Returns: App-owned action row matching Android `ListPreference` layout.
      - Side effects: Invokes `onSelect`, which may write preferences and refresh reader state.
      - Failure modes: Empty option lists render a disabled-looking row with no menu actions.
      */
@@ -2258,88 +2456,31 @@ public struct SettingsView: View {
         selectedValue: String,
         onSelect: @escaping (String) -> Void
     ) -> some View {
-        Menu {
-            ForEach(options) { option in
-                Button {
-                    onSelect(option.value)
-                } label: {
-                    if option.value == selectedValue {
-                        Label(option.title, systemImage: "checkmark")
-                    } else {
-                        Text(option.title)
-                    }
-                }
-            }
-        } label: {
-            HStack(alignment: .center, spacing: AndBibleSettingsPreferenceLayout.accessorySpacing) {
-                settingsRowLabel(
-                    preferenceKey: preference.preferenceKey,
-                    title: preference.title,
-                    summary: preference.summary,
-                    isEnabled: !options.isEmpty
-                )
-
-                Spacer(minLength: AndBibleSettingsPreferenceLayout.accessorySpacing)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(options.isEmpty ? Color.secondary.opacity(0.5) : Color.accentColor)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
+        AndroidCatalogActionPreferenceRow(
+            title: preference.title,
+            summary: preference.summary,
+            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: preference.preferenceKey.rawValue),
+            trailingValue: options.first(where: { $0.value == selectedValue })?.title,
+            isEnabled: !options.isEmpty,
+            palette: surfacePalette,
+            accessibilityIdentifier: preference.accessibilityIdentifier
+        ) {
+            activeListPreferenceDialog = SettingsListPreferenceDialogPresentation(
+                id: preference.accessibilityIdentifier,
+                title: preference.title,
+                options: options,
+                selectedValue: selectedValue,
+                onSelect: onSelect
+            )
         }
-        .buttonStyle(.plain)
-        .disabled(options.isEmpty)
-        .accessibilityIdentifier(preference.accessibilityIdentifier)
-    }
-
-    /**
-     Builds one Android-shaped settings row label for action rows backed by raw Android keys.
-
-     - Parameters:
-       - androidKey: Raw Android preference/action key used to resolve source icon metadata.
-       - title: Primary row title.
-       - summary: Optional secondary row text.
-       - detail: Optional tertiary state text.
-       - isEnabled: Whether the row should render with enabled or disabled emphasis.
-     - Returns: Shared row label aligned with Android preference geometry.
-     - Side effects: Renders an image from the module bundle when `androidKey` has catalog metadata.
-     - Failure modes: Unknown keys simply produce an un-iconed but aligned row.
-     */
-    private func settingsRowLabel(
-        androidKey: String,
-        title: String,
-        summary: String? = nil,
-        detail: String? = nil,
-        isEnabled: Bool = true
-    ) -> AndBibleSettingsRowLabel {
-        AndBibleSettingsRowLabel(
-            title: title,
-            summary: summary,
-            detail: detail,
-            icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: androidKey),
-            isEnabled: isEnabled
-        )
-    }
-
-    /**
-     Builds an Android-shaped settings section header using the active app accent color.
-
-     - Parameter title: User-visible section title.
-     - Returns: Section header aligned with row text rather than the icon column.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func settingsSectionHeader(_ title: String) -> AndBibleSettingsSectionHeader {
-        AndBibleSettingsSectionHeader(title: title)
     }
 
     /**
      Builds one Android-style Application Preferences section without SwiftUI `Form` grouping.
 
      Android renders settings as a continuous preference list with tinted section captions and
-     full-width rows. This helper keeps that surface explicit so native controls can still own
-     accessibility and persistence while the container no longer contributes iOS grouped-card chrome.
+     full-width rows. This helper keeps that shared app-owned surface explicit while each row retains
+     its persistence command and the container contributes no iOS grouped-card chrome.
 
      - Parameters:
        - title: User-visible section title aligned with the row text column.
@@ -2352,28 +2493,7 @@ public struct SettingsView: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            settingsSectionHeader(title)
-                .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionHeaderBottomPadding)
-            content()
-                .padding(.horizontal, AndBibleSettingsPreferenceLayout.rowHorizontalPadding)
-        }
-        .padding(.bottom, AndBibleSettingsPreferenceLayout.sectionBottomPadding)
-    }
-
-    /**
-     Platform background for the flat Android-style Application Preferences surface.
-
-     - Returns: A system background color on iOS and a transparent fallback on macOS package builds.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private var settingsScreenBackground: Color {
-        #if os(iOS)
-        Color(.systemBackground)
-        #else
-        Color.clear
-        #endif
+        AndroidPreferenceSection(title: title, palette: surfacePalette, content: content)
     }
 
     private var settingsAccessibilityValue: String {
@@ -2422,7 +2542,6 @@ public struct SettingsView: View {
         showErrorBox = store.getBool(.showErrorBox)
         enableBluetoothMediaButtons = store.getBool(.enableBluetoothPref)
         fontSizeMultiplier = store.getInt(.fontSizeMultiplier)
-        globalTextDisplaySettings = store.globalTextDisplaySettings()
         fullScreenHideButtons = store.getBool(.fullScreenHideButtonsPref)
         hideWindowButtons = store.getBool(.hideWindowButtons)
         hideBibleReferenceOverlay = store.getBool(.hideBibleReferenceOverlay)
@@ -2560,25 +2679,6 @@ public struct SettingsView: View {
             UserDefaults.standard.removeObject(forKey: "AppleLanguages")
         }
         showRestartAlert = true
-    }
-
-    /**
-     Persists Android's global text-display settings from Application Preferences.
-
-     Android stores this structured row separately from scalar app preferences and refreshes all
-     windows after changes. iOS uses `SettingsStore.setGlobalTextDisplaySettings` so matching
-     workspace/window overrides are cleared through the existing Android-parity propagation path.
-
-     - Side Effects:
-       - writes `global_text_display_settings`
-       - may clear redundant workspace/window text-display overrides
-       - invokes `onSettingsChanged` so visible reader panes reload the new global defaults
-     - Failure: Store failures follow the soft-failure behavior documented by `SettingsStore`.
-     */
-    private func applyGlobalTextDisplaySettingsChange() {
-        let store = SettingsStore(modelContext: modelContext)
-        store.setGlobalTextDisplaySettings(globalTextDisplaySettings)
-        onSettingsChanged?()
     }
 
     /**
@@ -2932,173 +3032,5 @@ public struct SettingsView: View {
             }
             return nil
         }
-    }
-}
-
-/**
- Multi-select dictionary picker for preferences where an empty selection means "all dictionaries".
- */
-private struct DictionaryMultiSelectView: View {
-    /// Navigation title for the picker sheet.
-    let title: String
-
-    /// Installed dictionary modules shown as toggle rows.
-    let dictionaries: [ModuleInfo]
-
-    /// Explicitly selected dictionary names. Empty means "all enabled".
-    @Binding var selectedNames: Set<String>
-
-    /// Builds the dictionary toggle list.
-    var body: some View {
-        List(dictionaries, id: \.name) { dictionary in
-            Toggle(
-                isOn: Binding(
-                    get: {
-                        selectedNames.isEmpty || selectedNames.contains(dictionary.name)
-                    },
-                    set: { isEnabled in
-                        updateSelection(dictionaryName: dictionary.name, isEnabled: isEnabled)
-                    }
-                )
-            ) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(dictionary.name)
-                    Text(dictionary.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .navigationTitle(title)
-    }
-
-    /**
-     Applies one dictionary toggle change while preserving empty-means-all semantics.
-     */
-    private func updateSelection(dictionaryName: String, isEnabled: Bool) {
-        let allNames = Set(dictionaries.map(\.name))
-        var effectiveSelected = selectedNames.isEmpty ? allNames : selectedNames
-
-        if isEnabled {
-            effectiveSelected.insert(dictionaryName)
-        } else {
-            effectiveSelected.remove(dictionaryName)
-        }
-
-        if effectiveSelected == allNames {
-            selectedNames = []
-        } else {
-            selectedNames = effectiveSelected
-        }
-    }
-}
-
-/**
- Inverse-selection dictionary picker for preferences where the stored set represents disabled items.
- */
-private struct DictionaryInverseMultiSelectView: View {
-    /// Navigation title for the picker sheet.
-    let title: String
-
-    /// Installed dictionary modules shown as toggle rows.
-    let dictionaries: [ModuleInfo]
-
-    /// Persisted dictionary names that should be disabled.
-    @Binding var disabledNames: Set<String>
-
-    /// Builds the inverse-selection dictionary toggle list.
-    var body: some View {
-        List(dictionaries, id: \.name) { dictionary in
-            Toggle(
-                isOn: Binding(
-                    get: { !disabledNames.contains(dictionary.name) },
-                    set: { isEnabled in
-                        if isEnabled {
-                            disabledNames.remove(dictionary.name)
-                        } else {
-                            disabledNames.insert(dictionary.name)
-                        }
-                    }
-                )
-            ) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(dictionary.name)
-                    Text(dictionary.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .navigationTitle(title)
-    }
-}
-
-/**
- Multi-select picker for enabling Android-parity experimental feature flags.
- */
-private struct ExperimentalFeaturesMultiSelectView: View {
-    /// Navigation title for the picker sheet.
-    let title: String
-
-    /// Available feature options derived from the Android contract.
-    let options: [SettingsView.ExperimentalFeatureOption]
-
-    /// Persisted set of enabled experimental feature identifiers.
-    @Binding var selectedValues: Set<String>
-
-    /// Builds the experimental-features toggle list.
-    var body: some View {
-        List(options) { option in
-            Toggle(
-                isOn: Binding(
-                    get: { selectedValues.contains(option.value) },
-                    set: { isEnabled in
-                        if isEnabled {
-                            selectedValues.insert(option.value)
-                        } else {
-                            selectedValues.remove(option.value)
-                        }
-                    }
-                )
-            ) {
-                Text(SettingsView.localizedExperimentalFeatureTitle(option))
-            }
-        }
-        .navigationTitle(title)
-    }
-}
-
-/**
- Inverse-selection picker for bookmark modal actions where unchecked rows are hidden from the modal.
- */
-private struct BookmarkModalActionsInverseMultiSelectView: View {
-    /// Navigation title for the picker sheet.
-    let title: String
-
-    /// Available action options derived from the Android arrays.xml contract.
-    let options: [SettingsView.BookmarkModalActionOption]
-
-    /// Persisted set of disabled action identifiers.
-    @Binding var disabledValues: Set<String>
-
-    /// Builds the bookmark-modal action toggle list.
-    var body: some View {
-        List(options) { option in
-            Toggle(
-                isOn: Binding(
-                    get: { !disabledValues.contains(option.value) },
-                    set: { isEnabled in
-                        if isEnabled {
-                            disabledValues.remove(option.value)
-                        } else {
-                            disabledValues.insert(option.value)
-                        }
-                    }
-                )
-            ) {
-                Text(SettingsView.localizedBookmarkModalActionTitle(option))
-            }
-        }
-        .navigationTitle(title)
     }
 }

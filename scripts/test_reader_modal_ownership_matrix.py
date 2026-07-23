@@ -39,6 +39,33 @@ DAILY_READING_VIEW = (
     / "ReadingPlans"
     / "DailyReadingView.swift"
 )
+READING_PLAN_LIST_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "ReadingPlans"
+    / "ReadingPlanListView.swift"
+)
+ANDROID_DAILY_READING_ACTIVITY_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "ReadingPlans"
+    / "AndroidDailyReadingActivityView.swift"
+)
+ANDROID_READING_PLAN_SELECTOR_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "ReadingPlans"
+    / "AndroidReadingPlanSelectorView.swift"
+)
 READING_PLAN_START_DATE_DIALOG = (
     REPO_ROOT
     / "Sources"
@@ -47,6 +74,42 @@ READING_PLAN_START_DATE_DIALOG = (
     / "BibleUI"
     / "ReadingPlans"
     / "AndroidReadingPlanStartDateDialog.swift"
+)
+READING_PROGRESS_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Bible"
+    / "ReadingProgressViews.swift"
+)
+ANDROID_READING_PROGRESS_ACTIVITY_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Bible"
+    / "AndroidReadingProgressActivityView.swift"
+)
+ANDROID_READING_PROGRESS_SETTINGS_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Bible"
+    / "AndroidReadingProgressSettingsView.swift"
+)
+ANDROID_READ_HISTORY_DIALOG = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Shared"
+    / "AndroidChapterReadHistoryDialog.swift"
 )
 AI_MODELS_VIEW = (
     REPO_ROOT
@@ -102,14 +165,23 @@ IMPORT_EXPORT_VIEW = (
     / "Settings"
     / "ImportExportView.swift"
 )
-ANDROID_DATABASE_BACKUP_IMPORT_SHEET = (
+ANDROID_BACKUP_RESTORE_ACTIVITY_VIEW = (
     REPO_ROOT
     / "Sources"
     / "BibleUI"
     / "Sources"
     / "BibleUI"
     / "Settings"
-    / "AndroidDatabaseBackupImportSheet.swift"
+    / "AndroidBackupRestoreActivityView.swift"
+)
+ANDROID_DATABASE_BACKUP_IMPORT_DIALOG = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Settings"
+    / "AndroidDatabaseBackupImportDialog.swift"
 )
 ANDROID_MODULE_BACKUP_EXPORT_SHEET = (
     REPO_ROOT
@@ -120,6 +192,15 @@ ANDROID_MODULE_BACKUP_EXPORT_SHEET = (
     / "Settings"
     / "AndroidModuleBackupExportSheet.swift"
 )
+ANDROID_MULTISELECT_DIALOG_CONTENT = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Shared"
+    / "AndroidMultiselectDialogContent.swift"
+)
 BIBLE_READER_MODULE_PICKER = (
     REPO_ROOT
     / "Sources"
@@ -128,6 +209,42 @@ BIBLE_READER_MODULE_PICKER = (
     / "BibleUI"
     / "Bible"
     / "BibleReaderModulePicker.swift"
+)
+EPUB_LIBRARY_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Dictionary"
+    / "EpubLibraryView.swift"
+)
+MODULE_BROWSER_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Downloads"
+    / "ModuleBrowserView.swift"
+)
+LEGACY_SEARCH_RESULTS_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Search"
+    / "SearchResultsView.swift"
+)
+ANDROID_DOCUMENT_SELECTION_CONTROLS = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "Shared"
+    / "AndroidDocumentSelectionControls.swift"
 )
 BOOKMARK_LIST_VIEW = (
     REPO_ROOT
@@ -183,6 +300,24 @@ MY_DOCUMENT_PAGE_EDITOR = (
     / "MyDocuments"
     / "MyDocumentPageEditor.swift"
 )
+ANDROID_MY_DOCUMENTS_ACTIVITY_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "MyDocuments"
+    / "AndroidMyDocumentsActivityView.swift"
+)
+ANDROID_MY_DOCUMENT_PAGES_ACTIVITY_VIEW = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "MyDocuments"
+    / "AndroidMyDocumentPagesActivityView.swift"
+)
 AI_READER_HELP_PRESENTATION = (
     REPO_ROOT
     / "Sources"
@@ -209,6 +344,15 @@ AI_READER_RUN_VIEWS = (
     / "BibleUI"
     / "AI"
     / "AIReaderRunViews.swift"
+)
+AI_READER_TRANSIENT_DIALOGS = (
+    REPO_ROOT
+    / "Sources"
+    / "BibleUI"
+    / "Sources"
+    / "BibleUI"
+    / "AI"
+    / "AIReaderTransientDialogs.swift"
 )
 SEARCH_VIEW = (
     REPO_ROOT
@@ -308,13 +452,17 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "App-owned settings route.",
     ),
+    "ReaderDestination.windowHiddenLabels": (
+        "Android app-owned",
+        "Android ManageLabels HIDELABELS-mode activity reached from the active window's text options.",
+    ),
     "ReaderDestination.syncSettings": (
         "Android app-owned",
         "Android SyncSettingsActivity-equivalent reader navigation route.",
     ),
-    "ReaderModal.modulePicker": (
+    "ReaderDestination.modulePicker": (
         "Android app-owned",
-        "App-owned full-screen route.",
+        "Android ChooseDocument activity hosted on the same reader destination stack as Downloads.",
     ),
     "ReaderDestination.dictionaryBrowser": (
         "Android app-owned",
@@ -328,10 +476,6 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "Android ChooseMapKey-equivalent reader navigation route.",
     ),
-    "ReaderDestination.epubLibrary": (
-        "Android app-owned",
-        "App-owned EPUB library route.",
-    ),
     "ReaderDestination.epubSearch": (
         "Android app-owned",
         "Android EpubSearch-equivalent reader navigation route.",
@@ -340,9 +484,9 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "Android ManageLabels-equivalent reader navigation route.",
     ),
-    "ReaderModal.chooseDocument": (
+    "ReaderDestination.chooseDocument": (
         "Android app-owned",
-        "App-owned full-screen route.",
+        "Android all-types ChooseDocument activity hosted on the same reader destination stack as Downloads.",
     ),
     "helpDialogOverlay": (
         "Android app-owned",
@@ -385,11 +529,13 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
 
 ANDROID_MAIN_MENU = "app/src/main/java/net/bible/android/view/activity/page/MenuCommandHandler.kt"
 ANDROID_MAIN_ACTIVITY = "app/src/main/java/net/bible/android/view/activity/page/MainBibleActivity.kt"
+ANDROID_STARTUP_ACTIVITY = "app/src/main/java/net/bible/android/view/activity/StartupActivity.kt"
 ANDROID_MANIFEST = "app/src/main/AndroidManifest.xml"
 ANDROID_HISTORY = "app/src/main/java/net/bible/android/view/activity/navigation/History.kt"
 ANDROID_PROGRESS = "app/src/main/java/net/bible/android/view/activity/progress/ReadingProgressActivity.kt"
 ANDROID_READ_HISTORY = "app/src/main/java/net/bible/android/view/activity/progress/ReadHistoryDialog.kt"
 ANDROID_SEARCH = "app/src/main/java/net/bible/android/view/activity/search/Search.kt"
+ANDROID_MANAGE_LABELS = "app/src/main/java/net/bible/android/view/activity/bookmark/ManageLabels.kt"
 ANDROID_PLATFORM_BOUNDARY = "Android platform handoff (no app-owned window)"
 
 
@@ -420,13 +566,17 @@ ROUTE_EVIDENCE: dict[str, tuple[str, str]] = {
         "ReaderDestination.importExport",
         "ReaderDestination.settings",
         "ReaderDestination.aiSettings",
-        "ReaderDestination.startupDocumentSetup",
         "ReaderDestination.globalTextOptions",
         "ReaderDestination.workspaceTextOptions",
         "ReaderDestination.windowTextOptions",
         "ReaderDestination.windowColorSettings",
         "ReaderDestination.syncSettings",
         source=ANDROID_MAIN_MENU,
+        surface="reader navigation destination",
+    ),
+    **route_keys(
+        "ReaderDestination.startupDocumentSetup",
+        source=ANDROID_STARTUP_ACTIVITY,
         surface="reader navigation destination",
     ),
     **route_keys(
@@ -440,7 +590,6 @@ ROUTE_EVIDENCE: dict[str, tuple[str, str]] = {
         "ReaderDestination.speakControls",
         "ReaderDestination.dictionaryBrowser",
         "ReaderDestination.generalBookBrowser",
-        "ReaderDestination.epubLibrary",
         "ReaderDestination.mapBrowser",
         "ReaderDestination.epubSearch",
         "ReaderDestination.labelManager",
@@ -448,10 +597,15 @@ ROUTE_EVIDENCE: dict[str, tuple[str, str]] = {
         surface="reader navigation destination",
     ),
     **route_keys(
-        "ReaderModal.modulePicker",
-        "ReaderModal.chooseDocument",
+        "ReaderDestination.modulePicker",
+        "ReaderDestination.chooseDocument",
         source=ANDROID_MAIN_ACTIVITY,
-        surface="full-screen app-owned chooser",
+        surface="reader navigation destination",
+    ),
+    **route_keys(
+        "ReaderDestination.windowHiddenLabels",
+        source=ANDROID_MANAGE_LABELS,
+        surface="reader navigation destination",
     ),
     **route_keys(
         "historyDialogRequest",
@@ -642,8 +796,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "ReaderDestination.speakControls": "Android app-owned",
             "historyDialogRequest": "Android app-owned",
             "showRefChooser": "Android app-owned",
-            "ReaderModal.chooseDocument": "Android app-owned",
-            "ReaderModal.modulePicker": "Android app-owned",
+            "ReaderDestination.chooseDocument": "Android app-owned",
+            "ReaderDestination.modulePicker": "Android app-owned",
             "ReaderDestination.labelManager": "Android app-owned",
             "shareSheetBinding": "iOS system boundary",
             "BibleReaderModulePicker.AndroidPseudoDocument.myNotes": "Vue/WebView-owned",
@@ -692,6 +846,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
 
         expected_destinations = {
+            "chooseDocument": "presentReaderDestination(.chooseDocument",
             "bookmarks": "presentReaderDestination(.bookmarks",
             "studyPads": "presentReaderDestination(.studyPads",
             "myNotes": "presentReaderDestination(.myDocuments",
@@ -705,6 +860,201 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             self.assertIn(expected_route, body)
             self.assertNotIn("presentReaderSheet", body)
             self.assertNotIn("presentReaderModal", body)
+
+        module_picker_body = swift_function_body(source, "presentModulePicker")
+        self.assertIn("presentReaderDestination(.modulePicker", module_picker_body)
+        self.assertNotIn("presentReaderModal", module_picker_body)
+        self.assertNotIn("if let modal = activeReaderModal", source)
+        self.assertIn("documentChooserDestinationContent(", source)
+
+    def test_document_chooser_remains_the_same_full_activity_family_as_document_downloader(self) -> None:
+        """
+        Protect Choose Document from regressing into a large-font History-like modal.
+
+        Android's chooser and downloader derive from the same `DocumentSelectionBase` activity.
+        Both iOS projections must therefore reuse the same viewport host, app bar, filter strip,
+        palette, and document-row type scale. Merely drawing an app-owned dialog is not sufficient.
+        """
+        chooser_source = BIBLE_READER_MODULE_PICKER.read_text(encoding="utf-8")
+        downloader_source = MODULE_BROWSER_VIEW.read_text(encoding="utf-8")
+        shared_source = ANDROID_DOCUMENT_SELECTION_CONTROLS.read_text(encoding="utf-8")
+        reader_source = READER_VIEW.read_text(encoding="utf-8")
+
+        for source in (chooser_source, downloader_source):
+            self.assertIn("AndroidDocumentSelectionActivityScreen(surfacePalette: surfacePalette)", source)
+            self.assertIn("AndroidDocumentSelectionFilterBar(", source)
+            self.assertIn("AndroidActivityTopAppBar(", source)
+            self.assertIn(".font(.system(size: 16, weight: .regular))", source)
+            self.assertIn(".font(.system(size: 14, weight: .regular))", source)
+            self.assertNotIn("AndroidHistoryDialog", source)
+            self.assertNotIn("AndroidDialogWindow", source)
+            self.assertNotIn("AndroidDialogScaffold", source)
+            self.assertNotIn(".presentationDetents", source)
+            self.assertNotIn("NavigationStack {", source)
+            self.assertNotIn("List {", source)
+            self.assertNotIn(".navigationTitle(", source)
+
+        self.assertIn('title: String(localized: "document", defaultValue: "Document")', chooser_source)
+        self.assertIn(
+            'title: String(localized: "download", defaultValue: "Download Documents")',
+            downloader_source,
+        )
+        self.assertIn(
+            ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)",
+            shared_source,
+        )
+        self.assertIn("AndroidActivitySurface(palette: surfacePalette)", shared_source)
+        self.assertNotIn("surfacePalette.backgroundColor.ignoresSafeArea()", shared_source)
+        self.assertNotIn(".navigationBarBackButtonHidden(true)", shared_source)
+        self.assertNotIn(".toolbar(.hidden, for: .navigationBar)", shared_source)
+
+        destination_body = swift_function_body(reader_source, "documentChooserDestinationContent")
+        self.assertIn("BibleReaderModulePicker(", destination_body)
+        self.assertIn("onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes", destination_body)
+        self.assertNotIn("AndroidHistoryDialog", destination_body)
+        self.assertNotIn("AndroidDialogWindow", destination_body)
+
+    def test_startup_setup_reuses_android_activity_resources_and_owner_palette(self) -> None:
+        """First-download setup must not reintroduce native iOS navigation or screenshot styling."""
+        startup_source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Bible"
+            / "StartupDocumentSetupView.swift"
+        ).read_text(encoding="utf-8")
+        reader_source = READER_VIEW.read_text(encoding="utf-8")
+        destination_body = swift_switch_case_body(
+            swift_function_body(reader_source, "readerDestinationContent"),
+            "startupDocumentSetup",
+        )
+
+        self.assertIn('Image("DrawerLogo", bundle: .module)', startup_source)
+        self.assertIn("AndroidRaisedTextButton(", startup_source)
+        self.assertIn("surfacePalette.controlFillColor", startup_source)
+        self.assertIn("surfacePalette.secondaryForegroundColor", startup_source)
+        self.assertIn("AndroidDialogSurfacePalette.accent(for: colorScheme)", startup_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", startup_source)
+        self.assertIn('title: "https://andbible.org"', startup_source)
+        self.assertIn('title: "https://github.com/AndBible/and-bible"', startup_source)
+        self.assertIn(".toolbar(.hidden, for: .navigationBar)", startup_source)
+        self.assertNotIn(".buttonStyle(.borderedProminent)", startup_source)
+        self.assertNotIn(".controlSize(.large)", startup_source)
+        self.assertNotIn("systemBackground", startup_source)
+        self.assertNotIn("windowBackgroundColor", startup_source)
+        self.assertNotIn("Image(systemName:", startup_source)
+        self.assertIn("surfacePalette: readerThemeSurfacePalette", destination_body)
+        self.assertNotIn(".toolbar(.visible, for: .navigationBar)", destination_body)
+
+        download_index = startup_source.index("startupActionButton(for: .downloadDocuments)")
+        restore_index = startup_source.index("startupActionButton(for: .restoreDatabase)")
+        formats_index = startup_source.index("Text(supportedFormatsText)")
+        import_index = startup_source.index("startupActionButton(for: .loadDocumentsFromFiles)")
+        homepage_index = startup_source.index('title: "https://andbible.org"')
+        self.assertLess(download_index, restore_index)
+        self.assertLess(restore_index, formats_index)
+        self.assertLess(formats_index, import_index)
+        self.assertLess(import_index, homepage_index)
+
+    def test_production_sheet_inventory_is_only_explicit_operating_system_handoffs(self) -> None:
+        """Every remaining SwiftUI sheet must be a mail/share boundary, never app content."""
+        source_root = REPO_ROOT / "Sources" / "BibleUI" / "Sources" / "BibleUI"
+        expected = {
+            "AI/AIRawLogHistoryView.swift": [".sheet(item: $bugReportMail)"],
+            "AI/AIReaderLiveRawLogView.swift": [".sheet(item: $bugReportMail)"],
+            "Bible/BibleReaderView.swift": [
+                ".sheet(item: $manualBugReportMailPayload)",
+                ".sheet(item: $manualBugReportExport)",
+                ".sheet(isPresented: shareSheetBinding)",
+            ],
+            "MyDocuments/MyDocumentPagesListView.swift": [
+                ".sheet(isPresented: $showsShareSheet, onDismiss: clearPageExport)"
+            ],
+            "Settings/ImportExportView.swift": [
+                ".sheet(isPresented: $showExportSheet, onDismiss: handleShareSheetDismiss)"
+            ],
+        }
+        actual: dict[str, list[str]] = {}
+        for path in source_root.rglob("*.swift"):
+            signatures = [
+                line.strip().split(" {", maxsplit=1)[0]
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if re.search(r"\.sheet\s*\(", line)
+            ]
+            if signatures:
+                actual[str(path.relative_to(source_root))] = signatures
+
+        self.assertEqual(expected, actual)
+        self.assertIn(
+            "AIBugReportMailComposer(payload: payload)",
+            (source_root / "AI" / "AIRawLogHistoryView.swift").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "AIBugReportMailComposer(payload: payload)",
+            (source_root / "AI" / "AIReaderLiveRawLogView.swift").read_text(encoding="utf-8"),
+        )
+
+    def test_app_owned_bibleui_has_no_native_application_presentation_primitives(self) -> None:
+        """Live BibleUI source must use shared app-owned controls instead of iOS UI substitutes."""
+        source_root = REPO_ROOT / "Sources" / "BibleUI" / "Sources" / "BibleUI"
+        forbidden_patterns = {
+            "native collection/control": re.compile(
+                r"\b(?:List|Form|Menu|Picker|Toggle|DatePicker|NavigationLink)\s*[({]"
+            ),
+            "native adaptive presentation": re.compile(
+                r"\.(?:alert|confirmationDialog|popover|fullScreenCover|presentationDetents)\s*\("
+            ),
+            "native search/context behavior": re.compile(
+                r"\.(?:searchable|contextMenu|swipeActions)\s*\("
+            ),
+            "native navigation title": re.compile(r"\.navigationTitle\s*\("),
+        }
+
+        for path in source_root.rglob("*.swift"):
+            swift_source = path.read_text(encoding="utf-8")
+            code_only = re.sub(r"/\*.*?\*/", "", swift_source, flags=re.DOTALL)
+            code_only = re.sub(r"//.*", "", code_only)
+            for owner, pattern in forbidden_patterns.items():
+                with self.subTest(path=str(path.relative_to(source_root)), owner=owner):
+                    self.assertIsNone(pattern.search(code_only))
+
+        self.assertFalse((source_root / "Settings" / "AboutView.swift").exists())
+
+    def test_epub_management_reuses_choose_document_instead_of_a_parallel_library(self) -> None:
+        """Imported EPUBs retain Android's document row, context bar, and immutable-index actions."""
+        chooser_source = BIBLE_READER_MODULE_PICKER.read_text(encoding="utf-8")
+        reader_source = READER_VIEW.read_text(encoding="utf-8")
+
+        self.assertFalse(EPUB_LIBRARY_VIEW.exists())
+        self.assertNotIn("epubLibrary", swift_enum_cases(reader_source, "ReaderDestination"))
+        self.assertNotIn("EpubLibraryView", reader_source)
+        self.assertIn("case .epub(let epub):", chooser_source)
+        self.assertIn("onLongPress: { beginContextualEpubSelection(epub) }", chooser_source)
+        self.assertIn("AndroidDocumentContextActionBar(", chooser_source)
+        self.assertIn("private var contextualEpubActions", chooser_source)
+        self.assertIn("[.about, .uninstall, .deleteIndex]", chooser_source)
+        self.assertIn("ModuleBrowserModuleDetails(epub: contextualEpub)", chooser_source)
+        self.assertIn("EpubLibraryDeletionState", chooser_source)
+        self.assertIn("EpubReader.deleteSearchIndex(identifier: identifier)", chooser_source)
+        self.assertIn("controller.adoptRebuiltEpubReader(replacementReader)", chooser_source)
+        self.assertIn("Text(epub.initials)", chooser_source)
+        self.assertIn("Text(epub.title)", chooser_source)
+        self.assertNotIn("Text(epub.author)", chooser_source)
+
+    def test_reader_preparation_and_search_results_do_not_reintroduce_native_activity_chrome(self) -> None:
+        """Transient loading and Search retain shared app-owned activity ownership."""
+        reader_source = READER_VIEW.read_text(encoding="utf-8")
+
+        self.assertFalse(LEGACY_SEARCH_RESULTS_VIEW.exists())
+        self.assertNotIn("NavigationStack {", reader_source)
+        self.assertIn("private struct ReaderPanePreparationView", reader_source)
+        self.assertIn("AndroidActivityScreen(", reader_source)
+        self.assertIn("AndroidActivityLoadingView(", reader_source)
+        self.assertIn("AndroidActivityEmptyListView(", reader_source)
+        self.assertIn("surfacePalette: readerThemeSurfacePalette", reader_source)
+        self.assertNotIn("ProgressView()", reader_source)
 
     def test_history_is_a_captured_android_dialog_not_a_reader_sheet(self) -> None:
         """History must retain Android dialog ownership, title, and active-window result routing."""
@@ -721,26 +1071,77 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("AndroidHistoryDialog", source)
 
     def test_reading_plan_start_date_uses_android_date_picker_dialog_ownership(self) -> None:
-        """Android's DatePickerDialog must not regress into an adaptive SwiftUI sheet."""
+        """Android's calendar must remain app-owned rather than an iOS picker or sheet."""
         daily_reading_source = DAILY_READING_VIEW.read_text(encoding="utf-8")
         dialog_source = READING_PLAN_START_DATE_DIALOG.read_text(encoding="utf-8")
 
         self.assertIn("AndroidReadingPlanStartDateDialog", daily_reading_source)
         self.assertNotIn(".sheet(isPresented: $showStartDatePicker)", daily_reading_source)
-        self.assertIn("in: ...Date()", dialog_source)
+        self.assertIn("AndroidDialogWindow", dialog_source)
+        self.assertIn("LazyVGrid", dialog_source)
+        self.assertIn("calendar.compare(date, to: Date(), toGranularity: .day)", dialog_source)
+        self.assertNotIn("DatePicker(", dialog_source)
+        self.assertNotIn(".regularMaterial", dialog_source)
         self.assertIn("androidReadingPlanStartDateDialog", dialog_source)
         self.assertIn("dailyReadingStartDateCancelButton", dialog_source)
         self.assertIn("dailyReadingStartDateDoneButton", dialog_source)
 
+    def test_reading_plan_route_uses_android_activities_not_ios_collections(self) -> None:
+        """Plan selection and Daily Reading must not conceal native iOS collection chrome."""
+        route_source = READING_PLAN_LIST_VIEW.read_text(encoding="utf-8")
+        owner_source = DAILY_READING_VIEW.read_text(encoding="utf-8")
+        activity_source = ANDROID_DAILY_READING_ACTIVITY_VIEW.read_text(encoding="utf-8")
+        selector_source = ANDROID_READING_PLAN_SELECTOR_VIEW.read_text(encoding="utf-8")
+        combined = "\n".join((route_source, owner_source, activity_source, selector_source))
+
+        for forbidden in (
+            "List {",
+            "Form {",
+            "NavigationStack",
+            "NavigationLink",
+            "Menu {",
+            ".sheet(",
+            ".popover(",
+            ".contextMenu",
+            ".swipeActions",
+            ".regularMaterial",
+        ):
+            self.assertNotIn(forbidden, combined)
+
+        self.assertIn("AndroidReadingPlanSelectorView", route_source)
+        self.assertIn("AndroidDailyReadingActivityView", owner_source)
+        self.assertIn("AndroidActivityScreen(", selector_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", selector_source)
+        self.assertIn(".androidAnchoredPopupMenu", activity_source)
+        self.assertIn("AndroidPopupMenuSurface", activity_source)
+        self.assertIn("AndroidRaisedTextButton", activity_source)
+        self.assertIn(".fileImporter(", route_source)
+
     def test_read_history_is_a_captured_staged_delete_dialog_not_a_reader_sheet(self) -> None:
         """Read History must retain Android dialog dismissal semantics instead of sheet ownership."""
         source = READER_VIEW.read_text(encoding="utf-8")
+        dialog_source = ANDROID_READ_HISTORY_DIALOG.read_text(encoding="utf-8")
 
         self.assertNotIn("chapterReadHistory", swift_enum_cases(source, "ReaderSheet"))
         self.assertIn("chapterReadHistoryDialogRequest", source)
         self.assertIn("ChapterReadHistoryDialogRequest", source)
         self.assertIn("AndroidChapterReadHistoryDialog", source)
         self.assertIn("presentChapterReadHistoryDialog(target: target, from: window.id)", source)
+        self.assertIn("AndroidReadHistoryDialog", dialog_source)
+        self.assertIn("AndroidDialogWindow", dialog_source)
+        self.assertIn("deleteHistoryEntries(ids: pendingDeleteIDs)", dialog_source)
+        self.assertIn('Text(isPending ? "↶" : "×")', dialog_source)
+        for forbidden in (
+            "NavigationStack",
+            "NavigationView",
+            "Form {",
+            "List {",
+            "Section(",
+            ".sheet(",
+            ".regularMaterial",
+            "Image(systemName:",
+        ):
+            self.assertNotIn(forbidden, dialog_source)
 
     def test_help_is_an_android_owned_dialog_not_a_reader_modal_sheet(self) -> None:
         """Help & Tips must use the app-owned Android dialog owner at every reader entry point."""
@@ -896,17 +1297,15 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         modal_cases = swift_enum_cases(source, "ReaderModal")
         destination_cases = swift_enum_cases(source, "ReaderDestination")
 
-        for route in ["dictionaryBrowser", "generalBookBrowser", "epubLibrary", "mapBrowser", "epubSearch"]:
+        for route in ["dictionaryBrowser", "generalBookBrowser", "mapBrowser", "epubSearch"]:
             self.assertNotIn(route, modal_cases)
             self.assertIn(route, destination_cases)
         self.assertIn("presentReaderDestinationPreservingPane(.dictionaryBrowser)", source)
         self.assertIn("presentReaderDestinationPreservingPane(.generalBookBrowser)", source)
         self.assertIn("presentReaderDestinationPreservingPane(.mapBrowser)", source)
-        self.assertIn("presentReaderDestination(.epubLibrary", source)
         self.assertIn("presentReaderDestination(.epubSearch", source)
         self.assertIn("dictionaryBrowserScreen", source)
         self.assertIn("generalBookBrowserScreen", source)
-        self.assertIn("epubLibraryScreen", source)
         self.assertIn("mapBrowserScreen", source)
         self.assertIn("epubSearchScreen", source)
 
@@ -920,14 +1319,18 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("case .labelManager:", source)
 
     def test_ai_model_editing_uses_an_android_dialog_not_a_generic_sheet(self) -> None:
-        """Android's add/edit-model AlertDialog must stay app-owned on iOS."""
+        """Android's add/edit-model AlertDialog must reuse the shared app-owned window."""
         source = AI_MODELS_VIEW.read_text(encoding="utf-8")
+        dialog_source = AI_MODEL_DIALOGS.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(", source)
         self.assertIn("@State private var dialog: AIModelDialog?", source)
         self.assertIn("AIModelDialogOverlay(", source)
-        self.assertIn("accessibilityIdentifier(\"aiModelDialogOverlay\")", AI_MODEL_DIALOGS.read_text(encoding="utf-8"))
-        self.assertIn("No sheet, navigation editor, menu, or system confirmation participates.", AI_MODEL_DIALOGS.read_text(encoding="utf-8"))
+        self.assertIn("AndroidDialogWindow(", dialog_source)
+        self.assertIn('accessibilityIdentifier: "aiModelDialogOverlay"', dialog_source)
+        self.assertNotIn("Color.black.opacity", dialog_source)
+        self.assertNotIn(".regularMaterial", dialog_source)
+        self.assertIn("No sheet, navigation editor, menu, or system confirmation participates.", dialog_source)
 
     def test_ai_disclaimer_information_uses_an_android_dialog_not_a_generic_sheet(self) -> None:
         """Android's cancellable AI disclaimer AlertDialog remains app-owned on iOS."""
@@ -949,10 +1352,14 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
 
         self.assertNotIn(".sheet(", settings_source)
         self.assertNotIn(".sheet(", connection_source)
-        self.assertIn("NavigationLink {", settings_source)
+        self.assertNotIn("NavigationLink {", settings_source)
+        self.assertIn("@State private var activityRoute: AISettingsActivityRoute?", settings_source)
+        self.assertIn("case .connection:", settings_source)
         self.assertIn("AIConnectionSettingsView(", settings_source)
-        self.assertIn("NavigationLink {", connection_source)
-        self.assertIn("AIModelsView()", connection_source)
+        self.assertNotIn("NavigationLink {", connection_source)
+        self.assertIn("@State private var activeActivity: AIConnectionSettingsActivity?", connection_source)
+        self.assertIn("case .models:", connection_source)
+        self.assertIn("AIModelsView(", connection_source)
         self.assertIn("case disclaimerAcceptance(AIConfigurationEntryRequest)", dialog_source)
         self.assertIn("case .requireAcceptance(let pendingRequest):", dialog_source)
         self.assertIn("return .disclaimerAcceptance(pendingRequest)", dialog_source)
@@ -964,9 +1371,11 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         reader_source = BIBLE_READER_VIEW.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(item: $coordinator.presentation)", coordinator_source)
-        self.assertIn("AIReaderAppOwnedOverlay", coordinator_source)
+        self.assertNotIn("AIReaderAppOwnedOverlay", coordinator_source)
+        self.assertIn("struct AIReaderCoordinatorHost: View", coordinator_source)
         self.assertIn("onPresentPromptEditor: (UUID) -> Void", coordinator_source)
         self.assertIn("case .promptEditor(_, let promptID):", coordinator_source)
+        self.assertIn("AIReaderPromptEditorHandoff.perform(", coordinator_source)
         self.assertIn("coordinator.presentation = nil", coordinator_source)
         self.assertIn("onShowAIPromptEditor: ((UUID) -> Void)?", pane_source)
         self.assertIn("onPresentPromptEditor: { promptID in onShowAIPromptEditor?(promptID) }", pane_source)
@@ -978,7 +1387,7 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
     def test_android_backup_import_uses_an_app_owned_dialog_not_a_generic_sheet(self) -> None:
         """Android's restore-or-import AlertDialog must retain direct app-owned window ownership."""
         import_export_source = IMPORT_EXPORT_VIEW.read_text(encoding="utf-8")
-        dialog_source = ANDROID_DATABASE_BACKUP_IMPORT_SHEET.read_text(encoding="utf-8")
+        dialog_source = ANDROID_DATABASE_BACKUP_IMPORT_DIALOG.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(item: $androidBackupArchive", import_export_source)
         self.assertIn("AndroidDatabaseBackupImportDialog(", import_export_source)
@@ -986,13 +1395,59 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("struct AndroidDatabaseBackupImportDialog: View", dialog_source)
         self.assertIn("androidDatabaseBackupImportDialog", dialog_source)
         self.assertIn("guard !isApplying else { return }", dialog_source)
-        self.assertIn("AndroidDatabaseBackupImportSheet(", dialog_source)
+        self.assertIn("AndroidDatabaseBackupDialogState", dialog_source)
+        self.assertIn("AndroidDatabaseBackupSectionDialogContent(", dialog_source)
+        self.assertIn("AndroidMultiselectDialogContent(", dialog_source)
+        self.assertIn("AndroidDecisionDialog(", dialog_source)
+        self.assertIn("AndroidIndeterminateProgressDialog(", dialog_source)
+        self.assertNotIn("NavigationStack {", dialog_source)
+        self.assertNotIn("List {", dialog_source)
+        self.assertNotIn("Section {", dialog_source)
+        self.assertNotIn("Toggle(", dialog_source)
+        self.assertNotIn("Picker(", dialog_source)
+        self.assertNotIn("ProgressView(", dialog_source)
+        self.assertNotIn(".toolbar {", dialog_source)
+        self.assertNotIn(".regularMaterial", dialog_source)
+
+    def test_android_backup_activity_uses_shared_app_owned_activity_components(self) -> None:
+        """
+        BackupActivity must not hide native iOS list/navigation chrome behind Android copy.
+
+        The workflow screen is a reader destination with an app-owned activity bar, shared radio
+        rows, raised buttons, and owner palette. Files and Share remain valid system boundaries in
+        `ImportExportView`; the application-owned layout itself may not regress to List/Section,
+        navigation-title, bordered-button, or native ProgressView presentation.
+        """
+        import_export_source = IMPORT_EXPORT_VIEW.read_text(encoding="utf-8")
+        activity_source = ANDROID_BACKUP_RESTORE_ACTIVITY_VIEW.read_text(encoding="utf-8")
+
+        self.assertIn("AndroidBackupRestoreActivityView(", import_export_source)
+        self.assertNotIn("List {", import_export_source)
+        self.assertNotIn("Section {", import_export_source)
+        self.assertNotIn(".navigationTitle(", import_export_source)
+        self.assertNotIn(".buttonStyle(.borderedProminent)", import_export_source)
+        self.assertIn("AndroidActivityScreen(", activity_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", activity_source)
+        self.assertIn("BackupWorkflowOptionRow(", activity_source)
+        self.assertIn("AndroidRaisedTextButton(", activity_source)
+        self.assertIn("surfacePalette", activity_source)
+        self.assertNotIn("ProgressView(", activity_source)
+        self.assertNotIn("List {", activity_source)
+        self.assertNotIn("Section {", activity_source)
 
     def test_android_module_backup_multiselect_uses_an_app_owned_dialog(self) -> None:
-        """Android's module multiselect must retain ownership in both backup entry points."""
+        """
+        Android's module multiselect must retain ownership and shared control behavior.
+
+        The contract rejects native iOS list/navigation/toggle presentation, requires the shared
+        AppCompat dialog, checkbox row, palette, and hourglass components, and pins Android's
+        unchecked initial state. A failure means either backup entry point has structurally drifted
+        from `Dialogs.multiselect` even if a screenshot still resembles a modal.
+        """
         import_export_source = IMPORT_EXPORT_VIEW.read_text(encoding="utf-8")
         picker_source = BIBLE_READER_MODULE_PICKER.read_text(encoding="utf-8")
         dialog_source = ANDROID_MODULE_BACKUP_EXPORT_SHEET.read_text(encoding="utf-8")
+        multiselect_source = ANDROID_MULTISELECT_DIALOG_CONTENT.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(\n            isPresented: $showAndroidModuleBackupExportSheet", import_export_source)
         self.assertNotIn(".sheet(isPresented: $showModuleBackupSelection)", picker_source)
@@ -1001,6 +1456,15 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("struct AndroidModuleBackupExportDialog", dialog_source)
         self.assertIn("androidModuleBackupExportDialog", dialog_source)
         self.assertIn("guard !isExporting else { return }", dialog_source)
+        self.assertIn("AndroidMultiselectDialogContent(", dialog_source)
+        self.assertIn("AndroidCheckboxRow(", multiselect_source)
+        self.assertIn("AndroidDialogSurfacePalette", multiselect_source)
+        self.assertIn("AndroidIndeterminateProgressDialog(", dialog_source)
+        self.assertIn("initialSelectedModuleIdentities", dialog_source)
+        self.assertNotIn("NavigationStack {", dialog_source)
+        self.assertNotIn("List {", dialog_source)
+        self.assertNotIn("Toggle(", dialog_source)
+        self.assertNotIn(".toolbar {", dialog_source)
 
     def test_bookmark_csv_columns_use_an_android_multiselect_dialog(self) -> None:
         """Column choice stays app-owned before the legitimate system file-export handoff."""
@@ -1018,38 +1482,49 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
 
     def test_search_translation_picker_uses_android_multiselect_dialog_ownership(self) -> None:
         """
-        Protect Android's in-place Search translation dialog rather than a generic sheet substitute.
+        Protect Android's Search/SearchResults activities and shared translation dialog ownership.
 
         Android `Search.showTranslationSelector` calls `Dialogs.multiselect`, retaining the Search
         activity behind it and committing only a non-empty result. The iOS overlay must keep a
         private draft, discard it on Cancel, and leave the committed translation set unchanged
-        when OK follows Select none. A failure means Search would lose Android dialog ownership or
-        change its persisted-selection behavior.
+        when OK follows Select none. Submitting criteria must switch to a separate SearchResults
+        activity with its own actions. A failure means Search lost Android activity/dialog ownership,
+        changed persisted-selection behavior, or reinvented native/iOS presentation.
         """
         source = SEARCH_VIEW.read_text(encoding="utf-8")
+        multiselect_source = ANDROID_MULTISELECT_DIALOG_CONTENT.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(isPresented: $showTranslationPicker)", source)
+        self.assertNotIn("List {", source)
+        self.assertNotIn(".navigationTitle", source)
+        self.assertNotIn("Menu {", source)
+        self.assertIn("AndroidActivityScreen(", source)
+        self.assertIn("if presentationStage == .results", source)
+        self.assertIn("private var searchResultsContent", source)
+        self.assertIn("AndroidSearchHelpDialog(", source)
+        self.assertIn(".androidAnchoredPopupMenu(", source)
         self.assertIn("if showTranslationPicker", source)
         self.assertIn("searchTranslationPickerOverlay", source)
+        self.assertIn("AndroidMultiselectDialogContent(", source)
+        self.assertIn('accessibilityPrefix: "searchTranslationPicker"', source)
         self.assertIn("SearchTranslationPickerDraftState.opened", source)
         self.assertIn("SearchTranslationPickerDraftState(", source)
         self.assertIn(".cancelled()", source)
         self.assertIn("shouldCommitSelection = !pendingTranslationSelection.isEmpty", source)
         self.assertIn("cancelTranslationPicker()", source)
         self.assertIn("commitTranslationPickerSelection()", source)
-        self.assertIn("searchTranslationPickerOverlay", source)
-        self.assertIn("searchTranslationCancelButton", source)
-        self.assertIn("searchTranslationOKButton", source)
+        self.assertIn(r'"\(accessibilityPrefix)SelectToggleButton"', multiselect_source)
+        self.assertIn(r'"\(accessibilityPrefix)CancelButton"', multiselect_source)
+        self.assertIn(r'"\(accessibilityPrefix)ApplyButton"', multiselect_source)
 
     def test_remaining_ios_sheets_are_system_share_handoffs_or_platform_fallbacks(self) -> None:
         """
         Keep the post-migration sheet inventory limited to legitimate system ownership boundaries.
 
-        Android parity forbids substituting adaptive sheets for app activities or dialogs. The only
-        remaining reader sheet call is the system ShareSheet handoff. A failure means a new
-        app-owned sheet needs an Android source contract and an explicit owner decision before it
-        can ship. The shared overlay shell must also remain unidentified because SwiftUI propagates
-        a container identifier through its descendants and replaces their control-specific IDs.
+        Android parity forbids substituting adaptive sheets for app activities or dialogs. My
+        Documents exports all pages through the system Files exporter. A single-page Share choice
+        may reach the system ShareSheet only after Android's app-owned Save-or-Share decision. A
+        failure means application content regained native iOS sheet ownership.
         """
         page_list_source = MY_DOCUMENT_PAGES_LIST_VIEW.read_text(encoding="utf-8")
         document_list_source = MY_DOCUMENTS_LIST_VIEW.read_text(encoding="utf-8")
@@ -1057,10 +1532,14 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         reader_source = READER_VIEW.read_text(encoding="utf-8")
         pane_source = BIBLE_WINDOW_PANE.read_text(encoding="utf-8")
 
-        self.assertIn(".sheet(isPresented: $showsExport)", page_list_source)
+        self.assertIn(".sheet(isPresented: $showsShareSheet", page_list_source)
         self.assertIn("ShareSheet(items: exportURLs.map", page_list_source)
-        self.assertIn(".sheet(isPresented: $showsExport)", document_list_source)
-        self.assertIn("ShareSheet(items: exportURLs.map", document_list_source)
+        self.assertIn("showsExportDestinationDecision", page_list_source)
+        self.assertIn("myDocumentPagesExportDestinationDialog", page_list_source)
+        self.assertIn(".fileExporter(", page_list_source)
+        self.assertNotIn(".sheet", document_list_source)
+        self.assertIn("documents: documentExportDocuments", document_list_source)
+        self.assertIn("AndroidMyDocumentsActivityView(", document_list_source)
         self.assertIn(".sheet(isPresented: $showExportSheet", import_export_source)
         self.assertIn("ShareSheet(items: [url]", import_export_source)
         self.assertIn(".sheet(isPresented: shareSheetBinding)", reader_source)
@@ -1070,20 +1549,27 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertNotIn(".sheet(item: $activeReaderLabelAssignmentRoute)", reader_source)
         self.assertNotIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
         self.assertNotIn(".fullScreenCover(item: $refChooserPresentation)", reader_source)
-        self.assertIn("ReaderAppOwnedOverlay", reader_source)
-        self.assertNotIn('accessibilityIdentifier("androidReaderAppOwnedOverlay")', reader_source)
+        self.assertNotIn("ReaderAppOwnedOverlay", reader_source)
+        self.assertIn("readerLabelAssignmentContent(route)", reader_source)
+        self.assertIn("LabelAssignmentView(", reader_source)
+        self.assertIn("ReaderPassageChooserOverlay", reader_source)
+        self.assertIn("documentChooserDestinationContent(", reader_source)
         self.assertNotIn(".sheet(item: $historyDialogRequest)", reader_source)
         self.assertNotIn(".sheet(item: $chapterReadHistoryDialogRequest)", reader_source)
         self.assertNotIn("UIActivityViewController", pane_source)
         self.assertIn("ctrl.onShareHtml = { html in onShareText?(html) }", pane_source)
 
     def test_speak_passage_range_uses_a_navigation_destination_not_a_sheet(self) -> None:
-        """Android's GridChoosePassageBook flow must retain full activity-style navigation."""
+        """Android's GridChoosePassageBook flow must retain app-owned activity-style routing."""
         source = SPEAK_CONTROL_VIEW.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(isPresented: $showVerseRangeEditor", source)
-        self.assertIn(".navigationDestination(isPresented: $showVerseRangeEditor)", source)
-        self.assertIn("two `GridChoosePassageBook` passage picks", source)
+        self.assertNotIn(".navigationDestination(isPresented: $showVerseRangeEditor)", source)
+        self.assertIn("private var destinationLayer", source)
+        self.assertIn("case .verseRange:", source)
+        self.assertIn("SpeakVerseRangeEditor(", source)
+        self.assertIn("BookChooserView(", source)
+        self.assertIn("two `GridChoosePassageBook` requests", source)
         self.assertIn("speak_beginning_of_passage", source)
         self.assertIn("speak_ending_of_passage", source)
 
@@ -1098,9 +1584,39 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("androidMyDocumentPageEditorDialog", editor_source)
         self.assertIn("onCancel: () -> Void", editor_source)
         self.assertIn("myDocumentPageEditorSaveButton", editor_source)
+        self.assertIn("AndroidDialogWindow(", editor_source)
+        self.assertIn("AndroidPopupMenuSurface(", editor_source)
+        self.assertNotIn("TextEditor", editor_source)
+        self.assertNotIn("Picker(", editor_source)
+
+    def test_my_documents_routes_use_android_activity_components_not_ios_collections(self) -> None:
+        """Document and page managers must retain Android activity/list/menu ownership."""
+        document_owner = MY_DOCUMENTS_LIST_VIEW.read_text(encoding="utf-8")
+        page_owner = MY_DOCUMENT_PAGES_LIST_VIEW.read_text(encoding="utf-8")
+        document_activity = ANDROID_MY_DOCUMENTS_ACTIVITY_VIEW.read_text(encoding="utf-8")
+        page_activity = ANDROID_MY_DOCUMENT_PAGES_ACTIVITY_VIEW.read_text(encoding="utf-8")
+
+        self.assertIn("AndroidMyDocumentsActivityView(", document_owner)
+        self.assertIn("AndroidMyDocumentPagesActivityView(", page_owner)
+        for source in (document_owner, page_owner, document_activity, page_activity):
+            self.assertNotIn("List {", source)
+            self.assertNotIn("Form {", source)
+            self.assertNotIn("NavigationStack {", source)
+            self.assertNotIn("Menu {", source)
+            self.assertNotIn(".contextMenu", source)
+            self.assertNotIn(".swipeActions", source)
+
+        self.assertIn("AndroidActivityScreen(", document_activity)
+        self.assertIn("AndroidActivityAccessibilityMarker(", document_activity)
+        self.assertIn("AndroidActivityCommitBar(", document_activity)
+        self.assertIn("AndroidPopupMenuSurface(", document_activity)
+        self.assertIn("AndroidActivityScreen(", page_activity)
+        self.assertIn("AndroidActivityAccessibilityMarker(", page_activity)
+        self.assertIn("AndroidActivityCommitBar(", page_activity)
+        self.assertIn("AndroidPopupMenuSurface(", page_activity)
 
     def test_reader_help_uses_an_android_dialog_not_a_generic_sheet(self) -> None:
-        """BibleView help uses Android's in-place dialog owner instead of adaptive sheet chrome."""
+        """BibleView help reuses Android's shared in-place dialog owner and palette."""
         pane_source = BIBLE_WINDOW_PANE.read_text(encoding="utf-8")
         dialog_source = AI_READER_HELP_PRESENTATION.read_text(encoding="utf-8")
 
@@ -1110,41 +1626,39 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("onDismiss: { self.readerHelpPresentation = nil }", pane_source)
         self.assertNotIn("@Environment(\\.dismiss)", dialog_source)
         self.assertNotIn(".presentationDetents", dialog_source)
-        self.assertIn("androidAIReaderHelpDialog", dialog_source)
-        self.assertIn("Color.black.opacity(0.36)", dialog_source)
-        self.assertIn("Button(String(localized: \"okay\"), action: onDismiss)", dialog_source)
+        self.assertIn("AndroidDialogWindow(", dialog_source)
+        self.assertIn('accessibilityIdentifier: "androidAIReaderHelpDialog"', dialog_source)
+        self.assertIn("AndroidDialogScaffold(", dialog_source)
+        self.assertIn("AndroidDialogTextAction(", dialog_source)
+        self.assertNotIn("Color.black.opacity", dialog_source)
+        self.assertNotIn(".regularMaterial", dialog_source)
 
     def test_reader_ai_prompt_selection_uses_coordinator_owned_app_surfaces(self) -> None:
         """AI routes remain pane-owned without regressing to adaptive iOS sheets."""
         source = AI_READER_RUN_VIEWS.read_text(encoding="utf-8")
+        dialog_source = AI_READER_TRANSIENT_DIALOGS.read_text(encoding="utf-8")
 
         self.assertNotIn(".sheet(item: $coordinator.presentation)", source)
         self.assertNotIn(".fullScreenCover(item: $rawLogSnapshot)", source)
-        self.assertIn("AIReaderAppOwnedOverlay", source)
+        self.assertNotIn("AIReaderAppOwnedOverlay", source)
+        self.assertIn("struct AIReaderCoordinatorHost: View", source)
         self.assertIn("switch coordinator.presentation", source)
         self.assertIn("case .promptChooser:", source)
-        self.assertIn("AIReaderPromptChooserView(coordinator: coordinator)", source)
-        self.assertIn("AIReaderPromptPreparationView(coordinator: coordinator)", source)
-        self.assertIn("AIReaderRegenerationView(coordinator: coordinator)", source)
-        self.assertIn("AIReaderDocumentMarkerChooserView(coordinator: coordinator)", source)
-        self.assertIn("AIReaderRunActivityView(coordinator: coordinator)", source)
-        self.assertIn('accessibilityIdentifier("androidAIReaderAppOwnedOverlay")', source)
-        self.assertIn("NavigationStack {", source)
+        self.assertIn("AIReaderPromptChooserDialog(coordinator: coordinator)", source)
+        self.assertIn("AIReaderPromptPreparationDialog(coordinator: coordinator)", source)
+        self.assertIn("AIReaderRegenerationDialog(coordinator: coordinator)", source)
+        self.assertIn("AIReaderDocumentMarkerDialog(coordinator: coordinator)", source)
+        self.assertIn("AIReaderAgentLogWidget(", source)
+        self.assertNotIn("NavigationStack {", source)
         self.assertIn("coordinator.presentation = nil", source)
-        self.assertIn("coordinator.selectPrompt(entry)", source)
+        self.assertIn("AndroidDialogWindow(", dialog_source)
+        self.assertIn("AndroidDialogScaffold(", dialog_source)
+        self.assertIn("coordinator.selectPrompt(entry)", dialog_source)
 
     def test_drawer_progress_restores_android_last_tab_without_reusing_bridge_state(self) -> None:
         """Drawer launches must restore Android's persisted tab while bridge launches remain explicit."""
         source = READER_VIEW.read_text(encoding="utf-8")
-        progress_source = (
-            REPO_ROOT
-            / "Sources"
-            / "BibleUI"
-            / "Sources"
-            / "BibleUI"
-            / "Bible"
-            / "ReadingProgressViews.swift"
-        ).read_text(encoding="utf-8")
+        progress_source = READING_PROGRESS_VIEW.read_text(encoding="utf-8")
         drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
         progress_body = swift_switch_case_body(drawer_handler, "readingProgress")
 
@@ -1156,21 +1670,68 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
     def test_progress_screen_exposes_android_settings_and_help_actions(self) -> None:
         """The progress activity's Settings and Help actions remain inside its navigation context."""
         source = READER_VIEW.read_text(encoding="utf-8")
-        progress_source = (
-            REPO_ROOT
-            / "Sources"
-            / "BibleUI"
-            / "Sources"
-            / "BibleUI"
-            / "Bible"
-            / "ReadingProgressViews.swift"
-        ).read_text(encoding="utf-8")
+        progress_source = READING_PROGRESS_VIEW.read_text(encoding="utf-8")
+        activity_source = ANDROID_READING_PROGRESS_ACTIVITY_VIEW.read_text(encoding="utf-8")
+        settings_source = ANDROID_READING_PROGRESS_SETTINGS_VIEW.read_text(encoding="utf-8")
 
-        self.assertIn("readingProgressSettingsAction", progress_source)
-        self.assertIn("ReadingProgressSettingsView(controller: settingsController)", progress_source)
-        self.assertIn("readingProgressHelpAction", progress_source)
+        self.assertIn("readingProgressSettingsAction", activity_source)
+        self.assertIn("readingProgressHelpAction", activity_source)
+        self.assertIn("AndroidPopupMenuSurface", activity_source)
+        self.assertIn("AndroidFixedTabRow", activity_source)
         self.assertIn('localized: "help_reading_progress_text"', progress_source)
-        self.assertIn("settingsController: panePresentationController", source)
+        self.assertIn("AndroidHelpDialog", progress_source)
+        self.assertIn("ReadingProgressSettingsView(", source)
+        self.assertIn("surfacePalette: readerThemeSurfacePalette", source)
+        self.assertIn("AndroidSwitchPreferenceRow", settings_source)
+        self.assertIn("AndroidSingleChoiceDialog", settings_source)
+
+    def test_progress_activity_and_settings_forbid_native_ios_presentation_primitives(self) -> None:
+        """Progress routes must remain app-owned activities/dialogs, not cosmetically adapted forms."""
+        progress_source = READING_PROGRESS_VIEW.read_text(encoding="utf-8")
+        activity_source = ANDROID_READING_PROGRESS_ACTIVITY_VIEW.read_text(encoding="utf-8")
+        settings_source = ANDROID_READING_PROGRESS_SETTINGS_VIEW.read_text(encoding="utf-8")
+        combined = "\n".join((progress_source, activity_source, settings_source))
+
+        for forbidden in (
+            "Form {",
+            "List {",
+            "Section(",
+            "NavigationStack",
+            "NavigationLink",
+            "Menu {",
+            ".sheet(",
+            ".popover(",
+            ".regularMaterial",
+            ".pickerStyle(.segmented)",
+        ):
+            self.assertNotIn(forbidden, combined)
+        self.assertNotRegex(combined, r"\bPicker\(")
+        self.assertNotRegex(combined, r"\bToggle\(")
+        self.assertNotRegex(combined, r"\bProgressView\(")
+
+        self.assertIn("AndroidReadingProgressActivityView", progress_source)
+        self.assertIn("AndroidDeterminateProgressIndicator", progress_source)
+        self.assertIn("AndroidReadHistoryDialog", progress_source)
+        self.assertIn("LongPressGesture", progress_source)
+        self.assertIn("AndroidActivityScreen(", settings_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", settings_source)
+        self.assertNotIn("auto_track_reading", settings_source)
+
+        # Android builds these rows and grids from TextView/GridLayout primitives. Keep the
+        # source-backed contracts exact instead of reintroducing iOS symbols or invented state.
+        self.assertNotIn("Image(systemName:", progress_source)
+        self.assertNotIn("Color.accentColor", progress_source)
+        self.assertNotIn("Divider()", progress_source)
+        self.assertNotIn("let selectedOsisId", progress_source)
+        self.assertNotIn('localized: "old_testament"', progress_source)
+        self.assertNotIn('localized: "new_testament"', progress_source)
+        self.assertIn('Text("×")', progress_source)
+        self.assertIn('localized: "reading_progress_old_testament"', progress_source)
+        self.assertIn('localized: "reading_progress_new_testament"', progress_source)
+        self.assertIn(
+            "private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 10)",
+            progress_source,
+        )
 
     def test_destination_owned_reader_routes_cannot_fall_back_to_legacy_ios_presentations(self) -> None:
         """

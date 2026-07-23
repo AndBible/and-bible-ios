@@ -15,7 +15,8 @@ import BibleCore
  the full-width footer no longer reserves height, while the trailing restore affordance remains
  reachable as an overlay.
 
- It also hosts typed-reference navigation for represented windows.
+ Long-pressing a restore button forwards the exact represented window to the reader-owned shared
+ Android popup; it does not create a second native context-menu implementation.
  */
 struct WindowTabBar: View {
     /// Shared workspace/window coordinator used to read and mutate tab state.
@@ -33,23 +34,8 @@ struct WindowTabBar: View {
     /// Whether Android's monochrome/e-ink window-button override should be applied.
     var monochromeMode = false
 
-    /// Presents transient toast feedback in the parent reader.
-    var onShowToast: ((String) -> Void)?
-
-    /// Opens the native book chooser when the user selects the browse fallback.
-    var onShowBookChooser: (() -> Void)?
-
-    /// Attempts typed-reference navigation for a specific window and reports success/failure.
-    var onGoToTypedRef: ((BibleCore.Window, String) -> Bool)?
-
-    /// Controls presentation of the typed-reference alert from the tab context menu.
-    @State private var showGoToRefAlert = false
-
-    /// Draft typed-reference text bound to the alert text field.
-    @State private var goToRefText = ""
-
-    /// Window targeted by the currently presented typed-reference alert.
-    @State private var goToRefWindow: BibleCore.Window?
+    /// Requests the reader-owned shared Android popup for one exact restore-strip window.
+    var onPresentWindowMenu: ((BibleCore.Window) -> Void)?
 
     /// Whether a visible pane is still opening and should block more user-created windows.
     private var isAddWindowDisabled: Bool {
@@ -82,21 +68,6 @@ struct WindowTabBar: View {
                 )
             }
             .foregroundStyle(surfacePalette.foregroundColor)
-            .overlay {
-                if showGoToRefAlert {
-                    WindowTabBarReferenceDialog(
-                        text: $goToRefText,
-                        onGo: {
-                            if let window = goToRefWindow, !(onGoToTypedRef?(window, goToRefText) ?? false) {
-                                onShowToast?(String(localized: "go_to_reference_invalid"))
-                            }
-                            showGoToRefAlert = false
-                        },
-                        onBrowse: { onShowBookChooser?(); showGoToRefAlert = false },
-                        onCancel: { showGoToRefAlert = false }
-                    )
-                }
-            }
     }
 
     /**
@@ -346,18 +317,7 @@ struct WindowTabBar: View {
         let moduleName = renderedState?.moduleName ?? persistedModuleName(for: window, categoryName: categoryName)
         let reference = renderedState?.reference ?? shortReference(for: window)
         let buttonForegroundColor = tabPalette.footerButtonForegroundColor(isVisible: isVisible)
-        let canCopyReference = !fullReference(for: window).isEmpty
-        let moveCandidates = windowManager.windowsInPersistedOrder.filter {
-            windowManager.isEffectivelyPinned($0) == windowManager.isEffectivelyPinned(window)
-        }
-        let currentMoveIndex = moveCandidates.firstIndex(where: { $0.id == window.id })
-        let canMoveWindow = !window.isLinksWindow
-            && !windowManager.isMaximized
-            && moveCandidates.count > 1
         let canSyncWindow = isWindowSyncable(window)
-        let autoPinEnabled = windowManager.activeWorkspace?.workspaceSettings?.autoPin
-            ?? WorkspaceSettings.defaultAutoPin
-        let canPinWindow = !window.isLinksWindow && !windowManager.isMaximized && !autoPinEnabled
         let topCornerRadius: CGFloat = (windowManager.isEffectivelyPinned(window) || window.isLinksWindow) ? 6 : 1
         let tabShape = UnevenRoundedRectangle(
             cornerRadii: RectangleCornerRadii(
@@ -435,6 +395,12 @@ struct WindowTabBar: View {
             .opacity(isMinimized ? 0.62 : 1.0)
         }
         .buttonStyle(.plain)
+        .androidPopupMenuAnchor(id: WindowTabMenuAnchor.id(for: window.id))
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                onPresentWindowMenu?(window)
+            }
+        )
         .accessibilityIdentifier("windowTabButton::\(window.orderNumber)")
         .accessibilityValue(windowTabAccessibilityValue(
             isActive: isActive,
@@ -443,108 +409,10 @@ struct WindowTabBar: View {
             moduleName: moduleName,
             reference: reference
         ))
-        .contextMenu {
-            // Content actions
-            if !isMinimized {
-                if canCopyReference {
-                    Button(String(localized: "copy_reference"), systemImage: "doc.on.clipboard") {
-                        copyReference(for: window)
-                    }
-                }
-
-                Button(String(localized: "go_to_reference"), systemImage: "arrow.right.doc.on.clipboard") {
-                    actionDispatcher.perform(.activate, for: window)
-                    goToRefWindow = window
-                    goToRefText = ""
-                    showGoToRefAlert = true
-                }
-            }
-
-            Divider()
-
-            if isMinimized {
-                Button(String(localized: "restore"), systemImage: "arrow.up.left.and.arrow.down.right") {
-                    actionDispatcher.perform(.restore, for: window)
-                }
-            } else {
-                // Move window actions
-                if canMoveWindow {
-                    Button(String(localized: "move_up"), systemImage: "arrow.up") {
-                        guard let index = currentMoveIndex, index > 0 else { return }
-                        actionDispatcher.perform(.move(toPosition: index - 1), for: window)
-                    }
-                    .disabled(currentMoveIndex == nil || currentMoveIndex == 0)
-
-                    Button(String(localized: "move_down"), systemImage: "arrow.down") {
-                        guard let index = currentMoveIndex, index < moveCandidates.count - 1 else { return }
-                        actionDispatcher.perform(.move(toPosition: index + 1), for: window)
-                    }
-                    .disabled(currentMoveIndex == nil || currentMoveIndex == moveCandidates.count - 1)
-
-                    Divider()
-                }
-
-                Button(String(localized: "minimize"), systemImage: "minus") {
-                    actionDispatcher.perform(.minimize, for: window)
-                }
-                .disabled(windowManager.visibleWindows.count <= 1)
-
-                if windowManager.isMaximized {
-                    Button(String(localized: "restore_size"), systemImage: "arrow.down.right.and.arrow.up.left") {
-                        actionDispatcher.perform(.unmaximize, for: window)
-                    }
-                } else {
-                    Button(String(localized: "maximize"), systemImage: "arrow.up.left.and.arrow.down.right") {
-                        actionDispatcher.perform(.maximize, for: window)
-                    }
-                }
-            }
-
-            Divider()
-
-            if canSyncWindow || canPinWindow {
-                if canSyncWindow {
-                    Toggle(isOn: Binding(
-                        get: { window.isSynchronized },
-                        set: { actionDispatcher.perform(.setSynchronized($0), for: window) }
-                    )) {
-                        SwiftUI.Label(String(localized: "sync_scrolling"), systemImage: "arrow.triangle.2.circlepath")
-                    }
-                }
-
-                if canPinWindow {
-                    Toggle(isOn: Binding(
-                        get: { window.isPinMode },
-                        set: { actionDispatcher.perform(.setPinMode($0), for: window) }
-                    )) {
-                        SwiftUI.Label(String(localized: "pin"), systemImage: "pin")
-                    }
-                }
-
-                if canSyncWindow {
-                    Menu(String(localized: "sync_group")) {
-                        ForEach(WindowSyncGroupPresentation.storedGroups, id: \.self) { group in
-                            Button {
-                                actionDispatcher.perform(.changeSyncGroup(group), for: window)
-                            } label: {
-                                let groupTitle = WindowSyncGroupPresentation.title(forStoredGroup: group)
-                                if window.syncGroup == group {
-                                    SwiftUI.Label(groupTitle, systemImage: "checkmark")
-                                } else {
-                                    Text(groupTitle)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Divider()
-            }
-
-            Button(String(localized: "close"), systemImage: "xmark", role: .destructive) {
-                actionDispatcher.perform(.close, for: window)
-            }
-            .disabled(windowManager.allWindows.count <= 1)
+        .accessibilityAction(
+            named: String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
+        ) {
+            onPresentWindowMenu?(window)
         }
     }
 
@@ -695,38 +563,6 @@ struct WindowTabBar: View {
         return "\(book.osisId) \(chapter)"
     }
 
-    /// Copies the current reference for the given window and triggers toast feedback.
-    private func copyReference(for window: BibleCore.Window) {
-        let ref = fullReference(for: window)
-        guard !ref.isEmpty else { return }
-        #if os(iOS)
-        UIPasteboard.general.string = ref
-        #elseif os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(ref, forType: .string)
-        #endif
-        onShowToast?(String(localized: "reference_copied"))
-    }
-
-    /// Returns the full human-readable reference string for copy-to-clipboard actions.
-    private func fullReference(for window: BibleCore.Window) -> String {
-        guard !isAndroidMultiDocument(window) else { return "" }
-
-        // Try to get reference from controller if available
-        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
-            return "\(ctrl.currentBook) \(ctrl.currentChapter) (\(ctrl.activeModuleName))"
-        }
-        // Fallback to PageManager data
-        guard let pm = window.pageManager else { return "" }
-        let books = BibleReaderController.defaultBooks
-        let moduleName = pm.bibleDocument ?? "KJV"
-        guard let bookIndex = pm.bibleBibleBook,
-              bookIndex >= 0, bookIndex < books.count else { return "" }
-        let book = books[bookIndex]
-        let chapter = pm.bibleChapterNo ?? 1
-        return "\(book.name) \(chapter) (\(moduleName))"
-    }
-
     /**
      Identifies the Android synthetic `Multi` page for one tab.
 
@@ -775,31 +611,10 @@ struct WindowTabBar: View {
     }
 }
 
-/** Android-style typed-reference dialog that preserves the originating window identity. */
-private struct WindowTabBarReferenceDialog: View {
-    @Binding var text: String
-    let onGo: () -> Void
-    let onBrowse: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.36).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 16) {
-                Text(String(localized: "go_to_reference")).font(.headline)
-                Text(String(localized: "go_to_reference_message")).foregroundStyle(.secondary)
-                TextField(String(localized: "go_to_reference_placeholder"), text: $text)
-                    .textFieldStyle(.roundedBorder)
-                HStack { Spacer()
-                    Button(String(localized: "cancel"), action: onCancel)
-                    Button(String(localized: "browse"), action: onBrowse)
-                    Button(String(localized: "go"), action: onGo)
-                }
-            }
-            .padding(20).frame(maxWidth: 500)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .padding(24)
-        }
-        .accessibilityIdentifier("androidGoToReferenceDialog")
+/** Stable anchor identity shared by the restore-strip button and reader-owned popup host. */
+enum WindowTabMenuAnchor {
+    /** Returns one collision-free anchor identifier for the represented persisted window. */
+    static func id(for windowID: UUID) -> String {
+        "windowTabMenu::\(windowID.uuidString)"
     }
 }

@@ -21,37 +21,6 @@ private struct DocumentPickerLocalOverwriteConfirmation: Identifiable {
 }
 
 /**
- Light document-selection palette matching Android's `ChooseDocument` activity surface.
-
- The chooser shares Android's `DocumentSelectionBase` layout with Downloads, but Android renders
- this route with a light content surface and a dark gray app bar. These constants keep the custom
- SwiftUI layout independent from reader theme colors so changing Bible text colors does not
- accidentally recolor the document-management screen.
- */
-private enum DocumentChooserPalette {
-    /// Activity background behind filters and rows.
-    static let background = Color.white
-
-    /// Android action bar chrome for the Document activity.
-    static let appBar = Color(red: 0.27, green: 0.27, blue: 0.27)
-
-    /// Overflow menu surface anchored to the app bar.
-    static let menuSurface = Color.white
-
-    /// Thin row separators and filter dividers.
-    static let divider = Color.black.opacity(0.12)
-
-    /// Primary row and filter text.
-    static let primaryText = Color(red: 0.13, green: 0.13, blue: 0.13)
-
-    /// Secondary row metadata and labels.
-    static let secondaryText = Color(red: 0.47, green: 0.47, blue: 0.47)
-
-    /// Template icon tint used by Android-style document rows.
-    static let icon = Color(red: 0.49, green: 0.49, blue: 0.49)
-}
-
-/**
  Presents document rows for the currently focused pane and routes selections through the same
  document outcomes as Android's `ChooseDocument` activity.
 
@@ -62,20 +31,36 @@ private enum DocumentChooserPalette {
  from SwiftUI rendering details.
  */
 struct BibleReaderModulePicker: View {
+    /// Shared popup anchor names for the activity toolbar.
+    private enum PopupAnchor {
+        static let overflow = "modulePickerOverflowAnchor"
+    }
+
+    /// Single installed document selected by Android's contextual action mode.
+    private enum ContextualDocument: Equatable {
+        /// Installed SWORD/SQLite module initials.
+        case module(String)
+
+        /// Installed EPUB stable library identifier.
+        case epub(String)
+    }
+
     let controller: BibleReaderController
     let category: DocumentCategory
+    let surfacePalette: ReaderThemeSurfacePalette
     let onDismiss: () -> Void
     let onOpenDownloads: () -> Void
     let onOpenDictionaryBrowser: () -> Void
     let onOpenGeneralBookBrowser: () -> Void
     let onOpenMapBrowser: () -> Void
     let onOpenStudyPadSelector: () -> Void
+    let onDeleteEpub: (String) -> Void
 
     /// Search-index service used by Android's Delete Index row action.
     @Environment(SearchIndexService.self) private var searchIndexService
 
-    /// Dynamic Type category used to split Android's compact filter row when large text needs space.
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Active scheme used only for the shared popup elevation/accent projection.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Selected Android document-type filter.
     @State private var selectedFilter: DocumentTypeFilter
@@ -86,11 +71,20 @@ struct BibleReaderModulePicker: View {
     /// Free-text filter applied to module initials, descriptions, category labels, and language.
     @State private var searchText = ""
 
+    /// Installed module or EPUB selected by Android's single-choice contextual action mode.
+    @State private var contextualDocument: ContextualDocument?
+
     /// Details dialog payload for Android's About row action.
     @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
 
     /// Confirmation payload for destructive Android document actions.
     @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
+
+    /// Success-only EPUB deletion state shared with the reader reconciliation boundary.
+    @State private var epubDeletionState = EpubLibraryDeletionState()
+
+    /// EPUB awaiting Android's Delete search index confirmation.
+    @State private var pendingEpubIndexDeletion: EpubInfo?
 
     /// Last row-action failure surfaced to the user.
     @State private var rowActionErrorMessage: String?
@@ -162,12 +156,14 @@ struct BibleReaderModulePicker: View {
        - startsWithAllTypes: Whether the picker should start on Android's "All types" filter. Use
          this for the drawer-level Choose Document action, which Android opens without a `type`
          extra.
-       - onDismiss: Callback that closes the sheet without changing reader state.
+       - surfacePalette: Colors inherited from the launching reader workspace/window.
+       - onDismiss: Callback that closes the activity destination without changing reader state.
        - onOpenDownloads: Callback that opens Downloads after the chooser dismisses.
        - onOpenDictionaryBrowser: Follow-up browser route used after selecting a dictionary module.
        - onOpenGeneralBookBrowser: Follow-up browser route used after selecting a general book.
        - onOpenMapBrowser: Follow-up browser route used after selecting a map module.
        - onOpenStudyPadSelector: Follow-up route for Android's visible Journal/StudyPad pseudo-document.
+       - onDeleteEpub: Reader-owner callback emitted only after durable EPUB deletion succeeds.
 
      Side effects:
      - initializes SwiftUI state only; controller mutations happen later from row selection.
@@ -180,21 +176,25 @@ struct BibleReaderModulePicker: View {
         controller: BibleReaderController,
         category: DocumentCategory,
         startsWithAllTypes: Bool = false,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
         onDismiss: @escaping () -> Void,
         onOpenDownloads: @escaping () -> Void,
         onOpenDictionaryBrowser: @escaping () -> Void,
         onOpenGeneralBookBrowser: @escaping () -> Void,
         onOpenMapBrowser: @escaping () -> Void,
-        onOpenStudyPadSelector: @escaping () -> Void = {}
+        onOpenStudyPadSelector: @escaping () -> Void = {},
+        onDeleteEpub: @escaping (String) -> Void = { _ in }
     ) {
         self.controller = controller
         self.category = category
+        self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
         self.onOpenDownloads = onOpenDownloads
         self.onOpenDictionaryBrowser = onOpenDictionaryBrowser
         self.onOpenGeneralBookBrowser = onOpenGeneralBookBrowser
         self.onOpenMapBrowser = onOpenMapBrowser
         self.onOpenStudyPadSelector = onOpenStudyPadSelector
+        self.onDeleteEpub = onDeleteEpub
         _selectedFilter = State(initialValue: startsWithAllTypes ? .all : Self.initialDocumentTypeFilter(for: category))
     }
 
@@ -227,6 +227,34 @@ struct BibleReaderModulePicker: View {
             selectedLanguage: selectedLanguage,
             searchText: searchText
         )
+    }
+
+    /// Installed row currently driving Android's contextual document menu.
+    private var contextualModule: ModuleInfo? {
+        guard case .module(let moduleName) = contextualDocument else { return nil }
+        return allSelectableModules.first { $0.name == moduleName }
+    }
+
+    /// Installed EPUB currently driving Android's contextual document menu.
+    private var contextualEpub: EpubInfo? {
+        guard case .epub(let identifier) = contextualDocument else { return nil }
+        return EpubReader.installedEpubs().first { $0.identifier == identifier }
+    }
+
+    /// Android-ordered contextual actions for the currently selected installed row.
+    private var contextualModuleActions: [ModuleDownloadRowAction] {
+        guard let contextualModule else { return [] }
+        return Self.rowActions(for: contextualModule, installedModules: allSelectableModules)
+    }
+
+    /// Android's common About/Delete/Delete Index actions for a deletable EPUB general book.
+    private var contextualEpubActions: [ModuleDownloadRowAction] {
+        [.about, .uninstall, .deleteIndex]
+    }
+
+    /// Whether any installed document currently owns the single-choice contextual action bar.
+    private var hasContextualDocumentSelection: Bool {
+        contextualDocument != nil
     }
 
     /// Language choices built from the complete chooser dataset, sorted alphabetically.
@@ -355,16 +383,64 @@ struct BibleReaderModulePicker: View {
     private var rowActionPresentedScreen: some View {
         moduleAccessPresentedScreen
         .overlay {
-            if let confirmation = pendingRowActionConfirmation {
+            if epubDeletionState.isAwaitingConfirmation,
+               let candidate = epubDeletionState.pending.first {
+                let format = String(localized: "delete_doc", defaultValue: "Delete %@?")
+                ModulePickerDecisionDialog(
+                    title: "",
+                    message: String(format: format, candidate.title),
+                    actions: [
+                        .init(
+                            id: "yes",
+                            title: String(localized: "yes", defaultValue: "Yes"),
+                            role: .destructive,
+                            perform: deletePendingEpubs
+                        ),
+                        .init(
+                            id: "no",
+                            title: String(localized: "no", defaultValue: "No"),
+                            role: nil
+                        ) {
+                            epubDeletionState.cancel()
+                        },
+                    ]
+                )
+            } else if let epub = pendingEpubIndexDeletion {
+                let format = String(
+                    localized: "delete_search_index_doc",
+                    defaultValue: "Delete index of %@?"
+                )
+                ModulePickerDecisionDialog(
+                    title: "",
+                    message: String(format: format, epub.initials),
+                    actions: [
+                        .init(
+                            id: "okay",
+                            title: String(localized: "okay", defaultValue: "OK"),
+                            role: .destructive
+                        ) {
+                            pendingEpubIndexDeletion = nil
+                            deleteEpubSearchIndex(epub)
+                        },
+                        .init(
+                            id: "cancel",
+                            title: String(localized: "cancel", defaultValue: "Cancel"),
+                            role: nil
+                        ) {
+                            pendingEpubIndexDeletion = nil
+                        },
+                    ]
+                )
+            } else if let confirmation = pendingRowActionConfirmation {
                 ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
-                    .init(id: "confirm", title: confirmation.kind == .uninstall ? String(localized: "uninstall") : String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                    .init(id: "confirm", title: confirmation.confirmButtonTitle, role: .destructive) {
                         switch confirmation.kind {
                         case .uninstall: uninstallInstalledModule(confirmation.moduleName)
                         case .deleteIndex: deleteModuleIndex(confirmation.moduleName)
                         }
                         pendingRowActionConfirmation = nil
                     },
-                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingRowActionConfirmation = nil }
+                    .init(id: "cancel", title: confirmation.cancelButtonTitle, role: nil) { pendingRowActionConfirmation = nil }
                 ])
             } else if let message = rowActionErrorMessage {
                 ModulePickerDecisionDialog(title: String(localized: "document_action_failed", defaultValue: "Document action failed"), message: message, actions: [
@@ -393,13 +469,13 @@ struct BibleReaderModulePicker: View {
                 }
                 Text(String(localized: "installing", defaultValue: "Installing"))
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(DocumentChooserPalette.primaryText)
+                    .foregroundStyle(surfacePalette.foregroundColor)
             }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, minHeight: 52)
-            .background(DocumentChooserPalette.menuSurface)
+            .background(surfacePalette.backgroundColor)
             .overlay(alignment: .top) {
-                Divider().background(DocumentChooserPalette.divider)
+                Divider().background(surfacePalette.inactiveBorderColor)
             }
             .accessibilityIdentifier("modulePickerInstallProgress")
         }
@@ -421,36 +497,36 @@ struct BibleReaderModulePicker: View {
     private var androidDocumentChooserScreen: some View {
         let visibleRows = filteredDocumentRows
 
-        return ZStack(alignment: .topTrailing) {
-            VStack(spacing: 0) {
-                androidTopAppBar
-                androidFilterBar(visibleDocumentCount: visibleRows.count)
-                androidDocumentRowsContent(visibleRows)
-            }
-            if showOverflowMenu {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                    .onTapGesture {
-                        showOverflowMenu = false
-                    }
-                androidChooserOverflowMenu
-                    .padding(.top, 56)
-                    .padding(.trailing, 8)
-                    .zIndex(1)
-            }
+        return AndroidDocumentSelectionActivityScreen(surfacePalette: surfacePalette) {
+            androidTopAppBar
+        } filterBar: {
+            androidFilterBar(visibleDocumentCount: visibleRows.count)
+        } rows: {
+            androidDocumentRowsContent(visibleRows)
         }
-        .background(DocumentChooserPalette.background.ignoresSafeArea())
+        .overlay(alignment: .topLeading) {
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "document", defaultValue: "Document"),
+                accessibilityIdentifier: "modulePickerScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.overflow,
+            isPresented: $showOverflowMenu,
+            menuWidth: 290,
+            estimatedMenuHeight: 144,
+            accessibilityIdentifier: "modulePickerOverflowMenu"
+        ) {
+            androidChooserOverflowMenu
+        }
         .onChange(of: searchText) { oldValue, newValue in
+            clearContextualModuleSelection()
             if oldValue.isEmpty && !newValue.isEmpty {
                 selectedFilter = .all
                 selectedLanguage = ""
             }
         }
-        .navigationBarBackButtonHidden(true)
-        #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-        #endif
     }
 
     /**
@@ -460,40 +536,75 @@ struct BibleReaderModulePicker: View {
      - Side effects: Back dismisses the chooser; overflow toggles the Android-style menu.
      - Failure modes: none.
      */
+    @ViewBuilder
     private var androidTopAppBar: some View {
-        HStack(spacing: 16) {
-            Button(action: onDismiss) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 24, weight: .semibold))
-                    .frame(width: 44, height: 44)
+        if let contextualModule {
+            AndroidDocumentContextActionBar(
+                actions: contextualModuleActions,
+                surfacePalette: surfacePalette,
+                accessibilityPrefix: "modulePicker",
+                onClose: clearContextualModuleSelection,
+                onAbout: {
+                    clearContextualModuleSelection()
+                    selectedModuleDetails = moduleDetails(for: contextualModule)
+                },
+                onDelete: {
+                    clearContextualModuleSelection()
+                    pendingRowActionConfirmation = confirmation(.uninstall, for: contextualModule)
+                },
+                onUnlock: {
+                    clearContextualModuleSelection()
+                    beginUnlock(contextualModule)
+                },
+                onDeleteIndex: {
+                    clearContextualModuleSelection()
+                    pendingRowActionConfirmation = confirmation(.deleteIndex, for: contextualModule)
+                }
+            )
+        } else if let contextualEpub {
+            AndroidDocumentContextActionBar(
+                actions: contextualEpubActions,
+                surfacePalette: surfacePalette,
+                accessibilityPrefix: "modulePicker",
+                onClose: clearContextualModuleSelection,
+                onAbout: {
+                    clearContextualModuleSelection()
+                    selectedModuleDetails = ModuleBrowserModuleDetails(epub: contextualEpub)
+                },
+                onDelete: {
+                    clearContextualModuleSelection()
+                    epubDeletionState.request([
+                        EpubLibraryDeletionCandidate(
+                            identifier: contextualEpub.identifier,
+                            title: contextualEpub.initials
+                        )
+                    ])
+                },
+                onUnlock: {},
+                onDeleteIndex: {
+                    clearContextualModuleSelection()
+                    pendingEpubIndexDeletion = contextualEpub
+                }
+            )
+        } else {
+            AndroidActivityTopAppBar(
+                title: String(localized: "document", defaultValue: "Document"),
+                accessibilityIdentifier: "modulePicker",
+                backgroundColor: surfacePalette.toolbarBackgroundColor,
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                onBack: onDismiss
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "modulePickerOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: PopupAnchor.overflow)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.white)
-            .accessibilityLabel(String(localized: "back_to_previous", defaultValue: "Back"))
-            .accessibilityIdentifier("modulePickerBackButton")
-
-            Text(String(localized: "document", defaultValue: "Document"))
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Button {
-                showOverflowMenu.toggle()
-            } label: {
-                Image(systemName: "ellipsis.vertical")
-                    .font(.system(size: 24, weight: .bold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.white)
-            .accessibilityLabel(String(localized: "more", defaultValue: "More"))
-            .accessibilityIdentifier("modulePickerOverflowButton")
         }
-        .padding(.horizontal, 8)
-        .frame(height: 56)
-        .background(DocumentChooserPalette.appBar)
     }
 
     /**
@@ -503,65 +614,46 @@ struct BibleReaderModulePicker: View {
      route remains inside the chooser except the explicit Downloads handoff.
      */
     private var androidChooserOverflowMenu: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            androidOverflowMenuButton(
-                title: String(localized: "download_modules"),
-                accessibilityIdentifier: "modulePickerDownloadsButton"
-            ) {
-                showOverflowMenu = false
-                openDownloadsAfterDismiss()
-            }
-
-            androidOverflowMenuButton(
-                title: String(localized: "backup_modules", defaultValue: "Backup Documents"),
-                accessibilityIdentifier: "modulePickerBackupDocumentsButton"
-            ) {
-                guard !isExportingModuleBackup else { return }
-                showOverflowMenu = false
-                presentModuleBackupSelection()
-            }
-
-            androidOverflowMenuButton(
-                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
-                accessibilityIdentifier: "modulePickerInstallZipButton"
-            ) {
-                guard !isImportingExternalDocument else { return }
-                showOverflowMenu = false
-                showInstallZipImporter = true
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "modulePickerOverflowSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
+        ) {
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "backup_modules2",
+                        defaultValue: "Backup Documents to…"
+                    ),
+                    accessibilityIdentifier: "modulePickerBackupDocumentsButton"
+                ) {
+                    guard !isExportingModuleBackup else { return }
+                    showOverflowMenu = false
+                    presentModuleBackupSelection()
+                }
+                AndroidPopupMenuRow(
+                    title: String(localized: "download", defaultValue: "Download Documents"),
+                    accessibilityIdentifier: "modulePickerDownloadsButton"
+                ) {
+                    showOverflowMenu = false
+                    openDownloadsAfterDismiss()
+                }
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "install_zip",
+                        defaultValue: "Load Documents From Files"
+                    ),
+                    accessibilityIdentifier: "modulePickerInstallZipButton"
+                ) {
+                    guard !isImportingExternalDocument else { return }
+                    showOverflowMenu = false
+                    showInstallZipImporter = true
+                }
             }
         }
-        .frame(width: 260, alignment: .leading)
-        .background(DocumentChooserPalette.menuSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
-        .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-    }
-
-    /**
-     Builds one row in the Android-style overflow menu.
-
-     - Parameters:
-       - title: User-visible row title.
-       - accessibilityIdentifier: Stable UI-test identifier.
-       - action: Command executed when the row is tapped.
-     - Returns: A full-width menu row.
-     - Side effects: Executes `action`.
-     - Failure modes: none.
-     */
-    private func androidOverflowMenuButton(
-        title: String,
-        accessibilityIdentifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(DocumentChooserPalette.primaryText)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .padding(.horizontal, 16)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /**
@@ -573,145 +665,48 @@ struct BibleReaderModulePicker: View {
      - Failure modes: Large Dynamic Type splits controls into two rows to avoid overlap.
      */
     private func androidFilterBar(visibleDocumentCount: Int) -> some View {
-        VStack(spacing: 4) {
-            Group {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .bottom, spacing: 14) {
-                            androidLanguageFilterMenu()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            androidDocumentTypeFilterMenu(visibleDocumentCount: visibleDocumentCount)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        androidSearchFilterField()
-                    }
-                } else {
-                    HStack(alignment: .bottom, spacing: 14) {
-                        androidLanguageFilterMenu()
-                            .frame(minWidth: 96, maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                        androidSearchFilterField()
-                            .frame(minWidth: 96)
-                            .layoutPriority(2)
-                        androidDocumentTypeFilterMenu(visibleDocumentCount: visibleDocumentCount)
-                            .frame(minWidth: 112, maxWidth: .infinity, alignment: .trailing)
-                            .layoutPriority(1)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
-
-            Rectangle()
-                .fill(DocumentChooserPalette.divider)
-                .frame(height: 1)
-        }
-        .background(DocumentChooserPalette.background)
-    }
-
-    /**
-     Builds Android's language autocomplete affordance as a compact menu.
-
-     - Returns: Underlined language label with all installed chooser languages.
-     - Side effects: Selecting a row mutates `selectedLanguage`.
-     - Failure modes: Empty language lists still expose the all-language placeholder.
-     */
-    private func androidLanguageFilterMenu() -> some View {
-        Menu {
-            Button(String(localized: "settings_language")) {
+        AndroidDocumentSelectionFilterBar(
+            surfacePalette: surfacePalette,
+            languageTitle: languageFilterTitle(for: selectedLanguage),
+            languageOptions: availableLanguages.map {
+                AndroidDocumentSelectionOption(id: $0, title: Self.displayName(for: $0))
+            },
+            documentTypeTitle: Self.documentTypeFilterTitle(for: selectedFilter),
+            documentTypeOptions: Self.documentTypeFilterOrder.enumerated().map { index, filter in
+                AndroidDocumentSelectionOption(
+                    id: String(index),
+                    title: Self.documentTypeFilterTitle(for: filter)
+                )
+            },
+            resultCountTitle: AndroidDocumentSelectionFilterBar.localizedResultCount(
+                visibleDocumentCount
+            ),
+            searchPlaceholder: String(
+                localized: "free_text_search_documents",
+                defaultValue: "Search"
+            ),
+            searchText: $searchText,
+            accessibilityPrefix: "modulePicker",
+            onOpenLanguageOptions: {
+                clearContextualModuleSelection()
                 selectedLanguage = ""
+            },
+            onSelectLanguage: {
+                clearContextualModuleSelection()
+                selectedLanguage = $0
+            },
+            onSearchFocused: {
+                clearContextualModuleSelection()
+                selectedLanguage = ""
+                selectedFilter = .all
+            },
+            onSelectDocumentType: { optionID in
+                guard let index = Int(optionID),
+                      Self.documentTypeFilterOrder.indices.contains(index) else { return }
+                clearContextualModuleSelection()
+                selectedFilter = Self.documentTypeFilterOrder[index]
             }
-            if !availableLanguages.isEmpty {
-                Divider()
-            }
-            ForEach(availableLanguages, id: \.self) { language in
-                Button(Self.displayName(for: language)) {
-                    selectedLanguage = language
-                }
-            }
-        } label: {
-            androidFilterLabel(languageFilterTitle(for: selectedLanguage))
-        }
-        .accessibilityIdentifier("modulePickerLanguageFilter")
-    }
-
-    /**
-     Builds Android's inline free-text document search field.
-
-     - Returns: Plain underlined search input whose real text field exposes the stable UI-test
-       identifier through SwiftUI accessibility flattening.
-     - Side effects: Typing mutates `searchText` and the root screen aligns filters with Android's
-       search-focus behavior.
-     - Failure modes: none.
-     */
-    private func androidSearchFilterField() -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            TextField(String(localized: "search", defaultValue: "Search"), text: $searchText)
-                .textFieldStyle(.plain)
-                .foregroundStyle(DocumentChooserPalette.primaryText)
-                .tint(DocumentChooserPalette.primaryText)
-                .submitLabel(.search)
-                .accessibilityIdentifier("modulePickerSearchField")
-            Rectangle()
-                .fill(DocumentChooserPalette.secondaryText)
-                .frame(height: 1)
-        }
-    }
-
-    /**
-     Builds Android's document-type spinner and visible document count.
-
-     - Parameter visibleDocumentCount: Number of rows after current filters.
-     - Returns: Count text stacked above the document-type menu.
-     - Side effects: Selecting a type mutates `selectedFilter`.
-     - Failure modes: Unsupported filters are not generated because the order is static.
-     */
-    private func androidDocumentTypeFilterMenu(visibleDocumentCount: Int) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(String(localized: "documents_count \(visibleDocumentCount)"))
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(DocumentChooserPalette.secondaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                .multilineTextAlignment(.trailing)
-            Menu {
-                ForEach(Self.documentTypeFilterOrder, id: \.self) { filter in
-                    Button(Self.documentTypeFilterTitle(for: filter)) {
-                        selectedFilter = filter
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(Self.documentTypeFilterTitle(for: selectedFilter))
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .multilineTextAlignment(.trailing)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(DocumentChooserPalette.primaryText)
-            }
-        }
-        .accessibilityIdentifier("modulePickerCategoryFilter")
-    }
-
-    /**
-     Builds one underlined Android filter label.
-
-     - Parameter title: User-visible label text.
-     - Returns: Compact label with Android-style underline.
-     - Side effects: none.
-     - Failure modes: Accessibility text sizes allow two lines to avoid truncating long languages.
-     */
-    private func androidFilterLabel(_ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(DocumentChooserPalette.primaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-            Rectangle()
-                .fill(DocumentChooserPalette.secondaryText)
-                .frame(height: 1)
-        }
+        )
     }
 
     /**
@@ -747,7 +742,7 @@ struct BibleReaderModulePicker: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(DocumentChooserPalette.background)
+        .background(surfacePalette.backgroundColor)
     }
 
     /**
@@ -761,7 +756,7 @@ struct BibleReaderModulePicker: View {
     private func androidMessageRow(_ message: String) -> some View {
         Text(message)
             .font(.body)
-            .foregroundStyle(DocumentChooserPalette.secondaryText)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 16)
             .padding(.vertical, 24)
@@ -799,26 +794,30 @@ struct BibleReaderModulePicker: View {
     private func epubRow(_ epub: EpubInfo) -> some View {
         androidRowContainer(
             accessibilityIdentifier: "modulePickerRow::\(epub.initials)",
+            isSelected: contextualDocument == .epub(epub.identifier),
+            onLongPress: { beginContextualEpubSelection(epub) },
             leading: {
-                VStack(spacing: 5) {
-                    categoryIcon(for: .generalBook)
-                    Text(Self.displayName(for: epub.language))
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(width: 70)
+                AndroidDocumentListLeadingColumn(
+                    category: .generalBook,
+                    languageTitle: Self.displayName(for: epub.language),
+                    installSizeTitle: nil,
+                    statusIconAssetName: nil,
+                    statusIconColor: .clear,
+                    isRecommended: false,
+                    isWarned: false,
+                    encryptionState: .none,
+                    surfacePalette: surfacePalette
+                )
             },
             center: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(epub.initials)
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(surfacePalette.foregroundColor)
                         .lineLimit(1)
-                    Text(epub.author.isEmpty ? epub.title : "\(epub.title) - \(epub.author)")
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                    Text(epub.title)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(2)
                 }
             },
@@ -826,8 +825,7 @@ struct BibleReaderModulePicker: View {
                 Spacer().frame(width: 48)
             },
             selection: {
-                controller.switchEpub(identifier: epub.identifier)
-                dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
+                handleEpubRowTap(epub)
             }
         )
     }
@@ -842,32 +840,30 @@ struct BibleReaderModulePicker: View {
         let actions = Self.rowActions(for: module, installedModules: allSelectableModules)
         return androidRowContainer(
             accessibilityIdentifier: "modulePickerRow::\(module.name)",
+            isSelected: contextualDocument == .module(module.name),
+            onLongPress: { beginContextualModuleSelection(module) },
             leading: {
-                VStack(spacing: 5) {
-                    categoryIcon(for: module.category)
-                    if module.isEncrypted && !module.isUnlocked {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(DocumentChooserPalette.icon)
-                            .accessibilityLabel(String(localized: "locked", defaultValue: "Locked"))
-                    }
-                    Text(Self.displayName(for: module.language))
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(width: 70)
+                AndroidDocumentListLeadingColumn(
+                    category: module.category,
+                    languageTitle: Self.displayName(for: module.language),
+                    installSizeTitle: nil,
+                    statusIconAssetName: nil,
+                    statusIconColor: .clear,
+                    isRecommended: false,
+                    isWarned: false,
+                    encryptionState: Self.encryptionState(for: module),
+                    surfacePalette: surfacePalette
+                )
             },
             center: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(module.name)
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(surfacePalette.foregroundColor)
                         .lineLimit(1)
                     Text(module.description)
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(2)
                 }
             },
@@ -880,54 +876,9 @@ struct BibleReaderModulePicker: View {
                 .frame(width: 48, alignment: .trailing)
             },
             selection: {
-                select(module)
+                handleModuleRowTap(module)
             }
         )
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if actions.contains(.uninstall) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = confirmation(.uninstall, for: module)
-                } label: {
-                    Label(String(localized: "uninstall"), systemImage: "trash")
-                }
-            }
-        }
-        .contextMenu {
-            if actions.contains(.about) {
-                Button {
-                    selectedModuleDetails = moduleDetails(for: module)
-                } label: {
-                    Label(String(localized: "about"), systemImage: "info.circle")
-                }
-            }
-            if actions.contains(.uninstall) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = confirmation(.uninstall, for: module)
-                } label: {
-                    Label(String(localized: "uninstall"), systemImage: "trash")
-                }
-            }
-            if actions.contains(.deleteIndex) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = confirmation(.deleteIndex, for: module)
-                } label: {
-                    Label(
-                        String(localized: "delete_module_index", defaultValue: "Delete Index"),
-                        systemImage: "magnifyingglass"
-                    )
-                }
-            }
-            if actions.contains(.unlock) {
-                Button {
-                    beginUnlock(module)
-                } label: {
-                    Label(
-                        String(localized: "unlock", defaultValue: "Unlock"),
-                        systemImage: "lock.open"
-                    )
-                }
-            }
-        }
     }
 
     /**
@@ -940,25 +891,27 @@ struct BibleReaderModulePicker: View {
         androidRowContainer(
             accessibilityIdentifier: "modulePickerPseudoRow::\(document.rawValue)",
             leading: {
-                VStack(spacing: 5) {
-                    pseudoDocumentIcon(for: document)
-                    Text(Self.displayName(for: document.language))
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(width: 70)
+                AndroidDocumentListLeadingColumn(
+                    category: Self.moduleCategory(for: document),
+                    languageTitle: Self.displayName(for: document.language),
+                    installSizeTitle: nil,
+                    statusIconAssetName: nil,
+                    statusIconColor: .clear,
+                    isRecommended: false,
+                    isWarned: false,
+                    encryptionState: .none,
+                    surfacePalette: surfacePalette
+                )
             },
             center: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(document.androidInitials)
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.primaryText)
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(surfacePalette.foregroundColor)
                         .lineLimit(1)
                     Text(document.description)
-                        .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(DocumentChooserPalette.secondaryText)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(2)
                 }
             },
@@ -967,6 +920,10 @@ struct BibleReaderModulePicker: View {
                     .frame(width: 48)
             },
             selection: {
+                guard !hasContextualDocumentSelection else {
+                    clearContextualModuleSelection()
+                    return
+                }
                 select(document)
             }
         )
@@ -977,16 +934,20 @@ struct BibleReaderModulePicker: View {
 
      - Parameters:
        - accessibilityIdentifier: Stable identifier for the concrete row.
+       - isSelected: Whether Android's contextual action mode currently owns the row.
+       - onLongPress: Optional callback that enters contextual mode for a manageable row.
        - leading: Left icon/language column.
        - center: Main abbreviation and description column.
        - trailing: Right action/status column.
        - selection: Primary row action matching Android list-item selection.
      - Returns: A full-width button row with Android spacing and divider placement.
-     - Side effects: Executes `selection` when the row body is tapped.
-     - Failure modes: Row-level context and swipe actions are supplied by the caller.
+     - Side effects: Executes `selection` after a tap and `onLongPress` after the Android hold delay.
+     - Failure modes: Rows without a long-press callback remain ordinary selectable rows.
      */
     private func androidRowContainer<Leading: View, Center: View, Trailing: View>(
         accessibilityIdentifier: String,
+        isSelected: Bool = false,
+        onLongPress: (() -> Void)? = nil,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder center: () -> Center,
         @ViewBuilder trailing: () -> Trailing,
@@ -1003,12 +964,13 @@ struct BibleReaderModulePicker: View {
                             .frame(width: 48, height: 44)
                             .accessibilityHidden(true)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier(accessibilityIdentifier)
+                .accessibilityValue(isSelected ? "selected" : "")
 
                 trailing()
                     .padding(.top, 12)
@@ -1016,10 +978,14 @@ struct BibleReaderModulePicker: View {
             }
 
             Rectangle()
-                .fill(DocumentChooserPalette.divider)
+                .fill(surfacePalette.inactiveBorderColor)
                 .frame(height: 1)
                 .padding(.leading, 96)
         }
+        .androidDocumentContextSelection(
+            isSelected: isSelected,
+            onLongPress: onLongPress
+        )
     }
 
     /**
@@ -1033,11 +999,11 @@ struct BibleReaderModulePicker: View {
      */
     private func aboutButton(for module: ModuleInfo) -> some View {
         Button {
+            clearContextualModuleSelection()
             selectedModuleDetails = moduleDetails(for: module)
         } label: {
-            Image(systemName: "info.circle")
-                .font(.system(size: 28, weight: .regular))
-                .foregroundStyle(DocumentChooserPalette.icon)
+            AndBibleIconView(name: "DocumentInfo", size: 24)
+                .foregroundStyle(AndroidResourcePalette.grey600)
                 .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
@@ -1046,63 +1012,114 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Renders the Android-sourced document category icon for a chooser row.
+     Projects installed-module encryption into Android's shared document-row marker.
 
-     - Parameter category: Installed module category.
-     - Returns: Template icon matching the closest bundled Android document glyph.
-     - Side effects: Loads local image assets when rendered.
-     - Failure modes: Unknown categories use the generic document icon.
+     - Parameter module: Installed module rendered by Choose Document.
+     - Returns: No marker for ordinary modules, a red closed lock for locked encrypted modules, or a
+       green open lock for unlocked encrypted modules.
+     - Side effects: none.
+     - Failure modes: none; `ModuleInfo` exposes both required flags.
      */
-    @ViewBuilder
-    private func categoryIcon(for category: ModuleCategory) -> some View {
-        switch category {
-        case .bible:
-            AndBibleIconView(name: "ToolbarBible", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
+    private static func encryptionState(for module: ModuleInfo) -> AndroidDocumentEncryptionState {
+        guard module.isEncrypted else { return .none }
+        return module.isUnlocked ? .unlocked : .locked
+    }
+
+    /**
+     Maps one Android pseudo-document category onto the shared document-list category glyph.
+
+     - Parameter document: Pseudo-document from Android's `FakeBookFactory` projection.
+     - Returns: Matching SWORD module category, with unsupported pseudo categories using General Book.
+     - Side effects: none.
+     - Failure modes: none; the default branch is an explicit generic-book fallback.
+     */
+    private static func moduleCategory(for document: AndroidPseudoDocument) -> ModuleCategory {
+        switch document.category {
         case .commentary:
-            AndBibleIconView(name: "ToolbarCommentary", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
+            return .commentary
         case .dictionary:
-            AndBibleIconView(name: "SettingsIconDictionary", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
-        case .generalBook:
-            AndBibleIconView(name: "DrawerDocuments", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
+            return .dictionary
         case .map:
-            Image(systemName: "map")
-                .font(.system(size: 26, weight: .regular))
-                .foregroundStyle(DocumentChooserPalette.icon)
-        case .addon:
-            AndBibleIconView(name: "DrawerDownloads", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
+            return .map
+        case .generalBook:
+            return .generalBook
         default:
-            AndBibleIconView(name: "DrawerDocuments", size: 28)
-                .foregroundStyle(DocumentChooserPalette.icon)
+            return .generalBook
         }
     }
 
     /**
-     Renders the category icon for one Android pseudo-document.
+     Enters Android's single-choice contextual mode for an installed chooser row.
 
-     - Parameter document: Pseudo-document identity.
-     - Returns: Icon based on the same document category mapping Android rows use.
-     - Side effects: Loads local image assets when rendered.
-     - Failure modes: Unsupported pseudo categories use the generic document icon.
+     - Parameter module: Long-pressed installed module.
+     - Side effects: Closes the ordinary overflow popup and replaces the app bar with contextual
+       document actions.
+     - Failure modes: none; the module remains validated against `allSelectableModules` when read.
      */
-    @ViewBuilder
-    private func pseudoDocumentIcon(for document: AndroidPseudoDocument) -> some View {
-        switch document.category {
-        case .commentary:
-            categoryIcon(for: .commentary)
-        case .generalBook:
-            categoryIcon(for: .generalBook)
-        case .dictionary:
-            categoryIcon(for: .dictionary)
-        case .map:
-            categoryIcon(for: .map)
-        default:
-            categoryIcon(for: .generalBook)
+    private func beginContextualModuleSelection(_ module: ModuleInfo) {
+        showOverflowMenu = false
+        contextualDocument = .module(module.name)
+    }
+
+    /**
+     Enters Android's single-choice contextual mode for an imported EPUB document row.
+
+     - Parameter epub: Long-pressed installed EPUB general book.
+     - Side effects: Closes the ordinary overflow popup and selects the EPUB for shared document
+       About, Delete, and Delete Index actions.
+     - Failure modes: A concurrently removed EPUB makes `contextualEpub` resolve to nil and the
+       normal activity bar safely returns on the next render.
+     */
+    private func beginContextualEpubSelection(_ epub: EpubInfo) {
+        showOverflowMenu = false
+        contextualDocument = .epub(epub.identifier)
+    }
+
+    /**
+     Applies Android row-tap behavior in normal or contextual mode.
+
+     - Parameter module: Tapped installed module.
+     - Side effects: Selects the document normally when no contextual action mode exists; otherwise
+       changes the single selected contextual row or closes contextual mode when the same row is tapped.
+     - Failure modes: Ordinary document selection retains the existing unlock and key-validation paths.
+     */
+    private func handleModuleRowTap(_ module: ModuleInfo) {
+        guard hasContextualDocumentSelection else {
+            select(module)
+            return
         }
+        let selection = ContextualDocument.module(module.name)
+        contextualDocument = contextualDocument == selection ? nil : selection
+    }
+
+    /**
+     Applies Android row-tap behavior to an imported EPUB in normal or contextual mode.
+
+     - Parameter epub: Tapped installed EPUB row.
+     - Side effects: Activates and opens the EPUB TOC in normal mode; otherwise changes or clears
+       the single contextual selection without opening a document.
+     - Failure modes: `switchEpub(identifier:)` fails closed if the EPUB disappeared after render.
+     */
+    private func handleEpubRowTap(_ epub: EpubInfo) {
+        if hasContextualDocumentSelection {
+            let selection = ContextualDocument.epub(epub.identifier)
+            contextualDocument = contextualDocument == selection ? nil : selection
+            return
+        }
+        controller.switchEpub(identifier: epub.identifier)
+        dismissAndPresentAuxiliaryBrowser(onOpenGeneralBookBrowser)
+    }
+
+    /**
+     Exits Android contextual mode without closing Choose Document.
+
+     Side effects: Clears only the selected contextual module and ordinary overflow state.
+
+     Failure modes: none; repeated calls are idempotent.
+     */
+    private func clearContextualModuleSelection() {
+        contextualDocument = nil
+        showOverflowMenu = false
     }
 
     /**
@@ -1115,7 +1132,7 @@ struct BibleReaderModulePicker: View {
      */
     private func languageFilterTitle(for language: String) -> String {
         guard !language.isEmpty else {
-            return String(localized: "settings_language")
+            return String(localized: "chooce_language_hint", defaultValue: "Language")
         }
         return Self.displayName(for: language)
     }
@@ -1343,44 +1360,37 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Dismisses the picker and opens Downloads after SwiftUI has finished the sheet transition.
+     Replaces the chooser destination with Downloads on the existing reader stack.
 
-     Side effects:
-     - invokes `onDismiss`
-     - invokes `onOpenDownloads` on the main queue after a short delay
+     Side effects: invokes `onOpenDownloads`; the coordinator preserves the captured pane and owns
+     the destination replacement.
      */
     private func openDownloadsAfterDismiss() {
-        onDismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            onOpenDownloads()
-        }
+        onOpenDownloads()
     }
 
     /**
-     Dismisses the picker before opening a category-specific browser.
+     Replaces the picker with a category-specific browser on the same reader stack.
 
      - Parameter presentation: Browser presentation callback supplied by the reader coordinator.
      Side effects:
-     - invokes `onDismiss`
-     - schedules the browser presentation after the sheet transition delay
+     - invokes the coordinator-owned destination replacement
      */
     private func dismissAndPresentAuxiliaryBrowser(_ presentation: @escaping () -> Void) {
-        dismissAndPerform(presentation)
+        presentation()
     }
 
     /**
-     Dismisses the picker before performing a reader action.
+     Performs a reader document action and then closes the chooser destination.
 
-     - Parameter action: Work to run after the sheet transition delay.
+     - Parameter action: Synchronous controller action matching Android's activity result handling.
      Side effects:
+     - invokes `action`
      - invokes `onDismiss`
-     - schedules `action` on the main queue
      */
     private func dismissAndPerform(_ action: @escaping () -> Void) {
+        action()
         onDismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            action()
-        }
     }
 
     /**
@@ -1442,6 +1452,63 @@ struct BibleReaderModulePicker: View {
                 await MainActor.run {
                     rowActionErrorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    /**
+     Commits the EPUB deletion confirmed from Android's shared document action mode.
+
+     - Side effects: Removes the published EPUB, notifies the reader owner only after durable
+       deletion succeeds, and clears the confirmation request before storage work begins.
+     - Failure modes: Stops at the first storage error and leaves that failure visible in the
+       shared document-action dialog; successfully deleted EPUBs are never reported as present.
+     */
+    private func deletePendingEpubs() {
+        rowActionErrorMessage = epubDeletionState.commit(
+            delete: { try EpubReader.delete(identifier: $0) },
+            onDeleted: onDeleteEpub
+        )?.localizedDescription
+    }
+
+    /**
+     Deletes an imported EPUB's FTS index through immutable generation publication.
+
+     Android keeps the document installed and usable after Delete Index. The iOS adapter therefore
+     publishes an index-free generation off the main actor and adopts it only when this pane still
+     owns the same EPUB identity.
+
+     - Parameter epub: Stable installed EPUB selected by contextual action mode.
+     - Side effects: Publishes a replacement generation and re-renders the active EPUB when the
+       initiating pane still owns it.
+     - Failure modes: Publication errors surface in the shared action dialog. A stale pane or a
+       document switch does not overwrite the newer reader state.
+     */
+    private func deleteEpubSearchIndex(_ epub: EpubInfo) {
+        let identifier = epub.identifier
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<EpubReader, Error>.success(
+                        try EpubReader.deleteSearchIndex(identifier: identifier)
+                    )
+                } catch {
+                    return Result<EpubReader, Error>.failure(error)
+                }
+            }.value
+
+            switch outcome {
+            case .success(let replacementReader):
+                guard controller.activeEpubReader?.identifier == identifier else { return }
+                guard controller.adoptRebuiltEpubReader(replacementReader) else {
+                    rowActionErrorMessage = String(
+                        localized: "error_occurred",
+                        defaultValue: "An error has occurred"
+                    )
+                    return
+                }
+            case .failure(let error):
+                rowActionErrorMessage = error.localizedDescription
             }
         }
     }
@@ -1989,15 +2056,15 @@ struct BibleReaderModulePicker: View {
     private static func categoryFilterTitle(for category: DocumentCategory) -> String {
         switch category {
         case .bible:
-            return String(localized: "bibles")
+            return String(localized: "doc_type_bible", defaultValue: "Bible")
         case .commentary:
-            return String(localized: "commentaries")
+            return String(localized: "doc_type_commentary", defaultValue: "Commentary")
         case .dictionary:
-            return String(localized: "dictionaries")
+            return String(localized: "doc_type_dictionary", defaultValue: "Dictionary")
         case .generalBook:
-            return String(localized: "category_books")
+            return String(localized: "doc_type_book", defaultValue: "Book")
         case .map:
-            return String(localized: "map")
+            return String(localized: "doc_type_map", defaultValue: "Map")
         default:
             return String(localized: "doc_type_all", defaultValue: "All types")
         }

@@ -46,6 +46,7 @@ struct BookmarkCSVTransferDocument: FileDocument {
 
 /** Android `Dialogs.multiselect`-equivalent column selector shown before the system export handoff. */
 struct BookmarkCSVColumnSelectionView: View {
+    /// Current appearance used by the shared Android dialog window.
     @Environment(\.colorScheme) private var colorScheme
 
     /// Draft selection that commits only when Android's positive action is chosen.
@@ -70,78 +71,30 @@ struct BookmarkCSVColumnSelectionView: View {
 
     /** Builds Android's app-owned multi-select dialog without a generic SwiftUI sheet. */
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onCancel)
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text(String(
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidBookmarkCSVColumnDialog",
+            onOutsideTap: onCancel
+        ) {
+            AndroidMultiselectDialogContent(
+                title: String(
                     localized: "csv_column_selection_title",
                     defaultValue: "Select CSV Columns"
-                ))
-                .font(.headline)
-                .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(AndroidBookmarkCSVColumn.allCases, id: \.self) { column in
-                            Button {
-                                toggle(column)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: selectedColumns.contains(column)
-                                        ? "checkmark.square.fill"
-                                        : "square")
-                                        .foregroundStyle(selectedColumns.contains(column)
-                                            ? AndroidDialogSurfacePalette.accent(for: colorScheme)
-                                            : AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
-                                    Text(column.displayName)
-                                        .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
-                                    Spacer()
-                                }
-                                .padding(.vertical, 10)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("bookmarkCSVColumnToggle::\(column.rawValue)")
-                            .accessibilityValue(selectedColumns.contains(column) ? "selected" : "unselected")
-                        }
-                    }
-                }
-                .frame(maxHeight: 420)
-
-                HStack {
-                    Spacer()
-                    Button(String(localized: "cancel"), action: onCancel)
-                        .accessibilityIdentifier("bookmarkCSVColumnCancelButton")
-                    Button(
-                        String(
-                            format: String(localized: "export_something", defaultValue: "Export %@"),
-                            "CSV"
-                        )
-                    ) {
-                        onExport(selectedColumns)
-                    }
-                    .disabled(selectedColumns.isEmpty)
-                    .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
-                    .accessibilityIdentifier("bookmarkCSVColumnExportButton")
-                }
-            }
-            .padding(24)
-            .frame(maxWidth: 520)
-            .background(AndroidDialogSurfacePalette.background(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
-        }
-        .accessibilityIdentifier("androidBookmarkCSVColumnDialog")
-    }
-
-    /** Toggles one draft column without persisting or starting the export handoff. */
-    private func toggle(_ column: AndroidBookmarkCSVColumn) {
-        if selectedColumns.contains(column) {
-            selectedColumns.remove(column)
-        } else {
-            selectedColumns.insert(column)
+                ),
+                rows: AndroidBookmarkCSVColumn.allCases.map { column in
+                    AndroidMultiselectDialogRow(
+                        id: column,
+                        title: column.displayName,
+                        accessibilityIdentifier: "bookmarkCSVColumnToggle::\(column.rawValue)"
+                    )
+                },
+                selectedIDs: $selectedColumns,
+                isBusy: false,
+                accessibilityIdentifier: "androidBookmarkCSVColumnDialogContent",
+                accessibilityPrefix: "bookmarkCSVColumn",
+                onCancel: onCancel,
+                onConfirm: { onExport(Set($0)) }
+            )
         }
     }
 }

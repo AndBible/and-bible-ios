@@ -278,7 +278,9 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "ai_hidden_status": "hidden",
     "app_name": "app_name_andbible",
     "application_preferences": "settings",
+    "backup_backup_message_ios": "backup_backup_message",
     "bookmark": "add_bookmark1",
+    "buy_development2": "buy_development2",
     "calculator_pin": "prefs_calculator_pin",
     "calculator_pin_description": "prefs_calculator_pin_desc",
     "choose_book": "choosePassageBookName",
@@ -300,6 +302,7 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "footnotes": "prefs_show_footnotes_title",
     "fullscreen": "toggle_fullscreen",
     "help_bookmarks": "bookmarks",
+    "help_full_documentation_link": "help_full_documentation_link",
     "help_navigation": "help_nav_title",
     "help_search": "help_search_title",
     "help_workspaces": "help_workspaces_title",
@@ -309,6 +312,8 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "install_failed_reason": "install_failed_reason",
     "install_zip_successfull": "install_zip_successfull",
     "label_edit_name": "label_name_prompt",
+    "labels_search_hint": "labels_search_hint",
+    "paragraph_break": "add_paragraph_break",
     "links": "strongs_links",
     "main_menu": "menu",
     "map": "doc_type_map",
@@ -376,10 +381,25 @@ ANDROID_SHARED_KEY_MAPPINGS = {
 """Explicit iOS-key to Android-key localization mappings.
 
 Entries cover iOS keys whose English text matches Android under a different
-resource name. They are intentionally one-to-one so the generated snapshot can
-show the exact Android source for every imported value. The table performs no
-file I/O by itself; build/sync code ignores entries whose keys are absent from a
-particular fixture or checkout.
+resource name or whose translated copy is Android-owned but requires an explicit
+iOS English platform boundary. They are intentionally one-to-one so the
+generated snapshot can show the exact Android source for every imported value.
+The table performs no file I/O by itself; build/sync code ignores entries whose
+keys are absent from a particular fixture or checkout.
+"""
+
+
+IOS_PLATFORM_ENGLISH_OVERRIDES = {
+    "backup_backup_message_ios": (
+        "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
+    ),
+}
+"""English platform-boundary copy layered on Android translation provenance.
+
+Each key must also appear in ``ANDROID_SHARED_KEY_MAPPINGS``. Non-English values
+continue to come from that Android source resource, so every shipped locale stays
+translated and tree-aligned; only English terminology that would be false or
+misleading on iOS is replaced explicitly.
 """
 
 
@@ -1347,15 +1367,19 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         )
 
     safe_keys = sorted(source_key_by_key)
+    expected_english_by_key = {
+        key: IOS_PLATFORM_ENGLISH_OVERRIDES.get(
+            key,
+            android_base[source_key_by_key[key]],
+        )
+        for key in safe_keys
+    }
     english_mismatch_keys = sorted(
         key
         for key in safe_keys
-        if ios_english.get(key) != android_base[source_key_by_key[key]]
+        if ios_english.get(key) != expected_english_by_key[key]
     )
-    english_by_key = {
-        key: android_base[source_key_by_key[key]]
-        for key in safe_keys
-    }
+    english_by_key = expected_english_by_key
 
     non_english_by_key: dict[str, list[str]] = {key: [] for key in safe_keys}
     translations_by_locale: dict[str, dict[str, str]] = {}

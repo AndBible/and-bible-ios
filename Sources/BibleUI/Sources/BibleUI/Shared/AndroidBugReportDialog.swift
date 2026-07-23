@@ -9,41 +9,41 @@ import SwiftUI
  owned.
  */
 struct AndroidBugReportDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     let onDismiss: () -> Void
     let onSendReport: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text(String(
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidBugReportDialog",
+            onOutsideTap: onDismiss
+        ) {
+            AndroidDialogScaffold(
+                title: String(
                     localized: "bug_report_email_title",
                     defaultValue: "Send bug report via email"
-                ))
-                    .font(.headline)
+                )
+            ) {
                 Text(String(
                     localized: "bug_report_email_text",
                     defaultValue: "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
                 ))
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button(String(localized: "cancel", defaultValue: "Cancel"), action: onDismiss)
-                    Spacer()
-                    Button(String(localized: "send_bug_report_title", defaultValue: "Feedback / bug report"), action: onSendReport)
-                        .buttonStyle(.borderedProminent)
-                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
+            } actions: {
+                AndroidDialogTextAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onDismiss
+                )
+                AndroidDialogTextAction(
+                    title: String(localized: "send_bug_report_title", defaultValue: "Feedback / bug report"),
+                    action: onSendReport
+                )
             }
-            .padding()
-            .frame(maxWidth: 480)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
         }
-        .accessibilityIdentifier("androidBugReportDialog")
     }
 }
 
@@ -53,58 +53,50 @@ struct AndroidBugReportPreparationDialog: View {
     let isExportRetry: Bool
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36).ignoresSafeArea()
-            VStack(spacing: 16) {
-                ProgressView()
-                Text(String(
-                    localized: "send_bug_report_title",
-                    defaultValue: "Feedback / bug report"
-                ))
-                    .font(.headline)
-                Text(isExportRetry
-                    ? String(localized: "bug_report_export_preparing", defaultValue: "Preparing your report for export. Nothing has been sent.")
-                    : String(localized: "bug_report_collecting_evidence", defaultValue: "Collecting available diagnostic evidence. Nothing has been sent."))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding()
-            .frame(maxWidth: 360)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .padding(24)
-        }
-        .accessibilityIdentifier("androidBugReportPreparationDialog")
+        AndroidIndeterminateProgressDialog(
+            message: isExportRetry
+                ? String(localized: "bug_report_export_preparing", defaultValue: "Preparing your report for export. Nothing has been sent.")
+                : String(localized: "bug_report_collecting_evidence", defaultValue: "Collecting available diagnostic evidence. Nothing has been sent."),
+            accessibilityIdentifier: "androidBugReportPreparationDialog"
+        )
     }
 }
 
 /** Explains that a prepared report was not sent because no configured mail account is available. */
 struct AndroidBugReportUnsentDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     let onDismiss: () -> Void
     let onExport: () -> Void
     /// Explains a failed local ZIP attempt without implying any report was sent.
     let exportFailed: Bool
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 16) {
-                Text(String(localized: "bug_report_not_sent", defaultValue: "Bug report not sent")).font(.headline)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidBugReportUnsentDialog",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            AndroidDialogScaffold(
+                title: String(localized: "bug_report_not_sent", defaultValue: "Bug report not sent")
+            ) {
                 Text(exportFailed
                     ? String(localized: "bug_report_export_failed", defaultValue: "The report could not be exported. No bug report has been sent.")
                     : String(localized: "bug_report_mail_unavailable", defaultValue: "Mail is not configured on this device. No bug report has been sent."))
-                    .foregroundStyle(.secondary)
-                HStack {
-                    Button(String(localized: "cancel", defaultValue: "Cancel"), action: onDismiss)
-                    Spacer()
-                    Button(String(localized: "bug_report_export", defaultValue: "Export report"), action: onExport)
-                        .buttonStyle(.borderedProminent)
-                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
+            } actions: {
+                AndroidDialogTextAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onDismiss
+                )
+                AndroidDialogTextAction(
+                    title: String(localized: "bug_report_export", defaultValue: "Export report"),
+                    action: onExport
+                )
             }
-            .padding()
-            .frame(maxWidth: 480)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .padding(24)
         }
-        .accessibilityIdentifier("androidBugReportUnsentDialog")
     }
 }

@@ -300,104 +300,55 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves a button from either a system alert or an app-owned Android decision dialog.
-
-     - Parameters:
-       - title: Visible button title expected inside the currently presented decision surface.
-       - app: Running application under test.
-       - timeout: Maximum number of seconds to wait for a matching surface and button.
-     - Returns: The owning decision surface and matching button, or `nil` after the bounded wait.
-     - Side effects: Polls the accessibility hierarchy without activating controls.
-     - Failure modes: Returns `nil` when no supported decision surface exposes the requested button.
-     */
-    func resolveDecisionDialogButton(
-        _ title: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> (surface: XCUIElement, button: XCUIElement)? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            let systemAlert = app.alerts.firstMatch
-            if systemAlert.exists {
-                let button = systemAlert.buttons[title].firstMatch
-                if button.exists {
-                    return (systemAlert, button)
-                }
-            }
-
-            let androidSurfaceIdentifiers = [
-                "androidMyDocumentDecisionDialog",
-                "androidModulePickerDecisionDialog",
-                "androidReadingProgressDecisionDialog",
-            ]
-            let androidSurfaces = androidSurfaceIdentifiers.compactMap { identifier in
-                resolvedElement(identifier, in: app)
-            }
-            for surface in androidSurfaces where surface.exists {
-                let nestedButton = surface.buttons[title].firstMatch
-                if nestedButton.exists {
-                    return (surface, nestedButton)
-                }
-
-                // SwiftUI can flatten overlay controls beside their identified container in the
-                // accessibility tree, so resolve the visible action from the application root.
-                let flattenedButton = app.buttons[title].firstMatch
-                if flattenedButton.exists, flattenedButton.isHittable {
-                    return (surface, flattenedButton)
-                }
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-        return nil
-    }
-
-    /**
-     Taps one system-alert or Android decision-dialog button and waits for its surface to disappear.
+     Taps one semantic action in an app-owned Android dialog and waits for the action to close.
+     *
+     * Native `XCUIElement.alerts` queries are deliberately excluded: application decisions use
+     * shared Android dialog windows, while only operating-system handoffs may surface native iOS
+     * alerts. Stable semantic IDs keep the test valid across translated button labels.
      *
      * - Parameters:
-     *   - title: Visible button title expected inside the currently presented alert.
+     *   - actionIdentifier: Full shared-dialog action identifier, including its semantic action ID.
+     *   - dialogIdentifier: Stable identifier of the owning app dialog when SwiftUI exposes its
+     *     noninteractive container separately from the parent activity.
+     *   - expectedTitle: Optional English-locale label assertion that verifies visible copy without
+     *     using it as the control locator.
      *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the button and dismissal.
+     *   - timeout: Maximum number of seconds to wait for the action and dismissal.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - resolves the live decision button, taps it, and blocks until its surface no longer exists
+     *   - taps the real app-owned dialog action and blocks until that action disappears
+     *   - also verifies container dismissal when the dialog container has its own accessible node
      * - Failure modes:
-     *   - records an XCTest failure if the decision button never appears or the surface does not
-     *     dismiss after the tap
+     *   - records an XCTest failure when the action is absent, visible copy is wrong, the action
+     *     remains after activation, or an exposed dialog container remains after the action
      */
-    func tapAlertButton(
-        _ title: String,
+    func tapAppOwnedDialogAction(
+        _ actionIdentifier: String,
+        dialogIdentifier: String,
+        expectedTitle: String? = nil,
         in app: XCUIApplication,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        guard let decision = resolveDecisionDialogButton(title, in: app, timeout: timeout) else {
-            XCTFail(
-                "Expected a system alert or Android decision dialog before tapping '\(title)'.",
+        let dialog = resolvedElement(dialogIdentifier, in: app)
+        let action = requireElement(actionIdentifier, in: app, timeout: timeout, file: file, line: line)
+        if let expectedTitle {
+            XCTAssertEqual(
+                action.label,
+                expectedTitle,
+                "Expected app-owned dialog action '\(actionIdentifier)' to render translated copy '\(expectedTitle)'.",
                 file: file,
                 line: line
             )
-            return
         }
-        XCTAssertTrue(
-            decision.button.exists,
-            "Expected decision button '\(title)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        tapElementReliably(decision.button, timeout: timeout, file: file, line: line)
 
-        let dismissedPredicate = NSPredicate(format: "exists == false")
-        expectation(for: dismissedPredicate, evaluatedWith: decision.surface)
-        waitForExpectations(timeout: timeout)
-        XCTAssertFalse(
-            decision.surface.exists,
-            "Expected the decision surface to dismiss after tapping '\(title)'.",
-            file: file,
-            line: line
-        )
+        tapElementReliably(action, timeout: timeout, file: file, line: line)
+        waitForElementToDisappear(action, timeout: timeout, file: file, line: line)
+        if let dialog {
+            waitForElementToDisappear(dialog, timeout: timeout, file: file, line: line)
+        }
     }
 
     /**
@@ -926,58 +877,4 @@ extension AndBibleUITests {
         )
     }
 
-    /**
-     Dismisses the bookmark list surface if the StudyPad handoff leaves it visible over the reader.
-
-     - Parameters:
-       - app: Running application that may still show the bookmark list.
-       - timeout: Maximum number of seconds to spend on the close attempt.
-     - Side effects:
-       - taps the sheet Done button or destination back button when either is visible
-     - Failure modes:
-       - returns without failing when the bookmark list is not visible
-     */
-    func dismissBookmarkListIfVisible(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        guard bookmarkListSurfaceIsVisible(in: app) else {
-            return
-        }
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        if tapElementIfPossible(doneButton, timeout: min(timeout, 2)) {
-            _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
-            return
-        }
-
-        let backButton = app.navigationBars.buttons.element(boundBy: 0)
-        _ = tapElementIfPossible(backButton, timeout: min(timeout, 2))
-        _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
-    }
-
-    /**
-     Waits for the StudyPad screen title to appear.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the StudyPad title.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - polls the live accessibility hierarchy until the StudyPad title appears
-     * - Failure modes:
-     *   - records an XCTest failure if the native StudyPad title never appears before timeout
-     */
-    func waitForStudyPadPresentation(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 20,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        XCTAssertTrue(
-            requireElement("readerStudyPadTitle", in: app, timeout: timeout, file: file, line: line).exists,
-            file: file,
-            line: line
-        )
-    }
 }

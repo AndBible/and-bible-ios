@@ -330,13 +330,13 @@ final class BibleReaderModulePickerTests: XCTestCase {
     }
 
     /**
-     Guards Android `ChooseDocument` routes against regressing to an iOS presentation host.
+     Guards Android `ChooseDocument` routes against regressing to a dialog-sized presentation host.
 
      Android opens both the all-types chooser and category-scoped chooser as an app-owned
      full-screen activity. The iOS coordinator state is private, so this source-level contract
-     checks the presentation boundary directly: document chooser routes must be filtered into a
-     reader-owned overlay, the chooser view itself must not carry medium/large sheet detents, and
-     neither reader route may return to a native sheet or full-screen cover.
+     checks the presentation boundary directly: both chooser routes must use the same reader-stack
+     destination host as Downloads, and neither route may return to an overlay, native sheet, or
+     full-screen cover.
      */
     func testBibleReaderDocumentChooserRoutesUseAppOwnedOverlayInsteadOfNativePresentation() throws {
         let readerSource = try BibleUITestSourceLocator.source(
@@ -345,13 +345,29 @@ final class BibleReaderModulePickerTests: XCTestCase {
         let pickerSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
+        let chooserDestinationSource = try BibleUITestSourceLocator.extractFunction(
+            named: "documentChooserDestinationContent",
+            from: readerSource
+        )
 
-        XCTAssertTrue(readerSource.contains("ReaderAppOwnedOverlay"))
-        XCTAssertTrue(readerSource.contains("if let modal = activeReaderModal"))
+        XCTAssertTrue(readerSource.contains("case modulePicker"))
+        XCTAssertTrue(readerSource.contains("case chooseDocument"))
+        XCTAssertTrue(readerSource.contains("case .modulePicker:"))
+        XCTAssertTrue(readerSource.contains("case .chooseDocument:"))
+        XCTAssertTrue(readerSource.contains("documentChooserDestinationContent("))
+        XCTAssertTrue(readerSource.contains("presentReaderDestination(.modulePicker"))
+        XCTAssertTrue(readerSource.contains("presentReaderDestination(.chooseDocument"))
+        XCTAssertFalse(readerSource.contains("if let modal = activeReaderModal"))
+        XCTAssertFalse(readerSource.contains("readerModalContent("))
         XCTAssertFalse(readerSource.contains("readerSheetModalBinding"))
         XCTAssertFalse(readerSource.contains("readerDocumentChooserModalBinding"))
         XCTAssertFalse(readerSource.contains(".fullScreenCover(item: $refChooserPresentation)"))
         XCTAssertFalse(pickerSource.contains(".presentationDetents([.medium, .large])"))
+        XCTAssertTrue(chooserDestinationSource.contains("BibleReaderModulePicker("))
+        XCTAssertTrue(chooserDestinationSource.contains("surfacePalette: readerThemeSurfacePalette"))
+        XCTAssertFalse(chooserDestinationSource.contains("ReaderAppOwnedOverlay"))
+        XCTAssertFalse(chooserDestinationSource.contains(".sheet("))
+        XCTAssertFalse(chooserDestinationSource.contains(".fullScreenCover("))
     }
 
     /**
@@ -366,20 +382,149 @@ final class BibleReaderModulePickerTests: XCTestCase {
         let pickerSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
+        let sharedSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDocumentSelectionControls.swift"
+        )
 
         XCTAssertTrue(pickerSource.contains("private var androidDocumentChooserScreen"))
+        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionActivityScreen("))
         XCTAssertTrue(pickerSource.contains("private var androidTopAppBar"))
         XCTAssertTrue(pickerSource.contains("private func androidFilterBar(visibleDocumentCount: Int)"))
         XCTAssertTrue(pickerSource.contains("private func androidDocumentRow(_ row: DocumentChooserRow)"))
-        XCTAssertTrue(pickerSource.contains("private func androidLanguageFilterMenu()"))
-        XCTAssertTrue(pickerSource.contains("private func androidSearchFilterField()"))
-        XCTAssertTrue(pickerSource.contains("private func androidDocumentTypeFilterMenu(visibleDocumentCount: Int)"))
+        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionFilterBar("))
+        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionFilterBar.localizedResultCount"))
+        XCTAssertFalse(pickerSource.contains("private func androidLanguageFilterMenu()"))
         XCTAssertTrue(pickerSource.contains("private var androidChooserOverflowMenu"))
         XCTAssertTrue(pickerSource.contains("String(localized: \"document\", defaultValue: \"Document\")"))
-        XCTAssertTrue(pickerSource.contains(".toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertTrue(sharedSource.contains("AndroidActivitySurface(palette: surfacePalette)"))
+        XCTAssertFalse(sharedSource.contains(".toolbar(.hidden, for: .navigationBar)"))
         XCTAssertFalse(pickerSource.contains("NavigationStack {\n            List {"))
         XCTAssertFalse(pickerSource.contains(".searchable(text: $searchText"))
         XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
+    }
+
+    /**
+     Locks the reported chooser regression to Android's full activity structure shared with Downloads.
+
+     The regression presented Choose Document as a large-type, history-like constrained modal even
+     though Android's `ChooseDocument` and `DownloadActivity` inherit the same
+     `DocumentSelectionBase` screen. This guard requires both iOS routes to reuse the same app-owned
+     activity host, top bar, filter strip, icon column, contextual action bar, palette ownership, and
+     16/14sp row typography. Native menus, context menus, swipe actions, sheets, and local color
+     facsimiles are forbidden inside either document-selection activity.
+     */
+    func testDocumentChooserAndDownloadsShareFullAndroidDocumentSelectionStructure() throws {
+        let pickerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+        let downloadsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
+        )
+        let sharedSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDocumentSelectionControls.swift"
+        )
+        let rowPresentationSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift"
+        )
+        let activityMarkerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidActivityAccessibilityMarker.swift"
+        )
+
+        for source in [pickerSource, downloadsSource] {
+            XCTAssertTrue(source.contains("AndroidDocumentSelectionActivityScreen("))
+            XCTAssertTrue(source.contains("AndroidActivityTopAppBar("))
+            XCTAssertTrue(source.contains("AndroidDocumentSelectionFilterBar("))
+            XCTAssertTrue(source.contains("AndroidDocumentListLeadingColumn("))
+            XCTAssertTrue(source.contains("AndroidDocumentContextActionBar("))
+            XCTAssertTrue(source.contains("AndroidActivityAccessibilityMarker("))
+            XCTAssertTrue(source.contains("ReaderThemeSurfacePalette"))
+            XCTAssertTrue(source.contains(".font(.system(size: 16, weight: .regular))"))
+            XCTAssertTrue(source.contains(".font(.system(size: 14, weight: .regular))"))
+
+            for forbidden in [
+                "Menu {",
+                ".contextMenu",
+                ".swipeActions",
+                ".sheet(",
+                ".presentationDetents",
+                "Image(systemName:",
+                "DocumentChooserPalette",
+            ] {
+                XCTAssertFalse(source.contains(forbidden), "Unexpected native/invented document UI: \(forbidden)")
+            }
+        }
+
+        XCTAssertTrue(sharedSource.contains("struct AndroidDocumentSelectionActivityScreen"))
+        XCTAssertTrue(sharedSource.contains("AndroidActivitySurface(palette: surfacePalette)"))
+        XCTAssertTrue(sharedSource.contains("VStack(spacing: 0)"))
+        XCTAssertTrue(sharedSource.contains("maxHeight: .infinity"))
+        XCTAssertFalse(sharedSource.contains("surfacePalette.backgroundColor.ignoresSafeArea()"))
+        XCTAssertFalse(sharedSource.contains(".navigationBarBackButtonHidden(true)"))
+        XCTAssertFalse(sharedSource.contains(".toolbar(.hidden, for: .navigationBar)"))
+        XCTAssertTrue(sharedSource.contains(".frame(height: 55)"))
+        XCTAssertTrue(sharedSource.contains("localized: \"document_filter_results\""))
+        XCTAssertTrue(sharedSource.contains("defaultValue: \"%d documents\""))
+        XCTAssertTrue(sharedSource.contains("AndroidResourcePalette.grey600"))
+        XCTAssertTrue(sharedSource.contains("AndroidResourcePalette.yellow600"))
+        XCTAssertTrue(activityMarkerSource.contains("struct AndroidActivityAccessibilityMarker"))
+        XCTAssertTrue(activityMarkerSource.contains(".accessibilityElement(children: .ignore)"))
+        XCTAssertTrue(activityMarkerSource.contains(".allowsHitTesting(false)"))
+        XCTAssertTrue(downloadsSource.contains("ModuleBrowserStatusSlotPresentation(status: status)"))
+        XCTAssertTrue(rowPresentationSource.contains("DocumentInstalledStatus"))
+        XCTAssertTrue(rowPresentationSource.contains("DocumentDownloadingStatus"))
+        XCTAssertTrue(rowPresentationSource.contains("DocumentUpdateStatus"))
+        XCTAssertTrue(rowPresentationSource.contains("DocumentErrorStatus"))
+        XCTAssertTrue(rowPresentationSource.contains("AndroidResourcePalette.documentUpgradeAmber"))
+
+        let backup = try XCTUnwrap(pickerSource.range(of: "modulePickerBackupDocumentsButton"))
+        let downloads = try XCTUnwrap(pickerSource.range(of: "modulePickerDownloadsButton"))
+        let install = try XCTUnwrap(pickerSource.range(of: "modulePickerInstallZipButton"))
+        XCTAssertLessThan(backup.lowerBound, downloads.lowerBound)
+        XCTAssertLessThan(downloads.lowerBound, install.lowerBound)
+    }
+
+    /**
+     Guards imported EPUB management against returning to a parallel native iOS library.
+
+     - Setup: Reads the Choose Document, reader-route, and immutable EPUB adapter sources.
+     - Expected result: EPUBs use the same long-press context bar and About/Delete/Delete Index
+       ordering as Android General Book rows; deletion is durable and Delete Index publishes and
+       adopts an index-free generation without removing the document.
+     - Failure meaning: EPUB management has drifted into an iOS-only route, invented row actions,
+       or a mutable in-place index operation that can invalidate an active reader.
+     - Side effects: None; this is a structural ownership and lifecycle contract.
+     */
+    func testImportedEpubRowsReuseAndroidDocumentContextManagement() throws {
+        let pickerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+        let readerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+        let epubReaderSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleCore/Sources/BibleCore/Formats/EpubReader.swift"
+        )
+        let generationSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleCore/Sources/BibleCore/Formats/EpubReaderGeneration.swift"
+        )
+
+        XCTAssertFalse(readerSource.contains("case epubLibrary"))
+        XCTAssertFalse(readerSource.contains("EpubLibraryView("))
+        XCTAssertTrue(readerSource.contains("onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes"))
+        XCTAssertTrue(pickerSource.contains("case .epub(let epub):"))
+        XCTAssertTrue(pickerSource.contains("onLongPress: { beginContextualEpubSelection(epub) }"))
+        XCTAssertTrue(pickerSource.contains("private var contextualEpubActions"))
+        XCTAssertTrue(pickerSource.contains("[.about, .uninstall, .deleteIndex]"))
+        XCTAssertTrue(pickerSource.contains("ModuleBrowserModuleDetails(epub: contextualEpub)"))
+        XCTAssertTrue(pickerSource.contains("EpubLibraryDeletionState"))
+        XCTAssertTrue(pickerSource.contains("EpubReader.deleteSearchIndex(identifier: identifier)"))
+        XCTAssertTrue(pickerSource.contains("controller.adoptRebuiltEpubReader(replacementReader)"))
+        XCTAssertTrue(pickerSource.contains("Text(epub.initials)"))
+        XCTAssertTrue(pickerSource.contains("Text(epub.title)"))
+        XCTAssertFalse(pickerSource.contains("Text(epub.author)"))
+        XCTAssertTrue(epubReaderSource.contains("public static func deleteSearchIndex"))
+        XCTAssertTrue(generationSource.contains("includesSearchIndex: false"))
+        XCTAssertTrue(generationSource.contains("try clearSearchIndex(at: stagingIndex)"))
     }
 
     /**

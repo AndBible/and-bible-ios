@@ -499,13 +499,10 @@ public final class RepositorySourceManager: @unchecked Sendable {
         packageDirectory: String? = nil
     ) async throws -> RepositorySourceRegistration {
         let resolvedRegistration = try await resolveCustomSource(from: rawURL)
-        let registration = try Self.registration(
-            byApplyingPackageDirectory: packageDirectory,
-            to: resolvedRegistration
+        return try persistResolvedCustomSource(
+            resolvedRegistration,
+            packageDirectory: packageDirectory
         )
-        try writeCustomRegistration(registration, replacing: nil)
-        NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
-        return registration
     }
 
     /**
@@ -519,6 +516,7 @@ public final class RepositorySourceManager: @unchecked Sendable {
      - Returns: Resolved replacement registration that was persisted.
 
      Side effects:
+     - reads current repository configuration before issuing any replacement request
      - performs HTTPS requests for validation
      - rewrites `InstallMgr.conf` and/or the custom metadata sidecar
      - posts `sourcesDidChangeNotification` after a successful write
@@ -532,15 +530,42 @@ public final class RepositorySourceManager: @unchecked Sendable {
         with rawURL: String,
         packageDirectory: String? = nil
     ) async throws -> RepositorySourceRegistration {
-        guard !InstallManager.isDefaultSourceName(originalName) else {
-            throw RepositorySourceManagementError.protectedDefaultSource(originalName)
-        }
-
-        guard loadSources().contains(where: { $0.name == originalName && !isDefaultSource($0) }) else {
-            throw RepositorySourceManagementError.sourceNotFound(originalName)
-        }
-
+        try validateCustomSourceReplacementTarget(named: originalName)
         let resolvedRegistration = try await resolveCustomSource(from: rawURL)
+        return try persistResolvedCustomSource(
+            resolvedRegistration,
+            replacing: originalName,
+            packageDirectory: packageDirectory
+        )
+    }
+
+    /**
+     Persists a registration already resolved by Android's live custom-repository editor.
+
+     Separating resolution from persistence lets the activity validate while the user types,
+     display Android's valid/check/progress state, and commit the exact result when Save is tapped
+     without issuing the same manifest/catalog requests twice.
+
+     - Parameters:
+       - resolvedRegistration: Registration returned by `resolveCustomSource(from:)`.
+       - originalName: Existing custom source to replace, or `nil` when adding.
+       - packageDirectory: Optional preserved SWORD package-directory override.
+     - Returns: The normalized registration written to local source configuration.
+     - Side effects: Rewrites `InstallMgr.conf` and/or custom metadata and posts
+       `sourcesDidChangeNotification` after success.
+     - Throws: `RepositorySourceManagementError` for protected or stale edit targets, invalid
+       package overrides, duplicate names, or persistence failures.
+     */
+    @discardableResult
+    public func persistResolvedCustomSource(
+        _ resolvedRegistration: RepositorySourceRegistration,
+        replacing originalName: String? = nil,
+        packageDirectory: String? = nil
+    ) throws -> RepositorySourceRegistration {
+        if let originalName {
+            try validateCustomSourceReplacementTarget(named: originalName)
+        }
+
         let registration = try Self.registration(
             byApplyingPackageDirectory: packageDirectory,
             to: resolvedRegistration
@@ -548,6 +573,28 @@ public final class RepositorySourceManager: @unchecked Sendable {
         try writeCustomRegistration(registration, replacing: originalName)
         NotificationCenter.default.post(name: Self.sourcesDidChangeNotification, object: nil)
         return registration
+    }
+
+    /**
+     Validates one custom-source edit target before network resolution and again before persistence.
+
+     The first check keeps stale editor actions deterministic and avoids unnecessary external work.
+     The second check closes the race where another owner deletes or resets the source while the
+     replacement URL is being resolved.
+
+     - Parameter originalName: Existing repository identity selected by the caller.
+     - Side effects: Reads the current merged repository catalog.
+     - Throws: `protectedDefaultSource` for built-ins or `sourceNotFound` for stale custom targets.
+     */
+    private func validateCustomSourceReplacementTarget(named originalName: String) throws {
+        guard !InstallManager.isDefaultSourceName(originalName) else {
+            throw RepositorySourceManagementError.protectedDefaultSource(originalName)
+        }
+        guard loadSources().contains(where: { source in
+            source.name == originalName && !isDefaultSource(source)
+        }) else {
+            throw RepositorySourceManagementError.sourceNotFound(originalName)
+        }
     }
 
     /**

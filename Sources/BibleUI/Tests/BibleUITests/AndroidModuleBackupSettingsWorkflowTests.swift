@@ -9,6 +9,69 @@ import BibleCore
  */
 final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
     /**
+     Verifies Android's unchecked opening state and non-dismissing neutral toggle contract.
+
+     The first neutral action selects every visible exact identity; invoking it again clears every
+     row. The selected result must retain visible catalog order rather than Set iteration order.
+
+     Side effects: none; exercises pure production selection helpers.
+
+     Failure modes: A failure means the iOS dialog preselects modules, loses Android identity
+     semantics, or implements Select all/none differently from `Dialogs.multiselect`.
+     */
+    func testExportPickerStartsUncheckedAndNeutralActionTogglesAllThenNone() {
+        let rows = [
+            installedContent("KJV", family: .swordConfiguration),
+            installedContent("WEB", family: .myBible),
+        ]
+
+        let initial = AndroidModuleBackupExportSheet.initialSelectedModuleIdentities
+        XCTAssertTrue(initial.isEmpty)
+        let dialogRows = AndroidModuleBackupExportSheet.multiselectRows(for: rows)
+
+        let selectedAll = AndroidMultiselectDialogContent<SQLiteDocumentIdentity>.toggledAllSelection(
+            in: dialogRows,
+            selectedIDs: initial
+        )
+        XCTAssertEqual(
+            AndroidModuleBackupExportSheet.selectedModuleNames(
+                inDisplayOrder: rows,
+                selectedIdentities: selectedAll
+            ),
+            ["KJV", "WEB"]
+        )
+
+        let selectedNone = AndroidMultiselectDialogContent<SQLiteDocumentIdentity>.toggledAllSelection(
+            in: dialogRows,
+            selectedIDs: selectedAll
+        )
+        XCTAssertTrue(selectedNone.isEmpty)
+    }
+
+    /**
+     Verifies the module row uses Android's single parenthesized label rather than invented family
+     metadata or a split native-iOS title/detail row.
+
+     Side effects: Resolves the active localization for Android's shared format key.
+
+     Failure modes: A failure means the visible label no longer follows
+     `something_with_parenthesis(name, "initials, language")`.
+     */
+    func testExportPickerRowTitleMatchesAndroidVisibleLabelContract() {
+        let row = AndroidModuleBackupInstalledContent(
+            initials: "WEB",
+            displayName: "World English Bible",
+            language: "en",
+            family: .myBible
+        )
+
+        XCTAssertEqual(
+            AndroidModuleBackupExportSheet.moduleRowTitle(for: row),
+            "World English Bible (WEB, en)"
+        )
+    }
+
+    /**
      Verifies the real picker preserves canonical catalog order and Android identity semantics.
 
      Canonically equivalent Unicode spellings must remain distinct because Android compares Java

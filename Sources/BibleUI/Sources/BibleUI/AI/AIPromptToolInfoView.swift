@@ -31,8 +31,23 @@ enum AIPromptToolInfoBehavior {
  app-owned information dialog; the destination performs no persistence or credential access.
  */
 struct AIPromptToolInfoView: View {
+    /// Standalone dismissal fallback when the caller does not own an explicit route.
+    @Environment(\.dismiss) private var dismiss
     /// Android's app-owned Tool Info help dialog.
     @State private var helpDialog: AIConfigurationDialog?
+    /// Reader/workspace palette inherited from the prompt editor.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command.
+    let onBack: (() -> Void)?
+
+    /** Creates the app-owned Tool Info activity without reading its immutable catalog. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Read and structural tools that Android reports as not requiring permission.
     private var readTools: [AgentTool] {
@@ -45,44 +60,54 @@ struct AIPromptToolInfoView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                toolSection(
-                    title: String(localized: "ai_read_tools", defaultValue: "Read Tools"),
-                    tools: readTools
-                )
-                toolSection(
-                    title: String(localized: "ai_write_tools", defaultValue: "Write Tools"),
-                    tools: writeTools
-                )
-            }
-            .padding(.top, 8)
-            .padding(.bottom, 16)
-        }
-        .navigationTitle(String(localized: "ai_available_tools", defaultValue: "Available tools"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    helpDialog = .information(
-                        title: String(localized: "help", defaultValue: "Help"),
-                        message: String(
-                            localized: "help_tool_info_text",
-                            defaultValue: "AI tools are specialised functions the AI can call to read your data or make changes on your behalf. Read tools (verses, commentaries, dictionaries, bookmarks) never require permission. Write tools (creating bookmarks, notes, study pad entries) are gated by the permission system."
-                        )
+        AndroidActivityScreen(
+            title: String(localized: "ai_available_tools", defaultValue: "Available tools"),
+            accessibilityIdentifier: "aiPromptToolInfoTopAppBar",
+            palette: surfacePalette,
+            onBack: performBack
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityHelp"),
+                accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                accessibilityIdentifier: "aiPromptToolInfoHelpButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                helpDialog = .information(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    message: String(
+                        localized: "help_tool_info_text",
+                        defaultValue: "AI tools are specialised functions the AI can call to read your data or make changes on your behalf. Read tools (verses, commentaries, dictionaries, bookmarks) never require permission. Write tools (creating bookmarks, notes, study pad entries) are gated by the permission system."
                     )
-                } label: {
-                    Image(systemName: "questionmark.circle")
+                )
+            }
+        } content: {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    toolSection(
+                        title: String(localized: "ai_read_tools", defaultValue: "Read Tools"),
+                        tools: readTools
+                    )
+                    toolSection(
+                        title: String(localized: "ai_write_tools", defaultValue: "Write Tools"),
+                        tools: writeTools
+                    )
                 }
-                .accessibilityLabel(String(localized: "help", defaultValue: "Help"))
-                .accessibilityIdentifier("aiPromptToolInfoHelpButton")
-                .disabled(helpDialog != nil)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
             }
         }
+        .disabled(helpDialog != nil)
         .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
         .accessibilityIdentifier("aiPromptToolInfoView")
+    }
+
+    /** Returns through the explicit prompt-editor owner or standalone environment fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 
     /**
@@ -98,7 +123,8 @@ struct AIPromptToolInfoView: View {
     @ViewBuilder
     private func toolSection(title: String, tools: [AgentTool]) -> some View {
         Text(title)
-            .font(.title3.weight(.bold))
+            .font(.system(size: 18, weight: .bold))
+            .foregroundStyle(surfacePalette.foregroundColor)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -107,10 +133,11 @@ struct AIPromptToolInfoView: View {
         ForEach(tools, id: \.self) { tool in
             VStack(alignment: .leading, spacing: 2) {
                 Text(AIPermissionPresentation.title(for: tool))
-                    .font(.subheadline.weight(.bold))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(surfacePalette.foregroundColor)
                 Text(AndroidAgentToolDefinitionCatalog.definition(for: tool).description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

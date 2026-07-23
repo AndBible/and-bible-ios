@@ -628,7 +628,7 @@ public final class AndroidDatabaseBackupService {
     public static let databaseBackupFileName = "AndBibleDatabaseBackup.abdb.zip"
 
     /// Manifest filename used by Android database and module backup archives.
-    private static let manifestFileName = "AndBibleBackupManifest.json"
+    private static let manifestFileName = AndroidBackupManifestCodec.fileName
 
     /// Semantic category databases iOS can materialize directly from native state.
     private static let semanticExportableDatabaseCategories: [AndroidDatabaseBackupCategory] = [
@@ -640,57 +640,6 @@ public final class AndroidDatabaseBackupService {
         .myDocuments,
         .progress,
     ]
-
-    /**
-     Decodable shape of Android's manifest JSON before iOS normalizes optional fields.
-
-     Android backup manifests have evolved with optional `contains`, `manifestVersion`, and app
-     version fields. Keeping this DTO private lets `decodeManifest(from:)` preserve Android defaults
-     without making partially decoded manifests part of the public API. Unknown `contains` values
-     are ignored so future Android-only categories do not block restore of known database sections.
-     */
-    private struct ManifestDTO: Decodable {
-        let backupType: String
-        let contains: Set<AndroidDatabaseBackupCategory>
-        let manifestVersion: Int?
-        let andBibleVersion: Int?
-
-        private enum CodingKeys: String, CodingKey {
-            case backupType
-            case contains
-            case manifestVersion
-            case andBibleVersion
-        }
-
-        /**
-         Decodes Android's manifest while preserving known categories and skipping future ones.
-
-         - Parameter decoder: JSON decoder input for `AndBibleBackupManifest.json`.
-         - Side effects: none.
-         - Failure modes: Throws when required manifest fields are missing or have invalid types.
-         */
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            backupType = try container.decode(String.self, forKey: .backupType)
-            let rawContains = try container.decodeIfPresent([String].self, forKey: .contains) ?? []
-            contains = Set(rawContains.compactMap(AndroidDatabaseBackupCategory.init(rawValue:)))
-            manifestVersion = try container.decodeIfPresent(Int.self, forKey: .manifestVersion)
-            andBibleVersion = try container.decodeIfPresent(Int.self, forKey: .andBibleVersion)
-        }
-    }
-
-    /**
-     Encodable manifest shape emitted by Android database backup export.
-
-     iOS only declares categories it can currently materialize into Android-shaped SQLite files.
-     Android restore validates database files from the `db/` directory, so this manifest remains
-     honest while allowing unsupported Android-only categories to stay absent.
-     */
-    private struct ExportManifestDTO: Encodable {
-        let backupType: String
-        let contains: [AndroidDatabaseBackupCategory]
-        let manifestVersion: Int
-    }
 
     /// Largest Android backup manifest accepted for in-memory JSON decoding.
     private static let maximumManifestByteCount = 1024 * 1024
@@ -805,12 +754,11 @@ public final class AndroidDatabaseBackupService {
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupFileExport {
         let exportCategories = exportableDatabaseCategories()
-        let manifest = ExportManifestDTO(
+        let manifestData = try AndroidBackupManifestCodec.encode(
             backupType: "DB_BACKUP",
-            contains: exportCategories,
-            manifestVersion: 1
+            contains: exportCategories.map(\.rawValue),
+            andBibleVersion: AndroidBackupManifestCodec.producerVersion()
         )
-        let manifestData = try JSONEncoder().encode(manifest)
         var entries: [ZipArchiveWriterFileEntry] = [
             ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: manifestData),
         ]
@@ -1254,12 +1202,14 @@ public final class AndroidDatabaseBackupService {
        Android's manifest shape.
      */
     private func decodeManifest(from data: Data) throws -> AndroidDatabaseBackupManifest {
-        guard let dto = try? JSONDecoder().decode(ManifestDTO.self, from: data) else {
+        guard let dto = try? AndroidBackupManifestCodec.decode(data) else {
             throw AndroidDatabaseBackupError.invalidManifest
         }
         return AndroidDatabaseBackupManifest(
             backupType: dto.backupType,
-            contains: dto.contains,
+            contains: Set(
+                (dto.contains ?? []).compactMap(AndroidDatabaseBackupCategory.init(rawValue:))
+            ),
             manifestVersion: dto.manifestVersion ?? 1,
             andBibleVersion: dto.andBibleVersion
         )

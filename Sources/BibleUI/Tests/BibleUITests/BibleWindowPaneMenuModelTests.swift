@@ -1,5 +1,6 @@
 // BibleWindowPaneMenuModelTests.swift -- Android parity tests for pane hamburger menus
 
+import BibleCore
 import XCTest
 @testable import BibleUI
 
@@ -14,16 +15,19 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
     /**
      Protects Android's normal-window top-level menu order.
 
-     Android shows New window, Maximise, Minimise, Move to, Pin, Synchronise, Text options,
-     Copy link to clipboard, and Close for a normal visible, non-maximized window. The old iOS
-     flat rows such as Move Up/Move Down, Sync Scrolling, Sync Group, Copy Reference, and typed
-     Go to Reference must not reappear in this model.
+     Android shows layout, text, configured AI, current-reference copy, typed clipboard navigation,
+     live speech navigation, and Close in XML order for a normal visible non-maximized window. The
+     old iOS flat rows and invented typed-reference dialog must not reappear in this model.
      */
     func testNormalWindowTopLevelMenuMatchesAndroidOrder() {
         let currentID = UUID()
         let otherID = UUID()
         let model = BibleWindowPaneMenuModel(snapshot: .fixture(
             windowID: currentID,
+            isAIConfigured: true,
+            copiedReferenceName: "John 3:16",
+            speakReferenceName: "Romans 8:1",
+            recentTextSettings: [.sectionTitles],
             allWindowsInPersistedOrder: [
                 .fixture(id: currentID, position: 0, document: "KJV", reference: "Gen 1"),
                 .fixture(id: otherID, position: 1, document: "ESV", reference: "Rom 1"),
@@ -42,9 +46,87 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
             "pin",
             "synchronize",
             "textOptions",
+            "aiActions",
             "copyLink",
+            "goToReference",
+            "goToSpeak",
             "close",
         ])
+    }
+
+    /** Protects Android's non-Bible whole-page bookmark position ahead of text options. */
+    func testGenericWindowInsertsWholePageBookmarkBeforeTextOptions() throws {
+        let model = BibleWindowPaneMenuModel(snapshot: .fixture(
+            canAddWholePageBookmark: true,
+            recentTextSettings: [.sectionTitles]
+        ))
+
+        let ids = model.items.map(\.id)
+        XCTAssertLessThan(
+            try XCTUnwrap(ids.firstIndex(of: "addWholePageBookmark")),
+            try XCTUnwrap(ids.firstIndex(of: "textOptions"))
+        )
+    }
+
+    /** Protects Android's empty-history fallback as a late top-level All Text Options action. */
+    func testEmptyRecentTextHistoryReplacesSubmenuWithTopLevelAllTextOptions() throws {
+        let model = BibleWindowPaneMenuModel(snapshot: .fixture(
+            copiedReferenceName: "John 3:16",
+            speakReferenceName: "Romans 8:1",
+            recentTextSettings: []
+        ))
+
+        XCTAssertFalse(model.items.contains { $0.id == "textOptions" })
+        let allIndex = try XCTUnwrap(model.items.firstIndex { $0.id == "allTextOptions" })
+        let speakIndex = try XCTUnwrap(model.items.firstIndex { $0.id == "goToSpeak" })
+        let closeIndex = try XCTUnwrap(model.items.firstIndex { $0.id == "close" })
+        XCTAssertGreaterThan(allIndex, speakIndex)
+        XCTAssertLessThan(allIndex, closeIndex)
+    }
+
+    /** Protects Android's enum-name ordering and shared asset/action contract for recent settings. */
+    func testRecentTextSettingsUseAndroidSortedRowsAndSharedActions() throws {
+        let model = BibleWindowPaneMenuModel(snapshot: .fixture(
+            sectionTitlesEnabled: false,
+            verseNumbersEnabled: true,
+            recentTextSettings: [.verseNumbers, .sectionTitles]
+        ))
+
+        let menu = try XCTUnwrap(model.items.first { $0.id == "textOptions" })
+        XCTAssertEqual(
+            Array(menu.children.prefix(2).map(\.id)),
+            ["textSetting::SECTIONTITLES", "textSetting::VERSENUMBERS"]
+        )
+        XCTAssertEqual(menu.children[0].action, .editTextSetting(.sectionTitles))
+        XCTAssertEqual(menu.children[0].iconAssetName, "SettingsIconSectionTitles")
+        XCTAssertTrue(menu.children[0].isCheckable)
+        XCTAssertFalse(menu.children[0].isChecked)
+        XCTAssertTrue(menu.children[1].isChecked)
+    }
+
+    /** Protects Android Study Pad's three shared export commands and their XML order. */
+    func testStudyPadWindowShowsHTMLArchiveAndCSVExportsInAndroidOrder() {
+        let model = BibleWindowPaneMenuModel(snapshot: .fixture(
+            canCopyLink: false,
+            canExportHTML: true,
+            canExportStudyPad: true,
+            canExportStudyPadCSV: true
+        ))
+
+        let exportIDs = model.items.map(\.id).filter { $0.hasPrefix("export") }
+        XCTAssertEqual(exportIDs, ["exportHTML", "exportStudyPad", "exportStudyPadCSV"])
+        XCTAssertEqual(
+            model.items.first(where: { $0.id == "exportHTML" })?.action,
+            .exportHTML
+        )
+        XCTAssertEqual(
+            model.items.first(where: { $0.id == "exportStudyPad" })?.action,
+            .exportStudyPad
+        )
+        XCTAssertEqual(
+            model.items.first(where: { $0.id == "exportStudyPadCSV" })?.action,
+            .exportStudyPadCSV
+        )
     }
 
     /**
@@ -145,7 +227,8 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
         let model = BibleWindowPaneMenuModel(snapshot: .fixture(
             isPinned: false,
             sectionTitlesEnabled: false,
-            verseNumbersEnabled: true
+            verseNumbersEnabled: true,
+            recentTextSettings: [.sectionTitles, .verseNumbers]
         ))
 
         let pin = try XCTUnwrap(model.items.first { $0.id == "pin" })
@@ -153,8 +236,12 @@ final class BibleWindowPaneMenuModelTests: XCTestCase {
         XCTAssertFalse(pin.isChecked)
 
         let textOptions = try XCTUnwrap(model.items.first { $0.id == "textOptions" })
-        let sectionTitles = try XCTUnwrap(textOptions.children.first { $0.id == "sectionTitles" })
-        let verseNumbers = try XCTUnwrap(textOptions.children.first { $0.id == "verseNumbers" })
+        let sectionTitles = try XCTUnwrap(
+            textOptions.children.first { $0.id == "textSetting::SECTIONTITLES" }
+        )
+        let verseNumbers = try XCTUnwrap(
+            textOptions.children.first { $0.id == "textSetting::VERSENUMBERS" }
+        )
         XCTAssertTrue(sectionTitles.isCheckable)
         XCTAssertFalse(sectionTitles.isChecked)
         XCTAssertTrue(verseNumbers.isCheckable)
@@ -206,13 +293,24 @@ private extension BibleWindowPaneMenuSnapshot {
         sectionTitlesEnabled: Bool = true,
         verseNumbersEnabled: Bool = true,
         isAIConfigured: Bool = false,
+        canCopyLink: Bool = true,
+        canAddWholePageBookmark: Bool = false,
+        canExportHTML: Bool = false,
+        canExportStudyPad: Bool = false,
+        canExportStudyPadCSV: Bool = false,
+        copiedReferenceName: String? = nil,
+        speakReferenceName: String? = nil,
+        recentTextSettings: [AndroidTextDisplaySettingType] = [],
         allWindowsInPersistedOrder: [BibleWindowPaneMenuWindowSummary] = [
             .fixture(position: 0, document: "KJV", reference: "Gen 1"),
             .fixture(position: 1, document: "ESV", reference: "Rom 1"),
         ],
         visibleWindows: [BibleWindowPaneMenuWindowSummary]? = nil
     ) -> BibleWindowPaneMenuSnapshot {
-        BibleWindowPaneMenuSnapshot(
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.showSectionTitles = sectionTitlesEnabled
+        displaySettings.showVerseNumbers = verseNumbersEnabled
+        return BibleWindowPaneMenuSnapshot(
             windowID: windowID,
             isLinksWindow: isLinksWindow,
             isPinned: isPinned,
@@ -223,7 +321,18 @@ private extension BibleWindowPaneMenuSnapshot {
             canMinimize: true,
             canClose: true,
             canSync: true,
-            canCopyLink: true,
+            canCopyLink: canCopyLink,
+            canAddWholePageBookmark: canAddWholePageBookmark,
+            canExportHTML: canExportHTML,
+            canExportStudyPad: canExportStudyPad,
+            canExportStudyPadCSV: canExportStudyPadCSV,
+            copiedReferenceName: copiedReferenceName,
+            speakReferenceName: speakReferenceName,
+            recentTextSettings: recentTextSettings.sorted { $0.rawValue < $1.rawValue },
+            resolvedTextDisplaySettings: displaySettings,
+            isBibleShown: true,
+            isMyNotesShown: false,
+            moduleHasRedLetterWords: true,
             autoPinEnabled: false,
             moduleHasStrongs: true,
             sectionTitlesEnabled: sectionTitlesEnabled,

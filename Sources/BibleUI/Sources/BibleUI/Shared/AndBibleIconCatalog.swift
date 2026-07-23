@@ -258,6 +258,93 @@ enum AndBibleIconCatalog {
         )
     ]
 
+    /// AI connection preference icons from Android `ai_connection_settings.xml`.
+    private static let aiConnectionSettingsIconByAndroidKey: [String: AndBibleIcon] = [
+        "ai_disclaimer_warning": .init(
+            assetName: "SettingsIconWarning",
+            androidDrawableName: "ic_warning_red_24dp"
+        ),
+        "ai_getting_started": .init(
+            assetName: "SettingsIconCloud",
+            androidDrawableName: "ic_baseline_cloud_24"
+        ),
+        "ai_providers_shortcut": .init(
+            assetName: "SettingsIconCloud",
+            androidDrawableName: "ic_baseline_cloud_24"
+        ),
+        "ai_models_shortcut": .init(
+            assetName: "SettingsIconRobot",
+            androidDrawableName: "icon_robot"
+        ),
+        "agent_permission_mode": .init(
+            assetName: "SettingsIconShield",
+            androidDrawableName: "ic_baseline_security_24"
+        ),
+        "manage_tool_permissions": .init(
+            assetName: "SettingsIconShield",
+            androidDrawableName: "ic_baseline_security_24"
+        ),
+        "llm_reset_usage": .init(
+            assetName: "ActivityReset",
+            androidDrawableName: "ic_baseline_refresh_gray_24"
+        ),
+        "raw_log_retention": .init(
+            assetName: "ActivityDelete",
+            androidDrawableName: "ic_delete_24dp"
+        ),
+        "model_override": .init(
+            assetName: "SettingsIconCloud",
+            androidDrawableName: "ic_baseline_cloud_24"
+        ),
+        "strict_context_matching": .init(
+            assetName: "SettingsIconDescription",
+            androidDrawableName: "ic_baseline_description_gray_24"
+        ),
+        "max_iterations": .init(
+            assetName: "ActivityReset",
+            androidDrawableName: "ic_baseline_refresh_gray_24"
+        ),
+        "specify_before_run": .init(
+            assetName: "PromptAdvancedKeyboard",
+            androidDrawableName: "ic_baseline_keyboard_24"
+        ),
+        "no_document_creation": .init(
+            assetName: "PromptAdvancedVisibilityOff",
+            androidDrawableName: "ic_baseline_visibility_off_24"
+        ),
+        "auto_include_documents": .init(
+            assetName: "PromptAdvancedDocuments",
+            androidDrawableName: "ic_baseline_menu_book_gray_24"
+        ),
+        "auto_include_commentaries": .init(
+            assetName: "PromptAdvancedCommentaries",
+            androidDrawableName: "ic_baseline_chat_bubble_outline_gray_24"
+        ),
+    ].merging(
+        Dictionary(
+            uniqueKeysWithValues: [
+                "ai_language",
+                "manage_ai_documents",
+                "commentary_max_response_chars",
+                "agent_max_iterations",
+                "ask_model_before_run",
+                "auto_hide_agent_log_on_completion",
+                "custom_agent_system_prompt",
+                "custom_text_transform_system_prompt",
+                "llm_usage_summary",
+                "raw_log_history",
+            ].map { key in
+                (
+                    key,
+                    AndBibleIcon(
+                        assetName: "SettingsIconDescription",
+                        androidDrawableName: "ic_baseline_description_gray_24"
+                    )
+                )
+            }
+        )
+    ) { explicit, _ in explicit }
+
     /// Text display icon mappings from Android `OptionsMenuItems.kt` and `text_display_settings.xml`.
     private static let textDisplayIconByAndroidKey: [String: AndBibleIcon] = [
         "STRONGS": .init(
@@ -403,6 +490,7 @@ enum AndBibleIconCatalog {
         applicationSettingsIconByAndroidKey
             .merging(syncSettingsIconByAndroidKey) { applicationIcon, _ in applicationIcon }
             .merging(textDisplayIconByAndroidKey) { applicationIcon, _ in applicationIcon }
+            .merging(aiConnectionSettingsIconByAndroidKey) { existingIcon, _ in existingIcon }
     }()
 
     /**

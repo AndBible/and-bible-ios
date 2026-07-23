@@ -41,21 +41,6 @@ enum UITestSearchQuerySeed {
     }
 }
 
-/// Applies platform-supported search-field input behavior without changing shared submit handling.
-private struct SearchQueryInputBehavior: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-#if os(iOS)
-        content
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled(true)
-            .submitLabel(.search)
-#else
-        content
-#endif
-    }
-}
-
 /**
  Full-text search interface with index management, scope filters, and multi-translation support.
 
@@ -84,6 +69,12 @@ public struct SearchView: View {
     /// Callback invoked when the user selects a search hit and wants to navigate to it.
     let onNavigate: ((SearchNavigationTarget) -> Bool)?
 
+    /// Callback that opens every visible result match in Android's dedicated links window.
+    let onOpenResultsInWindow: ((SearchGroupedResults) -> Bool)?
+
+    /// Explicit Android Up command supplied by the owning reader destination.
+    let onDismiss: (() -> Void)?
+
     /// Reference resolver invoked before a submitted value is treated as full-text search syntax.
     let onOpenReference: ((String) -> Bool)?
 
@@ -107,6 +98,9 @@ public struct SearchView: View {
 
     /// Whether this presentation was opened by Android's Strong's Find All action.
     var isStrongsFindAll: Bool
+
+    /// Reader/workspace-owned palette shared with every app-owned Search activity surface.
+    var surfacePalette: ReaderThemeSurfacePalette
 
     /// Current user-visible book name used for the "current book" scope label and fallback navigation.
     var currentBook: String
@@ -152,6 +146,24 @@ public struct SearchView: View {
 
     /// Presents the translation picker for multi-module search selection.
     @State private var showTranslationPicker = false
+
+    /// Presents Android Search's feature-specific help AlertDialog.
+    @State private var showSearchHelp = false
+
+    /// Presents the Search criteria action-bar overflow popup.
+    @State private var showSearchOverflow = false
+
+    /// Distinguishes Android's criteria and SearchResults activities without native iOS routing.
+    @State private var presentationStage: PresentationStage = .criteria
+
+    /// Canonical result group identities expanded through Android's arrow-only control.
+    @State private var expandedResultGroupIDs: Set<String> = []
+
+    /// Primary document whose existing index must be deleted before Android's rebuild flow.
+    @State private var forcedRebuildModuleName: String?
+
+    /// Whether successful index validation/creation should continue into SearchResults.
+    @State private var resumesSearchAfterIndex = false
 
     /// Installed module names selected for indexed multi-translation search.
     @State private var selectedModules: Set<String> = []
@@ -209,6 +221,15 @@ public struct SearchView: View {
         case currentBook
     }
 
+    /** App-owned activity stage corresponding to Android Search and SearchResults. */
+    enum PresentationStage: Equatable {
+        /// Search criteria activity with field, radio groups, translation chooser, and submit.
+        case criteria
+
+        /// SearchResults activity with grouped verse matches and result-specific app-bar actions.
+        case results
+    }
+
     /// Optional initial query to auto-populate and execute (e.g. from "Find all occurrences").
     private var initialQuery: String
 
@@ -226,11 +247,56 @@ public struct SearchView: View {
        - selectionPreferences: Registry-backed selected-translation persistence.
        - isStrongsFindAll: Whether this presentation must use Android's isolated Strong's-capable
          selection and preference key.
+       - surfacePalette: Reader/workspace-owned activity and content palette.
        - initialQuery: Optional query to prefill and auto-run on appear.
        - onOpenReference: Resolver invoked before full-text query compilation.
        - onNavigate: Callback returning true only when the selected hit was opened successfully.
+       - onOpenResultsInWindow: Callback returning true after the complete grouped result set opens
+         in Android's links window.
+       - onDismiss: Explicit Android Up command supplied by the reader destination.
      - Note: Initialization has no side effects. Index checks and optional auto-search begin in
        `onAppear`.
+     */
+    init(
+        swordModule: SwordModule? = nil,
+        swordManager: SwordManager? = nil,
+        searchIndexService: SearchIndexService? = nil,
+        searchIndexSourceRegistry: BibleSearchIndexSourceRegistry? = nil,
+        installedBibleModules: [ModuleInfo] = [],
+        currentBook: String = "Genesis",
+        currentOsisBookId: String = "Gen",
+        selectionPreferences: SearchSelectionPreferences? = nil,
+        isStrongsFindAll: Bool = false,
+        surfacePalette: ReaderThemeSurfacePalette,
+        initialQuery: String = "",
+        onOpenReference: ((String) -> Bool)? = nil,
+        onNavigate: ((SearchNavigationTarget) -> Bool)? = nil,
+        onOpenResultsInWindow: ((SearchGroupedResults) -> Bool)? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.swordModule = swordModule
+        self.swordManager = swordManager
+        self.searchIndexService = searchIndexService
+        self.searchIndexSourceRegistry = searchIndexSourceRegistry
+        self.installedBibleModules = installedBibleModules
+        self.currentBook = currentBook
+        self.currentOsisBookId = currentOsisBookId
+        self.selectionPreferences = selectionPreferences
+        self.isStrongsFindAll = isStrongsFindAll
+        self.surfacePalette = surfacePalette
+        self.initialQuery = initialQuery
+        self.onOpenReference = onOpenReference
+        self.onNavigate = onNavigate
+        self.onOpenResultsInWindow = onOpenResultsInWindow
+        self.onDismiss = onDismiss
+    }
+
+    /**
+     Preserves the package's public standalone Search initializer with the global default palette.
+
+     Reader-owned production routing uses the internal palette-aware initializer above. External
+     package clients retain the original API and never need access to the reader's internal palette
+     value type.
      */
     public init(
         swordModule: SwordModule? = nil,
@@ -246,77 +312,108 @@ public struct SearchView: View {
         onOpenReference: ((String) -> Bool)? = nil,
         onNavigate: ((SearchNavigationTarget) -> Bool)? = nil
     ) {
-        self.swordModule = swordModule
-        self.swordManager = swordManager
-        self.searchIndexService = searchIndexService
-        self.searchIndexSourceRegistry = searchIndexSourceRegistry
-        self.installedBibleModules = installedBibleModules
-        self.currentBook = currentBook
-        self.currentOsisBookId = currentOsisBookId
-        self.selectionPreferences = selectionPreferences
-        self.isStrongsFindAll = isStrongsFindAll
-        self.initialQuery = initialQuery
-        self.onOpenReference = onOpenReference
-        self.onNavigate = onNavigate
+        self.init(
+            swordModule: swordModule,
+            swordManager: swordManager,
+            searchIndexService: searchIndexService,
+            searchIndexSourceRegistry: searchIndexSourceRegistry,
+            installedBibleModules: installedBibleModules,
+            currentBook: currentBook,
+            currentOsisBookId: currentOsisBookId,
+            selectionPreferences: selectionPreferences,
+            isStrongsFindAll: isStrongsFindAll,
+            surfacePalette: .standard,
+            initialQuery: initialQuery,
+            onOpenReference: onOpenReference,
+            onNavigate: onNavigate,
+            onOpenResultsInWindow: nil,
+            onDismiss: nil
+        )
     }
 
     /**
      Builds the search UI for the current `viewState`.
 
-     The body switches between index-check progress, index-creation prompt/progress, and the full
-     search interface while also wiring the toolbar and translation-picker overlay.
+     The body switches between Android's Search and SearchResults activities, keeps index lifecycle
+     content inside that same app-owned shell, and presents shared popup/dialog components.
      */
     public var body: some View {
-        Group {
-            switch viewState {
-            case .checkingIndex:
-                ProgressView(String(localized: "search_checking_index"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            case .needsIndex(let moduleName, let moduleDescription):
-                indexPromptView(moduleName: moduleName, moduleDescription: moduleDescription)
-
-            case .creatingIndex:
-                indexProgressView
-
-            case .ready:
-                searchContent
-
-            case .indexFailure(let moduleName, let moduleDescription, let message):
-                indexFailureView(
-                    moduleName: moduleName,
-                    moduleDescription: moduleDescription,
-                    message: message
-                )
+        AndroidActivityScreen(
+            title: navigationTitle,
+            accessibilityIdentifier: "searchActivityAppBar",
+            palette: surfacePalette,
+            onBack: handleActivityBack
+        ) {
+            searchActivityActions
+        } content: {
+            searchActivityContent
+                .overlay(alignment: .topLeading) {
+                    // Export Search state through a tiny dedicated element so UI tests do not have
+                    // to snapshot the full Search container while result lists are changing.
+                    searchStateExport
+                }
+                .overlay {
+                    if showTranslationPicker {
+                        translationPickerOverlay
+                    }
+                    if showSearchHelp {
+                        AndroidSearchHelpDialog(
+                            title: navigationTitle,
+                            onDismiss: { showSearchHelp = false }
+                        )
+                    }
+                }
+            }
+        .androidAccessibilityIdentityMarker(
+            label: navigationTitle,
+            accessibilityIdentifier: "searchScreen",
+            accessibilityValue: searchAccessibilityValue,
+            surfaceColor: surfacePalette.backgroundColor
+        )
+        .androidAnchoredPopupMenu(
+            anchorID: "searchOverflowAnchor",
+            isPresented: $showSearchOverflow,
+            menuWidth: 230,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "searchOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "searchOverflowMenuSurface",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                if presentationStage == .results {
+                    AndroidPopupMenuRow(
+                        title: String(localized: "open_in_window", defaultValue: "Open in window"),
+                        accessibilityIdentifier: "searchOpenResultsInWindowAction"
+                    ) {
+                        showSearchOverflow = false
+                        openResultsInWindow()
+                    }
+                } else {
+                    AndroidPopupMenuRow(
+                        title: String(localized: "rebuild_index", defaultValue: "Rebuild index"),
+                        accessibilityIdentifier: "searchRebuildIndexAction"
+                    ) {
+                        showSearchOverflow = false
+                        beginRebuildIndexFlow()
+                    }
+                }
             }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("searchScreen")
-        .accessibilityValue(searchAccessibilityValue)
-        .overlay(alignment: .topLeading) {
-            // Export Search state through a tiny dedicated element so UI tests do not have to
-            // snapshot the full Search container while result lists are changing.
-            searchStateExport
-        }
-        .overlay {
-            if showTranslationPicker {
-                translationPickerOverlay
-            }
-        }
-        .navigationTitle(navigationTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
         .onAppear {
             restoreSelectedModules()
             let seededInitialQuery = initialQuery.isEmpty ? (UITestSearchQuerySeed.consume() ?? "") : initialQuery
-            _ = applyInitialQueryIfNeeded(seededInitialQuery)
-            checkIndex()
+            let didApplySeed = applyInitialQueryIfNeeded(seededInitialQuery)
+            checkIndex(autoSearchWhenReady: didApplySeed)
         }
         .onChange(of: initialQuery) { _, newValue in
             let didApply = applyInitialQueryIfNeeded(newValue)
             if didApply {
-                checkIndex()
+                checkIndex(autoSearchWhenReady: true)
             }
         }
         .onChange(of: query) { _, newValue in
@@ -329,37 +426,117 @@ public struct SearchView: View {
             cancelSearchWork(clearPublishedState: true)
             self.representedSearchQuery = nil
         }
-        .onChange(of: scopeOption) { _, _ in
-            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                performSearch()
-            }
-        }
-        .onChange(of: wordMode) { _, _ in
-            if case .ready = viewState, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                performSearch()
-            }
-        }
         .onChange(of: selectedModules) { _, _ in
-            checkIndex()
+            checkIndex(autoSearchWhenReady: presentationStage == .results)
         }
         .onDisappear(perform: cancelAllAsyncWork)
     }
 
-    /// Navigation title derived from the active state and latest result summary.
+    /// Android activity title derived from index lifecycle and criteria/results stage.
     private var navigationTitle: String {
         switch viewState {
         case .needsIndex, .creatingIndex, .indexFailure:
             return String(localized: "search_index")
         case .ready:
-            if !resultSummary.isEmpty {
+            if presentationStage == .results, !resultSummary.isEmpty {
                 return resultSummary
             }
             if let mod = swordModule {
-                return String(localized: "Find in \(mod.info.name)")
+                let format = String(
+                    localized: "search_in",
+                    defaultValue: "Find in %@"
+                )
+                return String(format: format, locale: .current, mod.info.name)
             }
             return String(localized: "search")
         case .checkingIndex:
             return String(localized: "search")
+        }
+    }
+
+    /** Chooses Search criteria, SearchResults, or index lifecycle content inside the shared shell. */
+    @ViewBuilder
+    private var searchActivityContent: some View {
+        switch viewState {
+        case .checkingIndex:
+            ProgressView(String(localized: "search_checking_index"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .needsIndex(let moduleName, let moduleDescription):
+            indexPromptView(moduleName: moduleName, moduleDescription: moduleDescription)
+        case .creatingIndex:
+            indexProgressView
+        case .ready:
+            if presentationStage == .results {
+                searchResultsContent
+            } else {
+                searchContent
+            }
+        case .indexFailure(let moduleName, let moduleDescription, let message):
+            indexFailureView(
+                moduleName: moduleName,
+                moduleDescription: moduleDescription,
+                message: message
+            )
+        }
+    }
+
+    /** Renders Android Search or SearchResults app-bar commands in source menu order. */
+    @ViewBuilder
+    private var searchActivityActions: some View {
+        if case .ready = viewState {
+            if presentationStage == .results {
+                AndroidActivityTopAppBarIconTextActionButton(
+                    title: selectedTranslationSummaryLabel,
+                    icon: .asset("SearchDocuments"),
+                    accessibilityLabel: String(localized: "choose_translations", defaultValue: "Choose translations"),
+                    accessibilityIdentifier: "searchResultsTranslationPickerButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: openTranslationPicker
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "more_options", defaultValue: "More options"),
+                    accessibilityIdentifier: "searchResultsOverflowAction",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { showSearchOverflow.toggle() }
+                )
+                .androidPopupMenuAnchor(id: "searchOverflowAnchor")
+            } else {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityHelp"),
+                    accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                    accessibilityIdentifier: "searchHelpAction",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { showSearchHelp = true }
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "more_options", defaultValue: "More options"),
+                    accessibilityIdentifier: "searchOverflowAction",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { showSearchOverflow.toggle() }
+                )
+                .androidPopupMenuAnchor(id: "searchOverflowAnchor")
+            }
+        }
+    }
+
+    /** Implements Android Up across nested SearchIndex and SearchResults activity states. */
+    private func handleActivityBack() {
+        if presentationStage == .results {
+            presentationStage = .criteria
+            return
+        }
+        closeSearch()
+    }
+
+    /** Closes the reader-owned Search destination through its explicit owner or SwiftUI fallback. */
+    private func closeSearch() {
+        cancelAllAsyncWork()
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
         }
     }
 
@@ -434,8 +611,8 @@ public struct SearchView: View {
      The UI harness reads this compact value instead of walking volatile SwiftUI search-field and
      result-list hierarchies while searches rerun.
 
-     - Returns: A semicolon-delimited state string containing lifecycle, query, result, option, and
-       focus tokens.
+     - Returns: A semicolon-delimited state string containing lifecycle, activity stage, query,
+       result, option, and focus tokens.
      - Side effects: none.
      - Failure modes: This computed export cannot fail; missing or renamed tokens break only the
        UI-test contract that consumes the value.
@@ -448,8 +625,9 @@ public struct SearchView: View {
         case .ready: "ready"
         case .indexFailure: "indexFailure"
         }
+        let stageToken = presentationStage == .results ? "results" : "criteria"
         let resultCount = groupedResults?.totalHitCount ?? 0
-        let baseState = "state=\(stateToken);query=\(query);searching=\(isSearching);results=\(resultCount);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));searchFieldFocused=\(isSearchFieldFocused);\(searchAccessibilityTranslationPickerToken)"
+        let baseState = "state=\(stateToken);stage=\(stageToken);query=\(query);searching=\(isSearching);results=\(resultCount);scope=\(searchScopeToken(for: scopeOption));wordMode=\(searchWordModeToken(for: wordMode));searchFieldFocused=\(isSearchFieldFocused);\(searchAccessibilityTranslationPickerToken)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
@@ -596,42 +774,46 @@ public struct SearchView: View {
        - moduleDescription: User-visible description shown in the prompt text.
      */
     private func indexPromptView(moduleName: String, moduleDescription: String) -> some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "text.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 12) {
-                Text(String(localized: "search_need_index"))
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-
-                Text("Create an index for \(moduleDescription)?")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 32)
+        VStack(spacing: 0) {
+            Text(indexPromptMessage(moduleName: moduleName, moduleDescription: moduleDescription))
+                .font(.system(size: 17))
+                .foregroundStyle(surfacePalette.foregroundColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
 
             Spacer()
 
-            HStack(spacing: 40) {
-                Button(String(localized: "cancel")) {
-                    cancelAllAsyncWork()
-                    dismiss()
-                }
-                .foregroundStyle(.secondary)
-
-                Button(String(localized: "search_create_index")) {
-                    startIndexCreation()
-                }
-                .fontWeight(.semibold)
-            }
-            .font(.headline)
-            .padding(.bottom, 40)
+            AndroidActivityCommitBar(
+                dismissTitle: String(localized: "cancel"),
+                commitTitle: forcedRebuildModuleName == moduleName
+                    ? String(localized: "rebuild_index_button", defaultValue: "Rebuild")
+                    : String(localized: "index_create", defaultValue: "Create"),
+                backgroundColor: surfacePalette.backgroundColor,
+                accentColor: surfacePalette.controlAccentColor,
+                disabledColor: surfacePalette.disabledForegroundColor,
+                isCommitEnabled: true,
+                accessibilityPrefix: "searchIndex",
+                onDismiss: cancelIndexPrompt,
+                onCommit: startIndexCreation
+            )
         }
+    }
+
+    /** Resolves Android's create/rebuild prompt with a locale-safe `%@` substitution. */
+    private func indexPromptMessage(moduleName: String, moduleDescription: String) -> String {
+        let format = forcedRebuildModuleName == moduleName
+            ? String(localized: "rebuild_index_for", defaultValue: "Rebuild index for %@?")
+            : String(localized: "create_index_for", defaultValue: "Create index for %@?")
+        return String(format: format, locale: .current, moduleDescription)
+    }
+
+    /** Returns from Android's SearchIndex activity to preserved Search criteria without closing it. */
+    private func cancelIndexPrompt() {
+        cancelIndexWork()
+        forcedRebuildModuleName = nil
+        resumesSearchAfterIndex = false
+        presentationStage = .criteria
+        viewState = .ready
     }
 
     /**
@@ -673,8 +855,11 @@ public struct SearchView: View {
 
             HStack(spacing: 28) {
                 Button(String(localized: "cancel")) {
-                    cancelAllAsyncWork()
-                    dismiss()
+                    if forcedRebuildModuleName != nil {
+                        cancelIndexPrompt()
+                    } else {
+                        closeSearch()
+                    }
                 }
                 .foregroundStyle(.secondary)
 
@@ -739,37 +924,17 @@ public struct SearchView: View {
     private var searchContent: some View {
         VStack(spacing: 0) {
             searchCriteriaForm
-
-            List {
-                if isSearching {
-                    ProgressView(String(localized: "search_searching"))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .listRowSeparator(.hidden)
-                } else if let searchFailureMessage {
-                    Text(searchFailureMessage)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("searchExecutionFailure")
-                } else if let groupedResults {
-                    groupedResultsSection(groupedResults)
-                } else if !query.isEmpty, !resultSummary.isEmpty {
-                    Text(String(localized: "no_results"))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .listRowSeparator(.hidden)
-                }
-            }
-            .listStyle(.plain)
-            .accessibilityIdentifier("searchResultsList")
-
             searchSubmitButton
         }
     }
 
     /// Stable app-owned query field used for both user input and UI automation.
     private var searchQueryBar: some View {
-        TextField(
-            String(localized: "type_text_or_bible_reference", defaultValue: "Type text or Bible reference"),
+        AndroidActivityTextInput(
+            placeholder: String(
+                localized: "type_text_or_bible_reference",
+                defaultValue: "Type text or Bible reference"
+            ),
             text: Binding(
                 get: { query },
                 set: { newValue in
@@ -777,21 +942,19 @@ public struct SearchView: View {
                     query = newValue
                     cancelSearchWork(clearPublishedState: true)
                 }
-            )
+            ),
+            foregroundColor: surfacePalette.foregroundColor,
+            backgroundColor: surfacePalette.controlFillColor,
+            borderColor: surfacePalette.inactiveBorderColor,
+            accessibilityIdentifier: "searchQueryField",
+            focus: $isSearchFieldFocused,
+            usesSearchSubmitLabel: true,
+            usesLiteralInputBehavior: true,
+            onSubmit: {
+                isSearchFieldFocused = false
+                performSearch()
+            }
         )
-        .modifier(SearchQueryInputBehavior())
-        .focused($isSearchFieldFocused)
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .accessibilityIdentifier("searchQueryField")
-        .onSubmit {
-            isSearchFieldFocused = false
-            performSearch()
-        }
         .onAppear {
             if UITestRuntimeConfiguration.shouldAutofocusSearchField {
                 DispatchQueue.main.async {
@@ -808,16 +971,21 @@ public struct SearchView: View {
         VStack(alignment: .leading, spacing: 0) {
             searchQueryBar
 
-            HStack(alignment: .top, spacing: 16) {
-                searchScopeRadioGroup
-                searchWordModeRadioGroup
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 16) {
+                        searchScopeRadioGroup
+                        searchWordModeRadioGroup
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
 
-            searchTranslationsSection
+                    searchTranslationsSection
+                }
+            }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("searchOptionsPanel")
         .accessibilityValue("visible")
@@ -828,7 +996,7 @@ public struct SearchView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(String(localized: "search_bible_section_group_prompt", defaultValue: "Bible section"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
 
             searchRadioRow(
                 label: String(localized: "search_scope_all", defaultValue: "All Bible"),
@@ -872,7 +1040,7 @@ public struct SearchView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(String(localized: "search_words_group_prompt", defaultValue: "Words"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
 
             ForEach(SearchWordMode.allCases, id: \.self) { mode in
                 searchRadioRow(
@@ -893,7 +1061,7 @@ public struct SearchView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(String(localized: "search_translations", defaultValue: "Translations"))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
 
             Button {
                 openTranslationPicker()
@@ -903,7 +1071,7 @@ public struct SearchView: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "pencil")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 }
                 .contentShape(Rectangle())
             }
@@ -914,28 +1082,25 @@ public struct SearchView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
         .overlay(alignment: .bottom) {
-            Divider()
+            Rectangle()
+                .fill(surfacePalette.inactiveBorderColor)
+                .frame(height: 1)
         }
     }
 
     /// Android-style bottom submit button for executing Search criteria.
     private var searchSubmitButton: some View {
-        Button {
+        AndroidActivitySingleActionBar(
+            title: String(localized: "search", defaultValue: "Search"),
+            backgroundColor: surfacePalette.backgroundColor,
+            accentColor: surfacePalette.controlAccentColor,
+            disabledColor: surfacePalette.disabledForegroundColor,
+            isEnabled: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            accessibilityIdentifier: "searchSubmitButton"
+        ) {
             isSearchFieldFocused = false
             performSearch()
-        } label: {
-            Text(String(localized: "search", defaultValue: "Search"))
-                .font(.body.weight(.medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
         }
-        .buttonStyle(.borderedProminent)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .overlay(alignment: .top) {
-            Divider()
-        }
-        .accessibilityIdentifier("searchSubmitButton")
     }
 
     /**
@@ -953,23 +1118,22 @@ public struct SearchView: View {
         identifier: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                Text(label)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .contentShape(Rectangle())
-            .accessibilityIdentifier(identifier)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
-        .accessibilityLabel(label)
-        .accessibilityValue(isSelected ? "selected" : "unselected")
-        .accessibilityIdentifier(identifier)
+        AndroidRadioRow(
+            title: label,
+            value: true,
+            selection: Binding(
+                get: { isSelected },
+                set: { shouldSelect in
+                    guard shouldSelect else { return }
+                    action()
+                }
+            ),
+            foregroundColor: surfacePalette.foregroundColor,
+            secondaryColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor,
+            titleFont: .system(size: 15),
+            accessibilityIdentifier: identifier
+        )
     }
 
     /**
@@ -1027,6 +1191,39 @@ public struct SearchView: View {
     // MARK: - Results Sections
 
     /**
+     Renders Android's distinct SearchResults activity body without native `List` ownership.
+
+     Loading, failure, empty, and grouped states share the owner palette and scroll container.
+     Results never remain inline beneath the Search criteria form.
+     */
+    private var searchResultsContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if isSearching {
+                    ProgressView(String(localized: "search_searching"))
+                        .tint(surfacePalette.controlAccentColor)
+                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                } else if let searchFailureMessage {
+                    Text(searchFailureMessage)
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .accessibilityIdentifier("searchExecutionFailure")
+                } else if let groupedResults {
+                    groupedResultsSection(groupedResults)
+                } else {
+                    Text(String(localized: "no_results"))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                }
+            }
+        }
+        .background(surfacePalette.backgroundColor)
+        .accessibilityIdentifier("searchResultsList")
+    }
+
+    /**
      Builds Android's verse-grouped result UI for text and Strong's searches.
 
      - Parameter grouped: Canonical verse groups with module-preserving matches and summary counts.
@@ -1036,84 +1233,57 @@ public struct SearchView: View {
      - Failure modes: Empty result collections render no sections; the caller owns the empty state.
      */
     private func groupedResultsSection(_ grouped: SearchGroupedResults) -> some View {
-        Group {
-            Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(grouped.moduleCounts, id: \.moduleName) { entry in
-                            HStack(spacing: 4) {
-                                Text(entry.moduleName)
-                                    .font(.caption.weight(.semibold))
-                                Text("\(entry.count)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(.quaternary, in: Capsule())
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(entry.moduleName)
-                            .accessibilityValue("count=\(entry.count)")
-                            .accessibilityIdentifier("searchResultGroupPill::\(sanitizedAccessibilitySegment(entry.moduleName))")
-                        }
-                    }
-                }
-            }
-
+        LazyVStack(alignment: .leading, spacing: 0) {
             if !grouped.moduleFailures.isEmpty {
-                Section {
-                    ForEach(grouped.moduleFailures) { failure in
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(failure.moduleName)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(failure.message)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
+                ForEach(grouped.moduleFailures) { failure in
+                    HStack(alignment: .top, spacing: 10) {
+                        AndBibleIconView(name: "ActivityErrorOutline", size: 24)
+                            .foregroundStyle(Color.orange)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(failure.moduleName)
+                                .font(.system(size: 16, weight: .semibold))
+                            Text(failure.message)
+                                .font(.system(size: 14))
+                                .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier(
-                            "searchModuleFailure::\(sanitizedAccessibilitySegment(failure.moduleName))"
-                        )
                     }
+                    .padding(12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(
+                        "searchModuleFailure::\(sanitizedAccessibilitySegment(failure.moduleName))"
+                    )
+                    searchResultDivider
                 }
             }
 
             if grouped.groups.isEmpty {
-                Section {
-                    Text(String(localized: "no_results"))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .listRowSeparator(.hidden)
-                }
+                Text(String(localized: "no_results"))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
             } else {
-                Section {
-                    ForEach(grouped.groups) { group in
-                        searchResultGroup(group)
-                    }
+                ForEach(grouped.groups) { group in
+                    searchResultGroup(group)
+                    searchResultDivider
                 }
             }
 
             if grouped.isTruncated {
-                Section {
-                    Text(String(
-                        localized: "search_results_truncated",
-                        defaultValue: "More than 5,000 results were found in at least one translation."
-                    ))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("searchResultsTruncated")
-                }
+                Text(String(
+                    localized: "search_results_truncated",
+                    defaultValue: "More than 5,000 results were found in at least one translation."
+                ))
+                .font(.system(size: 14))
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                .padding(12)
+                .accessibilityIdentifier("searchResultsTruncated")
             }
         }
     }
 
     /**
-     Builds one canonical verse group with a separately selectable row for every matching module.
+     Builds Android `multi_search_result_item`: tappable header, translation pills, and arrow-only
+     expansion for multi-translation verses.
 
      - Parameter group: Canonical verse and ordered module matches to render.
      - Returns: Unframed grouped rows preserving module identity through user selection.
@@ -1121,33 +1291,115 @@ public struct SearchView: View {
      - Failure modes: A malformed empty group renders only its canonical reference and no action.
      */
     private func searchResultGroup(_ group: SearchGroupedVerseResult) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(group.displayReference)
-                .font(.headline)
-
-            ForEach(Array(group.matches.enumerated()), id: \.element.id) { index, hit in
-                Button(action: { navigateTo(hit) }) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(hit.moduleName)
-                            .font(.caption.weight(.semibold))
-                            .frame(minWidth: 48, alignment: .leading)
-                        Text(SearchIndexService.cleanText(hit.snippet))
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(group.matches.count == 1 ? nil : 3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        let isSingleMatch = group.matches.count == 1
+        let isExpanded = expandedResultGroupIDs.contains(group.id)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                if !isSingleMatch {
+                    Button {
+                        toggleResultExpansion(group.id)
+                    } label: {
+                        AndBibleIconView(name: "SearchExpand", size: 24)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        isExpanded
+                            ? String(localized: "collapse", defaultValue: "Collapse")
+                            : String(localized: "expand", defaultValue: "Expand")
+                    )
+                    .accessibilityIdentifier("searchResultExpand::\(sanitizedAccessibilitySegment(group.displayReference))")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(
-                    index == 0
-                        ? searchResultIdentifier(for: group)
-                        : searchModuleResultIdentifier(for: hit)
-                )
+
+                if let firstMatch = group.matches.first {
+                    Button(action: { navigateTo(firstMatch) }) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(
+                                isSingleMatch
+                                    ? "\(group.displayReference) (\(firstMatch.moduleName))"
+                                    : group.displayReference
+                            )
+                            .font(.system(size: 17))
+                            .foregroundStyle(surfacePalette.foregroundColor)
+
+                            Text(SearchIndexService.cleanText(firstMatch.snippet))
+                                .font(.system(size: 14))
+                                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                                .lineLimit(isSingleMatch ? nil : 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(searchResultIdentifier(for: group))
+                }
+            }
+
+            if !isSingleMatch {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(group.matches) { hit in
+                            Button(action: { navigateTo(hit) }) {
+                                Text(hit.moduleName)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(surfacePalette.foregroundColor)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        surfacePalette.controlFillColor,
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier(searchModuleResultIdentifier(for: hit))
+                        }
+                    }
+                    .padding(.leading, 40)
+                }
+            }
+
+            if !isSingleMatch, isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(group.matches) { hit in
+                        Button(action: { navigateTo(hit) }) {
+                            (
+                                Text("\(hit.moduleName): ").bold()
+                                    + Text(SearchIndexService.cleanText(hit.snippet))
+                            )
+                                .font(.system(size: 15))
+                                .foregroundStyle(surfacePalette.foregroundColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("searchExpandedResult::\(sanitizedAccessibilitySegment(hit.id))")
+                    }
+                }
+                .padding(.leading, 40)
+                .padding(.top, 4)
             }
         }
-        .padding(.vertical, 3)
+        .padding(12)
+    }
+
+    /// Palette-owned divider shared by SearchResults rows and partial-failure rows.
+    private var searchResultDivider: some View {
+        Rectangle()
+            .fill(surfacePalette.inactiveBorderColor)
+            .frame(height: 1)
+    }
+
+    /** Toggles only the arrow-owned expansion state for one multi-translation verse. */
+    private func toggleResultExpansion(_ groupID: String) {
+        if expandedResultGroupIDs.contains(groupID) {
+            expandedResultGroupIDs.remove(groupID)
+        } else {
+            expandedResultGroupIDs.insert(groupID)
+        }
     }
 
     /**
@@ -1183,183 +1435,52 @@ public struct SearchView: View {
 
     // MARK: - Translation Picker
 
-    /**
-     Builds the dimmed modal layer used for Android-style multi-translation selection.
-
-     The overlay is owned by `SearchView` rather than SwiftUI sheet presentation so Search matches
-     Android's in-place `AlertDialog` behavior: the picker edits a local draft, Cancel discards it,
-     and OK is the only commit path.
-
-     - Returns: Full-screen modal dimmer and centered picker dialog.
-     - Side effects: Button actions inside the dialog can mutate `pendingTranslationSelection`,
-       commit to `selectedModules`, or dismiss the overlay; tapping the dimmer follows Android's
-       dialog-cancel path and discards the draft.
-     - Failure modes: Empty module sets render an empty scroll region; the caller only presents the
-       picker when more than one installed Bible module exists.
-     */
+    /** Presents Android `Dialogs.multiselect` through the shared dialog window and checkbox rows. */
     private var translationPickerOverlay: some View {
-        ZStack {
-            Color.black.opacity(colorScheme == .dark ? 0.45 : 0.32)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    cancelTranslationPicker()
-                }
-                .accessibilityHidden(true)
-
-            makeTranslationPicker(modules: candidateSearchModules)
-                .padding(.horizontal, 24)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("searchTranslationPickerOverlay")
-    }
-
-    /**
-     Builds the Android-style Search translation multiselect dialog.
-
-     Android's `Search.showTranslationSelector` presents a multi-choice `AlertDialog` with all
-     Bible modules sorted by abbreviation, existing selections prechecked, explicit Cancel/OK
-     buttons, and a neutral Select all/none toggle. This SwiftUI surface mirrors that contract
-     without using an iOS sheet or committing row taps directly to Search state.
-
-     - Parameter modules: Installed Bible modules available for selection.
-     - Returns: Centered modal dialog containing title, selectable rows, and dialog actions. The
-       scroll view owns the picker-list accessibility identifier so UI automation addresses the
-       clipped viewport rather than the lazy content stack.
-     - Side effects: Row and Select all/none actions mutate only `pendingTranslationSelection`; OK
-       may commit to `selectedModules` through `commitTranslationPickerSelection()`.
-     - Failure modes: Missing index-service state is treated as unknown and therefore does not add
-       the unindexed warning label.
-     */
-    private func makeTranslationPicker(modules: [ModuleInfo]) -> some View {
-        VStack(spacing: 0) {
-            Text(String(localized: "compare_choose_translations"))
-                .font(.headline)
-                .foregroundStyle(dialogPrimaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Self.androidSortedTranslationModules(modules)) { mod in
-                        translationRow(mod)
-                        Divider()
-                            .background(dialogSecondaryText.opacity(0.18))
-                            .padding(.leading, 22)
-                    }
-                }
-            }
-            .frame(maxHeight: 420)
-            .accessibilityIdentifier("searchTranslationPickerList")
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
-            HStack(spacing: 14) {
-                Button(String(localized: "cancel")) {
-                    cancelTranslationPicker()
-                }
-                .foregroundStyle(dialogAccent)
-                .accessibilityIdentifier("searchTranslationCancelButton")
-
-                Spacer(minLength: 8)
-
-                Button(searchTranslationSelectToggleTitle) {
-                    toggleAllTranslationRows()
-                }
-                .foregroundStyle(dialogAccent)
-                .accessibilityIdentifier("searchTranslationSelectAllButton")
-                .accessibilityValue(searchTranslationSelectToggleAccessibilityValue)
-
-                Button(String(localized: "ok", defaultValue: "OK")) {
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "searchTranslationPickerOverlay",
+            onOutsideTap: cancelTranslationPicker
+        ) {
+            AndroidMultiselectDialogContent(
+                title: String(localized: "choose_translations", defaultValue: "Choose translations"),
+                rows: searchTranslationPickerRows,
+                selectedIDs: $pendingTranslationSelection,
+                isBusy: false,
+                accessibilityIdentifier: "searchTranslationPickerDialog",
+                accessibilityPrefix: "searchTranslationPicker",
+                onCancel: cancelTranslationPicker,
+                onConfirm: { orderedModuleNames in
+                    pendingTranslationSelection = Set(orderedModuleNames)
                     commitTranslationPickerSelection()
                 }
-                .fontWeight(.semibold)
-                .foregroundStyle(dialogAccent)
-                .accessibilityIdentifier("searchTranslationOKButton")
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
+            )
         }
-        .frame(maxWidth: 430)
-        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .strokeBorder(dialogSecondaryText.opacity(0.28), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
     }
 
     /**
-     Builds one Android-style checkbox row in the Search translation picker.
+     Builds exact ordered rows for the reusable Android multiselect component.
 
-     - Parameter mod: Installed module metadata for the row being rendered.
-     - Returns: A full-width button that toggles the row's draft checked state.
-     - Side effects: Mutates `pendingTranslationSelection`; it does not mutate committed Search
-       module selection until the dialog OK action runs.
-     - Failure modes: If index readiness cannot be determined, the row label omits the unindexed
-       suffix rather than presenting possibly false status.
+     - Returns: Abbreviation-sorted module identities with Android's index-status suffix.
+     - Side effects: Reads index readiness without mutating Search state.
+     - Failure modes: Missing readiness is represented as not indexed, matching Search's fail-closed
+       index gate.
      */
-    private func translationRow(_ mod: ModuleInfo) -> some View {
-        let modName = mod.name
-        let isSelected = pendingTranslationSelection.contains(modName)
-        let rowLabel = Self.androidTranslationPickerLabel(
-            for: mod,
-            isIndexed: isTranslationModuleIndexed(modName),
-            unindexedStatus: String(localized: "search_index_not_created", defaultValue: "Search index not created")
-        )
-        return Button {
-            togglePendingTranslationSelection(modName)
-        } label: {
-            HStack(spacing: 14) {
-                if isSelected {
-                    Image(systemName: "checkmark.square.fill")
-                        .foregroundStyle(dialogAccent)
-                } else {
-                    Image(systemName: "square")
-                        .foregroundStyle(dialogSecondaryText)
-                }
-                Text(rowLabel)
-                    .font(.body)
-                    .foregroundStyle(dialogPrimaryText)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 13)
-            .contentShape(Rectangle())
+    private var searchTranslationPickerRows: [AndroidMultiselectDialogRow<String>] {
+        Self.androidSortedTranslationModules(candidateSearchModules).map { module in
+            AndroidMultiselectDialogRow(
+                id: module.name,
+                title: Self.androidTranslationPickerLabel(
+                    for: module,
+                    isIndexed: isTranslationModuleIndexed(module.name),
+                    unindexedStatus: String(
+                        localized: "search_index_not_created",
+                        defaultValue: "Search index not created"
+                    )
+                ),
+                accessibilityIdentifier: "searchTranslationRow::\(sanitizedAccessibilitySegment(module.name))"
+            )
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("searchTranslationRow::\(sanitizedAccessibilitySegment(modName))")
-        .accessibilityValue(isSelected ? "selected" : "unselected")
-    }
-
-    /// Android-dialog background color for the current system appearance.
-    private var dialogBackground: Color {
-        AndroidDialogSurfacePalette.background(for: colorScheme)
-    }
-
-    /// Android-dialog primary text color for the current system appearance.
-    private var dialogPrimaryText: Color {
-        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
-    }
-
-    /// Android-dialog secondary text color for the current system appearance.
-    private var dialogSecondaryText: Color {
-        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
-    }
-
-    /// Android-dialog accent color for interactive picker actions.
-    private var dialogAccent: Color {
-        AndroidDialogSurfacePalette.accent(for: colorScheme)
     }
 
     /**
@@ -1463,41 +1584,6 @@ public struct SearchView: View {
     }
 
     /**
-     Toggles one draft module check state in the Search translation picker.
-
-     Android allows the dialog's checked set to become empty while the dialog remains open; the
-     empty OK result is ignored later. This method intentionally does not enforce "at least one"
-     selection at row-tap time.
-
-     - Parameter moduleName: SWORD module abbreviation for the tapped row.
-     - Side effects: Mutates `pendingTranslationSelection`.
-     */
-    private func togglePendingTranslationSelection(_ moduleName: String) {
-        pendingTranslationSelection = SearchTranslationPickerDraftState(
-            isPresented: showTranslationPicker,
-            pendingSelection: pendingTranslationSelection
-        ).toggled(moduleName).pendingSelection
-    }
-
-    /**
-     Selects every module or clears the draft selection using Android's neutral-button behavior.
-
-     Android's multiselect neutral button toggles between Select all and Select none without
-     closing the dialog. This method mirrors that behavior against the abbreviation-sorted module
-     list.
-
-     Side effects: Mutates `pendingTranslationSelection`; does not commit to `selectedModules`.
-     */
-    private func toggleAllTranslationRows() {
-        pendingTranslationSelection = SearchTranslationPickerDraftState(
-            isPresented: showTranslationPicker,
-            pendingSelection: pendingTranslationSelection
-        ).toggledAll(
-            moduleNames: Self.androidSortedTranslationModules(candidateSearchModules).map(\.name)
-        ).pendingSelection
-    }
-
-    /**
      Resolves whether one module has a completed Search index for picker labeling.
 
      Android appends "Search index not created" when JSword reports an index status other than
@@ -1513,23 +1599,6 @@ public struct SearchView: View {
         return searchIndexService?.hasIndex(for: source.searchIndexSourceIdentity) ?? false
     }
 
-    /// Visible Select all/none label for the Search translation picker neutral action.
-    private var searchTranslationSelectToggleTitle: String {
-        let allCount = Self.androidSortedTranslationModules(candidateSearchModules).count
-        if allCount > 0, pendingTranslationSelection.count == allCount {
-            return String(localized: "select_none", defaultValue: "Select none")
-        }
-        return String(localized: "select_all", defaultValue: "Select all")
-    }
-
-    /// Stable UI-test semantic state for the picker neutral select toggle.
-    private var searchTranslationSelectToggleAccessibilityValue: String {
-        let allCount = Self.androidSortedTranslationModules(candidateSearchModules).count
-        return allCount > 0 && pendingTranslationSelection.count == allCount
-            ? "selectNone"
-            : "selectAll"
-    }
-
     // MARK: - Navigation
 
     /**
@@ -1541,11 +1610,47 @@ public struct SearchView: View {
      */
     private func navigateTo(_ hit: SearchModuleHit) {
         guard onNavigate?(SearchNavigationTarget(hit: hit)) == true else { return }
-        cancelAllAsyncWork()
-        dismiss()
+        closeSearch()
+    }
+
+    /** Opens the complete currently displayed result set in Android's dedicated links window. */
+    private func openResultsInWindow() {
+        guard let groupedResults,
+              onOpenResultsInWindow?(groupedResults) == true else {
+            return
+        }
+        closeSearch()
     }
 
     // MARK: - Index Management
+
+    /**
+     Opens Android's SearchIndex activity state for the current primary document.
+
+     The existing index is not deleted until the explicit Rebuild action. Cancel therefore returns
+     to unchanged Search criteria, matching Android's separate activity lifecycle.
+     */
+    private func beginRebuildIndexFlow() {
+        guard let moduleName = fallbackSearchModuleName,
+              resolveSearchIndexSource(named: moduleName) != nil else {
+            let name = fallbackSearchModuleName ?? String(localized: "search", defaultValue: "Search")
+            viewState = .indexFailure(
+                moduleName: name,
+                moduleDescription: moduleDescription(for: name),
+                message: String(
+                    localized: "error_occurred",
+                    defaultValue: "An error has occurred"
+                )
+            )
+            return
+        }
+        forcedRebuildModuleName = moduleName
+        presentationStage = .criteria
+        viewState = .needsIndex(
+            moduleName: moduleName,
+            moduleDescription: moduleDescription(for: moduleName)
+        )
+    }
 
     /**
      Checks whether the selected search target modules already have indexes.
@@ -1555,16 +1660,17 @@ public struct SearchView: View {
 
      Side effects:
      - mutates `viewState` to `.ready`, `.needsIndex`, or `.indexFailure`
-     - may trigger `autoSearchIfNeeded()` when the search UI becomes ready
+     - resumes the explicitly submitted or externally seeded search when the UI becomes ready
      - reads index availability from `SearchIndexService`
 
      Failure modes:
      - a missing index service or empty effective module selection becomes an explicit retryable
        failure instead of exposing Search as ready
      */
-    private func checkIndex() {
+    private func checkIndex(autoSearchWhenReady: Bool) {
         cancelSearchWork(clearPublishedState: true)
         cancelIndexWork()
+        resumesSearchAfterIndex = autoSearchWhenReady
         let fallbackModuleName = fallbackSearchModuleName ?? swordModule?.info.name ?? "Search"
         guard let service = searchIndexService else {
             viewState = .indexFailure(
@@ -1612,7 +1718,7 @@ public struct SearchView: View {
             )
         } else {
             viewState = .ready
-            autoSearchIfNeeded()
+            resumeSearchAfterIndexIfNeeded()
         }
     }
 
@@ -1641,8 +1747,10 @@ public struct SearchView: View {
      This covers both externally seeded queries and text the user entered while the view was still
      waiting on index readiness.
      */
-    private func autoSearchIfNeeded() {
-        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    private func resumeSearchAfterIndexIfNeeded() {
+        let shouldResume = resumesSearchAfterIndex
+        resumesSearchAfterIndex = false
+        if shouldResume, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             performSearch()
         }
     }
@@ -1681,6 +1789,10 @@ public struct SearchView: View {
        verification transitions to `.indexFailure` and never exposes stale Search results
      */
     private func startIndexCreation() {
+        if let forcedRebuildModuleName {
+            startForcedIndexRebuild(moduleName: forcedRebuildModuleName)
+            return
+        }
         cancelSearchWork(clearPublishedState: true)
         cancelIndexWork()
         let fallbackModuleName = fallbackSearchModuleName ?? swordModule?.info.name ?? "Search"
@@ -1749,7 +1861,7 @@ public struct SearchView: View {
                 guard indexRequestGate.accepts(requestToken) else { return }
                 indexTask = nil
                 viewState = .ready
-                autoSearchIfNeeded()
+                resumeSearchAfterIndexIfNeeded()
             } catch is CancellationError {
                 return
             } catch {
@@ -1758,6 +1870,63 @@ public struct SearchView: View {
                 viewState = .indexFailure(
                     moduleName: activeModuleName,
                     moduleDescription: moduleDescription(for: activeModuleName),
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    /**
+     Deletes and recreates one existing primary-document index after explicit Android confirmation.
+
+     - Parameter moduleName: Exact current document initials captured when the rebuild flow opened.
+     - Side effects: Deletes only that generated index, recreates it from the exact source snapshot,
+       verifies readiness, and returns to preserved Search criteria.
+     - Failure modes: Missing service/source, cancellation, build errors, and failed verification
+       transition to the existing retryable index failure state; source content is never deleted.
+     */
+    private func startForcedIndexRebuild(moduleName: String) {
+        cancelSearchWork(clearPublishedState: true)
+        cancelIndexWork()
+        guard let service = searchIndexService,
+              let source = resolveSearchIndexSource(named: moduleName) else {
+            forcedRebuildModuleName = nil
+            viewState = .indexFailure(
+                moduleName: moduleName,
+                moduleDescription: moduleDescription(for: moduleName),
+                message: SearchIndexError.databaseUnavailable(
+                    operation: "rebuilding \(moduleName)"
+                ).localizedDescription
+            )
+            return
+        }
+
+        let requestToken = indexRequestGate.begin()
+        viewState = .creatingIndex
+        indexTask = Task {
+            do {
+                await service.deleteIndex(for: moduleName)
+                try Task.checkCancellation()
+                guard indexRequestGate.accepts(requestToken) else { return }
+                try await service.createIndex(source: source)
+                try Task.checkCancellation()
+                guard indexRequestGate.accepts(requestToken) else { return }
+                guard service.hasIndex(for: source.searchIndexSourceIdentity) else {
+                    throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
+                }
+                indexTask = nil
+                forcedRebuildModuleName = nil
+                presentationStage = .criteria
+                viewState = .ready
+            } catch is CancellationError {
+                return
+            } catch {
+                guard indexRequestGate.accepts(requestToken), !Task.isCancelled else { return }
+                indexTask = nil
+                forcedRebuildModuleName = moduleName
+                viewState = .indexFailure(
+                    moduleName: moduleName,
+                    moduleDescription: moduleDescription(for: moduleName),
                     message: error.localizedDescription
                 )
             }
@@ -1836,11 +2005,12 @@ public struct SearchView: View {
             return
         }
         if onOpenReference?(trimmedQuery) == true {
-            cancelAllAsyncWork()
-            dismiss()
+            closeSearch()
             return
         }
         representedSearchQuery = trimmedQuery
+        presentationStage = .results
+        expandedResultGroupIDs.removeAll()
 
         guard let currentSearchIndexService = searchIndexService else {
             groupedResults = nil
@@ -1888,6 +2058,7 @@ public struct SearchView: View {
                 moduleName: missingModuleName,
                 moduleDescription: moduleDescription(for: missingModuleName)
             )
+            resumesSearchAfterIndex = true
             return
         }
 
@@ -1921,9 +2092,15 @@ public struct SearchView: View {
                     searchTask = nil
                     groupedResults = grouped
                     let translationCount = grouped.moduleCounts.count
-                    resultSummary = String(
-                        localized: "\(grouped.groups.count) verses in \(translationCount) translations"
-                    )
+                    if translationCount == 1 {
+                        resultSummary = String(
+                            localized: "\(grouped.groups.count) verses in 1 translation"
+                        )
+                    } else {
+                        resultSummary = String(
+                            localized: "\(grouped.groups.count) verses in \(translationCount) translations"
+                        )
+                    }
                     searchFailureMessage = nil
                     isSearching = false
                 }

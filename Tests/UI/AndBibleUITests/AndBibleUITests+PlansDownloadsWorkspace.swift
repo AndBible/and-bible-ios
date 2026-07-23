@@ -7,7 +7,7 @@ import UIKit
 
 extension AndBibleUITests {
     /**
-     Verifies the drawer Reading Plan route can start, advance, delete, and import plans.
+     Verifies the drawer Reading Plan route can select, advance, reset, and import plans.
      *
      * Android opens the selector through `DailyReading`, returns the chosen plan code, and then
      * immediately shows that plan's daily reading. Package tests own bundled catalog parity, custom
@@ -18,17 +18,17 @@ extension AndBibleUITests {
      *   - launches the reader shell with empty reading-plan state
      *   - opens Reading Plans from the drawer and verifies Android-style destination chrome
      *   - starts the first Android-parity built-in template, completes day one, and reopens day two
-     *   - returns to the plan list, deletes the active plan, then opens the import picker path
+     *   - resets through Daily Reading's overflow, then opens Import from that same source menu
      * - Failure modes:
      *   - fails if Reading Plans regresses to sheet presentation
-     *   - fails if the list state does not publish the expected active-plan counts
+     *   - fails if the coordinator state does not publish the expected selected-plan lifecycle
      *   - fails if the built-in catalog diverges from Android's bundled templates
      *   - fails if the built-in template does not navigate from picker selection to Daily Reading
      *   - fails if the daily reading route cannot complete today's due reading through the visible controls
-     *   - fails if the row-level delete action is missing or does not remove the active plan
-     *   - fails if the custom import affordance does not request file-picker presentation
+     *   - fails if Reset does not use Android's overflow/confirmation/finish lifecycle
+     *   - fails if Import is incorrectly placed in the selector or does not request ZIP selection
      */
-    func testReadingPlansRouteStartAdvanceDeleteAndImportAffordanceFlow() {
+    func testReadingPlansRouteSelectAdvanceResetAndImportAffordanceFlow() {
         let builtInPlanCode = "y1ot1nt1_OTthenNT"
         let builtInPlanToken = readingPlanStateToken(builtInPlanCode)
         let app = makeApp()
@@ -41,11 +41,12 @@ extension AndBibleUITests {
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer Reading Plan should use reader destination back chrome, not iOS sheet Done chrome."
         )
-        waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
+        waitForReadingPlanListState(containing: "total=0", in: app, timeout: 10)
+        waitForReadingPlanListState(containing: "showAvailablePlans=true", in: app, timeout: 10)
 
         openAvailableReadingPlans(in: app, timeout: 10)
-        waitForAvailablePlansState(containing: "templates=7", in: app, timeout: 10)
-        waitForAvailablePlansState(containing: builtInPlanToken, in: app, timeout: 10)
+        waitForReadingPlanListState(containing: "templates=7", in: app, timeout: 10)
+        waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
 
         tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
         XCTAssertTrue(
@@ -68,16 +69,15 @@ extension AndBibleUITests {
         )
         tapElementReliably(doneButton, timeout: 10)
         XCTAssertTrue(
-            requireElement("readingPlanListScreen", in: app, timeout: 20).exists,
-            "Android closes Daily Reading when the next plan day is not yet due."
+            waitForUITestCondition("Daily Reading closes to reader", timeout: 20) {
+                self.readerRenderedContentStateValue(in: app)?.contains(
+                    "readerDestination=none"
+                ) == true
+            },
+            "Android finishes Daily Reading when the next plan day is not yet due."
         )
-        waitForReadingPlanListState(containing: "active=1", in: app, timeout: 10)
-        waitForReadingPlanListState(containing: builtInPlanToken, in: app, timeout: 10)
 
-        tapElementReliably(
-            requireElement("readingPlanActivePlanLink", in: app, timeout: 10),
-            timeout: 10
-        )
+        _ = openReadingPlans(in: app, timeout: 20)
         XCTAssertTrue(requireElement("dailyReadingScreen", in: app, timeout: 20).exists)
         let advancedDay = requireElement("dailyReadingCurrentDayLabel", in: app, timeout: 15)
         XCTAssertTrue(
@@ -86,19 +86,98 @@ extension AndBibleUITests {
             },
             "Done must persist Android's next current day before dismissing Daily Reading."
         )
-        let dailyReadingBackButton = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(dailyReadingBackButton.waitForExistence(timeout: 10))
-        tapElementReliably(dailyReadingBackButton, timeout: 10)
-        XCTAssertTrue(requireElement("readingPlanListScreen", in: app, timeout: 20).exists)
+        tapElementReliably(
+            openDailyReadingOverflowItem("dailyReadingResetPlanButton", in: app),
+            timeout: 10
+        )
+        tapElementReliably(
+            requireElement(
+                "dailyReadingResetConfirmationDialogAction::yes",
+                in: app,
+                timeout: 10
+            ),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForUITestCondition("Reset closes Daily Reading to reader", timeout: 20) {
+                self.readerRenderedContentStateValue(in: app)?.contains(
+                    "readerDestination=none"
+                ) == true
+            }
+        )
 
-        let activePlan = requireElement("readingPlanActivePlanLink", in: app, timeout: 10)
-        deleteReadingPlan(activePlan, planCode: builtInPlanCode, in: app, timeout: 10)
-        waitForReadingPlanListState(containing: "active=0", in: app, timeout: 10)
-        waitForReadingPlanListState(notContaining: builtInPlanToken, in: app, timeout: 10)
-
+        _ = openReadingPlans(in: app, timeout: 20)
         openAvailableReadingPlans(in: app, timeout: 10)
-        tapElementReliably(revealAvailablePlansImportButton(in: app, timeout: 10), timeout: 10)
-        waitForAvailablePlansState(containing: "importPickerPresented=true", in: app, timeout: 20)
+        waitForReadingPlanListState(containing: "total=0", in: app, timeout: 10)
+        tapElementReliably(requireElement("readingPlanTemplateButton", in: app, timeout: 15), timeout: 10)
+        XCTAssertTrue(requireElement("dailyReadingScreen", in: app, timeout: 20).exists)
+
+        tapElementReliably(
+            openDailyReadingOverflowItem("readingPlanImportButton", in: app),
+            timeout: 10
+        )
+        waitForReadingPlanListState(containing: "importPickerPresented=true", in: app, timeout: 20)
+    }
+
+    /**
+     Opens Daily Reading's app-owned overflow and resolves one source menu command.
+
+     - Parameters:
+       - itemIdentifier: Stable identifier of the Android overflow row.
+       - app: Running application currently showing Daily Reading.
+       - timeout: Maximum time to open and resolve the popup.
+       - file: XCTest failure attribution source.
+       - line: XCTest failure attribution line.
+     - Returns: Visible, usable popup command.
+     - Side effects: Taps the real Daily Reading overflow trigger when necessary.
+     - Failure modes: Records a focused failure if the trigger or command never becomes visible.
+     */
+    func openDailyReadingOverflowItem(
+        _ itemIdentifier: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        if let item = resolvedElement(itemIdentifier, in: app),
+           elementHasUsableFrame(item) {
+            return item
+        }
+
+        let trigger = requireElement(
+            "dailyReadingActionsMenuButton",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+        tapElementReliably(trigger, timeout: timeout, file: file, line: line)
+
+        var resolvedItem: XCUIElement?
+        let didResolveItem = waitForUITestCondition(
+            "Daily Reading overflow item '\(itemIdentifier)'",
+            timeout: timeout
+        ) {
+            guard let item = self.resolvedElement(itemIdentifier, in: app),
+                  self.elementHasUsableFrame(item)
+            else {
+                return false
+            }
+            resolvedItem = item
+            return true
+        }
+        if didResolveItem, let resolvedItem {
+            return resolvedItem
+        }
+
+        let fallback = unresolvedElement(itemIdentifier, in: app)
+        XCTAssertTrue(
+            fallback.exists,
+            "Expected Daily Reading overflow item '\(itemIdentifier)' within \(timeout) seconds.",
+            file: file,
+            line: line
+        )
+        return fallback
     }
 
     /**
@@ -162,6 +241,85 @@ extension AndBibleUITests {
             line: line
         )
         return item
+    }
+
+    /**
+     Verifies Choose Document and Download Documents render as the same full Android activity family.
+
+     This is the live regression counterpart to the source-level ownership matrix. It protects the
+     reported failure where Choose Document became a large-type, History-like constrained modal by
+     requiring the real reader route to expose the shared app bar and all three inline
+     `DocumentSelectionBase` filters, then transitions through its real overflow action and compares
+     their geometry with Download Documents.
+
+     - Side effects:
+       - launches the reader, opens Choose Document, opens its app-owned overflow popup, and follows
+         the Download Documents action on the same reader destination stack
+     - Failure modes:
+       - fails if either activity loses its app-owned Back/overflow controls or shared filters
+       - fails if Choose Document is hosted as a History dialog or native iOS sheet
+       - fails if the shared filter controls no longer occupy equivalent activity geometry
+     */
+    func testDocumentChooserMatchesDownloadDocumentsActivityStructure() {
+        let app = makeApp()
+        app.launch()
+
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=chooseDocument",
+            in: app,
+            timeout: 20
+        )
+
+        let chooserBack = requireElement("modulePickerBackButton", in: app, timeout: 20)
+        let chooserOverflow = requireElement("modulePickerOverflowButton", in: app, timeout: 10)
+        let chooserLanguage = requireElement("modulePickerLanguageFilter", in: app, timeout: 10)
+        let chooserSearch = requireElement("modulePickerSearchField", in: app, timeout: 10)
+        let chooserCategory = requireElement("modulePickerCategoryFilter", in: app, timeout: 10)
+        let chooserFrames = (
+            back: chooserBack.frame,
+            language: chooserLanguage.frame,
+            search: chooserSearch.frame,
+            category: chooserCategory.frame
+        )
+
+        XCTAssertFalse(
+            unresolvedElement("androidHistoryDialog", in: app).exists,
+            "Choose Document must not reuse the constrained History dialog host."
+        )
+        XCTAssertFalse(
+            app.sheets.firstMatch.exists,
+            "Choose Document must remain an app-owned activity rather than a native iOS sheet."
+        )
+        XCTAssertLessThan(
+            chooserFrames.search.midY,
+            app.frame.midY,
+            "The shared document filter strip must remain in the activity header, not a centered modal."
+        )
+
+        tapElementReliably(chooserOverflow, timeout: 10)
+        tapElementReliably(
+            requireElement("modulePickerDownloadsButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=downloads",
+            in: app,
+            timeout: 20
+        )
+
+        let downloadsBack = requireElement("moduleBrowserBackButton", in: app, timeout: 20)
+        _ = requireElement("moduleBrowserOverflowButton", in: app, timeout: 10)
+        let downloadsLanguage = requireElement("moduleBrowserLanguageFilter", in: app, timeout: 10)
+        let downloadsSearch = requireElement("moduleBrowserSearchField", in: app, timeout: 10)
+        let downloadsCategory = requireElement("moduleBrowserCategoryFilter", in: app, timeout: 10)
+
+        XCTAssertEqual(chooserFrames.back.height, downloadsBack.frame.height, accuracy: 2)
+        XCTAssertEqual(chooserFrames.language.minY, downloadsLanguage.frame.minY, accuracy: 2)
+        XCTAssertEqual(chooserFrames.search.minY, downloadsSearch.frame.minY, accuracy: 2)
+        XCTAssertEqual(chooserFrames.search.height, downloadsSearch.frame.height, accuracy: 2)
+        XCTAssertEqual(chooserFrames.category.minY, downloadsCategory.frame.minY, accuracy: 2)
+        XCTAssertFalse(app.sheets.firstMatch.exists)
     }
 
     /**
@@ -230,7 +388,13 @@ extension AndBibleUITests {
             requireElement(warningRowIdentifier, in: app, timeout: 10),
             timeout: 10
         )
-        tapAlertButton("Cancel", in: app, timeout: 10)
+        tapAppOwnedDialogAction(
+            "androidModulePickerDecisionDialogAction::cancel",
+            dialogIdentifier: "androidModulePickerDecisionDialog",
+            expectedTitle: "Cancel",
+            in: app,
+            timeout: 10
+        )
 
         waitForResolvedSemanticState(
             named: "moduleBrowserStateExport",
@@ -249,7 +413,13 @@ extension AndBibleUITests {
             requireElement(warningRowIdentifier, in: app, timeout: 10),
             timeout: 10
         )
-        tapAlertButton("OK", in: app, timeout: 10)
+        tapAppOwnedDialogAction(
+            "androidModulePickerDecisionDialogAction::install",
+            dialogIdentifier: "androidModulePickerDecisionDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
 
         waitForResolvedSemanticState(
             named: "moduleBrowserStateExport",

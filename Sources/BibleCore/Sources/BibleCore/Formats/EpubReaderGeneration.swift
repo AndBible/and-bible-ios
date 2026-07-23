@@ -374,11 +374,97 @@ extension EpubReader {
         try? fileManager.removeItem(at: legacyIndex)
     }
 
+    /**
+     Rebuilds one explicitly requested index and opens the newly published immutable generation.
+
+     This is the explicit-root implementation behind Android EPUB Search's Rebuild index command
+     and deterministic tests. It uses the same publisher as automatic stale-index migration, so a
+     live reader remains leased to its old generation while future opens select the replacement.
+
+     - Parameters:
+       - identifier: Stable installed EPUB identity.
+       - libraryRootURL: Library root containing the current stable generation pointer.
+     - Returns: A reader leased to the newly published generation.
+     - Side effects: Copies the current package, builds a complete replacement index, atomically
+       switches the stable pointer, and opens the replacement read-only.
+     - Throws: Missing/unsafe generation state, index/publication failures, or failure to reopen the
+       just-published generation. Publication failures retain the prior stable pointer.
+     */
+    static func rebuildSearchIndex(
+        identifier: String,
+        libraryRootURL: URL
+    ) throws -> EpubReader {
+        libraryMutationLock.lock()
+        defer { libraryMutationLock.unlock() }
+        let fileManager = FileManager.default
+        guard let manifest = generationManifest(
+            identifier: identifier,
+            libraryRootURL: libraryRootURL
+        ) else {
+            throw EpubError.invalidEpub("Installed EPUB generation is unavailable")
+        }
+        let source = location(for: manifest, libraryRootURL: libraryRootURL)
+        guard fileManager.fileExists(atPath: source.packageRootURL.path) else {
+            throw EpubError.invalidEpub("Installed EPUB package is unavailable")
+        }
+        _ = try rebuildGeneration(
+            from: source,
+            libraryRootURL: libraryRootURL,
+            fileManager: fileManager
+        )
+        guard let reader = EpubReader(identifier: identifier, libraryRootURL: libraryRootURL) else {
+            throw EpubError.indexingFailed("Rebuilt EPUB index could not be opened")
+        }
+        return reader
+    }
+
+    /**
+     Publishes an immutable EPUB generation with rendered content intact and FTS rows removed.
+
+     - Parameters:
+       - identifier: Stable installed EPUB identity.
+       - libraryRootURL: Explicit library root for production or isolated tests.
+     - Returns: Reader leased to the newly published index-free generation.
+     - Side effects: Locks the library, stages a complete generation, clears only staged FTS rows,
+       atomically switches the stable pointer, and reopens the result.
+     - Throws: Missing package state, SQLite, publication, or reopen failures. The prior generation
+       remains current on failure, and already-open readers retain their immutable leases.
+     */
+    static func deleteSearchIndex(
+        identifier: String,
+        libraryRootURL: URL
+    ) throws -> EpubReader {
+        libraryMutationLock.lock()
+        defer { libraryMutationLock.unlock() }
+        let fileManager = FileManager.default
+        guard let manifest = generationManifest(
+            identifier: identifier,
+            libraryRootURL: libraryRootURL
+        ) else {
+            throw EpubError.invalidEpub("Installed EPUB generation is unavailable")
+        }
+        let source = location(for: manifest, libraryRootURL: libraryRootURL)
+        guard fileManager.fileExists(atPath: source.packageRootURL.path) else {
+            throw EpubError.invalidEpub("Installed EPUB package is unavailable")
+        }
+        _ = try rebuildGeneration(
+            from: source,
+            libraryRootURL: libraryRootURL,
+            fileManager: fileManager,
+            includesSearchIndex: false
+        )
+        guard let reader = EpubReader(identifier: identifier, libraryRootURL: libraryRootURL) else {
+            throw EpubError.indexingFailed("Index-free EPUB generation could not be opened")
+        }
+        return reader
+    }
+
     /** Rebuilds a stale immutable index by publishing a completely new package/index generation. */
     private static func rebuildGeneration(
         from source: EpubGenerationLocation,
         libraryRootURL: URL,
-        fileManager: FileManager
+        fileManager: FileManager,
+        includesSearchIndex: Bool = true
     ) throws -> EpubGenerationManifest {
         let generationIdentifier = newGenerationIdentifier()
         let container = generationContainerURL(
@@ -404,6 +490,9 @@ extension EpubReader {
             ),
             sourceFileName: sourceFileName
         )
+        if !includesSearchIndex {
+            try clearSearchIndex(at: stagingIndex)
+        }
         let manifest = EpubGenerationManifest(
             schemaVersion: generationManifestVersion,
             identifier: source.identifier,

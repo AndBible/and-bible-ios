@@ -688,3 +688,32 @@
 "report_bug_heading_4" = "Device info:";
 "report_bug_line_1" = "Tell us briefly what did you do / what happened when issue took place.";
 "send_bug_report_title" = "Feedback / bug report";
+
+/* Integrated Android app-owned parity translations */
+"label_unlabelled" = "ശീർഷകം ഇല്ലാത്തത്";
+"new_item" = "പുതിയ";
+"assign_labels" = "ശീർഷകം നിർണ്ണയിക്കുക";
+"empty_list" = "കാണിക്കുവാൻ ഒന്നുമില്ല";
+"label_name_prompt" = "പേര്";
+"sort_by_bible_book" = "ബൈബിള്‍ പുസ്തക ക്രമത്തിൽ";
+"sort_by_date" = "തീയതി ക്രമത്തിൽ";
+"next" = "അടുത്ത";
+"previous" = "മുൻപുള്ള";
+"rdg_plan_day" = "ദിവസം %@";
+"rdg_plan_selector_title" = "ഒരു വായന പദ്ധതി തിരഞ്ഞെടുക്കുക";
+"selectPassage" = "ഭാഗം";
+"delete_doc" = "നീക്കി കളയുക %@?";
+"delete_index" = "അന്വേഷണപട്ടിക നീക്കി കളയുക";
+"delete_search_index_doc" = "പട്ടിക നീക്കി കളയുക %@?";
+"doc_type_bible" = "വേദപുസ്തകം";
+"doc_type_book" = "പുസ്തകം";
+"doc_type_dictionary" = "നിഘണ്ഡു";
+"doc_type_map" = "ഭൂപടം";
+"colors_night_mode_title" = "രാത്രി രീതി";
+"repeat_passage" = "ഖണ്ഡിക ആവർത്തിക്കുക";
+"reset_settings" = "പുനഃരാരംഭിക്കൂ";
+"system_speak_settings" = "ഓപ്പൺ സിസ്റ്റം TTS സെറ്റിങ്ങ്സ്";
+"index_create" = "ഉണ്ടാക്കുക";
+"rebuild_index" = "സൂചിക വീണ്ടും ഉണ്ടാക്കുക";
+"search_dictionary_hint" = "നിഘണ്ടുവിൽ തിരയുക";
+"task_kill_warning" = "ഈ പ്രവർത്തനം തീരുന്നതിനു മുമ്പായി മറ്റൊരു പ്രവർത്തനം തുടങ്ങിയാൽ ദീർഘസമയം വേണ്ടിവരുന്ന ഇതു നിലച്ചുപോകാൻ സാധ്യത ഉണ്ട്";

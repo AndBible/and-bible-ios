@@ -1,4 +1,4 @@
-// MyDocumentPagesListView.swift -- Android-parity page management for one My Document
+// MyDocumentPagesListView.swift -- App-owned Android document Pages activity
 
 import BibleCore
 import Foundation
@@ -6,22 +6,26 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /**
- Manages one document's pages with explicit page-level Save/Cancel behavior.
+ Manages one document's pages using Android's Pages activity presentation and behavior.
 
- The parent supplies a value-based management session and a stable document identifier. This view
- edits only that document's pages, asks the parent to persist explicit saves, and returns selected
- pages to the owning reader without writing SwiftData directly.
+ The route owns an app bar, promoted New-page action, anchored Import overflow, draggable flat rows,
+ per-page popup menus, a text-only empty state, and persistent Dismiss/Save actions. It mutates the
+ parent's value session and delegates persistence to one parent callback, preserving a deterministic
+ page-level Save/Discard boundary without native iOS List, Menu, toolbar, or navigation chrome.
 
- - Side effects: Mutates the bound draft session, presents import/export and edit surfaces, invokes
-   the parent save callback, and opens selected pages in the reader.
- - Failure modes: Missing documents render a not-found state. Import, export, validation, and save
-   failures remain visible for correction or retry without silently discarding draft changes.
+ Side effects:
+ - mutates the bound draft session
+ - invokes the parent's transactional Save callback
+ - reads one security-scoped import or hands a completed export/share to the platform
+ - opens a persisted page in the owning reader
+
+ Failure modes: missing documents and workflow errors remain visible on the app-owned route
  */
 struct MyDocumentPagesListView: View {
-    @Environment(\.dismiss) private var dismiss
-
     let documentID: UUID
     @Binding var session: MyDocumentManagementSession
+    let surfacePalette: ReaderThemeSurfacePalette
+    let onDismiss: () -> Void
     let onSave: () -> Bool
     let onOpenPage: (String, String) -> Void
 
@@ -32,8 +36,13 @@ struct MyDocumentPagesListView: View {
     @State private var pendingOpenPage: MyDocumentPageDraft?
     @State private var showsDirtyDecision = false
     @State private var pendingExitAfterDecision = false
+    @State private var showsOverflowMenu = false
+    @State private var activePageMenuID: UUID?
+    @State private var pageExportDocument: MyDocumentExportDocument?
     @State private var exportURLs: [URL] = []
-    @State private var showsExport = false
+    @State private var showsExportDestinationDecision = false
+    @State private var showsPageFileExporter = false
+    @State private var showsShareSheet = false
     @State private var errorMessage: String?
 
     private var document: MyDocumentDraft? {
@@ -49,79 +58,30 @@ struct MyDocumentPagesListView: View {
         return pages != baselinePages
     }
 
-    /**
-     Builds the page list, editing controls, and deterministic UI-test state export.
-
-     - Side effects: Appearance captures a page baseline; user gestures may mutate the bound session,
-       present native file surfaces, persist through `onSave`, or invoke `onOpenPage`.
-     - Failure modes: A missing document renders the explicit unavailable state, while workflow
-       failures are shown by the view's alert.
-     */
+    /** Builds the complete app-owned activity and its legitimate platform file handoffs. */
     var body: some View {
-        Group {
-            if let document {
-                List {
-                    if pages.isEmpty {
-                        ContentUnavailableView(
-                            document.name,
-                            systemImage: "doc.text",
-                            description: Text(
-                                String(
-                                    localized: "my_document_pages_empty",
-                                    defaultValue: "No pages in this document."
-                                )
-                            )
-                        )
-                    } else {
-                        ForEach(pages) { page in
-                            pageRow(page, document: document)
-                        }
-                        .onMove { offsets, destination in
-                            do {
-                                try session.movePages(
-                                    documentID: documentID,
-                                    fromOffsets: offsets,
-                                    toOffset: destination
-                                )
-                            } catch {
-                                errorMessage = error.localizedDescription
-                            }
-                        }
-                    }
-                }
-                .navigationTitle(document.name)
-            } else {
-                ContentUnavailableView(
-                    String(localized: "my_documents", defaultValue: "My Documents"),
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(String(
-                        localized: "error_key_not_in_document",
-                        defaultValue: "Not found in document"
-                    ))
-                )
-            }
-        }
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(true)
-        .toolbar { pageToolbar }
+        AndroidMyDocumentPagesActivityView(
+            document: document,
+            pages: pages,
+            surfacePalette: surfacePalette,
+            hasChanges: hasPageChanges,
+            accessibilityValue: myDocumentPagesAccessibilityValue,
+            showsOverflowMenu: $showsOverflowMenu,
+            activePageMenuID: $activePageMenuID,
+            onBack: requestExit,
+            onCreate: beginCreatePage,
+            onImport: { isImporting = true },
+            onDismiss: discardAndExit,
+            onSave: saveAndExit,
+            onOpen: requestOpen,
+            onRename: beginRenamePage,
+            onExport: beginExport,
+            onDelete: { pendingDeletePage = $0 },
+            onMove: { movePage($0, before: $1) }
+        )
+        .overlay(alignment: .topLeading) { myDocumentPagesStateExport }
         .onAppear {
             if baselinePages == nil { baselinePages = pages }
-        }
-        .overlay {
-            if let editorRequest {
-                MyDocumentPageEditor(
-                    request: editorRequest,
-                    onCancel: { self.editorRequest = nil }
-                ) { title, type, content in
-                    applyEditor(editorRequest, title: title, contentType: type, content: content)
-                    self.editorRequest = nil
-                }
-            }
-        }
-        .sheet(isPresented: $showsExport) {
-            ShareSheet(items: exportURLs.map { $0 as Any })
         }
         .fileImporter(
             isPresented: $isImporting,
@@ -129,54 +89,138 @@ struct MyDocumentPagesListView: View {
             allowsMultipleSelection: false,
             onCompletion: importPage
         )
-        .overlay {
-            if showsDirtyDecision {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "my_document_save_changes", defaultValue: "Save changes?"), message: nil, actions: [
-                    .init(id: "save", title: String(localized: "save"), style: .normal, perform: saveAndContinue),
-                    .init(id: "discard", title: String(localized: "no", defaultValue: "Don't Save"), style: .destructive, perform: discardAndContinue),
-                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingOpenPage = nil; pendingExitAfterDecision = false; showsDirtyDecision = false }
-                ])
-            } else if pendingDeletePage != nil {
-                AndroidMyDocumentDecisionDialog(title: String(format: String(localized: "my_document_page_delete_confirmation", defaultValue: "Delete %@?"), pendingDeletePage?.title ?? ""), message: nil, actions: [
-                    .init(id: "delete", title: String(localized: "delete"), style: .destructive, perform: deletePendingPage),
-                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingDeletePage = nil }
-                ])
-            } else if let errorMessage {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "errorTitle", defaultValue: "Error occurred"), message: errorMessage, actions: [
-                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { self.errorMessage = nil }
-                ])
-            }
+        .fileExporter(
+            isPresented: $showsPageFileExporter,
+            document: pageExportDocument,
+            contentTypes: pageExportDocument.map { [$0.contentType] } ?? [.text],
+            defaultFilename: pageExportDocument?.fileName,
+            onCompletion: completePageFileExport
+        )
+        .sheet(isPresented: $showsShareSheet, onDismiss: clearPageExport) {
+            ShareSheet(items: exportURLs.map { $0 as Any })
         }
-        .accessibilityIdentifier("myDocumentPagesScreen")
-        .overlay(alignment: .topLeading) { myDocumentPagesStateExport }
+        .overlay { dialogLayer }
+        #if os(iOS)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
     }
 
-    /**
-     Serializes the selected document and visible page identities for semantic UI synchronization.
+    /// Highest-priority app-owned page dialog.
+    @ViewBuilder
+    private var dialogLayer: some View {
+        if let editorRequest {
+            MyDocumentPageEditor(
+                request: editorRequest,
+                onCancel: { self.editorRequest = nil }
+            ) { title, type in
+                applyEditor(editorRequest, title: title, contentType: type)
+                self.editorRequest = nil
+            }
+        } else if showsDirtyDecision {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    localized: "my_document_save_changes",
+                    defaultValue: "Save changes?"
+                ),
+                actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) {
+                        pendingOpenPage = nil
+                        pendingExitAfterDecision = false
+                        showsDirtyDecision = false
+                    },
+                    .init(id: "no", title: String(localized: "no"), style: .normal) {
+                        discardAndContinue()
+                    },
+                    .init(id: "yes", title: String(localized: "yes"), style: .normal) {
+                        saveAndContinue()
+                    },
+                ],
+                accessibilityIdentifier: "myDocumentPagesSaveChangesDialog"
+            )
+        } else if pendingDeletePage != nil {
+            AndroidDecisionDialog(
+                title: "",
+                message: pageDeleteConfirmation,
+                actions: [
+                    .init(id: "no", title: String(localized: "no"), style: .normal) {
+                        pendingDeletePage = nil
+                    },
+                    .init(id: "yes", title: String(localized: "yes"), style: .normal) {
+                        deletePendingPage()
+                    },
+                ],
+                accessibilityIdentifier: "myDocumentPagesDeleteDialog"
+            )
+        } else if showsExportDestinationDecision {
+            AndroidDecisionDialog(
+                title: String(
+                    localized: "backup_backup_title",
+                    defaultValue: "Backup to where?"
+                ),
+                message: String(
+                    localized: "backup_backup_message",
+                    defaultValue: "Backup to phone or elsewhere via Share function (email, Google Drive etc.)?"
+                ),
+                actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) {
+                        showsExportDestinationDecision = false
+                        clearPageExport()
+                    },
+                    .init(
+                        id: "phone",
+                        title: String(
+                            localized: "backup_phone_storage",
+                            defaultValue: "Phone storage"
+                        ),
+                        style: .normal
+                    ) {
+                        showsExportDestinationDecision = false
+                        showsPageFileExporter = true
+                    },
+                    .init(id: "share", title: String(localized: "share"), style: .normal) {
+                        sharePreparedPageExport()
+                    },
+                ],
+                accessibilityIdentifier: "myDocumentPagesExportDestinationDialog"
+            )
+        } else if let errorMessage {
+            AndroidDecisionDialog(
+                title: "",
+                message: errorMessage,
+                actions: [
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) { self.errorMessage = nil },
+                ],
+                accessibilityIdentifier: "myDocumentPagesErrorDialog"
+            )
+        }
+    }
 
-     - Returns: A compact value containing document initials, page count, dirty state, and bounded
-       page-key tokens when detailed UI-test exports are enabled.
-     - Side effects: None.
-     - Failure modes: Missing documents use the stable `missing` token and an empty page list.
-     */
+    private var pageDeleteConfirmation: String {
+        String(
+            format: String(
+                localized: "my_document_page_delete_confirmation",
+                defaultValue: "Delete page \"%@\"?"
+            ),
+            pendingDeletePage?.title ?? ""
+        )
+    }
+
     private var myDocumentPagesAccessibilityValue: String {
         let baseState = "document=\(document?.initials ?? "missing");total=\(pages.count);dirty=\(hasPageChanges)"
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return baseState }
         let rowTokens = pages
             .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(accessibilitySegment($0.pageKey))|" }
+            .map { "|\(myDocumentsAccessibilitySegment($0.pageKey))|" }
             .joined(separator: ",")
         return "\(baseState);rows=\(rowTokens)"
     }
 
-    /**
-     Publishes page-list state through a lightweight hidden element for UI-test polling.
-
-     - Side effects: Adds one noninteractive accessibility element only in detailed UI-test mode.
-     - Failure modes: None; normal app sessions render no export element.
-     */
     @ViewBuilder
     private var myDocumentPagesStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
@@ -190,153 +234,61 @@ struct MyDocumentPagesListView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var pageToolbar: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button {
-                requestExit()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .accessibilityLabel(String(localized: "cancel"))
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            #if os(iOS)
-            EditButton()
-            #endif
-            Menu {
-                Button {
-                    editorRequest = MyDocumentPageEditorRequest(
-                        pageID: nil,
-                        title: String(
-                            localized: "my_document_create_page_title",
-                            defaultValue: "Create page"
-                        ),
-                        initialTitle: String(
-                            format: String(
-                                localized: "my_document_new_page_name",
-                                defaultValue: "Page %d"
-                            ),
-                            pages.count + 1
-                        ),
-                        initialContentType: .markdown,
-                        initialContent: ""
-                    )
-                } label: {
-                    Label(
-                        String(localized: "my_document_create_page_title", defaultValue: "New page"),
-                        systemImage: "plus"
-                    )
-                }
-                Button {
-                    isImporting = true
-                } label: {
-                    Label(String(localized: "import"), systemImage: "square.and.arrow.down")
-                }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .accessibilityLabel(String(
+    /** Starts Android's create-page dialog with MARKDOWN selected by default. */
+    private func beginCreatePage() {
+        closePopups()
+        editorRequest = MyDocumentPageEditorRequest(
+            pageID: nil,
+            title: String(
                 localized: "my_document_create_page_title",
                 defaultValue: "New page"
-            ))
-
-            Button(String(localized: "save")) {
-                if onSave() {
-                    baselinePages = pages
-                    dismiss()
-                }
-            }
-            .disabled(!hasPageChanges)
-        }
+            ),
+            initialTitle: String(
+                format: String(
+                    localized: "my_document_new_page_name",
+                    defaultValue: "Page %d"
+                ),
+                pages.count + 1
+            ),
+            initialContentType: .markdown
+        )
     }
 
-    @ViewBuilder
-    private func pageRow(_ page: MyDocumentPageDraft, document: MyDocumentDraft) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                requestOpen(page)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(page.title.isEmpty ? page.pageKey : page.title)
-                        .foregroundStyle(.primary)
-                    HStack(spacing: 6) {
-                        Text(page.contentType.rawValue)
-                        if page.sourcePromptId != nil {
-                            Image(systemName: "sparkles")
-                                .accessibilityLabel("AI")
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Menu {
-                Button {
-                    editorRequest = MyDocumentPageEditorRequest(
-                        pageID: page.id,
-                        title: String(
-                            localized: "my_document_page_rename_title",
-                            defaultValue: "Edit page"
-                        ),
-                        initialTitle: page.title,
-                        initialContentType: page.contentType,
-                        initialContent: page.content
-                    )
-                } label: {
-                    Label(String(localized: "rename"), systemImage: "pencil")
-                }
-                Button {
-                    export(page, document: document)
-                } label: {
-                    Label(String(localized: "export"), systemImage: "square.and.arrow.up")
-                }
-                Button(role: .destructive) {
-                    pendingDeletePage = page
-                } label: {
-                    Label(String(localized: "delete"), systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-        }
-        .accessibilityIdentifier("myDocumentsPageRow::\(accessibilitySegment(document.initials))::\(accessibilitySegment(page.pageKey))")
-        .accessibilityValue("pageKey=\(page.pageKey);contentType=\(page.contentType.rawValue)")
+    /** Starts Android's rename-only page dialog without exposing raw content. */
+    private func beginRenamePage(_ page: MyDocumentPageDraft) {
+        closePopups()
+        editorRequest = MyDocumentPageEditorRequest(
+            pageID: page.id,
+            title: String(
+                localized: "my_document_page_rename_title",
+                defaultValue: "Rename page"
+            ),
+            initialTitle: page.title,
+            initialContentType: page.contentType
+        )
     }
 
+    /** Applies Create or Rename while preserving existing body/type data for Rename. */
     private func applyEditor(
         _ request: MyDocumentPageEditorRequest,
         title: String,
-        contentType: MyDocumentContentType,
-        content: String
+        contentType: MyDocumentContentType
     ) {
         do {
-            if let pageID = request.pageID {
+            if let pageID = request.pageID,
+               let page = pages.first(where: { $0.id == pageID }) {
                 try session.updatePage(
                     documentID: documentID,
                     pageID: pageID,
                     title: title,
-                    contentType: contentType,
-                    content: content
+                    contentType: page.contentType,
+                    content: page.content
                 )
             } else {
-                let pageID = try session.createPage(
+                _ = try session.createPage(
                     documentID: documentID,
                     title: title,
                     contentType: contentType
-                )
-                try session.updatePage(
-                    documentID: documentID,
-                    pageID: pageID,
-                    title: title,
-                    contentType: contentType,
-                    content: content
                 )
             }
         } catch {
@@ -344,6 +296,7 @@ struct MyDocumentPagesListView: View {
         }
     }
 
+    /** Imports Android's one selected Markdown/HTML file into the draft page collection. */
     private func importPage(_ result: Result<[URL], Error>) {
         do {
             guard let file = try MyDocumentNativeFileTransfer.importFiles(at: result.get()).first else {
@@ -355,18 +308,53 @@ struct MyDocumentPagesListView: View {
         }
     }
 
-    private func export(_ page: MyDocumentPageDraft, document: MyDocumentDraft) {
+    /** Prepares one deterministic page export before Android's shared Save-or-Share decision. */
+    private func beginExport(_ page: MyDocumentPageDraft) {
+        closePopups()
+        pageExportDocument = MyDocumentExportDocument(
+            file: MyDocumentTransferService.exportPage(page)
+        )
+        showsExportDestinationDecision = true
+    }
+
+    /** Materializes a temporary URL only after the user explicitly selects Android's Share action. */
+    private func sharePreparedPageExport() {
+        showsExportDestinationDecision = false
+        guard let document, let pageExportDocument else { return }
         do {
             exportURLs = try MyDocumentNativeFileTransfer.exportURLs(
-                for: [MyDocumentTransferService.exportPage(page)],
+                for: [MyDocumentExportFile(
+                    fileName: pageExportDocument.fileName,
+                    contentType: pageExportDocument.contentType == .html
+                        ? "text/html"
+                        : "text/markdown",
+                    content: pageExportDocument.content
+                )],
                 directoryName: document.name
             )
-            showsExport = true
+            showsShareSheet = true
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
+    /** Handles the final system Files handoff without presenting app content as an iOS sheet. */
+    private func completePageFileExport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success:
+            clearPageExport()
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /** Releases transient export records after Save, Share dismissal, or Cancel. */
+    private func clearPageExport() {
+        pageExportDocument = nil
+        exportURLs = []
+    }
+
+    /** Deletes the confirmed page from the draft collection. */
     private func deletePendingPage() {
         guard let page = pendingDeletePage else { return }
         pendingDeletePage = nil
@@ -377,8 +365,10 @@ struct MyDocumentPagesListView: View {
         }
     }
 
+    /** Matches Android's dirty prompt before returning one selected page to the reader. */
     private func requestOpen(_ page: MyDocumentPageDraft) {
-        guard session.isDirty else {
+        closePopups()
+        guard hasPageChanges else {
             open(page)
             return
         }
@@ -387,9 +377,11 @@ struct MyDocumentPagesListView: View {
         showsDirtyDecision = true
     }
 
+    /** Android Up prompts on dirty state; persistent Dismiss discards immediately. */
     private func requestExit() {
+        closePopups()
         guard hasPageChanges else {
-            dismiss()
+            onDismiss()
             return
         }
         pendingOpenPage = nil
@@ -397,23 +389,27 @@ struct MyDocumentPagesListView: View {
         showsDirtyDecision = true
     }
 
+    /** Persists the parent session and resumes the pending Exit/Open command. */
     private func saveAndContinue() {
         guard onSave() else { return }
         baselinePages = pages
+        showsDirtyDecision = false
         continuePendingAction()
     }
 
+    /** Restores the clean parent baseline and resumes the pending Exit/Open command. */
     private func discardAndContinue() {
-        // The parent enters page management only from a clean session. Restoring that complete
-        // baseline also resets the parent document timestamp changed by every page mutation.
         session.discardChanges()
+        baselinePages = pages
+        showsDirtyDecision = false
         continuePendingAction()
     }
 
+    /** Completes the exact activity action that originally triggered the dirty decision. */
     private func continuePendingAction() {
         if pendingExitAfterDecision {
             pendingExitAfterDecision = false
-            dismiss()
+            onDismiss()
             return
         }
         if let pendingOpenPage {
@@ -424,13 +420,53 @@ struct MyDocumentPagesListView: View {
         }
     }
 
+    /** Persistent Dismiss restores the parent baseline and closes without another prompt. */
+    private func discardAndExit() {
+        session.discardChanges()
+        baselinePages = pages
+        onDismiss()
+    }
+
+    /** Persistent Save closes only after the parent transaction succeeds. */
+    private func saveAndExit() {
+        guard onSave() else { return }
+        baselinePages = pages
+        onDismiss()
+    }
+
+    /** Returns one stable Android document/page key to the owning reader. */
     private func open(_ page: MyDocumentPageDraft) {
         guard let document else { return }
         onOpenPage(document.initials, page.pageKey)
     }
 
-    private func accessibilitySegment(_ value: String) -> String {
-        value.replacingOccurrences(of: "[^A-Za-z0-9]+", with: "_", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+    /** Closes both popup owners before opening another activity surface. */
+    private func closePopups() {
+        showsOverflowMenu = false
+        activePageMenuID = nil
     }
+
+    /** Reorders a stable drag payload before one target row and lets BibleCore normalize order. */
+    private func movePage(_ payloads: [String], before targetID: UUID) -> Bool {
+        guard let payload = payloads.first,
+              let sourceID = UUID(uuidString: payload),
+              sourceID != targetID,
+              let sourceIndex = pages.firstIndex(where: { $0.id == sourceID }),
+              let targetIndex = pages.firstIndex(where: { $0.id == targetID }) else {
+            return false
+        }
+        let destination = sourceIndex < targetIndex ? targetIndex + 1 : targetIndex
+        do {
+            try session.movePages(
+                documentID: documentID,
+                fromOffsets: IndexSet(integer: sourceIndex),
+                toOffset: destination
+            )
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
 }

@@ -15,6 +15,47 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class SyncSettingsUITestContractTests(unittest.TestCase):
     """Guards Sync Settings UI helpers against CI-only SwiftUI Form reachability stalls."""
 
+    def test_app_level_route_uses_the_shared_android_activity_back_action(self) -> None:
+        """Runtime-safe Sync Settings ownership must not restore native iOS navigation chrome."""
+        app_source = (REPO_ROOT / "AndBible" / "AndBibleApp.swift").read_text()
+        helper_source = (
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestListSupport.swift"
+        ).read_text()
+        route_start = app_source.index("private var syncSettingsRouteContent")
+        route_end = app_source.index("/**", route_start)
+        route_body = app_source[route_start:route_end]
+        helper_start = helper_source.index("func dismissSyncSettings(")
+        helper_end = helper_source.index("/**", helper_start)
+        helper_body = helper_source[helper_start:helper_end]
+
+        self.assertIn("SyncSettingsView(onBack: dismissSyncSettingsRoute)", route_body)
+        self.assertNotIn("NavigationStack", route_body)
+        self.assertNotIn(".toolbar", route_body)
+        self.assertNotIn("syncSettingsDoneButton", route_body)
+        self.assertIn('"syncSettingsTopAppBarBackButton"', helper_body)
+        self.assertNotIn("dismissSheetByDraggingDown", helper_body)
+
+    def test_icloud_ui_test_declares_and_bounds_the_unavailable_cloudkit_edge(self) -> None:
+        """The simulator test seam must be explicit, DEBUG-only, and omit fake CloudKit monitoring."""
+        app_source = (REPO_ROOT / "AndBible" / "AndBibleApp.swift").read_text()
+        test_source = (
+            REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITests+SettingsAndSync.swift"
+        ).read_text()
+        test_start = test_source.index("func testSyncSettingsICloudToggleDoesNotRequireRestart()")
+        test_end = test_source.index("/**", test_start)
+        test_body = test_source[test_start:test_end]
+        runtime_start = app_source.index("private func makeICloudRuntimeModeChange(")
+        runtime_end = app_source.index("/**", runtime_start)
+        runtime_body = app_source[runtime_start:runtime_end]
+
+        self.assertIn('app.launchEnvironment["UITEST_LOCAL_ICLOUD_RUNTIME_CONTAINER"] = "1"', test_body)
+        self.assertIn("#if DEBUG", app_source)
+        self.assertIn('environment["UITEST_SESSION_ID"]', app_source)
+        self.assertIn("usesUITestLocalICloudRuntimeContainer", runtime_body)
+        self.assertIn("requestedICloudEnabled: usesLocalUITestContainer ? false : requestedEnabled", runtime_body)
+        self.assertIn("cloudKitMonitoringContainer: effectiveICloudEnabled && !usesLocalUITestContainer", runtime_body)
+        self.assertIn("modelContainer: change.cloudKitMonitoringContainer", app_source)
+
     def test_invalid_server_url_test_uses_android_edit_validation_contract(self) -> None:
         """Invalid URL coverage must not depend on the iOS-only offscreen connection button.
 
@@ -34,8 +75,10 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
 
         self.assertNotIn("triggerSyncConnectionTest", test_body)
         self.assertNotIn("dismissKeyboardAfterFocusedTextEntry", test_body)
-        self.assertIn('"syncNextCloudServerURLCommitButton"', test_body)
-        self.assertIn("tapElementReliably(commitButton", test_body)
+        self.assertIn('"syncNextCloudServerURLRow"', test_body)
+        self.assertIn('"syncNextCloudServerURLAction::confirm"', test_body)
+        self.assertIn('dialogIdentifier: "syncNextCloudServerURL"', test_body)
+        self.assertNotIn('"syncNextCloudServerURLCommitButton"', test_body)
         self.assertIn(
             'waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL"',
             test_body,
@@ -44,9 +87,9 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
     def test_sync_settings_validates_server_url_when_editing_commits(self) -> None:
         """Sync Settings should reject malformed NextCloud server URLs at the edit boundary.
 
-        Android handles this in `serverUrlPref.setOnPreferenceChangeListener`, before the invalid
-        value is written to preferences. The iOS inline TextField needs an equivalent commit/focus
-        validation path so users and tests do not have to reach an unrelated lower Form row.
+        Android handles this in `serverUrlPref.setOnPreferenceChangeListener`, after the
+        `EditTextPreference` dialog closes and before the invalid value is written. iOS must use the
+        same shared app-owned preference dialog and error-dialog sequence.
         """
         source = (
             REPO_ROOT
@@ -57,44 +100,49 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
             / "Settings"
             / "SyncSettingsView.swift"
         ).read_text()
-        credential_start = source.index(
-            'TextField(String(localized: "auth_server_uri"), text: $serverURL)'
-        )
-        credential_end = source.index('TextField(String(localized: "auth_username")', credential_start)
+        credential_start = source.index("private var credentialEditorOverlay")
+        credential_end = source.index("/** Builds one exact-icon Android credential preference row.", credential_start)
         credential_body = source[credential_start:credential_end]
+        commit_start = source.index("private func commitCredential(")
+        commit_end = source.index("/// Plain localized status text", commit_start)
+        commit_body = source[commit_start:commit_end]
         persist_start = source.index("private func persistRemoteSettings()")
         persist_end = source.index("/**", persist_start)
         persist_body = source[persist_start:persist_end]
-        validation_start = source.index("private func validateNextCloudServerURLAfterEditing()")
-        validation_end = source.index("/**", validation_start)
-        validation_body = source[validation_start:validation_end]
 
-        self.assertIn("validateNextCloudServerURLAfterEditing()", credential_body)
-        self.assertIn("focusedNextCloudCredentialField", credential_body)
-        self.assertIn("_ = validateNextCloudServerURLAfterEditing()", credential_body)
-        self.assertNotIn("if validateNextCloudServerURLAfterEditing()", credential_body)
-        self.assertIn('"syncNextCloudServerURLCommitButton"', source)
-        self.assertIn("ToolbarItemGroup(placement: .keyboard)", source)
-        commit_button_start = source.index('"syncNextCloudServerURLCommitButton"')
-        toolbar_commit_body = source[source.rfind("Button(String(localized: \"ok\"))", 0, commit_button_start):commit_button_start]
-        self.assertIn("_ = validateNextCloudServerURLAfterEditing()", toolbar_commit_body)
-        self.assertIn("focusedNextCloudCredentialField = nil", toolbar_commit_body)
-        self.assertNotIn("if validateNextCloudServerURLAfterEditing()", toolbar_commit_body)
-        self.assertIn("-> Bool", validation_body)
+        self.assertIn("AndroidEditTextPreferenceDialog(", credential_body)
+        self.assertIn("commitCredential(candidate, for: field)", credential_body)
+        self.assertIn("activeCredentialEditor = nil", credential_body)
+        self.assertNotIn("validator:", credential_body)
+        self.assertNotIn("validateNextCloudServerURLAfterEditing", source)
+        self.assertIn("isAndroidValidNextCloudServerURL(trimmedCandidate)", commit_body)
+        self.assertIn("remoteConnectionStatus = .failure(invalidURLMessage)", commit_body)
+        self.assertIn("remoteSyncErrorMessage = invalidURLMessage", commit_body)
+        self.assertIn("serverURL = trimmedCandidate", commit_body)
+        self.assertIn("return", commit_body)
         self.assertIn("@State private var lastCommittedServerURL", source)
+        self.assertIn("lastCommittedServerURL = serverURL", commit_body)
         self.assertIn("lastCommittedServerURL = serverURL", persist_body)
         self.assertIn("isAndroidValidNextCloudServerURL(serverURL)", persist_body)
         self.assertIn("return", persist_body)
-        self.assertIn("serverURL = lastCommittedServerURL", validation_body)
 
     def test_sync_settings_button_resolution_accepts_visible_viewport_row(self) -> None:
-        """The Sync Settings resolver must not depend only on XCTest `isHittable`.
+        """The Sync resolver must use the real scroll owner and accept a visible viewport row.
 
         The CI shard failure showed SwiftUI can expose the NextCloud test-connection row as a
         native button while `isHittable` stays false long enough to exhaust the helper timeout.
-        A failure here means the resolver can regress to burning the whole timeout before treating
-        a visible Form row as reachable.
+        The accessibility marker is not a scroll surface, so swiping it cannot reveal lazy rows.
+        A failure here means the resolver can regress to either mistake.
         """
+        sync_view_source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Settings"
+            / "SyncSettingsView.swift"
+        ).read_text()
         source = (
             REPO_ROOT / "Tests" / "UI" / "AndBibleUITests" / "AndBibleUITestStateSupport.swift"
         ).read_text()
@@ -102,15 +150,24 @@ class SyncSettingsUITestContractTests(unittest.TestCase):
         resolver_end = source.index("func toggledSwitchValue(", resolver_start)
         resolver_body = source[resolver_start:resolver_end]
 
-        self.assertIn("let syncScreen = requireElement(", resolver_body)
+        self.assertIn('.accessibilityIdentifier("syncSettingsScrollView")', sync_view_source)
         self.assertIn('"syncSettingsScreen"', resolver_body)
+        self.assertIn(
+            'let scrollView = app.scrollViews["syncSettingsScrollView"].firstMatch',
+            resolver_body,
+        )
+        self.assertIn("scrollView.waitForExistence", resolver_body)
         self.assertIn("dismissKeyboardIfPresent(in: app)", resolver_body)
         self.assertRegex(
             resolver_body,
             r"waitForElementToBecomeHittable\([^)]+\)\s*\|\|\s*"
-            r"isElementVisible\([^,]+,\s*within:\s*syncScreen\)",
+            r"isElementVisible\([^,]+,\s*within:\s*scrollView\)",
         )
-        self.assertIn("isElementVisible(lastCandidate, within: syncScreen)", resolver_body)
+        self.assertIn("scrollView.swipeUp()", resolver_body)
+        self.assertIn("scrollView.swipeDown()", resolver_body)
+        self.assertIn("isElementVisible(lastCandidate, within: scrollView)", resolver_body)
+        self.assertNotIn("syncScreen.swipe", resolver_body)
+        self.assertNotIn("app.swipe", resolver_body)
         self.assertNotIn("become hittable within", resolver_body)
         self.assertIn("revealPasses < minimumRevealPasses", resolver_body)
 

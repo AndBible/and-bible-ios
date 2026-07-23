@@ -298,48 +298,6 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
 }
 
 /**
- Fixed Android Downloads surface colors.
-
- Android renders the document download browser with a dark app-bar/list surface independent of the
- reader's day/night theme. iOS keeps those colors local to Downloads so app theming still controls
- the reader while this route matches Android's document-management UI.
-
- Side effects:
- - none; values are static color constants
-
- Failure modes:
- - none
- */
-private enum ModuleBrowserPalette {
-    /// Full-screen Downloads background.
-    static let background = Color(red: 0.18, green: 0.18, blue: 0.18)
-
-    /// Android top app bar background.
-    static let appBar = Color.black
-
-    /// Android overflow menu popup surface.
-    static let menuSurface = Color(red: 0.20, green: 0.20, blue: 0.20)
-
-    /// Row divider and filter underline color.
-    static let divider = Color.white.opacity(0.16)
-
-    /// Primary row/app-bar text color.
-    static let primaryText = Color.white
-
-    /// Secondary row/filter text color.
-    static let secondaryText = Color.white.opacity(0.72)
-
-    /// Muted metadata text color.
-    static let tertiaryText = Color.white.opacity(0.52)
-
-    /// Android install/update affordance color.
-    static let install = Color.orange
-
-    /// Android installed affordance color.
-    static let installed = Color(red: 0.15, green: 0.85, blue: 0.28)
-}
-
-/**
  Browses installed and remote SWORD modules, then coordinates install and uninstall actions.
 
  The view combines locally installed module metadata from `SwordManager` with cached or refreshed
@@ -364,6 +322,11 @@ private enum ModuleBrowserPalette {
    `SwordManager`, and refreshes the installed state shown in the download rows
  */
 public struct ModuleBrowserView: View {
+    /// Shared popup anchor used by the Downloads activity overflow action.
+    private enum PopupAnchor {
+        static let overflow = "moduleBrowserOverflowAnchor"
+    }
+
     /// Android's repository list staleness window before Downloads refreshes catalogs on open.
     nonisolated static let downloadCatalogStaleInterval: TimeInterval = 24 * 60 * 60
 
@@ -376,11 +339,17 @@ public struct ModuleBrowserView: View {
     /// Dismisses the Android-style Downloads destination back to the reader stack.
     @Environment(\.dismiss) private var dismiss
 
+    /// Active scheme used by shared popup elevation and accent resolution.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Shared full-text search index service used for Android's Delete Index row action.
     @Environment(SearchIndexService.self) private var searchIndexService
 
     /// Startup/default-document behavior requested by the caller.
     private let defaultDownloadMode: ModuleBrowserDefaultDownloadMode
+
+    /// Colors inherited from the launching reader workspace/window.
+    private let surfacePalette: ReaderThemeSurfacePalette
 
     /// Reports whether startup default refresh/install work is still active.
     private let onDefaultDownloadActivityChanged: (Bool) -> Void
@@ -393,6 +362,9 @@ public struct ModuleBrowserView: View {
 
     /// Free-text query applied to the Android-style download list.
     @State private var searchText = ""
+
+    /// Remote row selected by Android's single-choice contextual action mode.
+    @State private var contextualModuleIdentity: RemoteModuleIdentity?
 
     /// Whether a remote catalog refresh is currently in progress.
     @State private var isRefreshing = false
@@ -487,9 +459,6 @@ public struct ModuleBrowserView: View {
     /// Feedback from Android's Install ZIP equivalent.
     @State private var externalDocumentImportMessage: String?
 
-    /// Current Dynamic Type size used to keep Android's compact filter row readable.
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
     /// SwiftData context used to check Android's generic-bookmark update warning condition.
     @Environment(\.modelContext) private var modelContext
 
@@ -511,6 +480,33 @@ public struct ModuleBrowserView: View {
     /// Startup default modules whose asynchronous installs have not reached a terminal row state.
     @State private var defaultDownloadInstallingModules: Set<RemoteModuleIdentity> = []
 
+    /// Remote catalog row currently driving Android's contextual document menu.
+    private var contextualModule: RemoteModuleInfo? {
+        guard let contextualModuleIdentity else { return nil }
+        return availableModules.first { $0.installIdentity == contextualModuleIdentity }
+    }
+
+    /// Installed metadata paired with the selected contextual catalog row, when present.
+    private var contextualInstalledModule: ModuleInfo? {
+        guard let contextualModule else { return nil }
+        return Self.installedModuleLookup(from: installedModules)[contextualModule.name]
+    }
+
+    /// Android-ordered contextual actions for the selected Downloads row.
+    private var contextualModuleActions: [ModuleDownloadRowAction] {
+        guard let contextualModule else { return [] }
+        let status = Self.displayStatus(
+            for: contextualModule,
+            installedModulesByName: Self.installedModuleLookup(from: installedModules),
+            downloadActivities: downloadActivities
+        )
+        return Self.rowActions(
+            installedModule: contextualInstalledModule,
+            isBeingInstalled: status.isBeingInstalled,
+            installedModules: installedModules
+        )
+    }
+
     /**
      Creates the module browser with optional Android-compatible search and default-download state.
 
@@ -525,8 +521,9 @@ public struct ModuleBrowserView: View {
          install activity so callers can avoid prompting while Easy Start is still running.
 
      Side effects:
-     - initializes local SwiftUI state only; repository and installed-module data are still loaded
-       lazily in `onAppear`
+     - initializes local SwiftUI state with the standard palette only; reader-owned routes use the
+       module-internal palette overload below
+     - repository and installed-module data are still loaded lazily in `onAppear`
      - when a default-download mode is supplied, `onAppear` later refreshes metadata/catalogs and
        requests Android defaults once
 
@@ -539,7 +536,38 @@ public struct ModuleBrowserView: View {
         defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
         onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in }
     ) {
+        self.init(
+            initialSearchText: initialSearchText,
+            defaultDownloadMode: defaultDownloadMode,
+            surfacePalette: .standard,
+            onDefaultDownloadActivityChanged: onDefaultDownloadActivityChanged
+        )
+    }
+
+    /**
+     Creates a reader-owned Downloads activity with the launching workspace/window palette.
+
+     This module-internal overload keeps the public Downloads API source-compatible while allowing
+     reader routes to pass the same resolved palette used by Choose Document. The palette remains an
+     internal BibleUI implementation type rather than leaking reader-shell internals into the public
+     package interface.
+
+     - Parameters:
+       - initialSearchText: Optional module initials used to pre-populate Android's search field.
+       - defaultDownloadMode: Optional startup/default-document behavior.
+       - surfacePalette: Owner-resolved reader/workspace colors shared with Choose Document.
+       - onDefaultDownloadActivityChanged: Startup work-state callback.
+     - Side effects: Initializes local view state only; repository loading remains lazy.
+     - Failure modes: Empty or unknown search values produce the normal filtered list behavior.
+     */
+    init(
+        initialSearchText: String = "",
+        defaultDownloadMode: ModuleBrowserDefaultDownloadMode = .disabled,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDefaultDownloadActivityChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
         self.defaultDownloadMode = defaultDownloadMode
+        self.surfacePalette = surfacePalette
         self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
         let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedFilterIndex = Self.persistedDocumentFilterIndex()
@@ -583,18 +611,6 @@ public struct ModuleBrowserView: View {
             if !resolvedA && resolvedB { return false }
             return nameA.localizedCaseInsensitiveCompare(nameB) == .orderedAscending
         }
-    }
-
-    /**
-     Whether the Android Add-ons filter should be visible in the Downloads type picker.
-
-     Android exposes add-ons as a separate document type backed by rows in the repository/document
-     list. iOS mirrors that by showing Add-ons only after the loaded catalog contains `And Bible`
-     rows, while keeping it visible if it is already selected so users can move back to another
-     filter after a catalog refresh.
-     */
-    private var shouldShowAddonsFilter: Bool {
-        selectedCategory == .addon || availableModules.contains { $0.category == .addon }
     }
 
     /// Available (remote) modules filtered by category, language, and search text.
@@ -673,74 +689,44 @@ public struct ModuleBrowserView: View {
         let installedModulesByName = Self.installedModuleLookup(from: installedModules)
 
         return ZStack(alignment: .topTrailing) {
-            moduleBrowserScreenMarker
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "download_documents", defaultValue: "Download Documents"),
+                accessibilityIdentifier: "moduleBrowserScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
             moduleBrowserStateExport(
                 visibleModules: visibleModules,
                 installedModulesByName: installedModulesByName
             )
-            androidDownloadsListContent(
-                visibleModules: visibleModules,
-                installedModulesByName: installedModulesByName
-            )
-            androidDownloadsOverflowLayer
+            AndroidDocumentSelectionActivityScreen(surfacePalette: surfacePalette) {
+                androidTopAppBar
+            } filterBar: {
+                androidFilterBar(visibleModuleCount: visibleModules.count)
+            } rows: {
+                androidDownloadsContent(
+                    visibleModules: visibleModules,
+                    installedModulesByName: installedModulesByName
+                )
+            }
         }
-        .background(ModuleBrowserPalette.background.ignoresSafeArea())
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.overflow,
+            isPresented: $showOverflowMenu,
+            menuWidth: 310,
+            estimatedMenuHeight: 96,
+            accessibilityIdentifier: "moduleBrowserOverflowMenu"
+        ) {
+            androidOverflowMenu
+        }
         .onChange(of: searchText) {
+            clearContextualModuleSelection()
             alignFiltersWithAndroidSearchState(searchText)
             captureDownloadListSortSnapshot()
         }
-        .navigationBarBackButtonHidden(true)
-        #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-        #endif
-    }
-
-    /**
-     Builds the app bar, filters, and download rows as one stable ZStack child.
-
-     - Parameters:
-       - visibleModules: Remote modules matching the current category, language, and search filters.
-       - installedModulesByName: Installed-module lookup used to derive each row's action state.
-     - Returns: Primary Downloads content below the route-level overlays.
-     - Side effects: Child controls can change filters or invoke module actions.
-     - Failure modes: Empty module arrays render the existing empty/error content.
-     */
-    private func androidDownloadsListContent(
-        visibleModules: [RemoteModuleInfo],
-        installedModulesByName: [String: ModuleInfo]
-    ) -> some View {
-        VStack(spacing: 0) {
-            androidTopAppBar
-            androidFilterBar(visibleModuleCount: visibleModules.count)
-            androidDownloadsContent(
-                visibleModules: visibleModules,
-                installedModulesByName: installedModulesByName
-            )
-        }
-    }
-
-    /**
-     Builds the tap-dismiss layer and Android overflow menu only while that menu is visible.
-
-     - Returns: Overflow chrome, or no content when the menu is closed.
-     - Side effects: Tapping outside the menu clears `showOverflowMenu`.
-     - Failure modes: none.
-     */
-    @ViewBuilder
-    private var androidDownloadsOverflowLayer: some View {
-        if showOverflowMenu {
-            ZStack(alignment: .topTrailing) {
-                Color.black.opacity(0.001)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                    .onTapGesture {
-                        showOverflowMenu = false
-                    }
-                androidOverflowMenu
-                    .padding(.top, 56)
-                    .padding(.trailing, 8)
-                    .zIndex(1)
-            }
+        .onChange(of: visibleModules.map(\.installIdentity)) { _, visibleIdentities in
+            guard let contextualModuleIdentity,
+                  !visibleIdentities.contains(contextualModuleIdentity) else { return }
+            clearContextualModuleSelection()
         }
     }
 
@@ -754,10 +740,7 @@ public struct ModuleBrowserView: View {
     private var documentManagementPresentedDownloadsScreen: some View {
         androidDownloadsLayout
         .navigationDestination(isPresented: $showRepositoryManager) {
-            RepositoryManagerView()
-            #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
-            #endif
+            RepositoryManagerView(surfacePalette: surfacePalette)
         }
         .fileImporter(
             isPresented: $showInstallZipImporter,
@@ -830,14 +813,14 @@ public struct ModuleBrowserView: View {
                 ])
             } else if let confirmation = pendingRowActionConfirmation {
                 ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
-                    .init(id: "confirm", title: confirmation.kind == .uninstall ? String(localized: "uninstall") : String(localized: "delete_module_index", defaultValue: "Delete Index"), role: .destructive) {
+                    .init(id: "confirm", title: confirmation.confirmButtonTitle, role: .destructive) {
                         switch confirmation.kind {
                         case .uninstall: uninstallModuleAfterCancellingInstall(confirmation.moduleName)
                         case .deleteIndex: deleteModuleIndex(confirmation.moduleName)
                         }
                         pendingRowActionConfirmation = nil
                     },
-                    .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingRowActionConfirmation = nil }
+                    .init(id: "cancel", title: confirmation.cancelButtonTitle, role: nil) { pendingRowActionConfirmation = nil }
                 ])
             }
         }
@@ -865,27 +848,6 @@ public struct ModuleBrowserView: View {
                 refreshInstalledList()
             }
         }
-    }
-
-    /**
-     Builds a stable screen-level accessibility marker without overriding child identifiers.
-
-     SwiftUI propagates container accessibility identifiers to descendants in this layout. Keeping
-     the screen identifier on a tiny explicit marker lets UI tests detect the route while preserving
-     concrete identifiers on the app bar, filters, and rows.
-
-     - Returns: A one-pixel accessibility marker for the Downloads route.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private var moduleBrowserScreenMarker: some View {
-        Rectangle()
-            .fill(ModuleBrowserPalette.background.opacity(0.001))
-            .frame(width: 1, height: 1)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(String(localized: "download_documents", defaultValue: "Download Documents"))
-            .accessibilityIdentifier("moduleBrowserScreen")
-            .allowsHitTesting(false)
     }
 
     /**
@@ -960,50 +922,83 @@ public struct ModuleBrowserView: View {
        action menu.
      - Failure modes: none.
      */
+    @ViewBuilder
     private var androidTopAppBar: some View {
-        HStack(spacing: 16) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 24, weight: .semibold))
-                    .frame(width: 44, height: 44)
+        if let contextualModule {
+            AndroidDocumentContextActionBar(
+                actions: contextualModuleActions,
+                surfacePalette: surfacePalette,
+                accessibilityPrefix: "moduleBrowser",
+                onClose: clearContextualModuleSelection,
+                onAbout: {
+                    let installedModule = contextualInstalledModule
+                    clearContextualModuleSelection()
+                    selectedModuleDetails = ModuleBrowserModuleDetails(
+                        module: contextualModule,
+                        installedModule: installedModule
+                    )
+                },
+                onDelete: {
+                    clearContextualModuleSelection()
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .uninstall,
+                        module: contextualModule
+                    )
+                },
+                onUnlock: {
+                    guard let installedModule = contextualInstalledModule else { return }
+                    clearContextualModuleSelection()
+                    beginUnlock(installedModule)
+                },
+                onDeleteIndex: {
+                    clearContextualModuleSelection()
+                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
+                        kind: .deleteIndex,
+                        module: contextualModule
+                    )
+                }
+            )
+        } else {
+            AndroidActivityTopAppBar(
+                title: String(localized: "download", defaultValue: "Download Documents"),
+                accessibilityIdentifier: "moduleBrowser",
+                backgroundColor: surfacePalette.toolbarBackgroundColor,
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                onBack: { dismiss() }
+            ) {
+                if !downloadErrors.isEmpty {
+                    AndroidActivityTopAppBarActionButton(
+                        icon: .asset("ActivityErrorOutline"),
+                        accessibilityLabel: String(
+                            localized: "download_errors",
+                            defaultValue: "Download errors"
+                        ),
+                        accessibilityIdentifier: "moduleBrowserDownloadErrorsButton",
+                        foregroundColor: surfacePalette.toolbarForegroundColor
+                    ) {
+                        showOverflowMenu = false
+                        showDownloadErrors = true
+                    }
+                }
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "moduleBrowserOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: PopupAnchor.overflow)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(ModuleBrowserPalette.primaryText)
-            .accessibilityLabel(String(localized: "back_to_previous", defaultValue: "Back"))
-            .accessibilityIdentifier("moduleBrowserBackButton")
-
-            Text(String(localized: "download_documents", defaultValue: "Download Documents"))
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(ModuleBrowserPalette.primaryText)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Button {
-                showOverflowMenu.toggle()
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 24, weight: .bold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ModuleBrowserPalette.primaryText)
-            .accessibilityLabel(String(localized: "more", defaultValue: "More"))
-            .accessibilityIdentifier("moduleBrowserOverflowButton")
         }
-        .padding(.horizontal, 8)
-        .frame(height: 56)
-        .background(ModuleBrowserPalette.appBar)
     }
 
     /**
      Builds the Downloads overflow popup using Android's menu item set.
 
-     Android defines Download errors, Load Documents From Files, and Custom repositories for this activity. iOS
-     presents the same actions from an explicit top-right popup instead of SwiftUI's native `Menu`
-     because the route needs Android-style placement and stable accessibility behavior.
+     Android promotes Download errors to a toolbar action when errors exist. The overflow itself
+     contains Load Documents From Files and Custom repositories in source order, presented through
+     the shared app-owned popup rather than SwiftUI's native `Menu`.
 
      - Returns: A dark, right-aligned overflow popup anchored below the app bar.
      - Side effects: Menu rows can show download errors, start the ZIP importer, or push repository
@@ -1012,74 +1007,40 @@ public struct ModuleBrowserView: View {
        being imported.
      */
     private var androidOverflowMenu: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if !downloadErrors.isEmpty {
-                androidOverflowMenuButton(
-                    title: String(localized: "download_errors", defaultValue: "Download errors"),
-                    accessibilityIdentifier: "moduleBrowserDownloadErrorsButton"
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "moduleBrowserOverflowSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
+        ) {
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "install_zip",
+                        defaultValue: "Load Documents From Files"
+                    ),
+                    accessibilityIdentifier: "moduleBrowserInstallZipButton"
+                ) {
+                    guard !isImportingExternalDocument else { return }
+                    showOverflowMenu = false
+                    showInstallZipImporter = true
+                }
+                .opacity(isImportingExternalDocument ? 0.52 : 1)
+
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "custom_repositories",
+                        defaultValue: "Custom repositories"
+                    ),
+                    accessibilityIdentifier: "moduleBrowserRepositoriesButton"
                 ) {
                     showOverflowMenu = false
-                    showDownloadErrors = true
+                    showRepositoryManager = true
                 }
-                Divider()
-                    .background(ModuleBrowserPalette.divider)
-            }
-
-            androidOverflowMenuButton(
-                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
-                accessibilityIdentifier: "moduleBrowserInstallZipButton",
-                disabled: isImportingExternalDocument
-            ) {
-                showOverflowMenu = false
-                showInstallZipImporter = true
-            }
-
-            androidOverflowMenuButton(
-                title: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
-                accessibilityIdentifier: "moduleBrowserRepositoriesButton"
-            ) {
-                showOverflowMenu = false
-                showRepositoryManager = true
             }
         }
-        .frame(width: 260, alignment: .leading)
-        .background(ModuleBrowserPalette.menuSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
-        .shadow(color: Color.black.opacity(0.35), radius: 8, x: 0, y: 4)
-    }
-
-    /**
-     Builds one Android overflow-menu row.
-
-     - Parameters:
-       - title: Localized row title.
-       - accessibilityIdentifier: Stable identifier used by UI tests for the concrete action.
-       - disabled: Whether the row should reject taps while remaining visible.
-       - action: Action to execute when the row is enabled and tapped.
-     - Returns: A full-width text row matching Android's compact overflow menu.
-     - Side effects: Executes `action` when tapped.
-     - Failure modes: Disabled rows do not execute their action.
-     */
-    private func androidOverflowMenuButton(
-        title: String,
-        accessibilityIdentifier: String,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            guard !disabled else { return }
-            action()
-        } label: {
-            Text(title)
-                .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(disabled ? ModuleBrowserPalette.tertiaryText : ModuleBrowserPalette.primaryText)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .padding(.horizontal, 16)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /**
@@ -1092,158 +1053,55 @@ public struct ModuleBrowserView: View {
      - Failure modes: Empty language catalogs show the all-language label and keep the menu usable.
      */
     private func androidFilterBar(visibleModuleCount: Int) -> some View {
-        VStack(spacing: 4) {
-            Group {
-                if dynamicTypeSize.isAccessibilitySize {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .bottom, spacing: 14) {
-                            androidLanguageFilterMenu()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            androidDocumentTypeFilterMenu(visibleModuleCount: visibleModuleCount)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        androidSearchFilterField()
-                    }
-                } else {
-                    HStack(alignment: .bottom, spacing: 14) {
-                        androidLanguageFilterMenu()
-                            .frame(minWidth: 96, maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                        androidSearchFilterField()
-                            .frame(minWidth: 96)
-                            .layoutPriority(2)
-                        androidDocumentTypeFilterMenu(visibleModuleCount: visibleModuleCount)
-                            .frame(minWidth: 112, maxWidth: .infinity, alignment: .trailing)
-                            .layoutPriority(1)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
-
-            Rectangle()
-                .fill(ModuleBrowserPalette.divider)
-                .frame(height: 1)
-        }
-        .background(ModuleBrowserPalette.background)
-    }
-
-    /**
-     Builds Android's language filter menu for the Downloads filter row.
-
-     - Returns: Menu containing all available languages plus Android's all-language option.
-     - Side effects: Mutates `selectedLanguage` when a menu item is selected.
-     - Failure modes: Empty catalogs show only the all-language option.
-     */
-    private func androidLanguageFilterMenu() -> some View {
-        Menu {
-            Button(languageFilterTitle(for: "")) {
+        let categoryOptions = [nil] + visibleCategoryFilters.map(Optional.some)
+        return AndroidDocumentSelectionFilterBar(
+            surfacePalette: surfacePalette,
+            languageTitle: languageFilterTitle(for: selectedLanguage),
+            languageOptions: availableLanguages.map {
+                AndroidDocumentSelectionOption(id: $0, title: displayName(for: $0))
+            },
+            documentTypeTitle: categoryFilterTitle(for: selectedCategory),
+            documentTypeOptions: categoryOptions.enumerated().map { index, category in
+                AndroidDocumentSelectionOption(
+                    id: String(index),
+                    title: categoryFilterTitle(for: category)
+                )
+            },
+            resultCountTitle: documentsCountTitle(visibleModuleCount),
+            searchPlaceholder: String(
+                localized: "free_text_search_documents",
+                defaultValue: "Search"
+            ),
+            searchText: $searchText,
+            accessibilityPrefix: "moduleBrowser",
+            onOpenLanguageOptions: {
+                clearContextualModuleSelection()
                 selectedLanguage = ""
                 captureDownloadListSortSnapshot()
-            }
-            if !availableLanguages.isEmpty {
-                Divider()
-            }
-            ForEach(availableLanguages, id: \.self) { language in
-                Button(displayName(for: language)) {
-                    selectedLanguage = language
-                    Self.rememberExplicitSelectedLanguage(language)
-                    captureDownloadListSortSnapshot()
+            },
+            onSelectLanguage: { language in
+                clearContextualModuleSelection()
+                selectedLanguage = language
+                Self.rememberExplicitSelectedLanguage(language)
+                captureDownloadListSortSnapshot()
+            },
+            onSearchFocused: {
+                clearContextualModuleSelection()
+                selectedLanguage = ""
+                selectedCategory = nil
+                persistSelectedCategory(nil)
+                captureDownloadListSortSnapshot()
+            },
+            onSelectDocumentType: { optionID in
+                guard let index = Int(optionID), categoryOptions.indices.contains(index) else {
+                    return
                 }
+                clearContextualModuleSelection()
+                selectedCategory = categoryOptions[index]
+                persistSelectedCategory(categoryOptions[index])
+                captureDownloadListSortSnapshot()
             }
-        } label: {
-            androidFilterLabel(languageFilterTitle(for: selectedLanguage))
-        }
-    }
-
-    /**
-     Builds Android's inline search filter for the Downloads filter row.
-
-     - Returns: Plain underlined search field matching Android's compact Downloads toolbar.
-     - Side effects: Mutates `searchText` as the user types.
-     - Failure modes: none.
-     */
-    private func androidSearchFilterField() -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            TextField(String(localized: "search", defaultValue: "Search"), text: $searchText)
-                .textFieldStyle(.plain)
-                .foregroundStyle(ModuleBrowserPalette.primaryText)
-                .tint(ModuleBrowserPalette.primaryText)
-                .submitLabel(.search)
-            Rectangle()
-                .fill(ModuleBrowserPalette.secondaryText)
-                .frame(height: 1)
-        }
-        .accessibilityIdentifier("moduleBrowserSearchField")
-    }
-
-    /**
-     Builds Android's document-type filter and visible document count.
-
-     - Parameter visibleModuleCount: Number of rows visible after current filters.
-     - Returns: Count text stacked above the Android document-type filter menu.
-     - Side effects: Mutates and persists `selectedCategory`; resets language selection using Android's
-       category-switch behavior.
-     - Failure modes: Empty category catalogs still expose Android's all-type option.
-     */
-    private func androidDocumentTypeFilterMenu(visibleModuleCount: Int) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(documentsCountTitle(visibleModuleCount))
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                .multilineTextAlignment(.trailing)
-            Menu {
-                Button(categoryFilterTitle(for: nil)) {
-                    selectedCategory = nil
-                    selectedLanguage = ""
-                    persistSelectedCategory(nil)
-                    applyAndroidDefaultLanguageIfNeeded(force: true)
-                    captureDownloadListSortSnapshot()
-                }
-                Divider()
-                ForEach(visibleCategoryFilters, id: \.self) { category in
-                    Button(categoryFilterTitle(for: category)) {
-                        selectedCategory = category
-                        selectedLanguage = ""
-                        persistSelectedCategory(category)
-                        applyAndroidDefaultLanguageIfNeeded(force: true)
-                        captureDownloadListSortSnapshot()
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(categoryFilterTitle(for: selectedCategory))
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .multilineTextAlignment(.trailing)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(ModuleBrowserPalette.primaryText)
-            }
-        }
-    }
-
-    /**
-     Builds one underlined Android filter menu label.
-
-     - Parameter title: User-visible filter title.
-     - Returns: Compact label with underline.
-     - Side effects: none.
-     - Failure modes: Long titles use two lines at accessibility Dynamic Type sizes and otherwise
-       compress like Android's toolbar filters.
-     */
-    private func androidFilterLabel(_ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(ModuleBrowserPalette.primaryText)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-            Rectangle()
-                .fill(ModuleBrowserPalette.secondaryText)
-                .frame(height: 1)
-        }
+        )
     }
 
     /**
@@ -1285,14 +1143,14 @@ public struct ModuleBrowserView: View {
                 } else if availableModules.isEmpty && !isRefreshing && !isLoadingInitialState {
                     VStack(spacing: 10) {
                         Text(String(localized: "tap_refresh_to_load"))
-                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         Button {
                             refreshCatalog()
                         } label: {
                             Label(String(localized: "refresh_catalog"), systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(.bordered)
-                        .tint(ModuleBrowserPalette.primaryText)
+                        .tint(surfacePalette.foregroundColor)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 28)
@@ -1304,7 +1162,7 @@ public struct ModuleBrowserView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(ModuleBrowserPalette.background)
+        .background(surfacePalette.backgroundColor)
     }
 
     /**
@@ -1317,12 +1175,12 @@ public struct ModuleBrowserView: View {
     private var androidLoadingRow: some View {
         VStack(spacing: 8) {
             ProgressView()
-                .tint(ModuleBrowserPalette.primaryText)
+                .tint(surfacePalette.foregroundColor)
             Text(refreshProgress ?? (isLoadingInitialState
                 ? String(localized: "loading", defaultValue: "Loading...")
                 : String(localized: "refreshing_catalog")))
                 .font(.caption)
-                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 22)
@@ -1340,14 +1198,14 @@ public struct ModuleBrowserView: View {
         return VStack(spacing: 8) {
             if let fraction = progress.fraction {
                 ProgressView(value: fraction)
-                    .tint(ModuleBrowserPalette.primaryText)
+                    .tint(surfacePalette.foregroundColor)
             } else {
                 ProgressView()
-                    .tint(ModuleBrowserPalette.primaryText)
+                    .tint(surfacePalette.foregroundColor)
             }
             Text(Self.installPhaseText(progress.phase, progressPercent: progress.percent))
                 .font(.caption)
-                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 22)
@@ -1364,7 +1222,7 @@ public struct ModuleBrowserView: View {
     private func androidMessageRow(_ message: String) -> some View {
         Text(message)
             .font(.body)
-            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 24)
     }
@@ -1372,23 +1230,19 @@ public struct ModuleBrowserView: View {
     /**
      Document categories shown in Android's type filter.
 
-     - Returns: Category rows in Android filter order, omitting Add-ons until catalog data proves
-       that Android add-on rows are present.
+     - Returns: All seven rows from Android's static `documentTypes` array in source order.
      - Side effects: none.
      - Failure modes: none
      */
     private var visibleCategoryFilters: [ModuleCategory] {
-        var categories: [ModuleCategory] = [
+        [
             .bible,
             .commentary,
             .dictionary,
             .generalBook,
             .map,
+            .addon,
         ]
-        if shouldShowAddonsFilter {
-            categories.append(.addon)
-        }
-        return categories
     }
 
     /**
@@ -1402,7 +1256,7 @@ public struct ModuleBrowserView: View {
      */
     private func languageFilterTitle(for language: String) -> String {
         guard !language.isEmpty else {
-            return String(localized: "all_languages_count \(availableLanguages.count)")
+            return String(localized: "chooce_language_hint", defaultValue: "Language")
         }
         return displayName(for: language)
     }
@@ -1412,11 +1266,11 @@ public struct ModuleBrowserView: View {
 
      - Parameter count: Number of rows visible after filters.
      - Returns: User-visible count text.
-     - Side effects: none.
-    - Failure modes: none
+     - Side effects: Reads the application localization bundle through the shared formatter.
+     - Failure modes: Missing translations use Android's exact English fallback.
      */
     private func documentsCountTitle(_ count: Int) -> String {
-        String(localized: "documents_count \(count)")
+        AndroidDocumentSelectionFilterBar.localizedResultCount(count)
     }
 
     /**
@@ -1433,15 +1287,15 @@ public struct ModuleBrowserView: View {
         }
         switch category {
         case .bible:
-            return String(localized: "bibles")
+            return String(localized: "doc_type_bible", defaultValue: "Bible")
         case .commentary:
-            return String(localized: "commentaries")
+            return String(localized: "doc_type_commentary", defaultValue: "Commentary")
         case .dictionary:
-            return String(localized: "dictionaries")
+            return String(localized: "doc_type_dictionary", defaultValue: "Dictionary")
         case .generalBook:
-            return String(localized: "category_books")
+            return String(localized: "doc_type_book", defaultValue: "Book")
         case .map:
-            return String(localized: "maps", defaultValue: "Maps")
+            return String(localized: "doc_type_map", defaultValue: "Map")
         case .addon:
             return String(localized: "doc_type_addons", defaultValue: "Add-ons")
         default:
@@ -2012,67 +1866,48 @@ public struct ModuleBrowserView: View {
         )
         let isRecommended = recommendedDocuments?.contains(module) == true
         let badAction = badDocuments?.badDocumentAction(for: module) ?? .none
+        let isContextuallySelected = contextualModuleIdentity == module.installIdentity
+        let statusPresentation = ModuleBrowserStatusSlotPresentation(status: status)
 
         return VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(spacing: 5) {
-                    categoryIcon(for: module.category)
-                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                    if isRecommended {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.yellow)
-                    }
-                    if badAction == .warn {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.red)
-                    }
-                    Text(displayName(for: module.language))
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                        .lineLimit(1)
-                    if let installSize = Self.installSizeText(for: module.installSizeBytes) {
-                        Text(installSize)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: 70)
+                AndroidDocumentListLeadingColumn(
+                    category: module.category,
+                    languageTitle: displayName(for: module.language),
+                    installSizeTitle: Self.installSizeText(for: module.installSizeBytes),
+                    statusIconAssetName: statusPresentation.statusIconAssetName,
+                    statusIconColor: statusPresentation.statusIconColor,
+                    isRecommended: isRecommended,
+                    isWarned: badAction == .warn,
+                    encryptionState: Self.encryptionState(for: installedModule),
+                    surfacePalette: surfacePalette
+                )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(module.name)
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(ModuleBrowserPalette.primaryText)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(module.name)
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(surfacePalette.foregroundColor)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 8)
+
+                        Text(module.sourceName)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .lineLimit(1)
+                            .multilineTextAlignment(.trailing)
+                    }
+
                     Text(module.description)
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                         .lineLimit(module.isInstallable ? 2 : 3)
                     if isRecommended {
                         Text(String(localized: "recommended_document", defaultValue: "Recommended!"))
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     }
-                    if case let .errorDownloading(message) = status {
-                        Text(message.isEmpty
-                            ? String(localized: "error_occurred", defaultValue: "An error has occurred")
-                            : message)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer(minLength: 8)
-
-                VStack(alignment: .trailing, spacing: 10) {
-                    Text(module.sourceName)
-                        .font(.system(size: 17, weight: .regular))
-                        .foregroundStyle(ModuleBrowserPalette.secondaryText)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.trailing)
 
                     rowTrailingControls(
                         for: module,
@@ -2081,82 +1916,29 @@ public struct ModuleBrowserView: View {
                         rowActions: rowActions
                     )
                 }
-                .frame(width: 112, alignment: .trailing)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+            .padding(.bottom, 2)
 
             Rectangle()
-                .fill(ModuleBrowserPalette.divider)
+                .fill(surfacePalette.inactiveBorderColor)
                 .frame(height: 1)
                 .padding(.leading, 96)
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            performPrimaryRowAction(for: module, status: status)
+            handleRemoteModuleRowTap(module, status: status)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(module.name)
         .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
         .accessibilityAddTraits(Self.primaryRowTapStartsDownload(status) ? .isButton : [])
         .accessibilityIdentifier("moduleBrowserRow::\(module.installIdentity.rawValue)")
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if rowActions.contains(.uninstall) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
-                        kind: .uninstall,
-                        module: module
-                    )
-                } label: {
-                    Label(String(localized: "uninstall"), systemImage: "trash")
-                }
-            }
-        }
-        .contextMenu {
-            if rowActions.contains(.about) {
-                Button {
-                    selectedModuleDetails = ModuleBrowserModuleDetails(
-                        module: module,
-                        installedModule: installedModule
-                    )
-                } label: {
-                    Label(String(localized: "about"), systemImage: "info.circle")
-                }
-            }
-            if rowActions.contains(.uninstall) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
-                        kind: .uninstall,
-                        module: module
-                    )
-                } label: {
-                    Label(String(localized: "uninstall"), systemImage: "trash")
-                }
-            }
-            if rowActions.contains(.deleteIndex) {
-                Button(role: .destructive) {
-                    pendingRowActionConfirmation = ModuleBrowserRowActionConfirmation(
-                        kind: .deleteIndex,
-                        module: module
-                    )
-                } label: {
-                    Label(
-                        String(localized: "delete_module_index", defaultValue: "Delete Index"),
-                        systemImage: "magnifyingglass"
-                    )
-                }
-            }
-            if rowActions.contains(.unlock), let installedModule {
-                Button {
-                    beginUnlock(installedModule)
-                } label: {
-                    Label(
-                        String(localized: "unlock", defaultValue: "Unlock"),
-                        systemImage: "lock.open"
-                    )
-                }
-            }
-        }
+        .androidDocumentContextSelection(
+            isSelected: isContextuallySelected,
+            onLongPress: { beginContextualModuleSelection(module) }
+        )
     }
 
     /**
@@ -2264,36 +2046,6 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     Renders the Android-sourced category icon for a Downloads row.
-
-     - Parameter category: Remote module category.
-     - Returns: Template icon matching the closest Android document category glyph available in the
-       packaged icon catalog.
-     - Side effects: Loads local asset images when rendered.
-     - Failure modes: Unsupported categories use the generic documents icon.
-     */
-    @ViewBuilder
-    private func categoryIcon(for category: ModuleCategory) -> some View {
-        switch category {
-        case .bible:
-            AndBibleIconView(name: "ToolbarBible", size: 28)
-        case .commentary:
-            AndBibleIconView(name: "ToolbarCommentary", size: 28)
-        case .dictionary:
-            AndBibleIconView(name: "SettingsIconDictionary", size: 28)
-        case .generalBook:
-            AndBibleIconView(name: "DrawerDocuments", size: 28)
-        case .map:
-            Image(systemName: "map")
-                .font(.system(size: 26, weight: .regular))
-        case .addon:
-            AndBibleIconView(name: "DrawerDownloads", size: 28)
-        default:
-            AndBibleIconView(name: "DrawerDocuments", size: 28)
-        }
-    }
-
-    /**
      Builds the trailing controls for a Downloads row from Android-compatible row actions.
 
      - Parameters:
@@ -2314,24 +2066,31 @@ public struct ModuleBrowserView: View {
         status: ModuleBrowserDownloadStatus,
         rowActions: [ModuleDownloadRowAction]
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .bottom, spacing: 8) {
+            rowPrimaryControl(for: module, status: status)
+
+            Spacer(minLength: 8)
+
             if rowActions.contains(.about) {
                 Button {
+                    clearContextualModuleSelection()
                     selectedModuleDetails = ModuleBrowserModuleDetails(
                         module: module,
                         installedModule: installedModule
                     )
                 } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 22, weight: .regular))
+                    AndBibleIconView(name: "DocumentInfo", size: 24)
+                        .foregroundStyle(AndroidResourcePalette.grey600)
+                        .frame(width: 44, height: 36)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.blue)
                 .accessibilityLabel(String(localized: "about"))
+                .accessibilityIdentifier(
+                    "moduleBrowserAboutButton::\(module.installIdentity.rawValue)"
+                )
             }
-
-            rowPrimaryControl(for: module, status: status)
         }
+        .frame(maxWidth: .infinity, minHeight: 36, alignment: .trailing)
     }
 
     /**
@@ -2340,10 +2099,9 @@ public struct ModuleBrowserView: View {
      - Parameters:
        - module: Remote catalog row being rendered.
        - status: Current Android-equivalent install status.
-     - Returns: SwiftUI control matching Android's status branch for the row.
-     - Side effects: Buttons may retry, update, or cancel module installs. Installable rows use
-       `performPrimaryRowAction(for:status:)` from the row tap while this slot stays empty to match
-       Android `NOT_INSTALLED`.
+     - Returns: Android's horizontal install progress/cancel row, unavailable text, or an empty slot.
+     - Side effects: The active-install cancel button can cancel its repository-scoped task. Retry and
+       update remain row-tap actions exactly as in Android's `DocumentDownloadItemAdapter`.
      - Failure modes: Install failures are caught and retained as row error state by
        `installModule(_:)`.
      */
@@ -2352,73 +2110,42 @@ public struct ModuleBrowserView: View {
         for module: RemoteModuleInfo,
         status: ModuleBrowserDownloadStatus
     ) -> some View {
-        let presentation = ModuleBrowserStatusSlotPresentation(status: status)
-
-        switch presentation.kind {
-        case .installed:
-            Image(systemName: presentation.statusIconSystemName ?? "checkmark.circle.fill")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(ModuleBrowserPalette.installed)
-        case .progress(let phase, let progressPercent):
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(Self.installPhaseText(phase, progressPercent: progressPercent))
-                    .font(.caption)
-                    .foregroundStyle(ModuleBrowserPalette.secondaryText)
+        switch status {
+        case .beingInstalled(let progress):
+            HStack(spacing: 8) {
+                let progressPercent = progress.percent
                 if let progressPercent {
                     ProgressView(value: Double(progressPercent), total: 100)
-                        .frame(width: 76)
-                        .tint(ModuleBrowserPalette.primaryText)
+                        .frame(maxWidth: .infinity)
+                        .tint(surfacePalette.foregroundColor)
                 } else {
                     ProgressView()
-                        .frame(width: 76)
-                        .tint(ModuleBrowserPalette.primaryText)
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: .infinity)
+                        .tint(surfacePalette.foregroundColor)
                 }
-                let isCancellable = ModuleInstallProgress(phase: phase).isCancellable
+
+                let isCancellable = progress.isCancellable
                 Button {
                     cancelInstall(module.installIdentity)
                 } label: {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 22, weight: .regular))
+                    AndBibleIconView(name: "DocumentCancel", size: 24)
+                        .frame(width: 44, height: 36)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(ModuleBrowserPalette.secondaryText)
+                .foregroundStyle(AndroidResourcePalette.documentErrorRed)
                 .disabled(!isCancellable)
                 .opacity(isCancellable ? 1 : 0)
                 .accessibilityHidden(!isCancellable)
                 .accessibilityLabel(String(localized: "cancel"))
             }
-        case .retryError:
-            VStack(alignment: .trailing, spacing: 6) {
-                Image(systemName: presentation.statusIconSystemName ?? "exclamationmark.triangle.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.red)
-                Button {
-                    requestDownloadConfirmation(for: module, status: status)
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 22, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ModuleBrowserPalette.install)
-                .accessibilityLabel(String(localized: "retry", defaultValue: "Retry"))
-            }
-        case .update:
-            Button {
-                requestDownloadConfirmation(for: module, status: status)
-            } label: {
-                Image(systemName: presentation.statusIconSystemName ?? "arrow.up.circle.fill")
-                    .font(.system(size: 24, weight: .bold))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ModuleBrowserPalette.install)
-            .accessibilityLabel(String(localized: "update"))
         case .unavailable:
-            Label(String(localized: "unavailable"), systemImage: "lock.slash")
+            Text(String(localized: "unavailable"))
                 .font(.caption)
-                .foregroundStyle(ModuleBrowserPalette.tertiaryText)
-        case .emptyInstallableSlot:
+                .foregroundStyle(surfacePalette.disabledForegroundColor)
+        case .installed, .errorDownloading, .updateAvailable, .installable:
             Color.clear
-                .frame(width: 24, height: 24)
+                .frame(height: 1)
                 .accessibilityHidden(true)
         }
     }
@@ -2481,6 +2208,72 @@ public struct ModuleBrowserView: View {
         case .beingInstalled, .installed, .unavailable:
             break
         }
+    }
+
+    /**
+     Dispatches a Downloads row tap through Android's contextual-selection and download contracts.
+
+     Android enters contextual action mode after a long press. While that mode is active, a row tap
+     changes or clears the selected document instead of starting a download. Outside contextual mode,
+     the normal `DownloadControl.manageDownload` behavior remains authoritative.
+
+     - Parameters:
+       - module: Remote catalog row represented by the tap.
+       - status: Current Android-equivalent install status for the row.
+     - Side effects: Changes contextual selection or stages a download confirmation.
+     - Failure modes: Confirmed install failures remain owned by `installModule(_:)`.
+     */
+    private func handleRemoteModuleRowTap(
+        _ module: RemoteModuleInfo,
+        status: ModuleBrowserDownloadStatus
+    ) {
+        guard contextualModuleIdentity == nil else {
+            contextualModuleIdentity = contextualModuleIdentity == module.installIdentity
+                ? nil
+                : module.installIdentity
+            return
+        }
+        performPrimaryRowAction(for: module, status: status)
+    }
+
+    /**
+     Enters Android's app-owned contextual document action mode for one Downloads row.
+
+     - Parameter module: Remote catalog row selected by a long press or accessibility action.
+     - Side effects: Closes the ordinary overflow popup and replaces the Downloads app bar with the
+       shared contextual action bar.
+     - Failure modes: none.
+     */
+    private func beginContextualModuleSelection(_ module: RemoteModuleInfo) {
+        showOverflowMenu = false
+        contextualModuleIdentity = module.installIdentity
+    }
+
+    /**
+     Leaves Android's contextual document action mode and closes its overflow popup.
+
+     - Side effects: Clears the selected row and any contextual popup presentation.
+     - Failure modes: none.
+     */
+    private func clearContextualModuleSelection() {
+        contextualModuleIdentity = nil
+        showOverflowMenu = false
+    }
+
+    /**
+     Converts installed SWORD encryption metadata into the shared Android lock-icon state.
+
+     - Parameter module: Installed module paired with the remote row, when available.
+     - Returns: No lock for unencrypted or remote-only rows, a red closed lock for a locked module,
+       or a green open lock for an unlocked encrypted module.
+     - Side effects: none.
+     - Failure modes: Missing installed metadata is represented as `.none`.
+     */
+    private static func encryptionState(
+        for module: ModuleInfo?
+    ) -> AndroidDocumentEncryptionState {
+        guard let module, module.isEncrypted else { return .none }
+        return module.isUnlocked ? .unlocked : .locked
     }
 
     /**

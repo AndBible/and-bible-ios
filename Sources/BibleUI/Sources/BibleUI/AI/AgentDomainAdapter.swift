@@ -112,6 +112,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
     let sqliteLibrary: SQLiteDocumentModuleLibrary
     let searchIndexService: SearchIndexService
     let bookmarkService: BookmarkService
+    let labelConfigurationService: WorkspaceLabelConfigurationService
     let myDocumentLibraryStore: MyDocumentLibraryStore
     let myDocumentStore: MyDocumentStore
     let windowManager: WindowManager
@@ -126,6 +127,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
        - sqliteLibrary: Installed Android SQLite document registry.
        - searchIndexService: Existing text and Strong's index service.
        - bookmarkService: Existing bookmarks, labels, and StudyPads service.
+       - labelConfigurationService: Cross-category owner for label/workspace mutations.
        - myDocumentLibraryStore: Transactional My Documents graph store.
        - myDocumentStore: Existing page lookup and atomic page-content store.
        - windowManager: Active workspace/window state owner.
@@ -139,6 +141,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         sqliteLibrary: SQLiteDocumentModuleLibrary,
         searchIndexService: SearchIndexService,
         bookmarkService: BookmarkService,
+        labelConfigurationService: WorkspaceLabelConfigurationService,
         myDocumentLibraryStore: MyDocumentLibraryStore,
         myDocumentStore: MyDocumentStore,
         windowManager: WindowManager,
@@ -149,6 +152,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         self.sqliteLibrary = sqliteLibrary
         self.searchIndexService = searchIndexService
         self.bookmarkService = bookmarkService
+        self.labelConfigurationService = labelConfigurationService
         self.myDocumentLibraryStore = myDocumentLibraryStore
         self.myDocumentStore = myDocumentStore
         self.windowManager = windowManager

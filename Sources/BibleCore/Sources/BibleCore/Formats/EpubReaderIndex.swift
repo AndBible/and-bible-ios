@@ -199,12 +199,15 @@ extension EpubReader {
         sourceFileName: String?,
         database: OpaquePointer?
     ) throws {
+        let androidDisplayName = sourceFileName.flatMap { $0.isEmpty ? nil : $0 }
+            ?? resourceIdentity.bookInitials
         let values: [(String, String)] = [
             ("index_version", indexVersion),
             ("initials", resourceIdentity.bookInitials),
             ("generation", resourceIdentity.generationIdentifier),
             ("source_file_name", sourceFileName ?? ""),
-            ("title", package.title),
+            ("title", package.title ?? androidDisplayName),
+            ("description", package.description ?? androidDisplayName),
             ("author", package.author),
             ("language", package.language),
             ("identifier", package.packageIdentifier ?? ""),
@@ -217,6 +220,43 @@ extension EpubReader {
                 integers: [],
                 database: database
             )
+        }
+    }
+
+    /**
+     Clears only EPUB full-text rows from one unpublished immutable generation.
+
+     Android's Delete search index action preserves the book, table of contents, rendered content,
+     and navigation metadata while removing the separate FTS index. The caller supplies a staging
+     database that has not yet been published, so live readers never observe in-place mutation.
+
+     - Parameter indexURL: Writable staged native EPUB index.
+     - Side effects: Opens the database read/write and removes every `content_fts` row atomically.
+     - Throws: `EpubError.indexingFailed` when SQLite cannot open, begin, clear, or commit the index.
+     - Failure modes: Any failure rolls back the transaction and leaves publication to the caller.
+     */
+    static func clearSearchIndex(at indexURL: URL) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            indexURL.path,
+            &database,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
+            nil
+        ) == SQLITE_OK else {
+            let message = sqliteMessage(database)
+            sqlite3_close(database)
+            throw EpubError.indexingFailed(message)
+        }
+        defer { sqlite3_close(database) }
+
+        guard sqlite3_exec(database, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK else {
+            throw EpubError.indexingFailed(sqliteMessage(database))
+        }
+        guard sqlite3_exec(database, "DELETE FROM content_fts", nil, nil, nil) == SQLITE_OK,
+              sqlite3_exec(database, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+            let message = sqliteMessage(database)
+            sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+            throw EpubError.indexingFailed(message)
         }
     }
 

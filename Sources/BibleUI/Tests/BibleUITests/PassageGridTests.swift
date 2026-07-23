@@ -149,15 +149,22 @@ final class PassageGridTests: XCTestCase {
      Verifies checkable passage chooser menu rows expose their state to accessibility.
 
      The Android-style overflow popup renders checkbox rows visually. iOS VoiceOver and UI tests
-     need the same state as an accessibility value, using the existing app convention for checkable
-     menu rows: `on` when checked and `off` when unchecked.
+     need the same state as an accessibility value. The chooser supplies `on` or `off` to the shared
+     popup row, and that component must forward the value to the rendered button.
      */
     func testPassageChooserMenuRowsExposeCheckedStateAccessibilityValue() throws {
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
         )
+        let popupSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidPopupMenu.swift"
+        )
 
-        XCTAssertTrue(source.contains(".accessibilityValue(isChecked(entry.option) ? \"on\" : \"off\")"))
+        XCTAssertTrue(source.contains("accessibilityValue: isChecked(entry.option) ? \"on\" : \"off\""))
+        XCTAssertTrue(popupSource.contains(
+            ".androidPopupMenuAccessibility(identifier: accessibilityIdentifier, value: accessibilityValue)"
+        ))
+        XCTAssertTrue(popupSource.contains("self.accessibilityValue(value)"))
     }
 
     /**

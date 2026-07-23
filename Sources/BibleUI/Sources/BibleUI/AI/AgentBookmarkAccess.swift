@@ -329,20 +329,14 @@ extension BibleUIAgentDomainAdapter {
                 "Cannot delete special internal label: \(label.name)"
             )
         }
-        let orphanBibleIDs = deleteOrphanedBookmarks
-            ? bookmarkService.bibleBookmarks(withLabel: labelID).filter {
-                orderedLabels(for: $0).allSatisfy { $0.id == labelID }
-            }.map(\.id)
-            : []
-        let orphanGenericIDs = deleteOrphanedBookmarks
-            ? bookmarkService.genericBookmarks(withLabel: labelID).filter {
-                orderedLabels(for: $0).allSatisfy { $0.id == labelID }
-            }.map(\.id)
-            : []
-
-        bookmarkService.deleteLabel(id: labelID)
-        orphanBibleIDs.forEach(bookmarkService.removeBibleBookmark)
-        orphanGenericIDs.forEach(bookmarkService.removeGenericBookmark)
+        do {
+            try labelConfigurationService.deleteLabel(
+                id: labelID,
+                deleteOrphanedBookmarks: deleteOrphanedBookmarks
+            )
+        } catch WorkspaceLabelConfigurationError.labelNotFound {
+            throw bookmarkDomainError("LABEL_NOT_FOUND", "Label not found: \(labelID.uuidString.lowercased())")
+        }
         return try BibleUIAgentJSON.success(BibleUIAgentJSON.object(
             ("labelId", BibleUIAgentJSON.uuid(labelID)),
             ("labelName", .string(label.name)),

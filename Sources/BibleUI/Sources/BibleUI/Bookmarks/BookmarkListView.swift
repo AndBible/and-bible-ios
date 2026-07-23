@@ -57,18 +57,33 @@ public struct BookmarkListView: View {
         /// Manage the full set of user labels.
         case labelManager
 
-        /// Assign labels to the selected bookmark.
-        case labelAssignment(UUID)
+        /// Assign one exact label set to the selected Bible and generic bookmarks.
+        case labelAssignment([UUID])
 
         /// Stable route identity for SwiftUI navigation.
         var id: String {
             switch self {
             case .labelManager:
                 return "labelManager"
-            case .labelAssignment(let bookmarkId):
-                return "labelAssignment::\(bookmarkId.uuidString)"
+            case .labelAssignment(let bookmarkIDs):
+                return "labelAssignment::" + bookmarkIDs
+                    .map(\.uuidString)
+                    .sorted()
+                    .joined(separator: ",")
             }
         }
+    }
+
+    /// App-owned Android popup currently visible over the Bookmark activity.
+    private enum BookmarkListPopup {
+        case labelFilter
+        case overflow
+    }
+
+    /// Stable anchor names shared by toolbar/filter controls and their popup surfaces.
+    private enum PopupAnchor {
+        static let labelFilter = "bookmarkListLabelFilterAnchor"
+        static let overflow = "bookmarkListOverflowAnchor"
     }
 
     /// SwiftData context used for bookmark deletion and save operations.
@@ -76,6 +91,9 @@ public struct BookmarkListView: View {
 
     /// Dismiss action for closing the bookmark sheet.
     @Environment(\.dismiss) private var dismiss
+
+    /// Active scheme used by the shared application popup palette.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Raw Bible bookmark query used as part of the source set for filtering and sorting.
     @Query(sort: \BibleBookmark.createdAt, order: .reverse) private var bibleBookmarks: [BibleBookmark]
@@ -101,23 +119,26 @@ public struct BookmarkListView: View {
     /// Current bookmark-list route for label management or label assignment.
     @State private var activeBookmarkListRoute: BookmarkListRoute?
 
+    /// Shared popup currently visible from the label selector or overflow action.
+    @State private var activePopup: BookmarkListPopup?
+
+    /// Bookmark identifiers selected by Android's contextual multi-select mode.
+    @State private var selectedBookmarkIDs: Set<UUID> = []
+
+    /// Selected bookmark identifiers waiting for explicit delete confirmation.
+    @State private var pendingDeletionIDs: [UUID] = []
+
+    /// Android-style transient sort description.
+    @State private var toastMessage: String?
+
     /// Current visible navigation or CSV outcome message.
     @State private var presentedMessage: BookmarkListPresentedMessage?
 
     /// Whether Android CSV import's document picker is presented.
     @State private var showCSVImporter = false
 
-    /// Whether Android CSV export's column selector is presented.
-    @State private var showCSVColumnSelector = false
-
-    /// Whether the destination picker is writing `csvExportDocument`.
-    @State private var showCSVExporter = false
-
-    /// Selected Android CSV columns, restored from the unchecked-column preference before export.
-    @State private var selectedCSVColumns = Set(AndroidBookmarkCSVColumn.allCases)
-
-    /// Immutable encoded document handed to SwiftUI's export picker.
-    @State private var csvExportDocument: BookmarkCSVTransferDocument?
+    /// Shared Android column-selection, encoding, preference, and file-destination owner.
+    @State private var csvExportWorkflow = AndroidBookmarkCSVExportWorkflow()
 
     /// Legacy callback retained only until the parent reader adopts exact typed navigation.
     var onNavigate: ((String, Int) -> Void)?
@@ -125,8 +146,20 @@ public struct BookmarkListView: View {
     /// Exact Bible/generic navigation callback for Android-parity reader wiring.
     var onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)?
 
-    /// Optional callback used to open a study pad for a selected label.
-    var onOpenStudyPad: ((UUID) -> Void)?
+    /// Workspace whose label auto-assignment and display overrides are edited from this route.
+    private let workspace: Workspace?
+
+    /// Reader/workspace-owned activity, content, and text palette.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Reader-owned route close action; standalone callers fall back to environment dismissal.
+    private let onDismiss: (() -> Void)?
+
+    /// Canonical annotation-factory projection for Bible row content.
+    private let bibleTextResolver: ((BibleBookmark) -> BookmarkListTextProjection)?
+
+    /// Canonical annotation-factory projection for generic row content.
+    private let genericTextResolver: ((GenericBookmark) -> BookmarkListTextProjection)?
 
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
@@ -138,37 +171,74 @@ public struct BookmarkListView: View {
      */
     var activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)?
 
-    /// Whether the list should expose sheet-style explicit dismiss chrome.
-    private let showsDismissButton: Bool
-
     /**
      Creates the bookmark list view.
 
      - Parameters:
        - onNavigate: Legacy source-compatible callback; exact navigation does not invoke it.
        - onNavigateTarget: Exact typed callback preferred over the legacy chapter-only callback.
-       - onOpenStudyPad: Callback invoked when the user wants to open a selected label's study pad.
+       - workspace: Active workspace whose label-specific settings should be shown by Label Manager.
        - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
          chapter/verse for legacy row display using the active Bible versification.
        - activeReferenceResolver: Optional resolver that maps a stored KJVA ordinal to the active
          module's versification (book name plus chapter/verse) for display only.
-       - showsDismissButton: Whether to show the sheet-style Done button; app-owned destination
-         routes rely on navigation-stack back chrome instead.
+       - showsDismissButton: Retained for source compatibility. The app-owned activity always
+         provides Android Up navigation and never presents native sheet chrome.
      */
     public init(
         onNavigate: ((String, Int) -> Void)? = nil,
         onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
-        onOpenStudyPad: ((UUID) -> Void)? = nil,
+        workspace: Workspace? = nil,
         bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
         showsDismissButton: Bool = true
     ) {
         self.onNavigate = onNavigate
         self.onNavigateTarget = onNavigateTarget
-        self.onOpenStudyPad = onOpenStudyPad
+        self.workspace = workspace
+        self.surfacePalette = .standard
+        self.onDismiss = nil
+        self.bibleTextResolver = nil
+        self.genericTextResolver = nil
         self.bibleOrdinalResolver = bibleOrdinalResolver
         self.activeReferenceResolver = activeReferenceResolver
-        self.showsDismissButton = showsDismissButton
+        _ = showsDismissButton
+    }
+
+    /**
+     Creates the reader-owned app activity with its live palette and canonical content resolvers.
+
+     - Parameters:
+       - surfacePalette: Active window/workspace palette shared with reader chrome.
+       - onDismiss: Clears the reader-owned destination without native sheet dismissal.
+       - bibleTextResolver: Reader annotation-factory projection for Bible bookmark text.
+       - genericTextResolver: Stored-source annotation-factory projection for generic text.
+       - onNavigateTarget: Exact typed navigation callback.
+       - workspace: Active workspace for shared label management.
+       - bibleOrdinalResolver: Legacy source-ordinal display resolver.
+       - activeReferenceResolver: Active-module KJVA display resolver.
+     - Side effects: none until the user invokes an action.
+     - Failure modes: Missing content resolvers leave verse previews empty while retaining rows.
+     */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: @escaping () -> Void,
+        bibleTextResolver: @escaping (BibleBookmark) -> BookmarkListTextProjection,
+        genericTextResolver: @escaping (GenericBookmark) -> BookmarkListTextProjection,
+        onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
+        workspace: Workspace? = nil,
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
+        self.bibleTextResolver = bibleTextResolver
+        self.genericTextResolver = genericTextResolver
+        self.onNavigate = nil
+        self.onNavigateTarget = onNavigateTarget
+        self.workspace = workspace
+        self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.activeReferenceResolver = activeReferenceResolver
     }
 
     /**
@@ -190,80 +260,102 @@ public struct BookmarkListView: View {
                 BookmarkListItem(
                     bibleBookmark: $0,
                     ordinalResolver: bibleOrdinalResolver,
-                    activeReferenceResolver: activeReferenceResolver
+                    activeReferenceResolver: activeReferenceResolver,
+                    textProjection: bibleTextResolver?($0) ?? .empty
                 )
             }
-        let genericItems = genericBookmarks.map(BookmarkListItem.init(genericBookmark:))
+        let genericItems = genericBookmarks.map {
+            BookmarkListItem(
+                genericBookmark: $0,
+                textProjection: genericTextResolver?($0) ?? .empty
+            )
+        }
         return bibleItems + genericItems
     }
 
-    /// User-created labels that should appear in the filter strip.
-    private var userLabels: [BibleCore.Label] {
-        labels.filter { $0.isRealLabel }
+    /// Android assignable labels in stable visible-name order, excluding synthetic Unlabelled.
+    private var assignableLabels: [BibleCore.Label] {
+        labels
+            .filter { $0.id != BibleCore.Label.unlabeledId && $0.name != BibleCore.Label.unlabeledName }
+            .sorted { lhs, rhs in
+                let comparison = AndroidLabelPresentation.displayName(for: lhs)
+                    .localizedCaseInsensitiveCompare(AndroidLabelPresentation.displayName(for: rhs))
+                if comparison != .orderedSame { return comparison == .orderedAscending }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
     }
 
     /**
      Builds the bookmark list screen, empty state, and related navigation destinations.
      */
     public var body: some View {
-        Group {
-            if bookmarkListItems.isEmpty {
-                ContentUnavailableView(
-                    String(localized: "no_bookmarks"),
-                    systemImage: "bookmark",
-                    description: Text(String(localized: "no_bookmarks_description"))
-                )
-                .accessibilityIdentifier("bookmarkListScreen")
-                .accessibilityValue(bookmarkListAccessibilityValue)
-            } else {
+        AndroidActivitySurface(palette: surfacePalette) {
+            appBar
+        } content: {
+            VStack(spacing: 0) {
+                labelFilterSelector
+                if showNotes {
+                    bookmarkSearchSection
+                }
+                Divider().overlay(surfacePalette.inactiveBorderColor)
                 bookmarkList
-                    .accessibilityIdentifier("bookmarkListScreen")
-                    .accessibilityValue(bookmarkListAccessibilityValue)
             }
         }
         .overlay(alignment: .topLeading) {
-            bookmarkListStateExport
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "bookmarks", defaultValue: "Bookmarks"),
+                accessibilityIdentifier: "bookmarkListScreen",
+                accessibilityValue: bookmarkListAccessibilityValue,
+                surfaceColor: surfacePalette.backgroundColor
+            )
         }
-        .navigationTitle(String(localized: "bookmarks"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            if showsDismissButton {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done")) { dismiss() }
-                        .accessibilityIdentifier("bookmarkListDoneButton")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 12) {
-                    Button {
-                        activeBookmarkListRoute = .labelManager
-                    } label: {
-                        Image(systemName: "tag")
-                    }
-                    sortMenu
-                    bookmarkActionsMenu
-                }
-            }
+        .overlay(alignment: .topLeading) {
+            bookmarkListStateExport
         }
         .navigationDestination(item: $activeBookmarkListRoute) { route in
             bookmarkListDestination(route)
         }
         .onAppear(perform: restoreBookmarkListPreferences)
         .onChange(of: sortOrder) { _, value in
+            selectedBookmarkIDs = []
             SettingsStore(modelContext: modelContext).setString(.bookmarkSortOrder, value: value.rawValue)
         }
         .onChange(of: showNotes) { _, value in
+            selectedBookmarkIDs = []
             if !value { searchText = "" }
             SettingsStore(modelContext: modelContext).setBool(.bookmarkShowNotes, value: value)
         }
+        .onChange(of: selectedLabelId) { _, _ in selectedBookmarkIDs = [] }
+        .onChange(of: searchText) { _, _ in selectedBookmarkIDs = [] }
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.labelFilter,
+            isPresented: popupBinding(.labelFilter),
+            menuWidth: 300,
+            estimatedMenuHeight: min(CGFloat(labelFilterOptions.count) * 48, 420),
+            accessibilityIdentifier: "bookmarkListLabelFilterMenu"
+        ) {
+            labelFilterMenu
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.overflow,
+            isPresented: popupBinding(.overflow),
+            menuWidth: 280,
+            estimatedMenuHeight: 146,
+            accessibilityIdentifier: "bookmarkListOverflowMenu"
+        ) {
+            bookmarkOverflowMenu
+        }
         .overlay {
-            if showCSVColumnSelector {
+            if csvExportWorkflow.showsColumnSelector {
                 BookmarkCSVColumnSelectionView(
-                    selectedColumns: selectedCSVColumns,
-                    onExport: prepareCSVExport,
-                    onCancel: { showCSVColumnSelector = false }
+                    selectedColumns: csvExportWorkflow.selectedColumns,
+                    onExport: { columns in
+                        csvExportWorkflow.prepareExport(
+                            columns: columns,
+                            modelContext: modelContext
+                        )
+                    },
+                    onCancel: csvExportWorkflow.cancelColumnSelection
                 )
             }
         }
@@ -274,22 +366,42 @@ public struct BookmarkListView: View {
             onCompletion: importCSVSelection
         )
         .fileExporter(
-            isPresented: $showCSVExporter,
-            document: csvExportDocument,
+            isPresented: Binding(
+                get: { csvExportWorkflow.showsFileExporter },
+                set: { csvExportWorkflow.showsFileExporter = $0 }
+            ),
+            document: csvExportWorkflow.exportDocument,
             contentType: .commaSeparatedText,
-            defaultFilename: csvExportFileName,
-            onCompletion: completeCSVExport
+            defaultFilename: csvExportWorkflow.exportFileName,
+            onCompletion: csvExportWorkflow.handleFileExportCompletion
         )
         .overlay {
             if let message = presentedMessage {
-                AndroidMyDocumentDecisionDialog(
+                AndroidDecisionDialog(
                     title: message.title,
                     message: message.message,
-                    actions: [.init(id: "okay", title: String(localized: "ok", defaultValue: "OK"), style: .normal) { presentedMessage = nil }]
+                    actions: [.init(id: "okay", title: String(localized: "ok", defaultValue: "OK"), style: .normal) { presentedMessage = nil }],
+                    accessibilityIdentifier: "androidBookmarkListFeedbackDialog"
                 )
-                .accessibilityIdentifier("androidBookmarkListFeedbackDialog")
+            } else if let feedback = csvExportWorkflow.feedback {
+                AndroidDecisionDialog(
+                    title: feedback.title,
+                    message: feedback.message,
+                    actions: [
+                        .init(
+                            id: "okay",
+                            title: String(localized: "ok", defaultValue: "OK"),
+                            style: .normal
+                        ) {
+                            csvExportWorkflow.feedback = nil
+                        },
+                    ],
+                    accessibilityIdentifier: "androidBookmarkListCSVFeedbackDialog"
+                )
             }
         }
+        .overlay { deleteConfirmationDialog }
+        .androidToastFeedback(toastMessage, bottomPadding: 48)
     }
 
     /// Builds app-owned bookmark-list destinations without introducing nested iOS sheets.
@@ -297,102 +409,187 @@ public struct BookmarkListView: View {
     private func bookmarkListDestination(_ route: BookmarkListRoute) -> some View {
         switch route {
         case .labelManager:
-            LabelManagerView(onOpenStudyPad: onOpenStudyPad != nil ? { labelId in
-                activeBookmarkListRoute = nil
-                onOpenStudyPad?(labelId)
-            } : nil)
-        case .labelAssignment(let bookmarkId):
+            LabelManagerView(
+                workspace: workspace,
+                surfacePalette: surfacePalette,
+                onDismiss: { activeBookmarkListRoute = nil }
+            )
+        case .labelAssignment(let bookmarkIDs):
             LabelAssignmentView(
-                bookmarkId: bookmarkId,
+                bookmarkIDs: bookmarkIDs,
+                workspace: workspace,
+                surfacePalette: surfacePalette,
                 onDismiss: { activeBookmarkListRoute = nil }
             )
         }
     }
 
-    /// Main list content once at least one bookmark exists.
+    /// Shared Android activity bar in normal or contextual selection mode.
+    private var appBar: some View {
+        AndroidActivityTopAppBar(
+            title: selectedBookmarkIDs.isEmpty
+                ? String(localized: "bookmarks", defaultValue: "Bookmarks")
+                : "",
+            accessibilityIdentifier: "bookmarkListAppBar",
+            accessibilityValue: selectedBookmarkIDs.isEmpty
+                ? ""
+                : "selected=\(selectedBookmarkIDs.count)",
+            backgroundColor: surfacePalette.toolbarBackgroundColor,
+            foregroundColor: surfacePalette.toolbarForegroundColor,
+            onBack: selectedBookmarkIDs.isEmpty ? closeBookmarkList : clearBookmarkSelection,
+            navigationIcon: selectedBookmarkIDs.isEmpty
+                ? .asset("ActivityBack")
+                : .asset("ActivityClose"),
+            navigationAccessibilityLabel: selectedBookmarkIDs.isEmpty
+                ? String(localized: "back", defaultValue: "Back")
+                : String(localized: "close", defaultValue: "Close")
+        ) {
+            if selectedBookmarkIDs.isEmpty {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("BookmarkManageLabels"),
+                    accessibilityLabel: String(localized: "manage_labels", defaultValue: "Manage labels"),
+                    accessibilityIdentifier: "bookmarkListManageLabelsButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: {
+                        activePopup = nil
+                        activeBookmarkListRoute = .labelManager
+                    }
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset(BookmarkListProjection.sortIconName(for: sortOrder)),
+                    accessibilityLabel: BookmarkListProjection.sortDescription(for: sortOrder),
+                    accessibilityIdentifier: "bookmarkListSortButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: advanceSortOrder
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "bookmarkListOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { togglePopup(.overflow) }
+                )
+                .androidPopupMenuAnchor(id: PopupAnchor.overflow)
+            } else {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("BookmarkLabel"),
+                    accessibilityLabel: String(localized: "assign_labels", defaultValue: "Assign labels"),
+                    accessibilityIdentifier: "bookmarkListAssignLabelsButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: beginLabelAssignment
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityDelete"),
+                    accessibilityLabel: String(localized: "delete", defaultValue: "Delete"),
+                    accessibilityIdentifier: "bookmarkListDeleteSelectionButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: requestSelectedBookmarkDeletion
+                )
+            }
+        }
+    }
+
+    /// Android spinner-style label selector that owns the current filter popup anchor.
+    private var labelFilterSelector: some View {
+        Button { togglePopup(.labelFilter) } label: {
+            HStack(spacing: 10) {
+                Text(selectedLabelFilterTitle)
+                    .font(.system(size: 17))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                AndBibleIconView(name: "PromptExpandIndicator", size: 16)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(surfacePalette.foregroundColor)
+        .background(surfacePalette.backgroundColor)
+        .androidPopupMenuAnchor(id: PopupAnchor.labelFilter)
+        .accessibilityIdentifier("bookmarkListLabelFilterButton")
+        .accessibilityValue(bookmarkListSelectedLabelAccessibilityToken)
+    }
+
+    /// Scrollable Android Bookmark rows or the activity's simple empty-list text.
     private var bookmarkList: some View {
-        List {
-            // Label filter chips
-            if !userLabels.isEmpty {
-                labelFilterSection
-            }
-
-            if showNotes {
-                bookmarkSearchSection
-            }
-
-            // Bookmark list
-            ForEach(filteredBookmarks) { bookmark in
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if filteredBookmarks.isEmpty {
+                    Text(String(localized: "empty_list", defaultValue: "No items to display"))
+                        .font(.system(size: 17))
+                        .foregroundStyle(surfacePalette.foregroundColor)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 16)
+                        .accessibilityIdentifier("bookmarkListEmptyText")
+                }
+                ForEach(filteredBookmarks) { bookmark in
                 BookmarkRow(
                     bookmark: bookmark,
                     showNotes: showNotes,
-                    onSelect: { navigate(to: bookmark) },
-                    onEditLabels: { activeBookmarkListRoute = .labelAssignment(bookmark.id) }
+                    isSelected: selectedBookmarkIDs.contains(bookmark.id),
+                    unlabeledColor: unlabeledLabelColor,
+                    surfacePalette: surfacePalette,
+                    onSelect: { handleBookmarkTap(bookmark) },
+                    onLongPress: { beginBookmarkSelection(bookmark) }
                 )
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        deleteBookmark(bookmark)
-                    } label: {
-                        SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-                    }
-                    .accessibilityIdentifier("bookmarkListDeleteButton::\(bookmark.accessibilitySegment)")
-                }
-                .contextMenu {
-                    Button {
-                        activeBookmarkListRoute = .labelAssignment(bookmark.id)
-                    } label: {
-                        SwiftUI.Label(String(localized: "edit_labels"), systemImage: "tag")
-                    }
-                    Button(role: .destructive) {
-                        deleteBookmark(bookmark)
-                    } label: {
-                        SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-                    }
+                    Divider().overlay(surfacePalette.inactiveBorderColor)
                 }
             }
-            .onDelete(perform: deleteBookmarks)
         }
     }
 
     /**
      Visible bookmark search control that mirrors Android's in-content bookmark search layout.
 
-     Android's `Bookmarks` activity owns an `EditText` under the label selector instead of relying
-     on action-bar search chrome. Keeping this as a normal list row makes the filter reachable when
-     the bookmark list is hosted inside the reader's app-owned destination stack, where SwiftUI's
-     navigation `.searchable` chrome is not reliably exposed.
+     Android's `Bookmarks` activity owns an `EditText` under the label selector rather than search
+     chrome in the action bar. This app-owned row uses the same note-only hint and clear action.
      */
     private var bookmarkSearchSection: some View {
-        Section {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
+        HStack(spacing: 8) {
+            VStack(spacing: 0) {
                 #if os(iOS)
-                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                TextField(
+                    "",
+                    text: $searchText,
+                    prompt: Text(String(localized: "filter_by_notes", defaultValue: "Search notes"))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                )
+                    .textFieldStyle(.plain)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityIdentifier("bookmarkListSearchField")
                 #else
-                TextField(String(localized: "search_bookmarks"), text: $searchText)
+                TextField(
+                    "",
+                    text: $searchText,
+                    prompt: Text(String(localized: "filter_by_notes", defaultValue: "Search notes"))
+                )
+                    .textFieldStyle(.plain)
                     .accessibilityIdentifier("bookmarkListSearchField")
                 #endif
-
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("bookmarkListClearSearchButton")
-                    .accessibilityLabel(String(localized: "clear"))
-                }
+                Rectangle()
+                    .fill(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                    .frame(height: 2)
             }
-            .accessibilityElement(children: .contain)
+
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    AndBibleIconView(name: "ActivityClose", size: 20)
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                .accessibilityIdentifier("bookmarkListClearSearchButton")
+                .accessibilityLabel(String(localized: "clear", defaultValue: "Clear"))
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(surfacePalette.backgroundColor)
+        .accessibilityElement(children: .contain)
     }
 
     /// Stable bookmark-list state exported for UI automation, including route presentation flags.
@@ -438,82 +635,243 @@ public struct BookmarkListView: View {
         )
     }
 
-    /// Sort-order menu shown in the navigation bar.
-    private var sortMenu: some View {
-        Menu {
-            Picker(String(localized: "sort"), selection: $sortOrder) {
-                SwiftUI.Label(
-                    String(localized: "sort_bible_order"),
-                    systemImage: "arrow.up"
-                )
-                    .tag(BookmarkSortOrder.bibleOrder)
-                    .accessibilityIdentifier("bookmarkListSortOption::bibleOrder")
-                SwiftUI.Label(
-                    String(localized: "sort_bible_order"),
-                    systemImage: "arrow.down"
-                )
-                    .tag(BookmarkSortOrder.bibleOrderDesc)
-                    .accessibilityIdentifier("bookmarkListSortOption::bibleOrderDesc")
-                SwiftUI.Label(
-                    String(localized: "sort_date_created"),
-                    systemImage: "arrow.up"
-                )
-                    .tag(BookmarkSortOrder.createdAt)
-                    .accessibilityIdentifier("bookmarkListSortOption::createdAt")
-                SwiftUI.Label(
-                    String(localized: "sort_date_created"),
-                    systemImage: "arrow.down"
-                )
-                    .tag(BookmarkSortOrder.createdAtDesc)
-                    .accessibilityIdentifier("bookmarkListSortOption::createdAtDesc")
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
+    /// Android label spinner choices: All, Unlabelled, then every assignable persisted label.
+    private var labelFilterOptions: [BookmarkLabelFilterOption] {
+        [
+            BookmarkLabelFilterOption(
+                labelID: nil,
+                title: String(localized: "all", defaultValue: "All")
+            ),
+            BookmarkLabelFilterOption(
+                labelID: BibleCore.Label.unlabeledId,
+                title: String(localized: "label_unlabelled", defaultValue: "Unlabelled")
+            ),
+        ] + assignableLabels.map {
+            BookmarkLabelFilterOption(
+                labelID: $0.id,
+                title: AndroidLabelPresentation.displayName(for: $0)
+            )
         }
-        .accessibilityIdentifier("bookmarkListSortMenu")
     }
 
-    /// Android bookmark presentation and CSV transfer commands.
-    private var bookmarkActionsMenu: some View {
-        Menu {
-            Toggle(
-                String(localized: "show_notes", defaultValue: "Show notes"),
-                isOn: $showNotes
-            )
-            .accessibilityIdentifier("bookmarkListShowNotesToggle")
+    /// Current Android spinner title.
+    private var selectedLabelFilterTitle: String {
+        labelFilterOptions.first { $0.labelID == selectedLabelId }?.title
+            ?? String(localized: "all", defaultValue: "All")
+    }
 
-            Divider()
+    /// Canonical Unlabelled tag color, with Android's blue-highlight default as fallback.
+    private var unlabeledLabelColor: Color {
+        let label = labels.first {
+            $0.id == BibleCore.Label.unlabeledId || $0.name == BibleCore.Label.unlabeledName
+        }
+        return Color(argbInt: label?.color ?? BibleCore.Label.defaultColor)
+    }
 
-            Button {
-                showCSVImporter = true
-            } label: {
-                SwiftUI.Label(
-                    String(
-                        format: String(localized: "import_items", defaultValue: "Import %@"),
-                        "CSV"
-                    ),
-                    systemImage: "square.and.arrow.down"
-                )
+    /// Shared app-owned popup used by Android's label spinner.
+    private var labelFilterMenu: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "bookmarkListLabelFilterSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(labelFilterOptions) { option in
+                        AndroidPopupMenuRow(
+                            title: option.title,
+                            accessibilityIdentifier: "bookmarkListFilterOption::\(option.accessibilitySegment)",
+                            accessibilityValue: option.labelID == selectedLabelId ? "selected" : ""
+                        ) {
+                            selectedLabelId = option.labelID
+                            activePopup = nil
+                        }
+                    }
+                }
             }
-            .accessibilityIdentifier("bookmarkListImportCSVButton")
+            .frame(maxHeight: 420)
+        }
+    }
 
-            Button {
-                presentCSVColumnSelector()
-            } label: {
-                SwiftUI.Label(
-                    String(
+    /// Shared app-owned overflow popup with Android's checkable notes and CSV commands.
+    private var bookmarkOverflowMenu: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "bookmarkListOverflowSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "show_notes", defaultValue: "Show notes"),
+                    accessory: .checkbox(isOn: showNotes),
+                    accessibilityIdentifier: "bookmarkListShowNotesToggle",
+                    accessibilityValue: showNotes ? "on" : "off"
+                ) {
+                    showNotes.toggle()
+                    activePopup = nil
+                }
+                AndroidPopupMenuRow(
+                    title: String(
                         format: String(localized: "export_something", defaultValue: "Export %@"),
                         "CSV"
                     ),
-                    systemImage: "square.and.arrow.up"
-                )
+                    accessibilityIdentifier: "bookmarkListExportCSVButton"
+                ) {
+                    activePopup = nil
+                    if filteredBookmarks.contains(where: \.isBibleBookmark) {
+                        presentCSVColumnSelector()
+                    }
+                }
+                AndroidPopupMenuRow(
+                    title: String(
+                        format: String(localized: "import_items", defaultValue: "Import %@"),
+                        "CSV"
+                    ),
+                    accessibilityIdentifier: "bookmarkListImportCSVButton"
+                ) {
+                    activePopup = nil
+                    showCSVImporter = true
+                }
             }
-            .disabled(filteredBookmarks.allSatisfy { !$0.isBibleBookmark })
-            .accessibilityIdentifier("bookmarkListExportCSVButton")
-        } label: {
-            Image(systemName: "ellipsis.circle")
         }
-        .accessibilityIdentifier("bookmarkListActionsMenu")
+    }
+
+    /// Message-only Android confirmation for contextual bookmark deletion.
+    @ViewBuilder
+    private var deleteConfirmationDialog: some View {
+        if !pendingDeletionIDs.isEmpty {
+            AndroidDecisionDialog(
+                title: "",
+                message: String.localizedStringWithFormat(
+                    String(
+                        localized: "confirm_delete_bookmarks",
+                        defaultValue: "Do you want to remove %ld bookmarks and their notes?"
+                    ),
+                    pendingDeletionIDs.count
+                ),
+                actions: [
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .destructive,
+                        perform: confirmSelectedBookmarkDeletion
+                    ),
+                    .init(
+                        id: "cancel",
+                        title: String(localized: "cancel", defaultValue: "Cancel"),
+                        style: .normal,
+                        perform: { pendingDeletionIDs = [] }
+                    ),
+                ],
+                accessibilityIdentifier: "bookmarkListDeleteConfirmationDialog"
+            )
+        }
+    }
+
+    /// Binding adapter used by both shared popup modifiers.
+    private func popupBinding(_ popup: BookmarkListPopup) -> Binding<Bool> {
+        Binding(
+            get: { activePopup == popup },
+            set: { isPresented in
+                if isPresented {
+                    activePopup = popup
+                } else if activePopup == popup {
+                    activePopup = nil
+                }
+            }
+        )
+    }
+
+    /// Toggles one popup while ensuring the two Android menus remain mutually exclusive.
+    private func togglePopup(_ popup: BookmarkListPopup) {
+        activePopup = activePopup == popup ? nil : popup
+    }
+
+    /// Advances through Android's direct four-state sort cycle and shows its category toast.
+    private func advanceSortOrder() {
+        activePopup = nil
+        let next = BookmarkListProjection.nextSortOrder(after: sortOrder)
+        sortOrder = next
+        let message = BookmarkListProjection.sortDescription(for: next)
+        toastMessage = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(AndroidToastFeedback.shortDuration))
+            if toastMessage == message { toastMessage = nil }
+        }
+    }
+
+    /// Starts contextual mode with the long-pressed bookmark selected.
+    private func beginBookmarkSelection(_ bookmark: BookmarkListItem) {
+        activePopup = nil
+        selectedBookmarkIDs.insert(bookmark.id)
+    }
+
+    /// Navigates normally or toggles the tapped row while contextual mode is active.
+    private func handleBookmarkTap(_ bookmark: BookmarkListItem) {
+        guard !selectedBookmarkIDs.isEmpty else {
+            navigate(to: bookmark)
+            return
+        }
+        if selectedBookmarkIDs.contains(bookmark.id) {
+            selectedBookmarkIDs.remove(bookmark.id)
+        } else {
+            selectedBookmarkIDs.insert(bookmark.id)
+        }
+    }
+
+    /// Exits Android contextual action mode without closing the Bookmark activity.
+    private func clearBookmarkSelection() {
+        selectedBookmarkIDs = []
+        pendingDeletionIDs = []
+    }
+
+    /**
+     Opens canonical label assignment after ending Android contextual action mode.
+
+     Android's `ListActionModeHelper` finishes action mode before dispatching Assign labels, so the
+     selected bookmark identities must be captured before clearing the visible contextual state.
+
+     - Side effects: Clears contextual selection and presents Label Assignment for the captured IDs.
+     - Failure modes: An empty selection leaves the current activity unchanged.
+     */
+    private func beginLabelAssignment() {
+        let bookmarkIDs = selectedBookmarkIDs.sorted { $0.uuidString < $1.uuidString }
+        guard !bookmarkIDs.isEmpty else { return }
+        selectedBookmarkIDs = []
+        activeBookmarkListRoute = .labelAssignment(bookmarkIDs)
+    }
+
+    /// Stages the current contextual selection for Android's explicit confirmation.
+    private func requestSelectedBookmarkDeletion() {
+        pendingDeletionIDs = selectedBookmarkIDs.sorted { $0.uuidString < $1.uuidString }
+    }
+
+    /// Deletes the confirmed selection in one save and exits contextual mode.
+    private func confirmSelectedBookmarkDeletion() {
+        let selected = bookmarkListItems.filter { pendingDeletionIDs.contains($0.id) }
+        do {
+            _ = try BookmarkListMutation.deleteItems(selected, in: modelContext)
+            clearBookmarkSelection()
+        } catch {
+            pendingDeletionIDs = []
+            presentedMessage = .error(error.localizedDescription)
+        }
+    }
+
+    /// Returns to the reader-owned route, or dismisses a standalone host.
+    private func closeBookmarkList() {
+        activePopup = nil
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 
     /**
@@ -527,48 +885,15 @@ public struct BookmarkListView: View {
         let settings = SettingsStore(modelContext: modelContext)
         sortOrder = BookmarkSortOrder(rawValue: settings.getString(.bookmarkSortOrder)) ?? .bibleOrder
         showNotes = settings.getBool(.bookmarkShowNotes)
-        let unchecked = Set(settings.getStringSet(.bookmarkCSVUncheckedColumns))
-        selectedCSVColumns = Set(AndroidBookmarkCSVColumn.allCases.filter {
-            !unchecked.contains($0.rawValue)
-        })
     }
 
     /** Opens Android's export-column selector with the persisted selection. */
     private func presentCSVColumnSelector() {
-        restoreBookmarkListPreferences()
-        showCSVColumnSelector = true
-    }
-
-    /**
-     Encodes the visible Bible subset and advances from column selection to destination selection.
-
-     - Side effects: Persists unchecked columns and populates the export document state.
-     - Failure modes: Encoding failures are shown in an alert and do not open the destination picker.
-     */
-    private func prepareCSVExport(selectedColumns: Set<AndroidBookmarkCSVColumn>) {
-        selectedCSVColumns = selectedColumns
-        let settings = SettingsStore(modelContext: modelContext)
-        let unchecked = AndroidBookmarkCSVColumn.allCases
-            .filter { !selectedCSVColumns.contains($0) }
-            .map(\.rawValue)
-        settings.setStringSet(.bookmarkCSVUncheckedColumns, values: unchecked)
-
         let bookmarks = filteredBookmarks.compactMap { item -> BibleBookmark? in
             guard case .bible(let bookmark) = item.source else { return nil }
             return bookmark
         }
-        do {
-            let data = try AndroidBookmarkCSVCodec.encode(
-                bookmarks: bookmarks,
-                selectedColumns: selectedCSVColumns
-            )
-            csvExportDocument = BookmarkCSVTransferDocument(data: data)
-            showCSVColumnSelector = false
-            showCSVExporter = true
-        } catch {
-            showCSVColumnSelector = false
-            presentedMessage = .error(error.localizedDescription)
-        }
+        csvExportWorkflow.beginExport(bookmarks: bookmarks, modelContext: modelContext)
     }
 
     /** Handles one document-picker result and commits a valid CSV file atomically. */
@@ -596,105 +921,6 @@ public struct BookmarkListView: View {
         }
     }
 
-    /** Converts the export picker's terminal result into a visible success or failure message. */
-    private func completeCSVExport(_ result: Result<URL, Error>) {
-        switch result {
-        case .success:
-            let count = filteredBookmarks.filter(\.isBibleBookmark).count
-            presentedMessage = .success(String.localizedStringWithFormat(
-                String(
-                    localized: "csv_export_success",
-                    defaultValue: "Exported %ld bookmarks to CSV"
-                ),
-                count
-            ))
-        case .failure(let error):
-            presentedMessage = .error(error.localizedDescription)
-        }
-        csvExportDocument = nil
-    }
-
-    /// Timestamped Android-compatible default filename for the destination picker.
-    private var csvExportFileName: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm"
-        return "bible_bookmarks_\(formatter.string(from: Date())).csv"
-    }
-
-    /// Horizontal label-filter chips plus the selected-label study-pad action.
-    private var labelFilterSection: some View {
-        Section {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    FilterChip(
-                        title: String(localized: "all"),
-                        chipColor: .secondary,
-                        isSelected: selectedLabelId == nil,
-                        accessibilityIdentifier: "bookmarkListFilterChip::all"
-                    ) {
-                        selectedLabelId = nil
-                    }
-
-                    ForEach(userLabels) { label in
-                        FilterChip(
-                            title: label.name,
-                            chipColor: Color(argbInt: label.color),
-                            isSelected: selectedLabelId == label.id,
-                            accessibilityIdentifier: "bookmarkListFilterChip::\(bookmarkListAccessibilitySegment(label.name))"
-                        ) {
-                            selectedLabelId = (selectedLabelId == label.id) ? nil : label.id
-                        }
-                    }
-                }
-                .padding(.horizontal, 4)
-            }
-
-            // Show "Open StudyPad" when a label is selected
-            if let labelId = selectedLabelId,
-               let label = userLabels.first(where: { $0.id == labelId }),
-               onOpenStudyPad != nil {
-                Button {
-                    onOpenStudyPad?(labelId)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "book")
-                        Text(String(localized: "open_studypad_for_label \(label.name)"))
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(Color(argbInt: label.color))
-                }
-                .accessibilityIdentifier(
-                    "bookmarkListOpenStudyPadButton::\(bookmarkListAccessibilitySegment(label.name))"
-                )
-            }
-        }
-    }
-
-    /**
-     Deletes the currently visible bookmarks at the given filtered-list offsets.
-
-     - Parameter offsets: Index offsets from `filteredBookmarks`.
-     */
-    private func deleteBookmarks(at offsets: IndexSet) {
-        let toDelete = offsets.map { filteredBookmarks[$0] }
-        _ = try? BookmarkListMutation.deleteItems(toDelete, in: modelContext)
-    }
-
-    /**
-     Deletes one bookmark from the list and persists the mutation.
-
-     - Parameter bookmark: Bookmark row selected for deletion.
-     - Side effects:
-       - deletes the provided bookmark from SwiftData
-       - saves the resulting bookmark collection immediately
-     - Failure modes:
-       - silently discards save failures because the list has no retry UI for destructive actions
-     */
-    private func deleteBookmark(_ bookmark: BookmarkListItem) {
-        _ = try? BookmarkListMutation.deleteItems([bookmark], in: modelContext)
-    }
-
     /**
      Emits one exact bookmark destination and dismisses only after successful parent handling.
 
@@ -720,7 +946,7 @@ public struct BookmarkListView: View {
         if let onNavigateTarget {
             do {
                 try onNavigateTarget(target)
-                dismiss()
+                closeBookmarkList()
             } catch {
                 presentedMessage = .error(error.localizedDescription)
             }
@@ -881,7 +1107,11 @@ enum BookmarkListProjection {
         var result = items
 
         if let selectedLabelId {
-            result = result.filter { $0.labels.contains { $0.id == selectedLabelId } }
+            if selectedLabelId == BibleCore.Label.unlabeledId {
+                result = result.filter(\.labels.isEmpty)
+            } else {
+                result = result.filter { $0.labels.contains { $0.id == selectedLabelId } }
+            }
         }
 
         if showNotes, !searchText.isEmpty {
@@ -918,6 +1148,45 @@ enum BookmarkListProjection {
         }
 
         return bibleItems + genericItems
+    }
+
+    /**
+     Advances through Android Bookmark's direct sort-button cycle.
+
+     - Parameter sortOrder: Current persisted sort state.
+     - Returns: `bibleOrderDesc`, `createdAtDesc`, `createdAt`, or `bibleOrder` in Android order;
+       unsupported legacy states enter at `createdAtDesc`.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    static func nextSortOrder(after sortOrder: BookmarkSortOrder) -> BookmarkSortOrder {
+        switch sortOrder {
+        case .bibleOrder: return .bibleOrderDesc
+        case .bibleOrderDesc: return .createdAtDesc
+        case .createdAtDesc: return .createdAt
+        case .createdAt: return .bibleOrder
+        case .lastUpdated, .orderNumber: return .createdAtDesc
+        }
+    }
+
+    /** Returns the exact ported Android sort drawable for one persisted sort state. */
+    static func sortIconName(for sortOrder: BookmarkSortOrder) -> String {
+        switch sortOrder {
+        case .bibleOrder: return "BookmarkSortBibleAscending"
+        case .bibleOrderDesc: return "BookmarkSortBibleDescending"
+        case .createdAt: return "BookmarkSortDateAscending"
+        case .createdAtDesc, .lastUpdated, .orderNumber: return "BookmarkSortDateDescending"
+        }
+    }
+
+    /** Returns Android's category toast/accessibility text for one sort state. */
+    static func sortDescription(for sortOrder: BookmarkSortOrder) -> String {
+        switch sortOrder {
+        case .bibleOrder, .bibleOrderDesc:
+            return String(localized: "sort_by_bible_book", defaultValue: "Sort by Bible book")
+        case .createdAt, .createdAtDesc, .lastUpdated, .orderNumber:
+            return String(localized: "sort_by_date", defaultValue: "Sort by date")
+        }
     }
 
     /**
@@ -1038,12 +1307,12 @@ enum BookmarkListProjection {
         selectedLabelId: UUID?,
         labels: [BibleCore.Label]
     ) -> String {
-        guard let selectedLabelId,
-              let label = labels.first(where: { $0.id == selectedLabelId })
-        else {
+        guard let selectedLabelId else { return "all" }
+        if selectedLabelId == BibleCore.Label.unlabeledId { return "unlabelled" }
+        guard let label = labels.first(where: { $0.id == selectedLabelId }) else {
             return "all"
         }
-        return bookmarkListAccessibilitySegment(label.name)
+        return bookmarkListAccessibilitySegment(AndroidLabelPresentation.displayName(for: label))
     }
 
     /**
@@ -1073,6 +1342,23 @@ enum BookmarkListProjection {
             return lhs.reference < rhs.reference
         }
         return ascending ? lhsValue < rhsValue : lhsValue > rhsValue
+    }
+}
+
+/** One stable Android label-spinner row, including synthetic All and Unlabelled choices. */
+private struct BookmarkLabelFilterOption: Identifiable {
+    /// Persisted label identity, `nil` only for Android's synthetic All row.
+    let labelID: UUID?
+
+    /// Localized visible title.
+    let title: String
+
+    /// Stable SwiftUI identity that cannot collide with a persisted label UUID.
+    var id: String { labelID?.uuidString ?? "all" }
+
+    /// Sanitized identifier segment used by UI automation.
+    var accessibilitySegment: String {
+        labelID == nil ? "all" : bookmarkListAccessibilitySegment(title)
     }
 }
 
@@ -1166,6 +1452,9 @@ struct BookmarkListItem: Identifiable {
     /// Optional note preview text.
     let noteText: String
 
+    /// Canonical Android prefix/selection/suffix row content from the reader annotation factory.
+    let textProjection: BookmarkListTextProjection
+
     /// Labels assigned to the bookmark.
     let labels: [BibleCore.Label]
 
@@ -1210,7 +1499,8 @@ struct BookmarkListItem: Identifiable {
     init(
         bibleBookmark bookmark: BibleBookmark,
         ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
-        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
+        textProjection: BookmarkListTextProjection = .empty
     ) {
         let reference = BookmarkListView.verseReference(
             for: bookmark,
@@ -1226,6 +1516,7 @@ struct BookmarkListItem: Identifiable {
         self.lastUpdatedOn = bookmark.lastUpdatedOn
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
+        self.textProjection = textProjection
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
         do {
             self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
@@ -1254,7 +1545,10 @@ struct BookmarkListItem: Identifiable {
     }
 
     /// Creates a normalized row for one generic bookmark.
-    init(genericBookmark bookmark: GenericBookmark) {
+    init(
+        genericBookmark bookmark: GenericBookmark,
+        textProjection: BookmarkListTextProjection = .empty
+    ) {
         let reference = BookmarkListView.genericReference(for: bookmark)
         let noteText = bookmark.notes?.notes ?? ""
         self.id = bookmark.id
@@ -1265,6 +1559,7 @@ struct BookmarkListItem: Identifiable {
         self.lastUpdatedOn = bookmark.lastUpdatedOn
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
+        self.textProjection = textProjection
         self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
         do {
             self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
@@ -1285,77 +1580,129 @@ struct BookmarkListItem: Identifiable {
 /**
  Renders one bookmark row inside `BookmarkListView`.
 
- The row shows the reference, label colors, optional icon, optional note preview, and a quick
- affordance for editing the bookmark's labels.
+ This is the SwiftUI projection of Android `bookmark_list_item.xml` and `BookmarkItemAdapter`: exact
+ generic label tags, Speak headphones, reference/date, emphasized bookmark content, and optional
+ HTML notes. Selection is owned by the parent contextual action mode rather than native swipe or
+ context-menu gestures.
  */
 private struct BookmarkRow: View {
+    /// Active AppCompat scheme used for the shared selection accent.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Bookmark being rendered.
     let bookmark: BookmarkListItem
 
     /// Whether note previews are visible under Android's persisted setting.
     let showNotes: Bool
 
+    /// Whether Android contextual action mode currently includes this row.
+    let isSelected: Bool
+
+    /// Android blue-highlight color used for the synthetic Unlabelled tag.
+    let unlabeledColor: Color
+
+    /// Reader/workspace palette inherited by the app-owned activity.
+    let surfacePalette: ReaderThemeSurfacePalette
+
     /// Callback used to resolve or visibly reject the exact bookmark target.
-    var onSelect: () -> Void
+    let onSelect: () -> Void
 
-    /// Callback used to open label editing for the bookmark.
-    var onEditLabels: (() -> Void)?
-
-    /// Builds the tappable bookmark row.
-    var body: some View {
-        selectionButton
-    }
+    /// Callback that starts Android contextual selection after a long press.
+    let onLongPress: () -> Void
 
     /**
-     Builds the main row button that navigates back into the reader for the bookmark passage.
+     Builds one bookmark row with Android's mutually exclusive click and long-click behavior.
 
-     - Returns: Row button containing the bookmark summary content.
-     - Side effects: Invokes `onSelect` when tapped.
-     - Failure modes: This helper cannot fail.
-     */
-    private var selectionButton: some View {
-        Button(action: onSelect) {
+     Inputs: immutable bookmark projection, selection state, owner palette, and parent commands
+
+     Output: one accessible row whose long press enters contextual mode and whose tap navigates or
+     toggles an existing contextual selection
+
+     Side effects: invokes exactly one parent command after a recognized gesture
+
+     Failure modes: none; an incomplete gesture invokes neither command
+    */
+    var body: some View {
+        AndroidTapLongPressButton(
+            isLongPressActionActive: isSelected,
+            onTap: onSelect,
+            onLongPress: onLongPress
+        ) {
             VStack(alignment: .leading, spacing: 4) {
                 headerRow
+                bookmarkContent
                 notePreview
-                labelTags
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            .background(isSelected
+                ? AndroidDialogSurfacePalette.accent(for: colorScheme).opacity(0.24)
+                : Color.clear)
             .contentShape(Rectangle())
-            .padding(.vertical, 2)
         }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
+        .accessibilityValue(isSelected ? "selected" : "")
+        .accessibilityAction(named: Text(String(localized: "select", defaultValue: "Select"))) {
+            onLongPress()
+        }
         .accessibilityIdentifier(bookmarkRowIdentifier())
     }
 
-    /// Header row containing label dots, icon, reference, and created-at date.
+    /// Assigned labels rendered as Android's generic tag glyphs, excluding Speak.
+    private var visibleTagLabels: [BibleCore.Label] {
+        bookmark.labels.filter { $0.name != BibleCore.Label.speakLabelName }
+    }
+
+    /// Whether the exact Android Speak headphones belong before the reference.
+    private var hasSpeakLabel: Bool {
+        bookmark.labels.contains { $0.name == BibleCore.Label.speakLabelName }
+    }
+
+    /// Header row containing label tags, Speak state, reference, and Android's fixed date pattern.
     private var headerRow: some View {
-        HStack {
-            // Label color dots
-            if !bookmark.labels.isEmpty {
-                HStack(spacing: 2) {
-                    ForEach(Array(bookmark.labels.prefix(3).enumerated()), id: \.offset) { _, label in
-                        Circle()
-                            .fill(Color(argbInt: label.color))
-                            .frame(width: 10, height: 10)
-                    }
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            if bookmark.labels.isEmpty {
+                AndBibleIconView(name: "BookmarkLabel", size: 24)
+                    .foregroundStyle(unlabeledColor)
+            } else {
+                ForEach(visibleTagLabels) { label in
+                    AndBibleIconView(name: "BookmarkLabel", size: 24)
+                        .foregroundStyle(Color(argbInt: label.color))
                 }
             }
 
-            if let icon = bookmark.customIcon, !icon.isEmpty {
-                Image(systemName: BibleCore.Label.sfSymbol(for: icon) ?? icon)
-                    .font(.headline)
+            if hasSpeakLabel {
+                AndBibleIconView(name: "BookmarkSpeak", size: 24)
+                    .foregroundStyle(surfacePalette.foregroundColor)
             }
 
             Text(bookmark.reference)
-                .font(.headline)
+                .font(.system(size: 17))
+                .lineLimit(2)
+                .layoutPriority(1)
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            Text(bookmark.createdAt, style: .date)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(formattedCreationDate)
+                .font(.system(size: 13))
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    @ViewBuilder
+    /// Verse/generic source content with only the persisted selection emphasized.
+    private var bookmarkContent: some View {
+        if !bookmark.textProjection.fullText.isEmpty {
+            (Text(bookmark.textProjection.prefix)
+                + Text(bookmark.textProjection.selectedText).bold()
+                + Text(bookmark.textProjection.suffix))
+                .font(.system(size: 14))
+                .foregroundStyle(surfacePalette.foregroundColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1363,51 +1710,37 @@ private struct BookmarkRow: View {
     /// Optional note-preview text shown when the bookmark has saved note content.
     private var notePreview: some View {
         if showNotes, !bookmark.noteText.isEmpty {
-            Text(bookmark.noteText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+            if let attributedNote {
+                Text(attributedNote)
+                    .font(.system(size: 14))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            } else {
+                Text(bookmark.noteText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(surfacePalette.foregroundColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
         }
     }
 
-    @ViewBuilder
-    /// Label tags or add-label affordance shown at the bottom of the bookmark row.
-    private var labelTags: some View {
-        if !bookmark.labels.isEmpty {
-            HStack(spacing: 4) {
-                ForEach(Array(bookmark.labels.prefix(3).enumerated()), id: \.offset) { _, label in
-                    Text(label.name)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(argbInt: label.color).opacity(0.2))
-                        .clipShape(Capsule())
-                }
-                Button {
-                    onEditLabels?()
-                } label: {
-                    Image(systemName: "pencil.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
-            }
-        } else {
-            Button {
-                onEditLabels?()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "tag")
-                        .font(.caption2)
-                    Text(String(localized: "add_labels"))
-                        .font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier(bookmarkInlineActionIdentifier("bookmarkListEditLabelsButton"))
-        }
+    /// HTML note spans recolored to the owning reader/workspace palette.
+    private var attributedNote: AttributedString? {
+        guard var attributed = try? AttributedString(htmlBody: bookmark.noteText) else { return nil }
+        attributed.foregroundColor = surfacePalette.foregroundColor
+        return attributed
+    }
+
+    /// Android `EEE, yyyy-MM-dd HH:mm` timestamp rendered in the user's locale/time zone.
+    private var formattedCreationDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .current
+        formatter.dateFormat = "EEE, yyyy-MM-dd HH:mm"
+        return formatter.string(from: bookmark.createdAt)
     }
 
     /**
@@ -1421,52 +1754,6 @@ private struct BookmarkRow: View {
         "bookmarkListRowButton::\(bookmark.accessibilitySegment)"
     }
 
-    /**
-     Resolves the deterministic XCUITest accessibility identifier for one inline row action.
-
-     - Parameter prefix: Fixed action prefix naming the control role.
-     - Returns: Stable identifier derived from the action prefix and bookmark reference string.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-    */
-    private func bookmarkInlineActionIdentifier(_ prefix: String) -> String {
-        "\(prefix)::\(bookmark.accessibilitySegment)"
-    }
-}
-
-// MARK: - Filter Chip
-
-/// Capsule-shaped label-filter button used in the bookmark list filter strip.
-private struct FilterChip: View {
-    /// User-visible chip title.
-    let title: String
-
-    /// Base color used for borders and selected-state fill.
-    let chipColor: Color
-
-    /// Whether this chip currently represents the active filter.
-    let isSelected: Bool
-
-    /// Stable accessibility identifier for UI automation.
-    let accessibilityIdentifier: String
-
-    /// Action invoked when the chip is tapped.
-    let action: () -> Void
-
-    /// Builds the chip button.
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(isSelected ? chipColor.opacity(0.3) : Color.clear)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(chipColor, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(accessibilityIdentifier)
-    }
 }
 
 /**

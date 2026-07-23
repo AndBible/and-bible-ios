@@ -11,6 +11,8 @@ import SwiftUI
  usage. Add, edit, and delete actions remain app-owned dialog overlays on this screen.
  */
 struct AIModelsView: View {
+    /// Pops the Models activity for standalone callers.
+    @Environment(\.dismiss) private var dismiss
     /// Current appearance supplied to Android's app-owned overflow popup surface.
     @Environment(\.colorScheme) private var colorScheme
 
@@ -29,6 +31,20 @@ struct AIModelsView: View {
     @State private var configurationDialog: AIConfigurationDialog?
     /// Whether Android's app-owned toolbar overflow popup is visible.
     @State private var showsOverflowMenu = false
+
+    /// Reader/workspace palette inherited from Connection settings.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up action returning to Connection settings.
+    let onBack: (() -> Void)?
+
+    /** Creates the app-owned Models activity without mutating model state. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Providers in Android's persisted display order.
     private var providers: [LLMProviderConfig] {
@@ -60,38 +76,72 @@ struct AIModelsView: View {
     }
 
     var body: some View {
-        ZStack {
-            List {
-                ForEach(models) { model in
-                    Button {
-                        dialog = .editor(
-                            providerID: model.providerConfigId,
-                            modelID: model.id
-                        )
-                    } label: {
-                        modelRow(
-                            AIModelListRowPresentation(
-                                modelID: model.modelId,
-                                providerName: providerName(for: model.providerConfigId),
-                                inputPricePerMillion: model.inputPricePerMillion,
-                                outputPricePerMillion: model.outputPricePerMillion,
-                                cumulativeCost: cumulativeCost(for: model.id),
-                                isDefault: model.id == defaultModelID
-                            )
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("aiModelRow_\(model.id.uuidString)")
-                }
-            }
-            .listStyle(.plain)
-            .accessibilityHidden(isModalPresented)
-            .disabled(isModalPresented)
+        ZStack(alignment: .topLeading) {
+            AndroidActivityScreen(
+                title: String(localized: "ai_models_category", defaultValue: "Models"),
+                accessibilityIdentifier: "aiModelsTopAppBar",
+                palette: surfacePalette,
+                onBack: performBack
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityAddCircle"),
+                    accessibilityLabel: String(localized: "add_model", defaultValue: "Add model"),
+                    accessibilityIdentifier: "aiAddModelButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: addModel
+                )
+                .disabled(providers.isEmpty || isModalPresented)
 
-            if showsOverflowMenu {
-                overflowDismissLayer
-                overflowMenu
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "aiModelsOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showsOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: "aiModelsOverflowAnchor")
+                .disabled(dialog != nil || configurationDialog != nil)
+            } content: {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
+                            if index > 0 {
+                                AndroidPreferenceDivider(palette: surfacePalette)
+                            }
+                            Button {
+                                dialog = .editor(
+                                    providerID: model.providerConfigId,
+                                    modelID: model.id
+                                )
+                            } label: {
+                                modelRow(
+                                    AIModelListRowPresentation(
+                                        modelID: model.modelId,
+                                        providerName: providerName(for: model.providerConfigId),
+                                        inputPricePerMillion: model.inputPricePerMillion,
+                                        outputPricePerMillion: model.outputPricePerMillion,
+                                        cumulativeCost: cumulativeCost(for: model.id),
+                                        isDefault: model.id == defaultModelID
+                                    )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("aiModelRow_\(model.id.uuidString)")
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .accessibilityHidden(isModalPresented)
+                .disabled(isModalPresented)
             }
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "ai_models_category", defaultValue: "Models"),
+                accessibilityIdentifier: "aiModelsScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+            .accessibilityHidden(isModalPresented)
 
             if dialog != nil {
                 AIModelDialogOverlay(
@@ -101,30 +151,14 @@ struct AIModelsView: View {
                 )
             }
         }
-        .accessibilityIdentifier("aiModelsScreen")
-        .navigationTitle(String(localized: "ai_models_category", defaultValue: "Models"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(isModalPresented)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: addModel) {
-                    Image(systemName: "plus")
-                }
-                .disabled(providers.isEmpty || isModalPresented)
-                .accessibilityLabel(String(localized: "add_model", defaultValue: "Add model"))
-                .accessibilityIdentifier("aiAddModelButton")
-
-                Button {
-                    showsOverflowMenu.toggle()
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .accessibilityIdentifier("aiModelsOverflowButton")
-                .disabled(isModalPresented)
-            }
+        .androidAnchoredPopupMenu(
+            anchorID: "aiModelsOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 210,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiModelsOverflowMenu"
+        ) {
+            overflowMenu
         }
         .aiConfigurationDialog($configurationDialog, credentialStore: .keychain())
     }
@@ -132,49 +166,42 @@ struct AIModelsView: View {
     /** Builds one dense Android-style configured-model row without nested navigation. */
     private func modelRow(_ presentation: AIModelListRowPresentation) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "cpu")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            AndBibleIconView(name: "SettingsIconRobot", size: 24)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if presentation.isDefault {
-                        Image(systemName: "star.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
-                            .accessibilityLabel(
-                                String(
-                                    localized: "model_set_default",
-                                    defaultValue: "Set as default model"
-                                )
-                            )
-                    }
-
-                    Text(presentation.modelID)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if presentation.isSupported {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .accessibilityLabel(
-                                String(localized: "model_supported_badge", defaultValue: "✓ Supported")
-                            )
-                    }
-                }
+                Text(
+                    "\(presentation.isDefault ? "★ " : "")" +
+                    "\(presentation.modelID)" +
+                    "\(presentation.isSupported ? " ✓" : "")"
+                )
+                .font(.body)
+                .foregroundStyle(surfacePalette.foregroundColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(presentation.modelID)
+                .accessibilityValue(
+                    [
+                        presentation.isDefault
+                            ? String(localized: "model_set_default", defaultValue: "Set as default model")
+                            : nil,
+                        presentation.isSupported
+                            ? String(localized: "model_supported_badge", defaultValue: "✓ Supported")
+                            : nil,
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: ", ")
+                )
 
                 Text(presentation.providerModelAndPricingSummary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let cumulativeCostText = presentation.cumulativeCostText {
                     Text(cumulativeCostText)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -189,25 +216,19 @@ struct AIModelsView: View {
         dialog = AIModelDialog.addDestination(providerIDs: providers.map(\.id))
     }
 
-    /// Full-screen clear hit target that dismisses Android's overflow popup without a system menu.
-    private var overflowDismissLayer: some View {
-        Color.black.opacity(0.001)
-            .ignoresSafeArea()
-            .contentShape(Rectangle())
-            .onTapGesture { showsOverflowMenu = false }
-            .zIndex(9)
-            .accessibilityHidden(true)
-    }
-
-    /// Android's one-row Models overflow menu, anchored below the trailing app-bar action.
+    /// Android's one-row Models overflow menu rendered by the shared anchored presenter.
     private var overflowMenu: some View {
         AndroidPopupMenuSurface(
             colorScheme: colorScheme,
-            accessibilityIdentifier: "aiModelsOverflowMenu"
+            accessibilityIdentifier: "aiModelsOverflowMenu",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
         ) {
             AndroidPopupMenuRow(
                 title: String(localized: "help", defaultValue: "Help"),
-                icon: .system("questionmark.circle"),
+                icon: .asset("DrawerHelp"),
                 accessibilityIdentifier: "aiModelsHelpMenuItem"
             ) {
                 showsOverflowMenu = false
@@ -220,13 +241,15 @@ struct AIModelsView: View {
                 )
             }
         }
-        .frame(width: 210)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .shadow(color: .black.opacity(0.28), radius: 10, x: 0, y: 5)
-        .padding(.top, 8)
-        .padding(.trailing, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .zIndex(10)
+    }
+
+    /** Returns through the explicit Connection settings owner or environment fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 
     /// Resolves the owning provider name without exposing credentials.

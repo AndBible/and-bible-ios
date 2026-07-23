@@ -1,28 +1,26 @@
+// AndroidMyDocumentMetadataDialog.swift -- App-owned document text-entry window
+
 import SwiftUI
 
-/** Android AlertDialog-equivalent owner for My Documents name and description editing. */
+/** Owns Android's AlertDialog-equivalent window for My Documents text-entry commands. */
 struct AndroidMyDocumentMetadataDialog: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let request: MyDocumentMetadataEditorRequest
     let onDismiss: () -> Void
-    let onSave: (String, String?) -> Void
+    let onSave: (String) -> Void
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidMyDocumentMetadataDialog",
+            onOutsideTap: onDismiss
+        ) {
             MyDocumentMetadataEditor(
                 request: request,
                 onSave: onSave,
                 onCancel: onDismiss
             )
-            .frame(maxWidth: 560, maxHeight: 440)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
         }
-        .accessibilityIdentifier("androidMyDocumentMetadataDialog")
     }
 }

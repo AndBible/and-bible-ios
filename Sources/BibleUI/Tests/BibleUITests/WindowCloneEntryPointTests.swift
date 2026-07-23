@@ -24,6 +24,9 @@ final class WindowCloneEntryPointTests: XCTestCase {
         let paneSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
         )
+        let actionHandlerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPaneMenuActionHandler.swift"
+        )
         let footerAction = try BibleUITestSourceLocator.extractFunction(
             named: "addWindowButton",
             from: tabBarSource
@@ -32,11 +35,19 @@ final class WindowCloneEntryPointTests: XCTestCase {
             named: "performWindowMenuAction",
             from: paneSource
         )
+        let sharedMenuAction = try BibleUITestSourceLocator.extractFunction(
+            named: "perform",
+            from: actionHandlerSource
+        )
 
         XCTAssertTrue(footerAction.contains("windowManager.addWindow(from: windowManager.activeWindow)"))
         XCTAssertFalse(footerAction.contains("category: \"bible\""))
-        XCTAssertTrue(paneMenuAction.contains("case .newWindow:"))
-        XCTAssertTrue(paneMenuAction.contains("windowManager.addWindow(from: window)"))
+        XCTAssertTrue(paneMenuAction.contains("BibleWindowPaneMenuActionHandler("))
+        XCTAssertTrue(paneMenuAction.contains("window: window"))
+        XCTAssertTrue(paneMenuAction.contains(").perform(action)"))
         XCTAssertFalse(paneMenuAction.contains("category: \"bible\""))
+        XCTAssertTrue(sharedMenuAction.contains("case .newWindow:"))
+        XCTAssertTrue(sharedMenuAction.contains("windowManager.addWindow(from: window)"))
+        XCTAssertFalse(sharedMenuAction.contains("category: \"bible\""))
     }
 }

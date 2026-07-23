@@ -16,10 +16,20 @@ import SwordKit
  app-owned destinations in the existing navigation stack; this view does not present sheets.
  */
 public struct AISettingsView: View {
+    /// Pops the reader-owned AI Settings activity for standalone callers.
+    @Environment(\.dismiss) private var dismiss
+
     /// Optional installed-module manager used to discover add-on prompt packs.
     private let swordManager: SwordManager?
     /// Device-only credential boundary forwarded to connection-management screens.
     private let credentialStore: AICredentialStore
+    /// Reader/workspace palette shared by every nested AI activity.
+    private let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit reader-owner Back command, or nil for the environment dismissal fallback.
+    private let onBack: (() -> Void)?
+
+    /// Nested Android activity currently replacing the AI Settings root.
+    @State private var activityRoute: AISettingsActivityRoute?
 
     /**
      Creates the shared AI settings route.
@@ -36,14 +46,78 @@ public struct AISettingsView: View {
     ) {
         self.swordManager = swordManager
         self.credentialStore = credentialStore
+        surfacePalette = .standard
+        onBack = nil
+    }
+
+    /**
+     Creates the reader-owned AI Settings activity with the active workspace/window palette.
+
+     - Parameters:
+       - swordManager: Installed-module source for add-on prompts and document access.
+       - credentialStore: Device-only provider credential boundary.
+       - surfacePalette: Palette resolved by the owning reader destination.
+       - onBack: Explicit command returning to the reader.
+     - Side effects: none until a child command is selected.
+     - Failure modes: nested persistence failures remain owned by their activity.
+     */
+    init(
+        swordManager: SwordManager?,
+        credentialStore: AICredentialStore = .keychain(),
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: @escaping () -> Void
+    ) {
+        self.swordManager = swordManager
+        self.credentialStore = credentialStore
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
     }
 
     public var body: some View {
-        AISettingsContentView(
-            swordManager: swordManager,
-            credentialStore: credentialStore
-        )
+        Group {
+            switch activityRoute {
+            case .connection:
+                AIConnectionSettingsView(
+                    swordManager: swordManager,
+                    credentialStore: credentialStore,
+                    surfacePalette: surfacePalette,
+                    onBack: { activityRoute = nil }
+                )
+            case .promptEditor(let promptID):
+                AIPromptEditorView(
+                    promptID: promptID,
+                    swordManager: swordManager,
+                    surfacePalette: surfacePalette,
+                    onBack: { activityRoute = nil },
+                    onChanged: {}
+                )
+            case nil:
+                AISettingsContentView(
+                    swordManager: swordManager,
+                    credentialStore: credentialStore,
+                    surfacePalette: surfacePalette,
+                    onBack: performRootBack,
+                    onOpenConnection: { activityRoute = .connection },
+                    onOpenPrompt: { activityRoute = .promptEditor($0) }
+                )
+            }
+        }
     }
+
+    /** Returns from AI Settings through its explicit reader owner or environment fallback. */
+    private func performRootBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
+    }
+}
+
+/** App-owned nested activities reachable from the AI Settings root. */
+private enum AISettingsActivityRoute: Equatable {
+    case connection
+    case promptEditor(UUID?)
 }
 
 /** Android's provider-count-driven top-level AI settings states. */
@@ -75,111 +149,146 @@ private struct AISettingsContentView: View {
     let swordManager: SwordManager?
     /// Device-only credential boundary used by connection destinations.
     let credentialStore: AICredentialStore
+    /// Reader/workspace colors shared by both configured and setup roots.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command.
+    let onBack: () -> Void
+    /// Opens Connection settings inside the same app-owned activity host.
+    let onOpenConnection: () -> Void
+    /// Opens a new or existing prompt editor inside the same activity host.
+    let onOpenPrompt: (UUID?) -> Void
 
     var body: some View {
         Group {
             switch AISettingsRootMode.resolve(providerCount: providerConfigurations.count) {
             case .setup:
                 AISettingsSetupView(
-                    swordManager: swordManager,
-                    credentialStore: credentialStore
+                    credentialStore: credentialStore,
+                    surfacePalette: surfacePalette,
+                    onBack: onBack,
+                    onOpenConnection: onOpenConnection
                 )
             case .prompts:
                 AIPromptManagementView(
                     swordManager: swordManager,
-                    settingsRootCredentialStore: credentialStore
+                    settingsRootCredentialStore: credentialStore,
+                    surfacePalette: surfacePalette,
+                    onBack: onBack,
+                    onOpenConnection: onOpenConnection,
+                    onOpenPrompt: onOpenPrompt
                 )
             }
         }
-        .navigationTitle(String(localized: "ai_settings", defaultValue: "AI Settings"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
     }
 }
 
-/** Android's unconfigured AI Settings state rendered with native iOS navigation. */
+/** Android's unconfigured AI Settings state rendered as a full app-owned activity. */
 private struct AISettingsSetupView: View {
-    /// Optional installed-module manager forwarded to Connection settings.
-    let swordManager: SwordManager?
     /// Device-only credential boundary forwarded to provider setup.
     let credentialStore: AICredentialStore
+    /// Reader/workspace palette selected by the activity owner.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command.
+    let onBack: () -> Void
+    /// Replaces this setup root with Connection settings.
+    let onOpenConnection: () -> Void
     /// Android's app-owned AI Settings help dialog.
     @State private var activeDialog: AIConfigurationDialog?
+    /// Whether Android's toolbar overflow popup is visible.
+    @State private var showsOverflowMenu = false
+    /// Current appearance used by the shared popup surface.
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 18) {
-                    Text(String(localized: "ai_setup_title", defaultValue: "Configure AI"))
-                        .font(.title2.weight(.semibold))
+        AndroidActivityScreen(
+            title: String(localized: "ai_settings", defaultValue: "AI Settings"),
+            accessibilityIdentifier: "aiSettingsTopAppBar",
+            palette: surfacePalette,
+            onBack: onBack
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ToolbarOverflow"),
+                accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                accessibilityIdentifier: "aiSettingsOverflowButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                showsOverflowMenu.toggle()
+            }
+            .androidPopupMenuAnchor(id: "aiSettingsOverflowAnchor")
+        } content: {
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 18) {
+                        Text(String(localized: "ai_setup_title", defaultValue: "Configure AI"))
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(surfacePalette.foregroundColor)
 
-                    Text(
-                        String(
-                            localized: "ai_setup_description",
-                            defaultValue: "AndBible can use AI to translate Bible text, explain verses, create summaries, and more. To get started, configure a connection to an OpenAI-compatible API provider."
-                        )
-                    )
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520)
-
-                    NavigationLink {
-                        AIConnectionSettingsView(
-                            swordManager: swordManager,
-                            credentialStore: credentialStore
-                        )
-                    } label: {
                         Text(
                             String(
+                                localized: "ai_setup_description",
+                                defaultValue: "AndBible can use AI to translate Bible text, explain verses, create summaries, and more. To get started, configure a connection to an OpenAI-compatible API provider."
+                            )
+                        )
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 520)
+
+                        AndroidRaisedTextButton(
+                            title: String(
                                 localized: "ai_configure_button",
                                 defaultValue: "Configure Connection"
-                            )
+                            ),
+                            foregroundColor: surfacePalette.foregroundColor,
+                            backgroundColor: surfacePalette.secondaryForegroundColor.opacity(0.28),
+                            accessibilityIdentifier: "aiConfigureConnectionButton",
+                            action: onOpenConnection
                         )
-                        .font(.headline)
-                        .textCase(.uppercase)
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-                        .background(
-                            Color.secondary.opacity(0.28),
-                            in: RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        )
+                        .frame(maxWidth: 320)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("aiConfigureConnectionButton")
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: geometry.size.height)
                 }
-                .padding(.horizontal, 32)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: geometry.size.height)
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        activeDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_ai_settings_text",
-                                defaultValue: "AI Settings is where you manage your prompts and categories. From here you can create new prompts, organise them into categories, import/export prompts as CSV, install add-on prompt packs, and reach the AI connection settings."
-                            )
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "ai_settings", defaultValue: "AI Settings"),
+            accessibilityIdentifier: "aiSetupScreen",
+            surfaceColor: surfacePalette.backgroundColor
+        )
+        .disabled(activeDialog != nil)
+        .androidAnchoredPopupMenu(
+            anchorID: "aiSettingsOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 220,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiSettingsOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiSettingsOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    icon: .asset("DrawerHelp"),
+                    accessibilityIdentifier: "aiSettingsHelpMenuItem"
+                ) {
+                    showsOverflowMenu = false
+                    activeDialog = .information(
+                        title: String(localized: "help", defaultValue: "Help"),
+                        message: String(
+                            localized: "help_ai_settings_text",
+                            defaultValue: "AI Settings is where you manage your prompts and categories. From here you can create new prompts, organise them into categories, import/export prompts as CSV, install add-on prompt packs, and reach the AI connection settings."
                         )
-                    } label: {
-                        Label(
-                            String(localized: "help", defaultValue: "Help"),
-                            systemImage: "questionmark.circle"
-                        )
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                    )
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .disabled(activeDialog != nil)
             }
         }
         .aiConfigurationDialog($activeDialog, credentialStore: credentialStore)
-        .accessibilityIdentifier("aiSetupScreen")
     }
 }

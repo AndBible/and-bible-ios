@@ -81,6 +81,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private let onShowSearch: () -> Void
     private let onShowSpeak: () -> Void
     private let onApplyStrongsMode: (Int) -> Void
+    private let onShowStrongsModeDialog: () -> Void
     private let onBibleTap: () -> Void
     private let onBibleLongPress: () -> Void
     private let onCommentaryTap: () -> Void
@@ -104,6 +105,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         onShowSearch: @escaping () -> Void,
         onShowSpeak: @escaping () -> Void,
         onApplyStrongsMode: @escaping (Int) -> Void,
+        onShowStrongsModeDialog: @escaping () -> Void,
         onBibleTap: @escaping () -> Void,
         onBibleLongPress: @escaping () -> Void,
         onCommentaryTap: @escaping () -> Void,
@@ -126,6 +128,7 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         self.onShowSearch = onShowSearch
         self.onShowSpeak = onShowSpeak
         self.onApplyStrongsMode = onApplyStrongsMode
+        self.onShowStrongsModeDialog = onShowStrongsModeDialog
         self.onBibleTap = onBibleTap
         self.onBibleLongPress = onBibleLongPress
         self.onCommentaryTap = onCommentaryTap
@@ -205,26 +208,16 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
             }
 
             if moduleHasStrongs {
-                Menu {
-                    ForEach(StrongsMode.allCases) { mode in
-                        Button {
-                            onApplyStrongsMode(mode.rawValue)
-                        } label: {
-                            if strongsMode == mode.rawValue {
-                                SwiftUI.Label(mode.label, systemImage: "checkmark")
-                            } else {
-                                Text(mode.label)
-                            }
-                        }
+                strongsIcon
+                    .foregroundStyle(toolbarIconColor(isActive: strongsEnabled))
+                    .contentShape(Rectangle())
+                    .gesture(strongsToolbarGesture)
+                    .accessibilityIdentifier("readerStrongsToolbarButton")
+                    .accessibilityLabel(String(localized: "toggle_strongs_numbers"))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction {
+                        onApplyStrongsMode((strongsMode + 1) % 3)
                     }
-                } label: {
-                    strongsIcon
-                        .foregroundStyle(toolbarIconColor(isActive: strongsEnabled))
-                } primaryAction: {
-                    onApplyStrongsMode((strongsMode + 1) % 3)
-                }
-                .accessibilityIdentifier("readerStrongsToolbarButton")
-                .accessibilityLabel(String(localized: "toggle_strongs_numbers"))
             }
 
             moduleToolbarAction(
@@ -266,6 +259,30 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     private var strongsIcon: some View {
         ToolbarAssetIcon(name: strongsIconAssetName)
             .frame(width: 24, height: 22)
+    }
+
+    /**
+     Reproduces Android's mutually exclusive Strong's toolbar gestures without native `Menu` UI.
+
+     A tap cycles the three modes immediately; a long press opens the shared window-scoped
+     `StrongsPreference` dialog. The exclusive gesture prevents a long press from also cycling the
+     value before the dialog appears.
+
+     - Returns: A gesture that dispatches exactly one Android Strong's action.
+     - Side effects: Invokes either `onApplyStrongsMode` or `onShowStrongsModeDialog`.
+     - Failure modes: A cancelled long press does not mutate settings or present a dialog.
+     */
+    private var strongsToolbarGesture: some Gesture {
+        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
+            switch value {
+            case .first(true):
+                onShowStrongsModeDialog()
+            case .second:
+                onApplyStrongsMode((strongsMode + 1) % 3)
+            case .first(false):
+                break
+            }
+        }
     }
 
     private var bibleToolbarIcon: some View {

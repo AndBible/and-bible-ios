@@ -108,6 +108,43 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertTrue(ReadingProgressStore(settingsStore: settingsStore).snapshot().history.isEmpty)
     }
 
+    /**
+     Verifies Android ReadHistoryDialog's staged set is removed through one bulk store mutation.
+
+     The contract covers multiple valid identifiers, an unknown identifier, retained-row identity,
+     and persistence after reopen. Failure means dialog dismissal can regress to partial row-by-row
+     state or accidentally remove rows that the user did not stage.
+     */
+    func testReadingProgressStoreDeletesStagedHistoryRowsAtomically() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = ReadingProgressStore(settingsStore: settingsStore)
+        let identity = try XCTUnwrap(
+            ReadingProgressKJVAIdentity(androidKJVBookOrdinal: 2, chapter: 1)
+        )
+
+        for timestamp in [100, 200, 300] as [Int64] {
+            _ = try store.recordChapterRead(
+                bookInitials: "KJV",
+                identity: identity,
+                source: .manual,
+                readAt: timestamp
+            )
+        }
+
+        let rows = store.snapshot().history
+        XCTAssertEqual(rows.count, 3)
+        let stagedIDs: Set<UUID> = [rows[0].id, rows[2].id, UUID()]
+
+        XCTAssertEqual(try store.deleteHistoryEntries(ids: stagedIDs), 2)
+        XCTAssertEqual(store.snapshot().history.map(\.id), [rows[1].id])
+        XCTAssertEqual(
+            ReadingProgressStore(settingsStore: settingsStore).snapshot().history.map(\.id),
+            [rows[1].id]
+        )
+        XCTAssertEqual(try store.deleteHistoryEntries(ids: stagedIDs), 0)
+        XCTAssertEqual(try store.deleteHistoryEntries(ids: []), 0)
+    }
+
     func testReadingProgressStorePersistsSettingsBundleAndPreservesNativeFields() throws {
         let settingsStore = try makeInMemorySettingsStore()
         let store = ReadingProgressStore(settingsStore: settingsStore)

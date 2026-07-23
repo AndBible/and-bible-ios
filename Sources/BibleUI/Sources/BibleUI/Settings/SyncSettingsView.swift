@@ -84,8 +84,20 @@ public struct SyncSettingsView: View {
     /// Last successfully completed confirmation branch exported only for UI-test assertions.
     @State private var lastRemoteConfirmationAction: String?
 
-    /// Currently focused inline NextCloud credential field, used to mirror Android edit commits.
-    @FocusState private var focusedNextCloudCredentialField: NextCloudCredentialField?
+    /// Whether Android's backend `ListPreference` dialog is visible.
+    @State private var showsBackendDialog = false
+
+    /// Active Android `EditTextPreference` dialog for one NextCloud credential.
+    @State private var activeCredentialEditor: NextCloudCredentialField?
+
+    /// Palette inherited from the reader/workspace owner.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Android Up action supplied by the destination host.
+    private let onBack: (() -> Void)?
+
+    /// Hosting dismissal fallback used outside the reader destination.
+    @Environment(\.dismiss) private var dismiss
 
     /**
      Represents the last manual WebDAV connection-test result shown in the status section.
@@ -107,9 +119,20 @@ public struct SyncSettingsView: View {
      dialog commits. iOS renders these settings inline, so focus transitions and submit actions are
      the equivalent commit boundary.
      */
-    private enum NextCloudCredentialField: Hashable {
+    private enum NextCloudCredentialField: String, Identifiable, Hashable {
         /// NextCloud/WebDAV server root URL.
         case serverURL
+
+        /// NextCloud/WebDAV account name.
+        case username
+
+        /// Device-local NextCloud/WebDAV password.
+        case password
+
+        /// Optional remote folder beneath the account root.
+        case folderPath
+
+        var id: String { rawValue }
     }
 
     /**
@@ -164,32 +187,65 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Creates the sync settings screen with environment-provided sync services and settings storage.
+     Creates an app-owned Sync Settings activity with environment-provided services and storage.
+
+     - Parameter onBack: Optional Android Up action supplied by an app-level owner. When omitted,
+       the view dismisses its current SwiftUI presentation environment.
+     - Side effects: none. The callback runs only after the user activates the app-owned top-bar
+       back button.
+     - Failure modes: none.
      */
-    public init() {}
+    public init(onBack: (() -> Void)? = nil) {
+        surfacePalette = .standard
+        self.onBack = onBack
+    }
+
+    /** Creates the reader-owned activity variant with inherited palette and explicit Up action. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: (() -> Void)?
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /**
-     Builds backend selection, iCloud controls, and remote-backend configuration sections.
+    Builds backend selection, iCloud controls, and remote-backend configuration sections.
      */
     public var body: some View {
-        Form {
-            backendSection
+        AndroidActivityScreen(
+            title: String(localized: "sync_adapter"),
+            accessibilityIdentifier: "syncSettingsTopAppBar",
+            palette: surfacePalette,
+            onBack: close
+        ) {
+            EmptyView()
+        } content: {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    backendSection
 
-            if selectedBackend == .iCloud {
-                iCloudSections
-            } else if selectedBackend == .nextCloud {
-                nextCloudSections
+                    if selectedBackend == .iCloud {
+                        iCloudSections
+                    } else if selectedBackend == .nextCloud {
+                        nextCloudSections
+                    }
+                }
+                .padding(.vertical, 8)
             }
+            .accessibilityIdentifier("syncSettingsScrollView")
         }
-        .accessibilityIdentifier("syncSettingsScreen")
-        .accessibilityValue(syncSettingsAccessibilityValue)
         .overlay(alignment: .topLeading) {
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "sync_adapter"),
+                accessibilityIdentifier: "syncSettingsScreen",
+                accessibilityValue: syncSettingsAccessibilityValue,
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .overlay(alignment: .topTrailing) {
             syncSettingsStateProbe
         }
-        .navigationTitle(String(localized: "sync_adapter"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
         .onAppear {
             loadPersistedSettingsIfNeeded()
         }
@@ -200,49 +256,32 @@ public struct SyncSettingsView: View {
             remoteSettingsStore.selectedBackend = newValue
             remoteConnectionStatus = nil
         }
-        .onChange(of: focusedNextCloudCredentialField) { oldValue, newValue in
-            if oldValue == .serverURL, newValue != .serverURL {
-                _ = validateNextCloudServerURLAfterEditing()
-            }
-        }
-        #if os(iOS)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                if focusedNextCloudCredentialField == .serverURL {
-                    Spacer()
-                    Button(String(localized: "ok")) {
-                        _ = validateNextCloudServerURLAfterEditing()
-                        focusedNextCloudCredentialField = nil
-                    }
-                    .accessibilityIdentifier("syncNextCloudServerURLCommitButton")
-                }
-            }
-        }
-        #endif
+        .overlay { backendDialogOverlay }
+        .overlay { credentialEditorOverlay }
         .overlay {
             if let candidate = pendingRemoteAdoption {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "cloud_sync_title"), message: String(format: String(localized: "overrideBackup"), remoteCategoryContentDescription(for: candidate.category)), actions: [
+                AndroidDecisionDialog(title: String(localized: "cloud_sync_title"), message: String(format: String(localized: "overrideBackup"), remoteCategoryContentDescription(for: candidate.category)), actions: [
                     .init(id: "restore", title: String(localized: "cloud_fetch_and_restore_initial"), style: .normal) { pendingRemoteConfirmation = .resetLocal(candidate); pendingRemoteAdoption = nil },
                     .init(id: "create", title: String(localized: "cloud_create_new"), style: .normal) { pendingRemoteConfirmation = .resetCloud(candidate); pendingRemoteAdoption = nil },
                     .init(id: "disable", title: String(localized: "cloud_disable_sync"), style: .normal) { disableRemoteSync(for: candidate.category); pendingRemoteAdoption = nil }
-                ])
+                ], accessibilityIdentifier: "syncBootstrapDialog")
             }
         }
         .overlay {
             if let confirmation = pendingRemoteConfirmation {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "are_you_sure"), message: remoteConfirmationMessage(for: confirmation), actions: [
+                AndroidDecisionDialog(title: String(localized: "are_you_sure"), message: remoteConfirmationMessage(for: confirmation), actions: [
                     .init(id: "confirm", title: String(localized: "ok"), style: .destructive) { let captured = confirmation; pendingRemoteConfirmation = nil; Task { await continueRemoteSynchronization(after: captured) } },
                     .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { disableRemoteSync(for: confirmation.category); pendingRemoteConfirmation = nil }
-                ])
+                ], accessibilityIdentifier: "syncConfirmationDialog")
             } else if showDisableConfirmation {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "disable_sync_title"), message: String(localized: "disable_sync_warning"), actions: [
+                AndroidDecisionDialog(title: String(localized: "disable_sync_title"), message: String(localized: "disable_sync_warning"), actions: [
                     .init(id: "disable", title: String(localized: "disable_sync"), style: .destructive) { showDisableConfirmation = false; syncService.toggleSync() },
                     .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showDisableConfirmation = false }
-                ])
+                ], accessibilityIdentifier: "syncDisableConfirmationDialog")
             } else if let message = remoteSyncErrorMessage {
-                AndroidMyDocumentDecisionDialog(title: String(localized: "cloud_sync_title"), message: message, actions: [
+                AndroidDecisionDialog(title: String(localized: "cloud_sync_title"), message: message, actions: [
                     .init(id: "okay", title: String(localized: "ok"), style: .normal) { remoteSyncErrorMessage = nil }
-                ])
+                ], accessibilityIdentifier: "syncErrorDialog")
             }
         }
     }
@@ -251,23 +290,21 @@ public struct SyncSettingsView: View {
      Backend selection section shared by all sync modes.
      */
     private var backendSection: some View {
-        Section {
-            Picker(selection: $selectedBackend) {
-                Text(String(localized: "icloud_sync"))
-                    .tag(RemoteSyncBackend.iCloud)
-                    .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.iCloud.rawValue)")
-                Text(String(localized: "adapters_next_cloud"))
-                    .tag(RemoteSyncBackend.nextCloud)
-                    .accessibilityIdentifier("syncBackendOption::\(RemoteSyncBackend.nextCloud.rawValue)")
-            } label: {
-                syncSettingsRowLabel(
-                    SyncSettingsPresentation.backend,
-                    title: String(localized: "sync_adapter"),
-                    summary: String(localized: "prefs_sync_introduction_summary1"),
-                    detail: String(format: String(localized: "sync_adapter_summary"), selectedBackendTitle)
-                )
+        AndroidPreferenceSection(
+            title: String(localized: "sync_general_settings"),
+            palette: surfacePalette
+        ) {
+            AndroidCatalogActionPreferenceRow(
+                title: String(localized: "sync_adapter"),
+                summary: String(localized: "prefs_sync_introduction_summary1"),
+                detail: String(format: String(localized: "sync_adapter_summary"), selectedBackendTitle),
+                icon: SyncSettingsPresentation.backend.icon,
+                trailingValue: selectedBackendTitle,
+                palette: surfacePalette,
+                accessibilityIdentifier: "syncBackendPicker"
+            ) {
+                showsBackendDialog = true
             }
-            .accessibilityIdentifier("syncBackendPicker")
         }
     }
 
@@ -277,8 +314,15 @@ public struct SyncSettingsView: View {
      */
     private var iCloudSections: some View {
         Group {
-            Section {
-                Toggle(isOn: Binding(
+            AndroidPreferenceSection(
+                title: String(localized: "icloud_sync"),
+                palette: surfacePalette
+            ) {
+                AndroidCatalogSwitchPreferenceRow(
+                    title: String(localized: "icloud_sync_enabled"),
+                    summary: String(localized: "icloud_sync_description"),
+                    icon: SyncSettingsPresentation.backend.icon,
+                    isOn: Binding(
                     get: { syncService.isEnabled },
                     set: { newValue in
                         guard newValue != syncService.isEnabled else {
@@ -290,64 +334,65 @@ public struct SyncSettingsView: View {
                             syncService.toggleSync()
                         }
                     }
-                )) {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.backend,
-                        title: String(localized: "icloud_sync_enabled"),
-                        summary: String(localized: "icloud_sync_description"),
-                        isEnabled: isICloudToggleEnabled
-                    )
-                }
-                .disabled(!isICloudToggleEnabled)
-                .accessibilityIdentifier("syncICloudEnabledToggle")
-            } header: {
-                syncSettingsSectionHeader(String(localized: "icloud_sync"))
+                    ),
+                    isEnabled: isICloudToggleEnabled,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "syncICloudEnabledToggle"
+                )
             }
 
-            Section {
-                LabeledContent {
-                    iCloudStatusView
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.syncInfo,
-                        title: String(localized: "status")
-                    )
-                }
+            AndroidPreferenceSection(
+                title: String(localized: "sync_status"),
+                palette: surfacePalette
+            ) {
+                AndroidCatalogValuePreferenceRow(
+                    title: String(localized: "status"),
+                    summary: nil,
+                    detail: nil,
+                    icon: SyncSettingsPresentation.syncInfo.icon,
+                    trailingValue: iCloudStatusText,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "syncICloudStatus"
+                )
 
                 if syncService.isEnabled && !syncService.requiresRestart {
-                    LabeledContent {
-                        Text(accountText)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        syncSettingsRowLabel(
-                            SyncSettingsPresentation.nextCloudCredential,
-                            title: String(localized: "icloud_account")
-                        )
-                    }
-
-                    LabeledContent {
-                        Text(lastSyncText)
-                            .foregroundStyle(.secondary)
-                    } label: {
-                        syncSettingsRowLabel(
-                            SyncSettingsPresentation.syncInfo,
-                            title: String(localized: "last_sync")
-                        )
-                    }
+                    AndroidPreferenceDivider(palette: surfacePalette)
+                    AndroidCatalogValuePreferenceRow(
+                        title: String(localized: "icloud_account"),
+                        summary: nil,
+                        detail: nil,
+                        icon: SyncSettingsPresentation.nextCloudCredential.icon,
+                        trailingValue: accountText,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "syncICloudAccount"
+                    )
+                    AndroidPreferenceDivider(palette: surfacePalette)
+                    AndroidCatalogValuePreferenceRow(
+                        title: String(localized: "last_sync"),
+                        summary: nil,
+                        detail: nil,
+                        icon: SyncSettingsPresentation.syncInfo.icon,
+                        trailingValue: lastSyncText,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "syncICloudLastSync"
+                    )
                 }
-            } header: {
-                syncSettingsSectionHeader(String(localized: "sync_status"))
             }
 
             if syncService.isEnabled && !syncService.requiresRestart {
-                Section {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.syncInfo,
+                AndroidPreferenceSection(
+                    title: String(localized: "sync_data_included"),
+                    palette: surfacePalette
+                ) {
+                    AndroidCatalogValuePreferenceRow(
                         title: String(localized: "sync_data_included"),
-                        summary: String(localized: "sync_what_syncs")
+                        summary: String(localized: "sync_what_syncs"),
+                        detail: nil,
+                        icon: SyncSettingsPresentation.syncInfo.icon,
+                        trailingValue: nil,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "syncICloudIncludedData"
                     )
-                } header: {
-                    syncSettingsSectionHeader(String(localized: "sync_data_included"))
                 }
             }
         }
@@ -369,127 +414,56 @@ public struct SyncSettingsView: View {
      */
     private var nextCloudSections: some View {
         Group {
-            Section {
-                LabeledContent {
-                    TextField(String(localized: "auth_server_uri"), text: $serverURL)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                        .multilineTextAlignment(.trailing)
-                        .focused($focusedNextCloudCredentialField, equals: .serverURL)
-                        .onSubmit {
-                            _ = validateNextCloudServerURLAfterEditing()
-                            focusedNextCloudCredentialField = nil
-                        }
-                        .accessibilityIdentifier("syncNextCloudServerURLField")
-                        #if os(iOS)
-                        .textContentType(.URL)
-                        .submitLabel(.done)
-                        #endif
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.nextCloudCredential,
-                        title: String(localized: "auth_server_uri")
-                    )
-                }
-
-                LabeledContent {
-                    TextField(String(localized: "auth_username"), text: $username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                        .multilineTextAlignment(.trailing)
-                        .accessibilityIdentifier("syncNextCloudUsernameField")
-                        #if os(iOS)
-                        .textContentType(.username)
-                        #endif
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.nextCloudCredential,
-                        title: String(localized: "auth_username")
-                    )
-                }
-
-                LabeledContent {
-                    SecureField(String(localized: "auth_password"), text: $password)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                        .multilineTextAlignment(.trailing)
-                        .accessibilityIdentifier("syncNextCloudPasswordField")
-                        #if os(iOS)
-                        .textContentType(.password)
-                        #endif
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.nextCloudCredential,
-                        title: String(localized: "auth_password")
-                    )
-                }
-
-                LabeledContent {
-                    TextField(String(localized: "auth_folder_path"), text: $folderPath)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                        .multilineTextAlignment(.trailing)
-                        .accessibilityIdentifier("syncNextCloudFolderPathField")
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.nextCloudCredential,
-                        title: String(localized: "auth_folder_path")
-                    )
-                }
-            } header: {
-                syncSettingsSectionHeader(String(localized: "adapters_next_cloud"))
-            } footer: {
-                Text(String(localized: "auth_folder_path_summary"))
+            AndroidPreferenceSection(
+                title: String(localized: "adapters_next_cloud"),
+                palette: surfacePalette
+            ) {
+                credentialPreferenceRow(.serverURL)
+                AndroidPreferenceDivider(palette: surfacePalette)
+                credentialPreferenceRow(.username)
+                AndroidPreferenceDivider(palette: surfacePalette)
+                credentialPreferenceRow(.password)
+                AndroidPreferenceDivider(palette: surfacePalette)
+                credentialPreferenceRow(.folderPath)
             }
 
-            Section {
-                Button {
+            AndroidPreferenceSection(
+                title: String(localized: "sync_status"),
+                palette: surfacePalette
+            ) {
+                AndroidCatalogActionPreferenceRow(
+                    title: String(localized: "test_connection"),
+                    summary: nil,
+                    detail: nil,
+                    icon: SyncSettingsPresentation.syncInfo.icon,
+                    trailingValue: nil,
+                    isEnabled: !isTestingConnection,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "syncNextCloudTestConnectionButton"
+                ) {
                     Task {
                         await testRemoteConnection()
                     }
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.syncInfo,
-                        title: String(localized: "test_connection"),
-                        isEnabled: !isTestingConnection
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .disabled(isTestingConnection)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(String(localized: "test_connection"))
-                .accessibilityIdentifier("syncNextCloudTestConnectionButton")
-
-                LabeledContent {
-                    remoteStatusView
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.syncInfo,
-                        title: String(localized: "status")
-                    )
-                }
+                AndroidPreferenceDivider(palette: surfacePalette)
+                AndroidCatalogValuePreferenceRow(
+                    title: String(localized: "status"),
+                    summary: nil,
+                    detail: nil,
+                    icon: SyncSettingsPresentation.syncInfo.icon,
+                    trailingValue: remoteStatusText,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "syncRemoteStatus"
+                )
                 .accessibilityIdentifier("syncRemoteStatus")
                 .accessibilityValue(remoteStatusAccessibilityValue)
-            } header: {
-                syncSettingsSectionHeader(String(localized: "sync_status"))
             }
 
-            Section {
+            AndroidPreferenceSection(
+                title: String(localized: "synchronization_categories"),
+                palette: surfacePalette
+            ) {
                 remoteCategoryList
-            } header: {
-                syncSettingsSectionHeader(String(localized: "synchronization_categories"))
             }
         }
     }
@@ -498,8 +472,11 @@ public struct SyncSettingsView: View {
      Shared Android-style remote category toggle list used by supported remote backends.
      */
     private var remoteCategoryList: some View {
-        ForEach(SyncSettingsPresentation.visibleCategoryRows, id: \.rawValue) { category in
+        ForEach(Array(SyncSettingsPresentation.visibleCategoryRows.enumerated()), id: \.element.rawValue) { index, category in
             activeRemoteCategoryRow(for: category)
+            if index < SyncSettingsPresentation.visibleCategoryRows.count - 1 {
+                AndroidPreferenceDivider(palette: surfacePalette)
+            }
         }
     }
 
@@ -518,29 +495,201 @@ public struct SyncSettingsView: View {
      */
     private func activeRemoteCategoryRow(for category: RemoteSyncCategory) -> some View {
         let categoryBinding = remoteCategoryBinding(for: category)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                Button {
-                    categoryBinding.wrappedValue.toggle()
-                } label: {
-                    syncSettingsRowLabel(
-                        SyncSettingsPresentation.category(category),
-                        title: remoteCategoryTitle(for: category),
-                        summary: remoteCategoryContentDescription(for: category),
-                        detail: remoteCategorySupplementalText(for: category),
-                        isEnabled: !isRemoteSyncInteractionLocked
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("syncCategoryToggle::\(category.rawValue)")
-                .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+        return AndroidCatalogSwitchPreferenceRow(
+            title: remoteCategoryTitle(for: category),
+            summary: remoteCategoryContentDescription(for: category),
+            detail: remoteCategorySupplementalText(for: category),
+            icon: SyncSettingsPresentation.category(category).icon,
+            isOn: categoryBinding,
+            isEnabled: !isRemoteSyncInteractionLocked,
+            palette: surfacePalette,
+            accessibilityIdentifier: "syncCategoryToggle::\(category.rawValue)"
+        )
+        .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+    }
 
-                Toggle("", isOn: categoryBinding)
-                    .labelsHidden()
-                    .accessibilityIdentifier("syncCategoryToggleSwitch::\(category.rawValue)")
-                    .accessibilityValue(remoteCategoryAccessibilityValue(for: category))
+    /** Closes the app-owned activity after committing valid remote settings. */
+    private func close() {
+        persistRemoteSettings()
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
+    }
+
+    /// App-owned Android `ListPreference` used to choose the synchronization backend.
+    @ViewBuilder
+    private var backendDialogOverlay: some View {
+        if showsBackendDialog {
+            AndroidSingleChoiceDialog(
+                title: String(localized: "sync_adapter"),
+                selectedValue: selectedBackend.rawValue,
+                options: [
+                    AndroidSingleChoiceOption(
+                        id: RemoteSyncBackend.iCloud.rawValue,
+                        value: RemoteSyncBackend.iCloud.rawValue,
+                        title: String(localized: "icloud_sync")
+                    ),
+                    AndroidSingleChoiceOption(
+                        id: RemoteSyncBackend.nextCloud.rawValue,
+                        value: RemoteSyncBackend.nextCloud.rawValue,
+                        title: String(localized: "adapters_next_cloud")
+                    ),
+                ],
+                accessibilityIdentifier: "syncBackendDialog",
+                onSelect: { rawValue in
+                    if let backend = RemoteSyncBackend(rawValue: rawValue) {
+                        selectedBackend = backend
+                    }
+                    showsBackendDialog = false
+                },
+                onCancel: { showsBackendDialog = false }
+            )
+        }
+    }
+
+    /// App-owned Android `EditTextPreference` editor for the currently selected credential row.
+    @ViewBuilder
+    private var credentialEditorOverlay: some View {
+        if let field = activeCredentialEditor {
+            AndroidEditTextPreferenceDialog(
+                title: credentialTitle(for: field),
+                initialText: credentialValue(for: field),
+                placeholder: credentialTitle(for: field),
+                isSecure: field == .password,
+                accessibilityIdentifier: credentialAccessibilityBase(for: field),
+                onCancel: { activeCredentialEditor = nil },
+                onSave: { candidate in
+                    commitCredential(candidate, for: field)
+                    activeCredentialEditor = nil
+                }
+            )
+        }
+    }
+
+    /** Builds one exact-icon Android credential preference row. */
+    private func credentialPreferenceRow(_ field: NextCloudCredentialField) -> some View {
+        AndroidCatalogActionPreferenceRow(
+            title: credentialTitle(for: field),
+            summary: field == .folderPath ? String(localized: "auth_folder_path_summary") : nil,
+            detail: nil,
+            icon: SyncSettingsPresentation.nextCloudCredential.icon,
+            trailingValue: nil,
+            palette: surfacePalette,
+            accessibilityIdentifier: "\(credentialAccessibilityBase(for: field))Row"
+        ) {
+            activeCredentialEditor = field
+        }
+    }
+
+    /// Localized Android preference title for one remote credential.
+    private func credentialTitle(for field: NextCloudCredentialField) -> String {
+        switch field {
+        case .serverURL:
+            return String(localized: "auth_server_uri")
+        case .username:
+            return String(localized: "auth_username")
+        case .password:
+            return String(localized: "auth_password")
+        case .folderPath:
+            return String(localized: "auth_folder_path")
+        }
+    }
+
+    /// Current staged value copied into one Android credential editor.
+    private func credentialValue(for field: NextCloudCredentialField) -> String {
+        switch field {
+        case .serverURL:
+            return serverURL
+        case .username:
+            return username
+        case .password:
+            return password
+        case .folderPath:
+            return folderPath
+        }
+    }
+
+    /// Stable accessibility base shared by a credential row, dialog, field, and actions.
+    private func credentialAccessibilityBase(for field: NextCloudCredentialField) -> String {
+        switch field {
+        case .serverURL:
+            return "syncNextCloudServerURL"
+        case .username:
+            return "syncNextCloudUsername"
+        case .password:
+            return "syncNextCloudPassword"
+        case .folderPath:
+            return "syncNextCloudFolderPath"
+        }
+    }
+
+    /**
+     Applies Android's `EditTextPreference` commit boundary to one NextCloud credential.
+
+     - Parameters:
+       - candidate: Staged dialog text submitted with Android's OK action.
+       - field: Credential preference that owns the submitted value.
+     - Returns: Nothing. The owning dialog closes after this callback, as Android's preference
+       dialog does after its change listener runs.
+     - Side effects: Persists accepted credentials, clears stale connection state, or publishes the
+       localized invalid-URL state and app-owned error dialog without changing the saved server URL.
+     - Failure modes: Invalid server URLs are rejected before mutation; local Keychain persistence
+       failures retain the existing best-effort behavior in `persistRemoteSettings()`.
+     */
+    private func commitCredential(_ candidate: String, for field: NextCloudCredentialField) {
+        switch field {
+        case .serverURL:
+            let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isAndroidValidNextCloudServerURL(trimmedCandidate) else {
+                let invalidURLMessage = String(localized: "invalid_url_message")
+                remoteConnectionStatus = .failure(invalidURLMessage)
+                remoteSyncErrorMessage = invalidURLMessage
+                return
             }
-            .disabled(isRemoteSyncInteractionLocked)
+            serverURL = trimmedCandidate
+            lastCommittedServerURL = serverURL
+        case .username:
+            username = candidate
+        case .password:
+            password = candidate
+        case .folderPath:
+            folderPath = candidate
+        }
+        remoteConnectionStatus = nil
+        persistRemoteSettings()
+    }
+
+    /// Plain localized status text used by the app-owned iCloud value row.
+    private var iCloudStatusText: String {
+        switch syncService.state {
+        case .disabled:
+            return String(localized: "sync_disabled")
+        case .noAccount:
+            return String(localized: "no_icloud_account")
+        case .idle:
+            return String(localized: "sync_active")
+        case .syncing:
+            return String(localized: "syncing")
+        case .pendingRestart:
+            return String(localized: "restart_to_apply_sync")
+        case .error(let message):
+            return message
+        }
+    }
+
+    /// Plain localized status text used by the app-owned NextCloud value row.
+    private var remoteStatusText: String {
+        if isTestingConnection {
+            return String(localized: "loading")
+        }
+        guard let remoteConnectionStatus else { return "—" }
+        switch remoteConnectionStatus {
+        case .success:
+            return String(localized: "ok")
+        case .failure(let message):
+            return message
         }
     }
 
@@ -791,8 +940,8 @@ public struct SyncSettingsView: View {
     /**
      UI-test-only accessibility probe used to observe the live sync-state token.
 
-     SwiftUI's `Form` wrapper can lag behind nested state mutations when XCTest reads the
-     collection view's exported value directly. This dedicated probe mirrors the same semantic
+     SwiftUI's screen root can lag behind nested state mutations when XCTest reads the complete
+     scroll hierarchy's exported value directly. This dedicated probe mirrors the same semantic
      token without changing the visible layout or exposing diagnostic tokens to real users.
      */
     @ViewBuilder
@@ -965,46 +1114,6 @@ public struct SyncSettingsView: View {
             password: password
         )
         lastCommittedServerURL = serverURL
-    }
-
-    /**
-     Applies Android's server URL edit-validation behavior to the inline iOS field.
-
-     Android validates `cloud_sync_server_url` from `serverUrlPref.setOnPreferenceChangeListener`
-     and rejects malformed edits before they are written to preferences. iOS uses an inline
-     `TextField`, so submit and focus-loss events call this method as the equivalent commit boundary.
-
-     - Returns: `true` when the edit was accepted and persisted, otherwise `false`.
-     - Side effects:
-     - invalid URLs update the transient remote status and present the same localized error dialog
-     - valid URLs clear stale connection-test status and persist the current remote settings
-
-     Failure modes:
-     - local persistence failures are still swallowed by `persistRemoteSettings()`, matching the
-       existing settings-save behavior
-     */
-    @discardableResult
-    private func validateNextCloudServerURLAfterEditing() -> Bool {
-        guard selectedBackend == .nextCloud else {
-            return true
-        }
-
-        let invalidURLMessage = String(localized: "invalid_url_message")
-        if serverURL == lastCommittedServerURL,
-           remoteConnectionStatus == .failure(invalidURLMessage)
-        {
-            return false
-        }
-        guard isAndroidValidNextCloudServerURL(serverURL) else {
-            remoteConnectionStatus = .failure(invalidURLMessage)
-            remoteSyncErrorMessage = invalidURLMessage
-            serverURL = lastCommittedServerURL
-            return false
-        }
-
-        remoteConnectionStatus = nil
-        persistRemoteSettings()
-        return true
     }
 
     /**

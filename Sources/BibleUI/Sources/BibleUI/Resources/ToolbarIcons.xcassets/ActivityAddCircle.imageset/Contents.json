@@ -1,0 +1,17 @@
+{
+  "images": [
+    {
+      "filename": "ic_add_circle_outline_white_24dp.svg",
+      "idiom": "universal",
+      "scale": "1x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "properties": {
+    "preserves-vector-representation": true,
+    "template-rendering-intent": "template"
+  }
+}

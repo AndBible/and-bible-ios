@@ -102,9 +102,13 @@ final class BibleReaderQuickModuleSelectorTests: XCTestCase {
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderQuickModuleSelector.swift"
         )
         XCTAssertTrue(selectorSource.contains("LazyVStack(alignment: .leading, spacing: 0)"))
-        XCTAssertTrue(selectorSource.contains("Button {"))
-        XCTAssertTrue(selectorSource.contains(".buttonStyle(.plain)"))
-        XCTAssertTrue(selectorSource.contains(".disabled(!row.isEnabled)"))
+        XCTAssertTrue(selectorSource.contains("AndroidPopupMenuSurface("))
+        XCTAssertTrue(selectorSource.contains("AndroidPopupMenuRow("))
+        XCTAssertTrue(selectorSource.contains("isEnabled: row.isEnabled"))
+        XCTAssertTrue(selectorSource.contains("surfacePalette: ReaderThemeSurfacePalette = .standard"))
+        XCTAssertFalse(selectorSource.contains("Color(red:"))
+        XCTAssertFalse(selectorSource.contains("systemBackground"))
+        XCTAssertFalse(selectorSource.contains("menuBackground"))
         XCTAssertFalse(selectorSource.contains("            VStack(alignment: .leading, spacing: 0)"))
     }
 

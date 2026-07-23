@@ -141,13 +141,11 @@ struct BibleReaderQuickModuleSelector: View {
      */
     let rows: [BibleReaderQuickModuleSelectorPresentation.Row]
 
-    /**
-     Current app color scheme used to choose the popup surface color.
-
-     Android uses a compact popup surface rather than the iOS document sheet; this input lets the
-     iOS overlay keep that dedicated popup treatment without reading global state internally.
-     */
+    /// Current app color scheme used by the shared Android popup elevation treatment.
     let colorScheme: ColorScheme
+
+    /// Reader/workspace palette inherited from the pane that owns the toolbar popup.
+    let surfacePalette: ReaderThemeSurfacePalette
 
     /**
      Maximum visible height available to the selector popup.
@@ -176,7 +174,8 @@ struct BibleReaderQuickModuleSelector: View {
 
      - Parameters:
        - rows: Sorted Android-parity rows to render.
-       - colorScheme: Current app color scheme used for the popup surface.
+       - colorScheme: Current app color scheme used for the shared popup elevation treatment.
+       - surfacePalette: Reader/workspace colors inherited from the toolbar's owning pane.
        - maximumHeight: Visible viewport for the popup; long lists scroll within this height.
        - accessibilityIdentifier: Stable identifier for the popup container.
        - rowAccessibilityIdentifierPrefix: Stable identifier prefix for row controls.
@@ -187,6 +186,7 @@ struct BibleReaderQuickModuleSelector: View {
     init(
         rows: [BibleReaderQuickModuleSelectorPresentation.Row],
         colorScheme: ColorScheme,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
         maximumHeight: CGFloat = .infinity,
         accessibilityIdentifier: String = "readerBibleQuickSelector",
         rowAccessibilityIdentifierPrefix: String = "readerBibleQuickSelectorRow",
@@ -194,6 +194,7 @@ struct BibleReaderQuickModuleSelector: View {
     ) {
         self.rows = rows
         self.colorScheme = colorScheme
+        self.surfacePalette = surfacePalette
         self.maximumHeight = maximumHeight
         self.accessibilityIdentifier = accessibilityIdentifier
         self.rowAccessibilityIdentifierPrefix = rowAccessibilityIdentifierPrefix
@@ -208,20 +209,27 @@ struct BibleReaderQuickModuleSelector: View {
      - Failure modes: none; empty rows produce an empty popup body.
      */
     var body: some View {
-        ScrollView(.vertical, showsIndicators: contentHeight > popupHeight) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 {
-                        Divider()
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: accessibilityIdentifier,
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            ScrollView(.vertical, showsIndicators: contentHeight > popupHeight) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 {
+                            Divider()
+                                .overlay(surfacePalette.inactiveBorderColor)
+                        }
+                        selectorRow(row)
                     }
-                    selectorRow(row)
                 }
             }
+            .frame(height: popupHeight)
         }
-        .frame(height: popupHeight)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(accessibilityIdentifier)
-        .background(menuBackground)
     }
 
     /**
@@ -237,25 +245,17 @@ struct BibleReaderQuickModuleSelector: View {
      - Failure modes: Disabled rows ignore tap and accessibility activation.
      */
     private func selectorRow(_ row: BibleReaderQuickModuleSelectorPresentation.Row) -> some View {
-        Button {
+        AndroidPopupMenuRow(
+            title: row.title,
+            accessibilityIdentifier: "\(rowAccessibilityIdentifierPrefix)_\(row.module.name)",
+            accessibilityValue: row.isEnabled ? "available" : "current",
+            isEnabled: row.isEnabled
+        ) {
             guard row.isEnabled else { return }
             onSelect(row.module)
-        } label: {
-            Text(row.title)
-                .font(.system(size: 15))
-                .lineLimit(1)
-                .foregroundStyle(row.isEnabled ? Color.primary : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: Self.rowHeight, alignment: .center)
-        .contentShape(Rectangle())
-        .buttonStyle(.plain)
-        .disabled(!row.isEnabled)
-        .opacity(row.isEnabled ? 1 : 0.48)
-        .accessibilityIdentifier("\(rowAccessibilityIdentifierPrefix)_\(row.module.name)")
-        .accessibilityValue(row.isEnabled ? "available" : "current")
     }
 
     /// Intrinsic height of the rendered row stack before viewport clipping.
@@ -269,15 +269,4 @@ struct BibleReaderQuickModuleSelector: View {
         min(contentHeight, max(0, maximumHeight))
     }
 
-    /// Popup surface color matching the existing Android-style reader overflow menu.
-    private var menuBackground: Color {
-        if colorScheme == .dark {
-            return Color(red: 0.22, green: 0.22, blue: 0.22)
-        }
-        #if os(iOS)
-        return Color(uiColor: .systemBackground)
-        #elseif os(macOS)
-        return Color(nsColor: .windowBackgroundColor)
-        #endif
-    }
 }

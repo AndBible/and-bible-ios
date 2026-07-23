@@ -8,6 +8,9 @@ import SwiftUI
  final review request to the legitimate system controller.
  */
 struct AndroidRateReviewDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     let onDismiss: () -> Void
     let onProceed: () -> Void
     let onContactSupport: () -> Void
@@ -16,66 +19,66 @@ struct AndroidRateReviewDialog: View {
     let onLearnToContribute: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidRateReviewDialog",
+            onOutsideTap: onDismiss
+        ) {
+            AndroidDialogScaffold(
+                title: String(localized: "rate_title", defaultValue: "Rating and reviewing app")
+            ) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(String(
+                            localized: "rate_message5",
+                            defaultValue: "Positive and detailed reviews help AndBible Open Source Project a lot. Thank you!"
+                        ))
+                        Text(String(
+                            localized: "rate_message6",
+                            defaultValue: "Before reviewing negative review, please consider the following:"
+                        ))
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text(String(localized: "rate_title", defaultValue: "Rating and reviewing app"))
-                    .font(.headline)
+                        rateLink(
+                            formatKey: "rate_message1",
+                            fallback: "If you have a problem with app, please %@ or %@ instead.",
+                            first: String(localized: "send_email", defaultValue: "send email"),
+                            second: String(localized: "bug_report", defaultValue: "send a bug report")
+                        )
+                        HStack {
+                            Button(String(localized: "send_email", defaultValue: "Send email"), action: onContactSupport)
+                            Button(String(localized: "bug_report", defaultValue: "Send a bug report"), action: onReportBug)
+                        }
 
-                Text(String(
-                    localized: "rate_message5",
-                    defaultValue: "Positive and detailed reviews help AndBible Open Source Project a lot. Thank you!"
-                ))
-                Text(String(
-                    localized: "rate_message6",
-                    defaultValue: "Before reviewing negative review, please consider the following:"
-                ))
+                        rateLink(
+                            formatKey: "rate_message2",
+                            fallback: "If some text or Bible translation has an issue, %@.",
+                            first: String(localized: "text_maintainers", defaultValue: "report it to maintainers")
+                        )
+                        Button(String(localized: "text_maintainers", defaultValue: "Contact maintainers"), action: onContactMaintainers)
 
-                rateLink(
-                    formatKey: "rate_message1",
-                    fallback: "If you have a problem with app, please %@ or %@ instead.",
-                    first: String(localized: "send_email", defaultValue: "send email"),
-                    second: String(localized: "bug_report", defaultValue: "send a bug report")
-                )
-                HStack {
-                    Button(String(localized: "send_email", defaultValue: "Send email"), action: onContactSupport)
-                    Button(String(localized: "bug_report", defaultValue: "Send a bug report"), action: onReportBug)
+                        Text(String.localizedStringWithFormat(
+                            String(localized: "rate_message3", defaultValue: "If particular text is not available in the application, %@."),
+                            String(localized: "how_to_help", defaultValue: "read how you can help")
+                        ) + " " + String(
+                            localized: "rate_message4",
+                            defaultValue: "The developers of this app are not responsible for maintaining documents."
+                        ))
+                        Button(String(localized: "how_to_help", defaultValue: "How to help"), action: onLearnToContribute)
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
                 }
-
-                rateLink(
-                    formatKey: "rate_message2",
-                    fallback: "If some text or Bible translation has an issue, %@.",
-                    first: String(localized: "text_maintainers", defaultValue: "report it to maintainers")
+            } actions: {
+                AndroidDialogTextAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onDismiss
                 )
-                Button(String(localized: "text_maintainers", defaultValue: "Contact maintainers"), action: onContactMaintainers)
-
-                Text(String.localizedStringWithFormat(
-                    String(localized: "rate_message3", defaultValue: "If particular text is not available in the application, %@."),
-                    String(localized: "how_to_help", defaultValue: "read how you can help")
-                ) + " " + String(
-                    localized: "rate_message4",
-                    defaultValue: "The developers of this app are not responsible for maintaining documents."
-                ))
-                Button(String(localized: "how_to_help", defaultValue: "How to help"), action: onLearnToContribute)
-
-                HStack {
-                    Button(String(localized: "cancel", defaultValue: "Cancel"), action: onDismiss)
-                    Spacer()
-                    Button(String(localized: "proceed_google_play", defaultValue: "Proceed to App Store"), action: onProceed)
-                        .buttonStyle(.borderedProminent)
-                }
+                AndroidDialogTextAction(
+                    title: String(localized: "proceed_google_play", defaultValue: "Proceed to App Store"),
+                    action: onProceed
+                )
             }
-            .padding()
-            .frame(maxWidth: 640)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
         }
-        .accessibilityIdentifier("androidRateReviewDialog")
     }
 
     /** Builds Android's localized two-action explanatory line. */

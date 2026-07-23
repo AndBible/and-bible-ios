@@ -34,19 +34,35 @@ private struct ReadingProgressPersistenceFailure: Identifiable {
 }
 
 /**
- Native Reading Progress sheet for Android-aligned reading and memorization progress.
+ Owns Android ReadingProgressActivity's reading/memorization state and data-driven content.
 
- The view reads immutable snapshots from the supplied progress stores on render, then mutates those
- stores only through explicit user actions such as removing memorized passages or target rows.
- Memorization rows open either the Android-style Memorize document range or the selected overview
- chapter through injected callbacks owned by the reader sheet.
+ Presentation is delegated to shared app-owned activity, tab, popup, dialog, and progress controls;
+ this type reads immutable store snapshots and mutates them only after explicit Android-equivalent
+ actions. Book/day/chapter history is presented through the shared staged-delete dialog instead of
+ an invented inline section or native iOS navigation surface.
+
+ Inputs: captured progress stores, launching reader palette, initial tab, navigation commands, and
+ reader content-opening callbacks
+
+ Output: one full-screen app-owned Read/Memory Progress activity
+
+ Side effects: persists tab selection, cycle changes, memorization removals, and staged history
+ deletions through the supplied stores
+
+ Failure modes: persistence failures keep the current activity visible and present the shared
+ Android error dialog
  */
 struct ReadingProgressView: View {
     let readingStore: ReadingProgressStore?
     let memorizationStore: MemorizationProgressStore?
-    let settingsController: BibleReaderController?
+    let surfacePalette: ReaderThemeSurfacePalette
+    let onBack: () -> Void
+    let onOpenSettings: (() -> Void)?
     let onOpenMemorizeRange: (MemorizationProgressRange) -> Void
     let onOpenChapter: (String, Int) -> Void
+
+    /// Active scheme used only for the shared AppCompat accent.
+    @Environment(\.colorScheme) private var colorScheme
     /// Android's persisted tab used when an activity launch does not carry an explicit tab extra.
     @AppStorage("reading_progress_last_tab") private var persistedTabRawValue = ReadingProgressTab.reading.rawValue
     @State private var selectedTab: ReadingProgressTab
@@ -58,12 +74,11 @@ struct ReadingProgressView: View {
     @State private var memorizationDeletionRequest: MemorizationDeletionRequest?
     @State private var readingRevision = 0
     @State private var selectedReadingBookOrdinal: Int?
-    @State private var selectedReadingDayMilliseconds: Int64?
+    @State private var bibleOverviewScrollRevision = 0
+    @State private var readHistorySelection: AndroidReadHistorySelection?
     @State private var showNewReadingCycleConfirmation = false
     @State private var persistenceFailure: ReadingProgressPersistenceFailure?
     @State private var isHelpPresented = false
-    /// History rows staged for Android-style delete-on-dismiss with tap-again undo.
-    @State private var pendingReadingDeleteIDs: Set<UUID> = []
 
     private static let relativeDateFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -74,14 +89,18 @@ struct ReadingProgressView: View {
     init(
         readingStore: ReadingProgressStore?,
         memorizationStore: MemorizationProgressStore?,
-        settingsController: BibleReaderController? = nil,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
         initialTab: ReadingProgressTab? = nil,
+        onBack: @escaping () -> Void = {},
+        onOpenSettings: (() -> Void)? = nil,
         onOpenMemorizeRange: @escaping (MemorizationProgressRange) -> Void = { _ in },
         onOpenChapter: @escaping (String, Int) -> Void = { _, _ in }
     ) {
         self.readingStore = readingStore
         self.memorizationStore = memorizationStore
-        self.settingsController = settingsController
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+        self.onOpenSettings = onOpenSettings
         self.onOpenMemorizeRange = onOpenMemorizeRange
         self.onOpenChapter = onOpenChapter
         let persistedTab = ReadingProgressTab(
@@ -91,14 +110,14 @@ struct ReadingProgressView: View {
     }
 
     var body: some View {
-        Form {
-            Picker(String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"), selection: $selectedTab) {
-                ForEach(ReadingProgressTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-
+        AndroidReadingProgressActivityView(
+            surfacePalette: surfacePalette,
+            selectedTab: $selectedTab,
+            onBack: onBack,
+            onOpenSettings: onOpenSettings,
+            onOpenHelp: { isHelpPresented = true },
+            scrollToBibleOverviewRevision: bibleOverviewScrollRevision
+        ) {
             switch selectedTab {
             case .reading:
                 readingSection
@@ -106,66 +125,103 @@ struct ReadingProgressView: View {
                 memorizationSection
             }
         }
-        .navigationTitle(String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"))
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let settingsController {
-                    NavigationLink {
-                        ReadingProgressSettingsView(controller: settingsController)
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel(String(localized: "settings", defaultValue: "Settings"))
-                    .accessibilityIdentifier("readingProgressSettingsAction")
-                }
-
-                Button {
-                    isHelpPresented = true
-                } label: {
-                    Image(systemName: "questionmark.circle")
-                }
-                .accessibilityLabel(String(localized: "help", defaultValue: "Help"))
-                .accessibilityIdentifier("readingProgressHelpAction")
-            }
-        }
         .onAppear {
             persistedTabRawValue = selectedTab.rawValue
         }
         .onChange(of: selectedTab) { _, tab in
             persistedTabRawValue = tab.rawValue
-        }
-        .overlay {
-            if let request = memorizationDeletionRequest {
-                ReadingProgressDecisionDialog(title: "", message: request.message, actions: [
-                    .init(id: "confirm", title: String(localized: "ok", defaultValue: "OK")) { performMemorizationDeletion(request); memorizationDeletionRequest = nil },
-                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel")) { memorizationDeletionRequest = nil }
-                ])
-            } else if persistenceFailure != nil {
-                ReadingProgressDecisionDialog(title: String(localized: "reading_progress_save_failed", defaultValue: "Unable to save progress"), message: String(localized: "reading_progress_save_failed_message", defaultValue: "Your existing progress was left unchanged. Try again."), actions: [
-                    .init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { persistenceFailure = nil }
-                ])
-            } else if isHelpPresented {
-                ReadingProgressDecisionDialog(title: String(localized: "help", defaultValue: "Help"), message: String(localized: "help_reading_progress_text", defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."), actions: [
-                    .init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { isHelpPresented = false }
-                ])
-            } else if showNewReadingCycleConfirmation {
-                ReadingProgressDecisionDialog(title: String(localized: "reading_progress_new_cycle", defaultValue: "New cycle"), message: String(localized: "reading_progress_new_cycle_confirm", defaultValue: "Start a new reading cycle? This will begin tracking your progress from scratch, while preserving your previous cycle's data."), actions: [
-                    .init(id: "newCycle", title: String(localized: "reading_progress_new_cycle", defaultValue: "New cycle")) {
-                        showNewReadingCycleConfirmation = false
-                        guard applyPendingReadingDeletes() else { return }
-                        do {
-                            _ = try readingStore?.startNewCycle()
-                            selectedReadingBookOrdinal = nil
-                            selectedReadingDayMilliseconds = nil
-                            readingRevision += 1
-                        } catch { persistenceFailure = ReadingProgressPersistenceFailure() }
-                    },
-                    .init(id: "cancel", title: String(localized: "cancel", defaultValue: "Cancel")) { showNewReadingCycleConfirmation = false }
-                ])
+            if tab == .reading {
+                memorizedPassagesShown = 10
+                targetsShown = 10
+            } else {
+                selectedMemorizationBookOsisId = nil
             }
         }
-        .onDisappear {
-            _ = applyPendingReadingDeletes()
+        .onChange(of: memorizationOverviewActive) { _, overviewActive in
+            if overviewActive {
+                selectedMemorizationBookOsisId = nil
+            }
+        }
+        .overlay {
+            if let selection = readHistorySelection {
+                AndroidReadHistoryDialog(
+                    store: readingStore,
+                    selection: selection,
+                    onDismiss: { readHistorySelection = nil },
+                    onChanged: { readingRevision += 1 }
+                )
+            } else if let request = memorizationDeletionRequest {
+                AndroidDecisionDialog(
+                    title: "",
+                    message: request.message,
+                    actions: [
+                        .init(
+                            id: "cancel",
+                            title: String(localized: "cancel", defaultValue: "Cancel"),
+                            style: .normal
+                        ) { memorizationDeletionRequest = nil },
+                        .init(
+                            id: "confirm",
+                            title: String(localized: "okay", defaultValue: "OK"),
+                            style: .normal
+                        ) {
+                            performMemorizationDeletion(request)
+                            memorizationDeletionRequest = nil
+                        },
+                    ],
+                    accessibilityIdentifier: "androidReadingProgressDecisionDialog"
+                )
+            } else if persistenceFailure != nil {
+                AndroidDecisionDialog(
+                    title: String(localized: "reading_progress_save_failed", defaultValue: "Unable to save progress"),
+                    message: String(localized: "reading_progress_save_failed_message", defaultValue: "Your existing progress was left unchanged. Try again."),
+                    actions: [
+                        .init(
+                            id: "okay",
+                            title: String(localized: "okay", defaultValue: "OK"),
+                            style: .normal
+                        ) { persistenceFailure = nil },
+                    ],
+                    accessibilityIdentifier: "androidReadingProgressDecisionDialog"
+                )
+            } else if isHelpPresented {
+                AndroidHelpDialog(
+                    featureMessage: String(
+                        localized: "help_reading_progress_text",
+                        defaultValue: "Your Bible reading and memorization progress at a glance. Mark chapters as read manually with the \"Mark as read\" button, or enable automatic tracking. Memorize exercises also feed into this view."
+                    ),
+                    documentationURL: URL(
+                        string: "https://docs.andbible.org/en/latest/reading_progress.html"
+                    ),
+                    onDismiss: { isHelpPresented = false }
+                )
+            } else if showNewReadingCycleConfirmation {
+                AndroidDecisionDialog(
+                    title: String(localized: "reading_progress_new_cycle", defaultValue: "New Cycle"),
+                    message: String(localized: "reading_progress_new_cycle_confirm", defaultValue: "Start a new reading cycle? This will begin tracking your progress from scratch, while preserving your previous cycle's data."),
+                    actions: [
+                        .init(
+                            id: "cancel",
+                            title: String(localized: "cancel", defaultValue: "Cancel"),
+                            style: .normal
+                        ) { showNewReadingCycleConfirmation = false },
+                        .init(
+                            id: "newCycle",
+                            title: String(localized: "okay", defaultValue: "OK"),
+                            style: .normal
+                        ) {
+                            showNewReadingCycleConfirmation = false
+                            do {
+                                _ = try readingStore?.startNewCycle()
+                                readingRevision += 1
+                            } catch {
+                                persistenceFailure = ReadingProgressPersistenceFailure()
+                            }
+                        },
+                    ],
+                    accessibilityIdentifier: "androidReadingProgressDecisionDialog"
+                )
+            }
         }
     }
 
@@ -182,77 +238,73 @@ struct ReadingProgressView: View {
             recentRows: []
         )
 
-        Group {
-            Section {
-                HStack {
-                    Button {
-                        selectReadingCycle(max(presentation.cycle - 1, 1))
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .disabled(presentation.cycle <= 1)
-                    .help(String(localized: "reading_progress_previous_cycle", defaultValue: "Previous cycle"))
-
-                    Spacer()
-                    Text(String(
-                        format: String(localized: "reading_progress_cycle", defaultValue: "Cycle %d"),
-                        presentation.cycle
-                    ))
-                    .font(.headline)
-                    Spacer()
-
-                    Button {
-                        selectReadingCycle(presentation.cycle + 1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .disabled(presentation.cycle >= presentation.latestCycle)
-                    .help(String(localized: "reading_progress_next_cycle", defaultValue: "Next cycle"))
-
-                    if presentation.cycle >= presentation.latestCycle {
-                        Button {
-                            showNewReadingCycleConfirmation = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .help(String(localized: "reading_progress_new_cycle", defaultValue: "New Cycle"))
-                    }
-                }
-            }
-
-            Section(String(localized: "summary", defaultValue: "Summary")) {
-                LabeledContent(
-                    String(localized: "reading_progress_chapters_read", defaultValue: "chapters read"),
-                    value: "\(presentation.distinctChapterCount) / \(presentation.totalBibleChapterCount)"
+        VStack(alignment: .leading, spacing: 0) {
+            ReadingProgressSummaryCounters(
+                leadingValue: "\(presentation.distinctChapterCount)",
+                leadingLabel: String(
+                    localized: "reading_progress_chapters_read",
+                    defaultValue: "chapters read"
+                ),
+                trailingValue: "\(presentation.activeDayCount)",
+                trailingLabel: String(
+                    localized: "reading_progress_active_days",
+                    defaultValue: "active days"
                 )
-                LabeledContent(
-                    String(localized: "reading_progress_active_days", defaultValue: "active days"),
-                    value: "\(presentation.activeDayCount)"
+            )
+            .padding(.bottom, 16)
+
+            VStack(alignment: .leading, spacing: 4) {
+                AndroidDeterminateProgressIndicator(
+                    fraction: presentation.overallProgress,
+                    trackColor: surfacePalette.inactiveBorderColor,
+                    accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
                 )
-                ProgressView(value: presentation.overallProgress)
                 Text(String(
-                    format: String(localized: "reading_progress_overall", defaultValue: "%@%% of Bible read"),
+                    format: String(
+                        localized: "reading_progress_overall",
+                        defaultValue: "%@%% of Bible read"
+                    ),
                     String(format: "%.1f", presentation.overallPercent)
                 ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
+            .padding(.bottom, 16)
+
+            Text(String(
+                localized: "reading_progress_bible_heatmap",
+                defaultValue: "Bible Overview"
+            ))
+            .font(.system(size: 16, weight: .bold))
+            .padding(.bottom, 8)
+            .id(AndroidReadingProgressScrollTarget.bibleOverview)
 
             readingBookSections(presentation)
 
-            Section(String(localized: "reading_progress_calendar", defaultValue: "Reading activity")) {
-                ReadingProgressCalendarHeatmap(
-                    counts: presentation.calendar,
-                    selectedDayMilliseconds: $selectedReadingDayMilliseconds
-                )
-            }
+            Text(String(
+                localized: "reading_progress_calendar",
+                defaultValue: "Reading Activity"
+            ))
+            .font(.system(size: 16, weight: .bold))
+            .padding(.bottom, 8)
 
-            readingHistorySection(presentation)
+            ReadingProgressCalendarHeatmap(counts: presentation.calendar) { dayMilliseconds in
+                readHistorySelection = .day(startMilliseconds: dayMilliseconds)
+            }
+            .padding(.bottom, 16)
+
+            readingCycleControls(presentation)
         }
         .id(readingRevision)
     }
 
-    /** Renders Android's Old/New Testament book heatmaps and selected chapter counts. */
+    /**
+     Renders Android's Old/New Testament book heatmaps and selected chapter counts.
+
+     Direct taps drill into chapters; mutually exclusive long presses open the shared book/chapter
+     history dialog without also firing the navigation command.
+     */
     @ViewBuilder
     private func readingBookSections(_ presentation: ReadingProgressPresentationSnapshot) -> some View {
         let effectiveMaximum = AndroidReadingProgressHeatmap.effectiveBookScaleMaximum(
@@ -268,127 +320,144 @@ struct ReadingProgressView: View {
                 presentation.books.filter(\.book.isNewTestament)
             ),
         ]
-        Section(String(localized: "reading_progress_bible_heatmap", defaultValue: "Bible overview")) {
-            ReadingProgressBookScale(effectiveMaximum: effectiveMaximum)
-            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+        VStack(alignment: .leading, spacing: 0) {
+            ReadingProgressBookScale(
+                effectiveMaximum: effectiveMaximum,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor
+            )
+            .padding(.bottom, 8)
+
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                 Text(group.0)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13, weight: .bold))
+                    .padding(.bottom, 4)
                 ReadingProgressBookHeatmap(
                     books: group.1,
                     effectiveMaximum: effectiveMaximum,
-                    selectedBookOrdinal: $selectedReadingBookOrdinal
+                    selectedBookOrdinal: Binding(
+                        get: { selectedReadingBookOrdinal },
+                        set: { ordinal in
+                            selectedReadingBookOrdinal = ordinal
+                            if ordinal != nil {
+                                bibleOverviewScrollRevision &+= 1
+                            }
+                        }
+                    ),
+                    onOpenHistory: { book in
+                        readHistorySelection = .book(
+                            kjvBookOrdinal: book.book.bibleBookOrdinal,
+                            longName: book.book.longName
+                        )
+                    }
                 )
+                .padding(.bottom, index == groups.count - 1 ? 16 : 12)
             }
 
             if let selectedReadingBookOrdinal,
                let selectedBook = presentation.books.first(where: {
                    $0.book.bibleBookOrdinal == selectedReadingBookOrdinal
                }) {
-                Divider()
                 Text(selectedBook.book.longName)
-                    .font(.headline)
-                ReadingProgressChapterHeatmap(book: selectedBook, onOpenChapter: onOpenChapter)
+                    .font(.system(size: 14, weight: .bold))
+                    .padding(.bottom, 4)
+                ReadingProgressChapterHeatmap(
+                    book: selectedBook,
+                    secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                    onOpenChapter: onOpenChapter,
+                    onOpenHistory: { chapter in
+                        readHistorySelection = .chapter(ChapterReadHistoryTarget(
+                            bookInitials: "",
+                            startOrdinal: 0,
+                            kjvBookOrdinal: selectedBook.book.bibleBookOrdinal,
+                            bookName: selectedBook.book.longName,
+                            chapter: chapter
+                        ))
+                    }
+                )
+                .padding(.bottom, 16)
             }
         }
     }
 
-    /** Renders recent or selected Android history with one-row delete controls. */
-    @ViewBuilder
-    private func readingHistorySection(_ presentation: ReadingProgressPresentationSnapshot) -> some View {
-        let rows = selectedReadingHistoryRows(in: presentation)
-        Section(String(localized: "reading_progress_history_title", defaultValue: "Reading history")) {
-            if rows.isEmpty {
-                Text(String(
-                    localized: "reading_progress_history_no_entries",
-                    defaultValue: "No read entries for this selection."
-                ))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(rows.prefix(50), id: \.id) { row in
-                    let isPending = pendingReadingDeleteIDs.contains(row.id)
-                    HStack {
-                        ReadingProgressHistoryRowView(row: row)
-                        Spacer()
-                        Button {
-                            if isPending {
-                                pendingReadingDeleteIDs.remove(row.id)
-                            } else {
-                                pendingReadingDeleteIDs.insert(row.id)
-                            }
-                        } label: {
-                            Image(systemName: isPending ? "arrow.uturn.backward" : "xmark")
-                        }
-                        .foregroundStyle(
-                            isPending
-                                ? AndroidReadingProgressColor.readingColor(
-                                    argb: AndroidReadingProgressHeatmap.chapterMaximumARGB
-                                )
-                                : Color.secondary
-                        )
-                        .help(
-                            isPending
-                                ? String(localized: "undo", defaultValue: "Undo")
-                                : String(localized: "delete", defaultValue: "Delete")
-                        )
-                    }
-                    .opacity(isPending ? 0.45 : 1)
+    /** Builds Android's bottom-of-content cycle selector and New Cycle text command. */
+    private func readingCycleControls(
+        _ presentation: ReadingProgressPresentationSnapshot
+    ) -> some View {
+        HStack(spacing: 8) {
+            cycleButton(
+                assetName: "ProgressCyclePrevious",
+                accessibilityLabel: String(
+                    localized: "reading_progress_previous_cycle",
+                    defaultValue: "Previous cycle"
+                ),
+                isEnabled: presentation.cycle > 1
+            ) {
+                selectReadingCycle(max(presentation.cycle - 1, 1))
+            }
+
+            Text(String(
+                format: String(localized: "reading_progress_cycle", defaultValue: "Cycle %d"),
+                presentation.cycle
+            ))
+            .font(.system(size: 14))
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            cycleButton(
+                assetName: "ProgressCycleNext",
+                accessibilityLabel: String(
+                    localized: "reading_progress_next_cycle",
+                    defaultValue: "Next cycle"
+                ),
+                isEnabled: presentation.cycle < presentation.latestCycle
+            ) {
+                selectReadingCycle(presentation.cycle + 1)
+            }
+
+            if presentation.cycle >= presentation.latestCycle {
+                Button(
+                    String(
+                        localized: "reading_progress_new_cycle",
+                        defaultValue: "New Cycle"
+                    )
+                ) {
+                    showNewReadingCycleConfirmation = true
                 }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                .buttonStyle(.plain)
+                .frame(minHeight: 40)
+                .accessibilityIdentifier("readingProgressNewCycleButton")
             }
         }
+    }
+
+    /** Builds one exact ported Android cycle-arrow control with disabled alpha behavior. */
+    private func cycleButton(
+        assetName: String,
+        accessibilityLabel: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            AndBibleIconView(name: assetName, size: 24)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(AndroidResourcePalette.grey500)
+        .opacity(isEnabled ? 1 : 0.3)
+        .disabled(!isEnabled)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     /** Selects an existing Android reading cycle and clears drill-down filters. */
     private func selectReadingCycle(_ cycle: Int) {
-        guard applyPendingReadingDeletes() else { return }
         do {
             _ = try readingStore?.setActiveCycle(cycle)
-            selectedReadingBookOrdinal = nil
-            selectedReadingDayMilliseconds = nil
             readingRevision += 1
         } catch {
             persistenceFailure = ReadingProgressPersistenceFailure()
         }
-    }
-
-    /** Commits Android-style pending history deletions when the history surface closes or changes cycle. */
-    @discardableResult
-    private func applyPendingReadingDeletes() -> Bool {
-        guard !pendingReadingDeleteIDs.isEmpty else { return true }
-        guard let readingStore else {
-            pendingReadingDeleteIDs.removeAll()
-            return true
-        }
-        for id in Array(pendingReadingDeleteIDs) {
-            do {
-                _ = try readingStore.deleteHistoryEntry(id: id)
-                pendingReadingDeleteIDs.remove(id)
-            } catch {
-                persistenceFailure = ReadingProgressPersistenceFailure()
-                readingRevision += 1
-                return false
-            }
-        }
-        readingRevision += 1
-        return true
-    }
-
-    /** Resolves history for the selected day/book, otherwise Android's newest entries. */
-    private func selectedReadingHistoryRows(
-        in presentation: ReadingProgressPresentationSnapshot,
-        calendar: Calendar = .current
-    ) -> [ReadingProgressHistoryRow] {
-        if let selectedReadingDayMilliseconds {
-            let start = AndroidTimestamp.date(from: selectedReadingDayMilliseconds)
-            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
-            return presentation.recentRows.filter {
-                let date = AndroidTimestamp.date(from: $0.readAt)
-                return date >= start && date < end
-            }
-        }
-        if let selectedReadingBookOrdinal {
-            return presentation.recentRows.filter { $0.kjvBookOrdinal == selectedReadingBookOrdinal }
-        }
-        return Array(presentation.recentRows.prefix(20))
     }
 
     @ViewBuilder
@@ -396,31 +465,44 @@ struct ReadingProgressView: View {
         let snapshot = memorizationStore?.snapshot() ?? MemorizationProgressSnapshot()
         let presentation = MemorizationProgressPresentation(snapshot: snapshot)
 
-        Group {
-            Section {
-                MemorizationSummaryView(summary: presentation.summary)
-                if presentation.summary.targetTotal > 0 {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ProgressView(
-                            value: Double(presentation.summary.targetMemorized),
-                            total: Double(presentation.summary.targetTotal)
-                        )
-                        Text(
-                            targetProgressLabel(
-                                memorized: presentation.summary.targetMemorized,
-                                total: presentation.summary.targetTotal
-                            )
-                        )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            ReadingProgressSummaryCounters(
+                leadingValue: "\(presentation.summary.totalMemorized)",
+                leadingLabel: String(
+                    localized: "memorize_verses_memorized",
+                    defaultValue: "Memorized"
+                ),
+                trailingValue: presentation.summary.targetTotal > 0
+                    ? "\(presentation.summary.targetTotal)"
+                    : "-",
+                trailingLabel: String(
+                    localized: "memorize_verses_target",
+                    defaultValue: "Goal"
+                )
+            )
+            .padding(.bottom, 16)
+
+            if presentation.summary.targetTotal > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    AndroidDeterminateProgressIndicator(
+                        fraction: Double(presentation.summary.targetMemorized)
+                            / Double(presentation.summary.targetTotal),
+                        trackColor: surfacePalette.inactiveBorderColor,
+                        accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
+                    )
+                    Text(targetProgressLabel(
+                        memorized: presentation.summary.targetMemorized,
+                        total: presentation.summary.targetTotal
+                    ))
+                    .font(.system(size: 12))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .padding(.bottom, 16)
             }
 
-            Section {
-                MemorizationViewToggle(overviewActive: $memorizationOverviewActive)
-            }
+            MemorizationViewToggle(overviewActive: $memorizationOverviewActive)
+                .padding(.bottom, 16)
 
             if memorizationOverviewActive {
                 memorizationOverviewSections(presentation)
@@ -433,33 +515,58 @@ struct ReadingProgressView: View {
 
     @ViewBuilder
     private func memorizationListSections(_ presentation: MemorizationProgressPresentation) -> some View {
-        Section(String(localized: "memorize_memorized_passages", defaultValue: "Memorized passages")) {
-            if presentation.memorizedPassages.isEmpty {
-                Text(String(localized: "memorize_no_memorized_passages", defaultValue: "No memorized passages yet"))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(presentation.memorizedPassages.prefix(memorizedPassagesShown))) { passage in
-                    memorizedPassageRow(passage)
-                }
-                if presentation.memorizedPassages.count > memorizedPassagesShown {
-                    Button(showMoreTitle(remaining: presentation.memorizedPassages.count - memorizedPassagesShown)) {
-                        memorizedPassagesShown += 10
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                progressSectionTitle(String(
+                    localized: "memorize_memorized_passages",
+                    defaultValue: "Memorized passages"
+                ), textSize: 16)
+                if presentation.memorizedPassages.isEmpty {
+                    Text(String(localized: "memorize_no_memorized_passages", defaultValue: "No memorized passages yet"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(presentation.memorizedPassages.prefix(memorizedPassagesShown))) { passage in
+                            memorizedPassageRow(passage)
+                        }
+                        if presentation.memorizedPassages.count > memorizedPassagesShown {
+                            Button(showMoreTitle(remaining: presentation.memorizedPassages.count - memorizedPassagesShown)) {
+                                memorizedPassagesShown += 10
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
                     }
                 }
             }
-        }
+            .padding(.bottom, 16)
 
-        Section(String(localized: "memorize_targets", defaultValue: "Memorization goals")) {
-            if presentation.incompleteTargets.isEmpty {
-                Text(String(localized: "memorize_no_targets", defaultValue: "No memorization goals set"))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(presentation.incompleteTargets.prefix(targetsShown))) { item in
-                    memorizationTargetRow(item)
-                }
-                if presentation.incompleteTargets.count > targetsShown {
-                    Button(showMoreTitle(remaining: presentation.incompleteTargets.count - targetsShown)) {
-                        targetsShown += 10
+            VStack(alignment: .leading, spacing: 8) {
+                progressSectionTitle(String(
+                    localized: "memorize_targets",
+                    defaultValue: "Memorization goals"
+                ), textSize: 16)
+                if presentation.incompleteTargets.isEmpty {
+                    Text(String(localized: "memorize_no_targets", defaultValue: "No memorization goals set"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(presentation.incompleteTargets.prefix(targetsShown))) { item in
+                            memorizationTargetRow(item)
+                        }
+                        if presentation.incompleteTargets.count > targetsShown {
+                            Button(showMoreTitle(remaining: presentation.incompleteTargets.count - targetsShown)) {
+                                targetsShown += 10
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                        }
                     }
                 }
             }
@@ -471,34 +578,58 @@ struct ReadingProgressView: View {
         let oldTestamentBooks = presentation.books.filter { !$0.isNewTestament }
         let newTestamentBooks = presentation.books.filter(\.isNewTestament)
 
-        Section(String(localized: "old_testament", defaultValue: "Old Testament")) {
-            MemorizationBookGridView(
-                books: oldTestamentBooks,
-                selectedOsisId: selectedMemorizationBookOsisId
-            ) { osisId in
-                selectedMemorizationBookOsisId = osisId
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                progressSectionTitle(String(
+                    localized: "reading_progress_old_testament",
+                    defaultValue: "Old Testament"
+                ), textSize: 13)
+                MemorizationBookGridView(
+                    books: oldTestamentBooks
+                ) { osisId in
+                    selectedMemorizationBookOsisId = osisId
+                }
+            }
+            .padding(.bottom, 12)
+
+            VStack(alignment: .leading, spacing: 4) {
+                progressSectionTitle(String(
+                    localized: "reading_progress_new_testament",
+                    defaultValue: "New Testament"
+                ), textSize: 13)
+                MemorizationBookGridView(
+                    books: newTestamentBooks
+                ) { osisId in
+                    selectedMemorizationBookOsisId = osisId
+                }
+            }
+            .padding(.bottom, 16)
+
+            if let selectedMemorizationBookOsisId,
+               let detail = presentation.chapterDetail(osisId: selectedMemorizationBookOsisId) {
+                VStack(alignment: .leading, spacing: 4) {
+                    progressSectionTitle(detail.title, textSize: 14)
+                    MemorizationChapterGridView(detail: detail, onOpenChapter: onOpenChapter)
+                }
+                .padding(.bottom, 16)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                progressSectionTitle(String(
+                    localized: "memorize_calendar",
+                    defaultValue: "Memorization Activity"
+                ), textSize: 16)
+                MemorizationCalendarView(counts: presentation.calendarCountsByDayStartMilliseconds)
             }
         }
+    }
 
-        Section(String(localized: "new_testament", defaultValue: "New Testament")) {
-            MemorizationBookGridView(
-                books: newTestamentBooks,
-                selectedOsisId: selectedMemorizationBookOsisId
-            ) { osisId in
-                selectedMemorizationBookOsisId = osisId
-            }
-        }
-
-        if let selectedMemorizationBookOsisId,
-           let detail = presentation.chapterDetail(osisId: selectedMemorizationBookOsisId) {
-            Section(detail.title) {
-                MemorizationChapterGridView(detail: detail, onOpenChapter: onOpenChapter)
-            }
-        }
-
-        Section(String(localized: "memorize_calendar", defaultValue: "Memorization Activity")) {
-            MemorizationCalendarView(counts: presentation.calendarCountsByDayStartMilliseconds)
-        }
+    /** Builds one Android XML-sized heading without iOS `Section` list chrome. */
+    private func progressSectionTitle(_ title: String, textSize: CGFloat) -> some View {
+        Text(title)
+            .font(.system(size: textSize, weight: .bold))
+            .foregroundStyle(surfacePalette.foregroundColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func memorizedPassageRow(
@@ -507,10 +638,10 @@ struct ReadingProgressView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(passage.title)
-                    .font(.body)
+                    .font(.system(size: 14))
                 Text(relativeDateText(milliseconds: passage.latestMemorizedAt))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
             }
             Spacer(minLength: 8)
             Button {
@@ -519,13 +650,16 @@ struct ReadingProgressView: View {
                     kind: .memorizedPassage(passage)
                 )
             } label: {
-                Image(systemName: "xmark.circle")
-                    .imageScale(.large)
+                Text("×")
+                    .font(.system(size: 18))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .foregroundStyle(surfacePalette.foregroundColor)
             .accessibilityLabel(String(localized: "remove", defaultValue: "Remove"))
         }
+        .padding(8)
         .contentShape(Rectangle())
         .onTapGesture {
             onOpenMemorizeRange(passage.range)
@@ -535,14 +669,14 @@ struct ReadingProgressView: View {
     private func memorizationTargetRow(
         _ item: MemorizationProgressPresentation.TargetItem
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(item.title) (\(item.memorizedCount)/\(item.verseCount))")
-                        .font(.body)
+                        .font(.system(size: 14))
                     Text(relativeDateText(milliseconds: item.createdAt))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 }
                 Spacer(minLength: 8)
                 Button {
@@ -551,15 +685,22 @@ struct ReadingProgressView: View {
                         kind: .target(item)
                     )
                 } label: {
-                    Image(systemName: "xmark.circle")
-                        .imageScale(.large)
+                    Text("×")
+                        .font(.system(size: 18))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .foregroundStyle(surfacePalette.foregroundColor)
                 .accessibilityLabel(String(localized: "remove", defaultValue: "Remove"))
             }
-            ProgressView(value: item.progressFraction)
+            AndroidDeterminateProgressIndicator(
+                fraction: item.progressFraction,
+                trackColor: surfacePalette.inactiveBorderColor,
+                accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
+            )
         }
+        .padding(8)
         .contentShape(Rectangle())
         .onTapGesture {
             onOpenMemorizeRange(item.row.range)
@@ -650,18 +791,27 @@ struct ReadingProgressView: View {
     }
 }
 
-private struct MemorizationSummaryView: View {
-    let summary: MemorizationProgressPresentation.Summary
+/**
+ Renders the equal-width two-counter summary shared by Android's Reading and Memorization tabs.
+
+ Inputs are preformatted values and localized labels; the component owns only the 28sp/12sp
+ typography, centered geometry, and twelve-point padding defined by `reading_progress.xml`.
+ */
+private struct ReadingProgressSummaryCounters: View {
+    let leadingValue: String
+    let leadingLabel: String
+    let trailingValue: String
+    let trailingLabel: String
 
     var body: some View {
         HStack(spacing: 0) {
             summaryColumn(
-                value: "\(summary.totalMemorized)",
-                label: String(localized: "memorize_verses_memorized", defaultValue: "Memorized")
+                value: leadingValue,
+                label: leadingLabel
             )
             summaryColumn(
-                value: summary.targetTotal > 0 ? "\(summary.targetTotal)" : "-",
-                label: String(localized: "memorize_verses_target", defaultValue: "Goal")
+                value: trailingValue,
+                label: trailingLabel
             )
         }
     }
@@ -681,21 +831,27 @@ private struct MemorizationSummaryView: View {
 private struct MemorizationViewToggle: View {
     @Binding var overviewActive: Bool
 
+    /// Active scheme used by Android's borderless-button text accent.
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(spacing: 0) {
             Button(String(localized: "memorize_view_overview", defaultValue: "Overview")) {
                 overviewActive = true
             }
-            .font(.system(size: 17, weight: overviewActive ? .bold : .regular))
-            .frame(maxWidth: .infinity)
+            .font(.system(size: 14, weight: overviewActive ? .bold : .regular))
+            .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .buttonStyle(.plain)
 
             Button(String(localized: "memorize_view_list", defaultValue: "List")) {
                 overviewActive = false
             }
-            .font(.system(size: 17, weight: overviewActive ? .regular : .bold))
-            .frame(maxWidth: .infinity)
+            .font(.system(size: 14, weight: overviewActive ? .regular : .bold))
+            .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.borderless)
     }
 }
 
@@ -712,13 +868,12 @@ private struct MemorizationDeletionRequest: Identifiable {
 
 private struct MemorizationBookGridView: View {
     let books: [MemorizationProgressPresentation.BookCell]
-    let selectedOsisId: String?
     let onSelect: (String) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 6)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 6)
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 2) {
+        LazyVGrid(columns: columns, spacing: 4) {
             ForEach(books) { book in
                 Button {
                     onSelect(book.osisId)
@@ -743,19 +898,11 @@ private struct MemorizationBookGridView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(AndroidReadingProgressColor.memorizationProgressColor(for: book.progressBucket))
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(
-                                selectedOsisId == book.osisId ? Color.accentColor : Color.clear,
-                                lineWidth: 2
-                            )
-                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(book.title)
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -763,13 +910,11 @@ private struct MemorizationChapterGridView: View {
     let detail: MemorizationProgressPresentation.ChapterDetail
     let onOpenChapter: (String, Int) -> Void
 
-    private var columns: [GridItem] {
-        let columnCount = min(max(detail.chapters.count, 5), 10)
-        return Array(repeating: GridItem(.flexible(), spacing: 2), count: columnCount)
-    }
+    /// Android memorization detail retains the XML grid's fixed ten columns.
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 10)
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 2) {
+        LazyVGrid(columns: columns, spacing: 4) {
             ForEach(detail.chapters) { chapter in
                 Button {
                     onOpenChapter(detail.osisId, chapter.chapter)
@@ -796,7 +941,6 @@ private struct MemorizationChapterGridView: View {
                 .accessibilityLabel("\(detail.title) \(chapter.chapter)")
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -817,6 +961,8 @@ private struct MemorizationCalendarView: View {
                             .frame(width: labelWidth, height: headerHeight)
                         ForEach(0..<7, id: \.self) { dayIndex in
                             dayLabel(for: dayIndex)
+                                .font(.system(size: 10))
+                                .foregroundStyle(AndroidResourcePalette.gray)
                                 .frame(width: labelWidth, height: cellSize, alignment: .leading)
                         }
                     }
@@ -826,7 +972,7 @@ private struct MemorizationCalendarView: View {
                             ForEach(0..<53, id: \.self) { weekIndex in
                                 Text(monthLabel(forWeek: weekIndex))
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AndroidResourcePalette.gray)
                                     .frame(width: cellSize, height: headerHeight, alignment: .leading)
                                     .lineLimit(1)
                             }
@@ -992,79 +1138,13 @@ private enum AndroidReadingProgressColor {
     }
 }
 
-/**
- Native settings form for reading and memorization progress behavior.
-
- The view edits the focused reader controller's progress settings when a controller is available
- and otherwise renders default values for routes opened before a pane controller is ready.
-
- - Parameters:
-   - controller: Optional reader controller that owns the progress stores to mutate.
- - Side effects: User edits call `saveReadingProgressSettings(_:)` on the supplied controller.
- - Failure modes: Missing controllers keep edits local to the view state.
- */
-struct ReadingProgressSettingsView: View {
-    let controller: BibleReaderController?
-    @State private var settings: ReadingProgressSettingsSnapshot
-
-    init(controller: BibleReaderController?) {
-        self.controller = controller
-        _settings = State(initialValue: controller?.readingProgressStore?.snapshot().settings ?? ReadingProgressSettingsSnapshot())
-    }
-
-    var body: some View {
-        Form {
-            Section(String(localized: "reading", defaultValue: "Reading")) {
-                Toggle(String(localized: "auto_track_reading", defaultValue: "Auto Track Reading"), isOn: settingBinding(\.autoTrackReading))
-            }
-
-            Section(String(localized: "memorization", defaultValue: "Memorization")) {
-                Toggle(String(localized: "auto_mark_memorized", defaultValue: "Auto Mark Memorized"), isOn: settingBinding(\.autoMarkMemorized))
-                Toggle(String(localized: "full_words", defaultValue: "Full Words"), isOn: settingBinding(\.memorizeTypeFullWords))
-                Toggle(String(localized: "error_heatmap", defaultValue: "Error Heatmap"), isOn: settingBinding(\.memorizeErrorHeatmap))
-                Toggle(String(localized: "hide_used_words", defaultValue: "Hide Used Words"), isOn: settingBinding(\.memorizeScrambleHideUsed))
-                Toggle(String(localized: "include_reference", defaultValue: "Include Reference"), isOn: settingBinding(\.memorizeIncludeReference))
-
-                Picker(
-                    String(localized: "word_visibility", defaultValue: "Word Visibility"),
-                    selection: settingBinding(\.memorizeWordVisibility)
-                ) {
-                    Text(String(localized: "light", defaultValue: "Light")).tag("light")
-                    Text(String(localized: "dim", defaultValue: "Dim")).tag("dim")
-                    Text(String(localized: "hidden", defaultValue: "Hidden")).tag("hidden")
-                }
-            }
-        }
-        .navigationTitle(String(localized: "reading_progress_settings", defaultValue: "Reading Progress Settings"))
-        .accessibilityIdentifier("readingProgressSettingsScreen")
-    }
-
-    /**
-     Creates a binding that persists one reading-progress setting after each edit.
-
-     - Parameter keyPath: Writable key path for the setting value inside the local snapshot.
-     - Returns: A SwiftUI binding suitable for toggles and pickers.
-     - Side Effects: Mutates local state and saves through the optional reader controller.
-     - Failure: When the controller is absent or saving fails, the local edited value remains until
-       the view is recreated.
-     */
-    private func settingBinding<Value>(_ keyPath: WritableKeyPath<ReadingProgressSettingsSnapshot, Value>) -> Binding<Value> {
-        Binding(
-            get: { settings[keyPath: keyPath] },
-            set: { value in
-                settings[keyPath: keyPath] = value
-                if let savedSettings = controller?.saveReadingProgressSettings(settings) {
-                    settings = savedSettings
-                }
-            }
-        )
-    }
-}
-
 /** Android percentage legend for the repeat-read book heatmap. */
 private struct ReadingProgressBookScale: View {
     /// Dynamic Android scale maximum, where `1` represents 100 percent.
     let effectiveMaximum: Double
+
+    /// Launching activity's `textColorSecondary` projection.
+    let secondaryTextColor: Color
 
     /** Builds Android's fixed 25-percent color bands through the effective maximum. */
     var body: some View {
@@ -1074,7 +1154,7 @@ private struct ReadingProgressBookScale: View {
         HStack(alignment: .center, spacing: 6) {
             Text(String(localized: "reading_progress_percent_read_scale", defaultValue: "Percent\nRead"))
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryTextColor)
                 .fixedSize(horizontal: true, vertical: false)
             VStack(spacing: 2) {
                 HStack(spacing: 0) {
@@ -1096,7 +1176,7 @@ private struct ReadingProgressBookScale: View {
                             percentage
                         ))
                         .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(secondaryTextColor)
                         .frame(maxWidth: .infinity)
                     }
                 }
@@ -1115,50 +1195,79 @@ private struct ReadingProgressBookHeatmap: View {
     /// Selected Android KJVA book ordinal for chapter drill-down.
     @Binding var selectedBookOrdinal: Int?
 
-    private let columns = [GridItem(.adaptive(minimum: 48, maximum: 64), spacing: 6)]
+    /// Android long-press command for the complete book's history.
+    let onOpenHistory: (ReadingProgressBookSummary) -> Void
+
+    /// Android `GridLayout` uses exactly six equal columns for both testaments.
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 6)
 
     /** Builds tappable book cells whose intensity reflects total reads per chapter. */
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 6) {
+        LazyVGrid(columns: columns, spacing: 4) {
             ForEach(books) { summary in
                 let argb = AndroidReadingProgressHeatmap.bookARGB(
                     readPercent: summary.readPercent,
                     effectiveMaximum: effectiveMaximum
                 )
-                Button {
-                    selectedBookOrdinal = summary.book.bibleBookOrdinal
-                } label: {
-                    HStack(spacing: 2) {
-                        Text(summary.book.shortName)
-                        if summary.isComplete {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 7, weight: .bold))
-                                .alignmentGuide(.firstTextBaseline) { dimensions in
-                                    dimensions[.bottom]
-                                }
-                        }
+                HStack(spacing: 2) {
+                    Text(summary.book.shortName)
+                    if summary.isComplete {
+                        Text("✓")
+                            .font(.system(size: 7, weight: .bold))
+                            .baselineOffset(4)
                     }
-                        .font(.caption2.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                        .foregroundStyle(
-                            summary.readPercent >= 1
-                                ? Color.white
-                                : AndroidReadingProgressColor.readingDarkText
-                        )
-                        .background(AndroidReadingProgressColor.readingColor(argb: argb))
-                        .overlay {
-                            if selectedBookOrdinal == summary.book.bibleBookOrdinal {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(Color.primary, lineWidth: 2)
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
-                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .foregroundStyle(
+                    summary.readPercent >= 1
+                        ? Color.white
+                        : AndroidReadingProgressColor.readingDarkText
+                )
+                .background(AndroidReadingProgressColor.readingColor(argb: argb))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+                .gesture(bookGesture(summary))
+                .accessibilityElement()
+                .accessibilityAddTraits(.isButton)
                 .accessibilityLabel(summary.book.longName)
                 .accessibilityValue(String(format: "%.0f%%", summary.readPercent * 100))
+                .accessibilityAction {
+                    selectedBookOrdinal = summary.book.bibleBookOrdinal
+                }
+                .accessibilityAction(
+                    named: String(
+                        localized: "reading_progress_history_title",
+                        defaultValue: "Read History"
+                    )
+                ) {
+                    onOpenHistory(summary)
+                }
             }
         }
+    }
+
+    /**
+     Builds Android's mutually exclusive book tap/long-press gesture.
+
+     - Parameter summary: Captured book cell.
+     - Returns: An exclusive gesture that cannot drill down after opening history.
+     - Side effects: a tap selects chapter detail; a long press opens book history.
+     - Failure modes: a cancelled long press performs no action.
+     */
+    private func bookGesture(_ summary: ReadingProgressBookSummary) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.45)
+            .exclusively(before: TapGesture())
+            .onEnded { value in
+                switch value {
+                case .first(true):
+                    onOpenHistory(summary)
+                case .second:
+                    selectedBookOrdinal = summary.book.bibleBookOrdinal
+                case .first(false):
+                    break
+                }
+            }
     }
 }
 
@@ -1167,13 +1276,16 @@ private struct ReadingProgressChapterScale: View {
     /// Largest repeat-read count in the selected book.
     let maximumCount: Int
 
+    /// Launching activity's `textColorSecondary` projection.
+    let secondaryTextColor: Color
+
     /** Builds Android's one/five/effective-maximum anchored color scale. */
     var body: some View {
         let counts = AndroidReadingProgressHeatmap.chapterScaleCounts(maximumCount: maximumCount)
         HStack(alignment: .center, spacing: 6) {
             Text(String(localized: "reading_progress_read_count_scale", defaultValue: "Read\nCount"))
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryTextColor)
                 .fixedSize(horizontal: true, vertical: false)
             VStack(spacing: 2) {
                 HStack(spacing: 0) {
@@ -1192,7 +1304,7 @@ private struct ReadingProgressChapterScale: View {
                     ForEach(counts, id: \.self) { count in
                         Text("\(count)")
                             .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(secondaryTextColor)
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -1206,43 +1318,82 @@ private struct ReadingProgressChapterScale: View {
 private struct ReadingProgressChapterHeatmap: View {
     /// Selected Android KJVA book summary.
     let book: ReadingProgressBookSummary
+
+    /// Launching activity's secondary text token for the count legend.
+    let secondaryTextColor: Color
     /// Reader-owned navigation callback receiving KJVA OSIS ID and one-based chapter.
     let onOpenChapter: (String, Int) -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 32, maximum: 42), spacing: 5)]
+    /// Android long-press command receiving the selected one-based chapter.
+    let onOpenHistory: (Int) -> Void
+
+    /// Android chooses five through ten equal columns from the selected book's chapter count.
+    private var columns: [GridItem] {
+        let columnCount = min(max(book.book.chapterCount, 5), 10)
+        return Array(repeating: GridItem(.flexible(), spacing: 4), count: columnCount)
+    }
 
     /** Builds fixed chapter cells whose intensity represents repeat-read count. */
     var body: some View {
         let maximum = max(book.chapterReadCounts.values.max() ?? 0, 1)
-        VStack(alignment: .leading, spacing: 8) {
-            ReadingProgressChapterScale(maximumCount: maximum)
-            LazyVGrid(columns: columns, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
+            ReadingProgressChapterScale(
+                maximumCount: maximum,
+                secondaryTextColor: secondaryTextColor
+            )
+            LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(1...book.book.chapterCount, id: \.self) { chapter in
                     let count = book.chapterReadCounts[chapter, default: 0]
                     let argb = AndroidReadingProgressHeatmap.chapterARGB(
                         count: count,
                         maximumCount: maximum
                     )
-                    Button {
-                        onOpenChapter(book.book.osisId, chapter)
-                    } label: {
-                        Text("\(chapter)")
-                            .font(.caption2.monospacedDigit())
-                            .frame(maxWidth: .infinity, minHeight: 28)
-                            .foregroundStyle(
-                                AndroidReadingProgressHeatmap.usesLightForeground(argb: argb)
-                                    ? Color.white
-                                    : AndroidReadingProgressColor.readingDarkText
+                    Text("\(chapter)")
+                        .font(.system(size: 12).monospacedDigit())
+                        .frame(minWidth: 36, maxWidth: .infinity, minHeight: 28)
+                        .foregroundStyle(
+                            AndroidReadingProgressHeatmap.usesLightForeground(argb: argb)
+                                ? Color.white
+                                : AndroidReadingProgressColor.readingDarkText
+                        )
+                        .background(AndroidReadingProgressColor.readingColor(argb: argb))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
+                        .gesture(chapterGesture(chapter))
+                        .accessibilityElement()
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("\(book.book.longName) \(chapter)")
+                        .accessibilityValue("\(count)")
+                        .accessibilityAction {
+                            onOpenChapter(book.book.osisId, chapter)
+                        }
+                        .accessibilityAction(
+                            named: String(
+                                localized: "reading_progress_history_title",
+                                defaultValue: "Read History"
                             )
-                            .background(AndroidReadingProgressColor.readingColor(argb: argb))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(book.book.longName) \(chapter)")
-                    .accessibilityValue("\(count)")
+                        ) {
+                            onOpenHistory(chapter)
+                        }
                 }
             }
         }
+    }
+
+    /** Builds Android's mutually exclusive chapter navigation/history gesture. */
+    private func chapterGesture(_ chapter: Int) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.45)
+            .exclusively(before: TapGesture())
+            .onEnded { value in
+                switch value {
+                case .first(true):
+                    onOpenHistory(chapter)
+                case .second:
+                    onOpenChapter(book.book.osisId, chapter)
+                case .first(false):
+                    break
+                }
+            }
     }
 }
 
@@ -1250,8 +1401,8 @@ private struct ReadingProgressChapterHeatmap: View {
 private struct ReadingProgressCalendarHeatmap: View {
     /// Android local-midnight activity buckets in the active cycle.
     let counts: [ReadingProgressDayCount]
-    /// Selected non-empty local day used to filter history rows.
-    @Binding var selectedDayMilliseconds: Int64?
+    /// Android day-tap command that opens the shared Read History dialog.
+    let onSelectDay: (Int64) -> Void
 
     private let calendar = Calendar.current
     private let cellSize: CGFloat = 14
@@ -1272,6 +1423,8 @@ private struct ReadingProgressCalendarHeatmap: View {
                             .frame(width: labelWidth, height: headerHeight)
                         ForEach(0..<7, id: \.self) { dayIndex in
                             dayLabel(for: dayIndex)
+                                .font(.system(size: 10))
+                                .foregroundStyle(AndroidResourcePalette.gray)
                                 .frame(width: labelWidth, height: cellSize, alignment: .leading)
                         }
                     }
@@ -1281,7 +1434,7 @@ private struct ReadingProgressCalendarHeatmap: View {
                             ForEach(0..<53, id: \.self) { weekIndex in
                                 Text(monthLabel(forWeek: weekIndex))
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(AndroidResourcePalette.gray)
                                     .frame(width: cellSize, height: headerHeight, alignment: .leading)
                                     .lineLimit(1)
                             }
@@ -1296,12 +1449,11 @@ private struct ReadingProgressCalendarHeatmap: View {
                                             let count = countsByDay[milliseconds, default: 0]
                                             if count > 0 {
                                                 Button {
-                                                    selectedDayMilliseconds = milliseconds
+                                                    onSelectDay(milliseconds)
                                                 } label: {
                                                     calendarCell(
                                                         count: count,
-                                                        maximum: maximum,
-                                                        selected: selectedDayMilliseconds == milliseconds
+                                                        maximum: maximum
                                                     )
                                                 }
                                                 .buttonStyle(.plain)
@@ -1309,7 +1461,7 @@ private struct ReadingProgressCalendarHeatmap: View {
                                                 .accessibilityLabel(day.formatted(date: .long, time: .omitted))
                                                 .accessibilityValue("\(count)")
                                             } else {
-                                                calendarCell(count: 0, maximum: maximum, selected: false)
+                                                calendarCell(count: 0, maximum: maximum)
                                                     .accessibilityLabel(day.formatted(date: .long, time: .omitted))
                                                     .accessibilityValue("0")
                                             }
@@ -1352,18 +1504,12 @@ private struct ReadingProgressCalendarHeatmap: View {
     }
 
     /** Builds one fixed-size Android activity cell. */
-    private func calendarCell(count: Int, maximum: Int, selected: Bool) -> some View {
+    private func calendarCell(count: Int, maximum: Int) -> some View {
         RoundedRectangle(cornerRadius: 2)
             .fill(AndroidReadingProgressColor.memorizationCalendarColor(
                 count: count,
                 maxCount: maximum
             ))
-            .overlay {
-                if selected {
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(Color.primary, lineWidth: 1.5)
-                }
-            }
             .frame(width: cellSize, height: cellSize)
     }
 
@@ -1398,182 +1544,5 @@ private struct ReadingProgressCalendarHeatmap: View {
         let start = calendar.startOfDay(for: day)
         return (try? AndroidTimestamp.milliseconds(from: start))
             ?? (start.timeIntervalSince1970.sign == .minus ? .min : .max)
-    }
-}
-
-struct ChapterReadHistoryView: View {
-    let store: ReadingProgressStore?
-    let target: ChapterReadHistoryTarget?
-    @State private var revision = 0
-    /// Rows staged for deletion and committed when this Android-equivalent history surface closes.
-    @State private var pendingDeleteIDs: Set<UUID> = []
-    @State private var persistenceFailure: ReadingProgressPersistenceFailure?
-
-    var body: some View {
-        Form {
-            if let target {
-                let _ = revision
-                let rows = store?.chapterReadHistory(
-                    kjvBookOrdinal: target.kjvBookOrdinal,
-                    chapter: target.chapter
-                ) ?? []
-                Section(chapterSubject(for: target)) {
-                    if rows.isEmpty {
-                        Text(String(
-                            localized: "reading_progress_history_no_entries",
-                            defaultValue: "No read entries for this selection."
-                        ))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(rows, id: \.id) { row in
-                            let isPending = pendingDeleteIDs.contains(row.id)
-                            HStack {
-                                ReadingProgressHistoryRowView(row: row, showsChapterReference: false)
-                                Spacer()
-                                Button {
-                                    if isPending {
-                                        pendingDeleteIDs.remove(row.id)
-                                    } else {
-                                        pendingDeleteIDs.insert(row.id)
-                                    }
-                                } label: {
-                                    Image(systemName: isPending ? "arrow.uturn.backward" : "xmark")
-                                }
-                                .foregroundStyle(
-                                    isPending
-                                        ? AndroidReadingProgressColor.readingColor(
-                                            argb: AndroidReadingProgressHeatmap.chapterMaximumARGB
-                                        )
-                                        : Color.secondary
-                                )
-                                .help(
-                                    isPending
-                                        ? String(localized: "undo", defaultValue: "Undo")
-                                        : String(localized: "delete", defaultValue: "Delete")
-                                )
-                            }
-                            .opacity(isPending ? 0.45 : 1)
-                        }
-                    }
-                }
-            } else {
-                Text(String(
-                    localized: "reading_progress_history_no_entries",
-                    defaultValue: "No read entries for this selection."
-                ))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle(String(localized: "reading_progress_history_title", defaultValue: "Read History"))
-        .overlay {
-            if persistenceFailure != nil {
-                ReadingProgressDecisionDialog(
-                    title: String(localized: "reading_progress_save_failed", defaultValue: "Unable to save progress"),
-                    message: String(localized: "reading_progress_save_failed_message", defaultValue: "Your existing progress was left unchanged. Try again."),
-                    actions: [.init(id: "okay", title: String(localized: "ok", defaultValue: "OK")) { persistenceFailure = nil }]
-                )
-            }
-        }
-        .onDisappear {
-            _ = applyPendingDeletes()
-        }
-    }
-
-    /** Commits rows still staged when the fixed-chapter history surface closes. */
-    @discardableResult
-    private func applyPendingDeletes() -> Bool {
-        guard !pendingDeleteIDs.isEmpty else { return true }
-        guard let store else {
-            pendingDeleteIDs.removeAll()
-            return true
-        }
-        for id in Array(pendingDeleteIDs) {
-            do {
-                _ = try store.deleteHistoryEntry(id: id)
-                pendingDeleteIDs.remove(id)
-            } catch {
-                persistenceFailure = ReadingProgressPersistenceFailure()
-                revision += 1
-                return false
-            }
-        }
-        revision += 1
-        return true
-    }
-
-    /** Resolves Android's short KJVA subject for the fixed-chapter history view. */
-    private func chapterSubject(for target: ChapterReadHistoryTarget) -> String {
-        let shortName = ReadingProgressKJVAIdentity(
-            androidKJVBookOrdinal: target.kjvBookOrdinal,
-            chapter: target.chapter
-        )?.book.shortName ?? target.bookName
-        return String(
-            format: String(
-                localized: "reading_progress_history_for",
-                defaultValue: "Reading progress for %@"
-            ),
-            "\(shortName) \(target.chapter)"
-        )
-    }
-}
-
-/** Android read-history row with KJVA reference, timestamp, and source-version fallback. */
-private struct ReadingProgressHistoryRowView: View {
-    /// Persisted Android chapter-history row.
-    let row: ReadingProgressHistoryRow
-    /// Whether the containing history selection spans more than one chapter.
-    let showsChapterReference: Bool
-
-    /** Creates either Android's chapter-per-row or fixed-chapter history presentation. */
-    init(row: ReadingProgressHistoryRow, showsChapterReference: Bool = true) {
-        self.row = row
-        self.showsChapterReference = showsChapterReference
-    }
-
-    /** Renders the same primary/secondary text split as Android `ReadHistoryDialog`. */
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(primaryText)
-                .font(.headline)
-            Text(secondaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// Android primary row content for a broad or fixed-chapter selection.
-    private var primaryText: String {
-        if showsChapterReference {
-            return "\(row.androidDisplayReference) · \(timeText)"
-        }
-        return "\(dateText) \(timeText)"
-    }
-
-    /// Android secondary row content for a broad or fixed-chapter selection.
-    private var secondaryText: String {
-        showsChapterReference ? "\(dateText) · \(versionText)" : versionText
-    }
-
-    /// Localized date text matching Android's device date formatter.
-    private var dateText: String {
-        readDate.formatted(date: .abbreviated, time: .omitted)
-    }
-
-    /// Localized time text matching Android's device time formatter.
-    private var timeText: String {
-        readDate.formatted(date: .omitted, time: .shortened)
-    }
-
-    /// Stored source module initials or Android's localized unknown-version fallback.
-    private var versionText: String {
-        row.androidDisplayVersion ?? String(
-            localized: "reading_progress_history_version_unknown",
-            defaultValue: "Unknown version"
-        )
-    }
-
-    /// Persisted epoch milliseconds converted once for row formatting.
-    private var readDate: Date {
-        AndroidTimestamp.date(from: row.readAt)
     }
 }

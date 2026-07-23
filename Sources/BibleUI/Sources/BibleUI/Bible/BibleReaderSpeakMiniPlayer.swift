@@ -2,87 +2,62 @@ import BibleCore
 import SwiftUI
 
 /**
- Compact speech-control bar shown while text-to-speech is active.
+ Reader host for the same app-owned speech transport widget Android uses in `main_bible_view`.
 
- The reader coordinator decides when the mini-player is visible. This view observes
- `SpeakService` directly so play/pause/title changes update without bloating `BibleReaderView`.
+ The reader coordinator decides visibility. This wrapper supplies the active reader reference,
+ workspace/window palette, configuration command, and Speak-bookmark dialog while the shared
+ transport component owns status, speed, exact drawables, and playback behavior.
  */
 struct BibleReaderSpeakMiniPlayer: View {
     @ObservedObject var speakService: SpeakService
     let currentReference: String
     let onShowControls: () -> Void
+    var surfacePalette: ReaderThemeSurfacePalette = .standard
+
+    @State private var showsBookmarkPicker = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button(action: onShowControls) {
-                HStack(spacing: 12) {
-                    Image(systemName: "waveform")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-
-                    Text(speakService.currentTitle ?? currentReference)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-
-                    Spacer()
-                }
-                .contentShape(Rectangle())
+        AndroidSpeakTransportView(
+            speakService: speakService,
+            surfacePalette: surfacePalette,
+            fallbackStatus: currentReference,
+            onShowBookmarks: { showsBookmarkPicker = true },
+            onShowConfiguration: onShowControls
+        )
+        .overlay {
+            if showsBookmarkPicker {
+                AndroidSingleChoiceDialog(
+                    title: String(
+                        localized: "speak_bookmarks_menu_title",
+                        defaultValue: "Speak from bookmark"
+                    ),
+                    selectedValue: -1,
+                    options: speakService.resumeBookmarks.enumerated().map { index, bookmark in
+                        AndroidSingleChoiceOption(
+                            id: "\(index)",
+                            value: index,
+                            title: bookmarkTitle(bookmark)
+                        )
+                    },
+                    accessibilityIdentifier: "readerSpeakBookmarkDialog",
+                    onSelect: { index in
+                        if speakService.resumeBookmarks.indices.contains(index) {
+                            speakService.resume(from: speakService.resumeBookmarks[index])
+                        }
+                        showsBookmarkPicker = false
+                    },
+                    onCancel: { showsBookmarkPicker = false }
+                )
             }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel(speakService.currentTitle ?? currentReference)
-            .accessibilityHint(String(localized: "speak_open_controls", defaultValue: "Open speech controls"))
-
-            Button {
-                speakService.skipBackward()
-            } label: {
-                Image(systemName: "backward.fill")
-                    .font(.body)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel(String(localized: "speak_skip_backward", defaultValue: "Skip backward"))
-
-            Button {
-                if speakService.isPaused {
-                    speakService.resume()
-                } else {
-                    speakService.pause()
-                }
-            } label: {
-                Image(systemName: speakService.isPaused ? "play.fill" : "pause.fill")
-                    .font(.body)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel(playPauseAccessibilityLabel)
-
-            Button {
-                speakService.skipForward()
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.body)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel(String(localized: "speak_skip_forward", defaultValue: "Skip forward"))
-
-            Button {
-                speakService.stop()
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(.body)
-                    .frame(width: 32, height: 32)
-            }
-            .accessibilityLabel(String(localized: "stop"))
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
     }
 
-    private var playPauseAccessibilityLabel: String {
-        if speakService.isPaused {
-            return String(localized: "speak_resume", defaultValue: "Resume")
-        }
-        return String(localized: "pause")
+    /** Formats one Android Speak-bookmark row without crossing Bible and generic key domains. */
+    private func bookmarkTitle(_ bookmark: SpeakResumeBookmark) -> String {
+        let position = bookmark.position
+        let source = position.bookName.isEmpty ? position.bookInitials : position.bookName
+        let key = position.keyName.isEmpty ? position.key : position.keyName
+        if source.isEmpty { return key }
+        return key.isEmpty ? source : "\(source) \(key)"
     }
 }

@@ -1,13 +1,16 @@
 import SwiftUI
 
 /**
- Renders the reader-owned History surface with Android dialog-window ownership.
+ Renders the reader-owned History dialog with Android dialog-window ownership.
 
  The dialog is deliberately not a SwiftUI sheet: `BibleReaderView` retains presentation state and
  supplies a captured window identity, so a focus change cannot retarget the visible History rows or
  the navigation result. Its only mutable behavior is delegated through `onDismiss` and `onNavigate`.
  */
 struct AndroidHistoryDialog: View {
+    /// Current palette mode selects the Android dialog surface color.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Captured reader window whose persisted History rows are displayed.
     let activeWindowID: UUID
 
@@ -23,29 +26,22 @@ struct AndroidHistoryDialog: View {
     /// Applies the selected History entry to the captured pane before closing.
     let onNavigate: (String) -> Void
 
-    /// Builds a dimmed, bounded app-owned dialog rather than an adaptive sheet.
+    /// Builds a bounded dialog whose dimmed backdrop dismisses it without changing History.
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-
-            NavigationStack {
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidHistoryDialog",
+            onOutsideTap: onDismiss
+        ) {
+            AndroidDialogScaffold(title: title, showsActionRegion: false) {
                 HistoryView(
                     bookNameResolver: bookNameResolver,
                     onNavigate: onNavigate,
-                    activeWindowID: activeWindowID,
-                    title: title,
-                    allowsDestructiveActions: false,
-                    onDismiss: onDismiss
+                    activeWindowID: activeWindowID
                 )
+            } actions: {
+                EmptyView()
             }
-            .frame(maxWidth: 560, maxHeight: 620)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.32), radius: 24, y: 12)
-            .padding(24)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("androidHistoryDialog")
     }
 }

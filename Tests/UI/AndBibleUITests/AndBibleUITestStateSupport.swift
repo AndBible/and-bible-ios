@@ -31,23 +31,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens the seeded `UI Test Seed` StudyPad handoff through the production bookmark-list controls.
-     *
-     * - Parameter app: Running application under test.
-     * - Side effects:
-     *   - selects the real `UI Test Seed` filter chip
-     *   - taps the production StudyPad handoff button shown for the selected label
-     *   - dismisses the bookmark-list sheet if the handoff leaves it covering the reader
-     * - Failure modes:
-     *   - fails if the production label-filter or StudyPad handoff controls are unavailable
-     */
-    func openSeedStudyPadFromBookmarkList(in app: XCUIApplication) {
-        selectBookmarkListFilterChip("UI_Test_Seed", in: app, timeout: 10)
-        tapElementReliably(requireElement("bookmarkListOpenStudyPadButton::UI_Test_Seed", in: app, timeout: 10), timeout: 10)
-        dismissBookmarkListIfVisible(in: app, timeout: 10)
-    }
-
-    /**
      Stable Search scope tokens mirrored from `SearchView` accessibility exports.
      */
     enum SearchScopeToken: String {
@@ -69,10 +52,11 @@ extension AndBibleUITests {
      *
      * - Parameters:
      *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the sheet dismissal to complete.
+     *   - timeout: Maximum time to wait for the activity transition to complete.
      * - Side effects:
-     *   - taps the production done button on Label Assignment, retrying when a hosted simulator
-     *     accepts the event without running the SwiftUI action
+     *   - taps Android ASSIGN mode's shared app-bar Up/Back control, which atomically commits the
+     *     draft before returning to the bookmark list
+     *   - retries when a hosted simulator accepts the event without running the SwiftUI action
      *   - polls the bookmark-list state export until the parent reports that Label Assignment is
      *     no longer presented
      * - Failure modes:
@@ -86,7 +70,7 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         tapElementReliably(
-            requireElement("labelAssignmentDoneButton", in: app, timeout: timeout),
+            requireElement("labelAssignmentAppBarBackButton", in: app, timeout: timeout),
             timeout: timeout
         )
 
@@ -97,8 +81,8 @@ extension AndBibleUITests {
                 return
             }
 
-            if let doneButton = resolvedElement("labelAssignmentDoneButton", in: app) {
-                _ = tapElementIfPossible(doneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow)))
+            if let backButton = resolvedElement("labelAssignmentAppBarBackButton", in: app) {
+                _ = tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow)))
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         } while Date() < deadline
@@ -234,18 +218,6 @@ extension AndBibleUITests {
             return value
         }
         if let screen = resolvedElement("readingPlanListScreen", in: app),
-           let value = screen.value as? String {
-            return value
-        }
-        return nil
-    }
-
-    /// Reads the current exported Available Plans state without walking the full picker hierarchy.
-    func resolvedAvailablePlansStateValue(in app: XCUIApplication) -> String? {
-        if let value = semanticStateExportValue("availablePlansStateExport", in: app) {
-            return value
-        }
-        if let screen = resolvedElement("availablePlansScreen", in: app),
            let value = screen.value as? String {
             return value
         }
@@ -1151,11 +1123,43 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for one switch element to report the requested raw value.
+     Compares native and app-owned accessibility representations of one Boolean switch state.
+     *
+     * Native iOS switches serialize their value as `1`/`0`, while AndBible's app-owned Android
+     * preference rows expose the spoken `On`/`Off` value. Treating those forms as the same logical
+     * state prevents a failed poll from tapping an already-enabled row a second time.
+     *
+     * - Parameters:
+     *   - actualValue: Accessibility value currently exposed by the control.
+     *   - expectedValue: Native or spoken Boolean value expected by the test.
+     * - Returns: `true` when both values represent the same Boolean state.
+     * - Side effects: none.
+     * - Failure modes: Unknown value spellings compare literally and are never guessed.
+     */
+    func accessibilitySwitchValue(_ actualValue: String?, matches expectedValue: String) -> Bool {
+        let actual = actualValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let expected = expectedValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if actual == expected {
+            return true
+        }
+
+        let enabledValues: Set<String> = ["1", "true", "on"]
+        let disabledValues: Set<String> = ["0", "false", "off"]
+        if enabledValues.contains(expected) {
+            return enabledValues.contains(actual)
+        }
+        if disabledValues.contains(expected) {
+            return disabledValues.contains(actual)
+        }
+        return false
+    }
+
+    /**
+     Waits for one switch element to report the requested logical value.
      *
      * - Parameters:
      *   - element: Switch element whose accessibility value should be polled.
-     *   - expectedValue: Raw switch value expected before the timeout expires.
+     *   - expectedValue: Native (`1`/`0`) or spoken (`On`/`Off`) value expected before timeout.
      *   - timeout: Maximum time to keep polling before giving up.
      * - Returns: `true` when the switch reaches `expectedValue`, otherwise `false`.
      * - Side effects:
@@ -1172,7 +1176,7 @@ extension AndBibleUITests {
             named: "switchValue:\(element.identifier)",
             timeout: timeout,
             valueProvider: { element.value as? String },
-            success: { $0 == expectedValue },
+            success: { self.accessibilitySwitchValue($0, matches: expectedValue) },
             recordsFailure: false,
             failureDescription: {
                 "Expected switch '\(element.identifier)' to report value '\(expectedValue)' within \(timeout) seconds. Last value: '\($0)'."
@@ -1181,8 +1185,8 @@ extension AndBibleUITests {
     }
 
     /**
-     Toggles one switch element and retries with a second native tap when the first tap does not
-     drive the underlying value change.
+     Toggles one native or app-owned switch element and retries with a second tap only when the
+     first tap does not drive the underlying logical value change.
      *
      * - Parameters:
      *   - element: Switch element that should toggle.
@@ -1303,24 +1307,25 @@ extension AndBibleUITests {
     }
 
     /**
-     Taps one adopt-versus-create Sync alert choice and waits for the exported Sync state to change.
+     Taps one adopt-versus-create Sync dialog choice and waits for exported Sync state to change.
      *
      * - Parameters:
-     *   - title: Visible alert button title to choose.
+     *   - title: Visible translated button title asserted after locating the semantic action.
+     *   - actionIdentifier: Stable app-owned dialog action identifier.
      *   - expectedTokens: Sync screen token values expected after the alert action.
      *   - app: Running application under test.
      *   - timeout: Maximum time to wait for the action and state transition.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - taps the real native alert button for the visible Sync bootstrap prompt
-     *   - retries only while the same first-prompt button remains visible after XCTest reports a tap
+     *   - taps the real shared Android dialog action for the visible Sync bootstrap prompt
      * - Failure modes:
-     *   - records an XCTest failure if the alert choice disappears without producing the expected
-     *     state or if the prompt remains visible until timeout
+     *   - records an XCTest failure if the semantic action, translated copy, or expected state is
+     *     missing
      */
     func chooseSyncBootstrapPromptOption(
         _ title: String,
+        actionIdentifier: String,
         expecting expectedTokens: [String: String],
         in app: XCUIApplication,
         timeout: TimeInterval = 10,
@@ -1334,14 +1339,6 @@ extension AndBibleUITests {
             .joined(separator: ";")
         var lastState = semanticStateExportValue("syncSettingsState", in: app) ?? "nil"
 
-        func expectedStateIsVisible() -> Bool {
-            guard let state = semanticStateExportValue("syncSettingsState", in: app) else {
-                return false
-            }
-            lastState = state
-            return expectedTokens.allSatisfy { syncStateToken(named: $0.key, in: state) == $0.value }
-        }
-
         func waitForExpectedState(timeout settleTimeout: TimeInterval) -> Bool {
             waitForResolvedSemanticState(
                 named: "syncSettingsState.bootstrapPromptChoice",
@@ -1353,33 +1350,29 @@ extension AndBibleUITests {
                 },
                 recordsFailure: false,
                 failureDescription: { state in
-                    "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)'. Final state: '\(state)'."
+                    "Expected dialog choice '\(title)' to drive syncSettingsState to '\(expectedDescription)'. Final state: '\(state)'."
                 },
                 file: file,
                 line: line
             )
         }
 
-        guard let decision = resolveDecisionDialogButton(title, in: app, timeout: min(timeout, 10)) else {
-            XCTFail(
-                "Expected the adopt-versus-create Android dialog to expose '\(title)'.",
-                file: file,
-                line: line
-            )
-            return
-        }
-        tapElementReliably(
-            decision.button,
-            timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)),
+        tapAppOwnedDialogAction(
+            actionIdentifier,
+            dialogIdentifier: "syncBootstrapDialog",
+            expectedTitle: title,
+            in: app,
+            timeout: min(timeout, 10),
             file: file,
             line: line
         )
+
         if waitForExpectedState(timeout: max(0.2, deadline.timeIntervalSinceNow)) {
             return
         }
 
         XCTFail(
-            "Expected alert choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",
+            "Expected dialog choice '\(title)' to drive syncSettingsState to '\(expectedDescription)' within \(timeout) seconds. Final state: '\(lastState)'.",
             file: file,
             line: line
         )
@@ -1535,26 +1528,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Scrolls the Sync Settings form toward controls below the currently visible viewport.
-     *
-     * - Parameter app: Running application under test.
-     * - Side effects:
-     *   - swipes the Sync Settings root when it is resolved, otherwise falls back to an app-level
-     *     upward swipe
-     * - Failure modes:
-     *   - leaves scroll position unchanged when no scrollable surface accepts the gesture
-     */
-    func revealSyncSettingsLowerContent(in app: XCUIApplication) {
-        if let syncScreen = resolvedElement("syncSettingsScreen", in: app),
-           syncScreen.exists
-        {
-            syncScreen.swipeUp()
-        } else {
-            app.swipeUp()
-        }
-    }
-
-    /**
      Resolves a Sync Settings control that may live in a lazily materialized SwiftUI form section.
      *
      * - Parameters:
@@ -1567,11 +1540,11 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The resolved control once it is visible inside the Sync Settings viewport.
      * - Side effects:
-     *   - clears any focused text input so the software keyboard cannot block lower Form rows
-     *   - scrolls Sync Settings lower content until the requested control materializes inside the
-     *     visible form viewport
+     *   - clears any focused text input so the software keyboard cannot block lower rows
+     *   - scrolls the production Sync Settings `ScrollView` until the requested control
+     *     materializes inside its visible viewport
      * - Failure modes:
-     *   - records an XCTest failure if the control never appears or never becomes visible
+     *   - records an XCTest failure if the production scroll owner or control never appears
      */
     func requireReachableSyncSettingsButton(
         _ identifier: String,
@@ -1580,10 +1553,17 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let syncScreen = requireElement(
+        _ = requireElement(
             "syncSettingsScreen",
             in: app,
             timeout: min(timeout, 5),
+            file: file,
+            line: line
+        )
+        let scrollView = app.scrollViews["syncSettingsScrollView"].firstMatch
+        XCTAssertTrue(
+            scrollView.waitForExistence(timeout: min(timeout, 5)),
+            "Expected Sync Settings to expose its production scroll owner.",
             file: file,
             line: line
         )
@@ -1602,7 +1582,7 @@ extension AndBibleUITests {
                 }
                 lastCandidate = control
                 if waitForElementToBecomeHittable(control, timeout: 0.25) ||
-                    isElementVisible(control, within: syncScreen)
+                    isElementVisible(control, within: scrollView)
                 {
                     return control
                 }
@@ -1615,7 +1595,7 @@ extension AndBibleUITests {
                 return control
             }
 
-            revealSyncSettingsLowerContent(in: app)
+            scrollView.swipeUp()
             revealPasses += 1
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < deadline || revealPasses < minimumRevealPasses
@@ -1625,11 +1605,7 @@ extension AndBibleUITests {
             if let control = resolveVisibleControl() {
                 return control
             }
-            if syncScreen.exists, !syncScreen.frame.isEmpty {
-                syncScreen.swipeDown()
-            } else {
-                app.swipeDown()
-            }
+            scrollView.swipeDown()
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < recoveryDeadline
 
@@ -1640,7 +1616,7 @@ extension AndBibleUITests {
             line: line
         )
         XCTAssertTrue(
-            isElementVisible(lastCandidate, within: syncScreen),
+            isElementVisible(lastCandidate, within: scrollView),
             "Expected Sync Settings control '\(identifier)' to become visible within \(timeout) seconds.",
             file: file,
             line: line

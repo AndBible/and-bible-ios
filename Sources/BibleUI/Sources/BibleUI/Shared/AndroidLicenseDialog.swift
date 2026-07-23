@@ -7,6 +7,9 @@ import SwiftUI
  BibleUI resource, retains text selection for links and copying, and has no browser dependency.
  */
 struct AndroidLicenseDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     let onDismiss: () -> Void
 
     /** Complete GPL text bundled with BibleUI, with a localized recovery message if it is absent. */
@@ -22,37 +25,28 @@ struct AndroidLicenseDialog: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-
-            VStack(spacing: 0) {
-                Text(String(localized: "app_licence_title", defaultValue: "Open Source License"))
-                    .font(.headline)
-                    .padding()
-
-                Divider()
-
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidLicenseDialog",
+            onOutsideTap: onDismiss
+        ) {
+            AndroidDialogScaffold(
+                title: String(localized: "app_licence_title", defaultValue: "Open Source License")
+            ) {
                 ScrollView {
                     Text(licenseText)
                         .font(.footnote.monospaced())
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
-                        .padding()
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 8)
                 }
-
-                Divider()
-
-                Button(String(localized: "ok", defaultValue: "OK"), action: onDismiss)
-                    .padding()
+            } actions: {
+                AndroidDialogTextAction(
+                    title: String(localized: "ok", defaultValue: "OK"),
+                    action: onDismiss
+                )
             }
-            .frame(maxWidth: 680, maxHeight: 720)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
         }
-        .accessibilityIdentifier("androidLicenseDialog")
     }
 }

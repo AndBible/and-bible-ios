@@ -277,6 +277,58 @@ extension AndBibleUITests {
     }
 
     /**
+     Returns from Android's SearchResults activity to the retained Search criteria activity.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to resolve Back and observe `stage=criteria`.
+     - Side effects: Taps the shared Search app bar's Up action only when results are visible.
+     - Failure modes: Records an XCTest failure when Search cannot return to settled criteria.
+     */
+    func returnToSearchCriteria(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 10
+    ) {
+        let alreadyOnCriteria = searchStateCandidateValues(in: app).contains {
+            $0.contains("state=ready")
+                && $0.contains("searching=false")
+                && $0.contains("stage=criteria")
+        }
+        guard !alreadyOnCriteria else { return }
+
+        let backButton = requireElement("searchActivityAppBarBackButton", in: app, timeout: timeout)
+        tapElementReliably(backButton, timeout: timeout)
+        waitForSearchState(containing: "stage=criteria", in: app, timeout: timeout)
+    }
+
+    /**
+     Submits the retained Search criteria and waits for Android's separate results activity.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to resolve Search and observe settled `stage=results`.
+     - Side effects: Activates Android's keyboard Search action when the query field owns focus;
+       otherwise taps the criteria activity's bottom Search command. Both paths wait for the
+       asynchronous query to finish.
+     - Failure modes: Records an XCTest failure when the active submit path is unavailable or
+       results never reach a settled state.
+     */
+    func submitSearchCriteria(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20
+    ) {
+        if searchFieldFocusIsActive(in: app) {
+            app.typeText(XCUIKeyboardKey.return.rawValue)
+            waitForSearchState(containing: "stage=results", in: app, timeout: timeout)
+            return
+        }
+
+        let submitButton = requireElement("searchSubmitButton", in: app, timeout: timeout)
+        tapElementReliably(submitButton, timeout: timeout)
+        waitForSearchState(containing: "stage=results", in: app, timeout: timeout)
+    }
+
+    /**
      Waits for the compact Search state export through the shared semantic-state waiter.
 
      Search publishes a deterministic `searchStateExport` value for UI tests. This helper keeps
@@ -612,7 +664,6 @@ extension AndBibleUITests {
             if isExpectedScopeSelected() {
                 return
             }
-            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
 
             let searchScreen = unresolvedElement("searchScreen", in: app)
@@ -695,14 +746,17 @@ extension AndBibleUITests {
                 return
             }
 
-            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
             let candidates = [
                 searchScreen.buttons["searchTranslationPickerButton"].firstMatch,
                 searchScreen.otherElements["searchTranslationPickerButton"].firstMatch,
+                searchScreen.buttons["searchResultsTranslationPickerButton"].firstMatch,
+                searchScreen.otherElements["searchResultsTranslationPickerButton"].firstMatch,
                 app.buttons["searchTranslationPickerButton"].firstMatch,
                 app.otherElements["searchTranslationPickerButton"].firstMatch,
+                app.buttons["searchResultsTranslationPickerButton"].firstMatch,
+                app.otherElements["searchResultsTranslationPickerButton"].firstMatch,
             ]
 
             if let picker = candidates.first(where: {
@@ -917,8 +971,8 @@ extension AndBibleUITests {
         includeLocalizedFallbacks: Bool = true
     ) -> [XCUIElement] {
         let identifiedCandidates = [
-            app.buttons["searchTranslationOKButton"].firstMatch,
-            app.otherElements["searchTranslationOKButton"].firstMatch,
+            app.buttons["searchTranslationPickerApplyButton"].firstMatch,
+            app.otherElements["searchTranslationPickerApplyButton"].firstMatch,
         ]
         guard includeLocalizedFallbacks else {
             return identifiedCandidates
@@ -945,8 +999,8 @@ extension AndBibleUITests {
         includeLocalizedFallbacks: Bool = true
     ) -> [XCUIElement] {
         let identifiedCandidates = [
-            app.buttons["searchTranslationCancelButton"].firstMatch,
-            app.otherElements["searchTranslationCancelButton"].firstMatch,
+            app.buttons["searchTranslationPickerCancelButton"].firstMatch,
+            app.otherElements["searchTranslationPickerCancelButton"].firstMatch,
         ]
         guard includeLocalizedFallbacks else {
             return identifiedCandidates
@@ -981,9 +1035,9 @@ extension AndBibleUITests {
      Waits for a translation-row tap to settle before the picker toolbar is queried again.
      *
      * The grouped multi-translation search test toggles a row, which triggers SwiftUI to re-render
-     * the list and starts a background search rerun. Waiting for either the row accessibility value
-     * to update or the picker list to remain visible prevents the next step from querying toolbar
-     * buttons during the most volatile part of that transition.
+     * the shared checkbox list. Waiting for either the row accessibility value to update or the
+     * picker list to remain visible prevents the next step from querying dialog actions during that
+     * transition; criteria changes do not execute a search until the explicit Search command.
      *
      * - Parameters:
      *   - identifier: Stable row accessibility identifier.
@@ -1058,7 +1112,7 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
-        let selectAll = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        let selectAll = app.buttons["searchTranslationPickerSelectToggleButton"].firstMatch
         if selectAll.waitForExistence(timeout: timeout) {
             let expectedValue = expectedSearchTranslationSelectToggleValue(afterTapping: selectAll)
             tapElementReliably(selectAll, timeout: timeout)
@@ -1109,9 +1163,9 @@ extension AndBibleUITests {
     ) {
         guard let expectedValue else { return }
 
-        let toggle = app.buttons["searchTranslationSelectAllButton"].firstMatch
+        let toggle = app.buttons["searchTranslationPickerSelectToggleButton"].firstMatch
         waitForResolvedSemanticState(
-            named: "searchTranslationSelectAllButton",
+            named: "searchTranslationPickerSelectToggleButton",
             timeout: timeout,
             valueProvider: {
                 guard toggle.exists else { return nil }
@@ -1278,7 +1332,6 @@ extension AndBibleUITests {
             if isExpectedWordModeSelected() {
                 return
             }
-            dismissSearchFieldFocusIfNeeded(in: app)
             revealSearchControls(in: app)
             let searchScreen = unresolvedElement("searchScreen", in: app)
 
@@ -1458,69 +1511,6 @@ extension AndBibleUITests {
             timeout: 0.2
         ) {
             optionsPanel.exists
-        }
-    }
-
-    /**
-     Moves focus away from the active Search field so the lower Search option rows can surface.
-
-     This helper intentionally avoids resolving `app.keyboards` or the Search text field unless a
-     compact Search state token first proves focus is active. Hosted CI has timed out while resolving
-     both broad keyboard queries and stale SwiftUI text-field snapshots after the field already lost
-     focus.
-     *
-     * - Parameter app: Running application under test.
-     * - Side effects:
-     *   - submits the focused field through the keyboard bridge, then tries coordinate and option
-     *     control fallbacks only when the Search state export reports `searchFieldFocused=true`
-     * - Failure modes:
-     *   - silently leaves focus unchanged when no keyboard dismissal action is available
-     */
-    func dismissSearchFieldFocusIfNeeded(in app: XCUIApplication) {
-        guard searchFieldFocusIsActive(in: app) else {
-            return
-        }
-
-        app.typeText(XCUIKeyboardKey.return.rawValue)
-        guard !waitForSearchFieldFocusToClear(in: app, timeout: 1.5) else {
-            return
-        }
-        app.coordinate(withNormalizedOffset: KeyboardDismissalCoordinate.softwareReturnKey).tap()
-        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
-            return
-        }
-        dismissKeyboardIfPresent(in: app)
-        guard !waitForSearchFieldFocusToClear(in: app, timeout: 0.5) else {
-            return
-        }
-        let searchScreen = unresolvedElement("searchScreen", in: app)
-        let dismissalCandidates = [
-            searchScreen.buttons["searchWordModeButton::allWords"].firstMatch,
-            searchScreen.otherElements["searchWordModeButton::allWords"].firstMatch,
-            searchScreen.segmentedControls["searchWordModePicker"].buttons["All Words"].firstMatch,
-            searchScreen.segmentedControls.buttons["All Words"].firstMatch,
-            searchScreen.buttons["All Words"].firstMatch
-        ]
-        for candidate in dismissalCandidates where candidate.exists && !candidate.frame.isEmpty {
-            tapElementReliably(candidate, timeout: 5)
-            if waitForSearchFieldFocusToClear(in: app, timeout: 0.5) {
-                return
-            }
-            return
-        }
-
-        let pickerCandidates = [
-            searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
-            searchScreen.otherElements["searchWordModePicker"].firstMatch,
-        ]
-        if let picker = pickerCandidates.first(where: { $0.exists || $0.waitForExistence(timeout: 0.2) }) {
-            tapSegmentedControlSegment(
-                picker,
-                index: 0,
-                segmentCount: SearchWordModeControl.segmentCount,
-                timeout: 5
-            )
-            _ = waitForSearchFieldFocusToClear(in: app, timeout: 0.5)
         }
     }
 

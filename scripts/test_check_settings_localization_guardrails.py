@@ -673,6 +673,52 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         self.assertEqual(result.files_changed, 4)
         self.assertEqual(result.values_written, 10)
 
+    def test_platform_english_override_keeps_android_translation_provenance(self) -> None:
+        """Uses iCloud terminology in English while syncing every Android-backed translation.
+
+        The iOS share boundary cannot rely on a Swift ``defaultValue`` because a same-name Android
+        resource wins at runtime. This fixture proves the explicit platform key receives truthful
+        English copy while non-English resources still come from Android rather than becoming
+        piecemeal English placeholders.
+        """
+        ios_key = "backup_backup_message_ios"
+        android_key = "backup_backup_message"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_root = root / "android"
+            self.make_shared_translation_repo(root, ["en", "fr"])
+            for tree in ["AndBible", "Localizations"]:
+                self.write_ios_strings(root, tree, "en", {ios_key: "Stale iOS copy"})
+                self.write_ios_strings(root, tree, "fr", {ios_key: "Stale French copy"})
+            self.write_android_strings(
+                android_root,
+                "values",
+                {android_key: "Backup using email or Google Drive?"},
+            )
+            self.write_android_strings(
+                android_root,
+                "values-fr",
+                {android_key: "Sauvegarder par courriel ou Google Drive ?"},
+            )
+
+            catalog = build_android_shared_localization(root, android_root)
+            sync_android_shared_translations(root, catalog)
+
+            for tree in ["AndBible", "Localizations"]:
+                english = parse_ios_strings(root / tree / "en.lproj" / "Localizable.strings")
+                french = parse_ios_strings(root / tree / "fr.lproj" / "Localizable.strings")
+                self.assertEqual(
+                    english[ios_key],
+                    "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?",
+                )
+                self.assertEqual(
+                    french[ios_key],
+                    "Sauvegarder par courriel ou Google Drive ?",
+                )
+
+        self.assertEqual(catalog.source_key_by_key[ios_key], android_key)
+        self.assertEqual(catalog.non_english_by_key[ios_key], ["fr"])
+
     def test_passphrase_and_unlock_keys_follow_android_owned_semantics(self) -> None:
         """Locks the two distribution-boundary keys to Android text and translations.
 

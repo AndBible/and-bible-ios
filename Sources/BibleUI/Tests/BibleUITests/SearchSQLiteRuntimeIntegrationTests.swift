@@ -121,6 +121,90 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentVerse, 2)
     }
 
+    /**
+     Opens SearchResults' complete mixed-backend match set through the shared links-window route.
+
+     - Setup: Installs the real SWORD KJV fixture beside a package-owned MyBible source, then builds
+       grouped Search hits for one exact verse from each module.
+     - Expected result: The controller emits one Vue Multi document whose fragments preserve group
+       order, exact module initials, and exact OSIS identities. An empty result fails closed without
+       invoking the window callback.
+     - Failure meaning: SearchResults' Android "Open in window" action drops translations, substitutes
+       the active Bible, reorders hits, or dismisses Search after an unroutable request.
+     - Side effects: Reads two isolated fixture verses and captures one in-memory window payload.
+     */
+    @MainActor
+    func testOpenSearchResultsInWindowPreservesEveryExactModuleMatch() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installMyBiblePackage(
+            initials: "SQLSEARCH",
+            directoryName: "window-source",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let genesisOrder = SearchCanonicalBookCatalog.order(of: "Gen")
+        let kjvIdentity = SearchVerseIdentity(
+            osisBookId: "Gen",
+            canonicalBookOrder: genesisOrder,
+            chapter: 1,
+            verse: 1
+        )
+        let sqliteIdentity = SearchVerseIdentity(
+            osisBookId: "Gen",
+            canonicalBookOrder: genesisOrder,
+            chapter: 1,
+            verse: 2
+        )
+        let grouped = SearchGroupedResults(
+            moduleResults: [
+                SearchModuleResults(moduleName: "KJV", hits: [
+                    SearchModuleHit(
+                        moduleName: "KJV",
+                        key: "Genesis 1:1",
+                        displayBook: "Genesis",
+                        snippet: "In the beginning",
+                        identity: kjvIdentity
+                    ),
+                ]),
+                SearchModuleResults(moduleName: "SQLSEARCH", hits: [
+                    SearchModuleHit(
+                        moduleName: "SQLSEARCH",
+                        key: "Genesis 1:2",
+                        displayBook: "Genesis",
+                        snippet: "The earth was formless",
+                        identity: sqliteIdentity,
+                        bookNamePresentation: .localizedCanonical
+                    ),
+                ]),
+            ],
+            moduleOrder: ["KJV", "SQLSEARCH"]
+        )
+        var routedJSON: String?
+        controller.onOpenMultiReferenceDocumentInLinksWindow = { routedJSON = $0 }
+
+        XCTAssertTrue(controller.openSearchResultsInLinksWindow(grouped))
+        let data = try XCTUnwrap(routedJSON?.data(using: .utf8))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertEqual(payload["compare"] as? Bool, false)
+        XCTAssertEqual(fragments.map { $0["bookInitials"] as? String }, ["KJV", "SQLSEARCH"])
+        XCTAssertEqual(fragments.map { $0["osisRef"] as? String }, ["Gen.1.1", "Gen.1.2"])
+        XCTAssertTrue((fragments[0]["xml"] as? String)?.contains("osisID=\"Gen.1.1\"") == true)
+        XCTAssertTrue((fragments[1]["xml"] as? String)?.contains("osisID=\"Gen.1.2\"") == true)
+
+        routedJSON = nil
+        let empty = SearchGroupedResults(moduleResults: [], moduleOrder: [])
+        XCTAssertFalse(controller.openSearchResultsInLinksWindow(empty))
+        XCTAssertNil(routedJSON)
+    }
+
     /** Installs one package-owned MyBible fixture with caller-controlled Search initials. */
     private func installMyBiblePackage(
         initials: String,

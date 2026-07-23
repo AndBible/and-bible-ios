@@ -114,6 +114,9 @@ enum AIReaderHelpCatalog {
 
 /** Native, scrollable reader dialog that preserves Android help emphasis and tappable links. */
 struct AIReaderHelpDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Semantic help content selected by the bridge route.
     let presentation: AIReaderHelpPresentation
 
@@ -122,15 +125,12 @@ struct AIReaderHelpDialog: View {
 
     /** Renders title, links, emphasis, and body in Android's vertical content order. */
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.36)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-
-            VStack(alignment: .leading, spacing: 16) {
-                Text(presentation.title.localizedValue)
-                    .font(.headline)
-
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "androidAIReaderHelpDialog",
+            onOutsideTap: onDismiss
+        ) {
+            AndroidDialogScaffold(title: presentation.title.localizedValue) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         if let tutorialLink = presentation.tutorialLink {
@@ -147,20 +147,15 @@ struct AIReaderHelpDialog: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                HStack {
-                    Spacer()
-                    Button(String(localized: "okay"), action: onDismiss)
-                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
+            } actions: {
+                AndroidDialogTextAction(
+                    title: String(localized: "okay", defaultValue: "OK"),
+                    action: onDismiss
+                )
             }
-            .padding()
-            .frame(maxWidth: 640, maxHeight: 700)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 16)
-            .padding(24)
         }
-        .accessibilityIdentifier("androidAIReaderHelpDialog")
     }
 
     /** Renders one allowlisted URL with its shared localized label. */

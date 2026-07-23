@@ -25,8 +25,8 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
         self.assertNotIn(".sheet(isPresented: $showLabelManager)", source)
         self.assertNotIn(".sheet(item: $editingLabelsBookmarkId)", source)
 
-    def test_reader_webview_label_assignment_uses_reader_owned_overlay(self) -> None:
-        """WebView assign-label requests should route like Android ManageLabels, not iOS covers."""
+    def test_reader_webview_label_assignment_uses_reader_activity_destination(self) -> None:
+        """WebView assign-label requests should route like Android ManageLabels, not overlays."""
         reader_source = (
             REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         ).read_text(encoding="utf-8")
@@ -36,9 +36,13 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
 
         self.assertIn("ReaderLabelAssignmentRoute", reader_source)
         self.assertIn("activeReaderLabelAssignmentRoute", reader_source)
-        self.assertIn("ReaderAppOwnedOverlay", reader_source)
+        self.assertIn(
+            ".navigationDestination(item: $activeReaderLabelAssignmentRoute)",
+            reader_source,
+        )
         self.assertNotIn(".fullScreenCover(item: $activeReaderLabelAssignmentRoute)", reader_source)
         self.assertNotIn(".sheet(item: $activeReaderLabelAssignmentRoute)", reader_source)
+        self.assertNotIn("if let route = activeReaderLabelAssignmentRoute", reader_source)
         self.assertIn("refreshBookmarkInVueJS", reader_source)
         self.assertIn("onAssignLabels", pane_source)
         self.assertNotIn("pendingLabelBookmarkId", pane_source)
@@ -46,23 +50,55 @@ class BookmarkLabelStudyPadParityGuardrailsTests(unittest.TestCase):
         self.assertNotIn(".sheet(item: $pendingLabelBookmarkId)", pane_source)
         self.assertNotIn("LabelAssignmentView(", pane_source)
 
-    def test_new_label_prompts_use_the_shared_app_owned_dialog(self) -> None:
-        """ManageLabels creation must not regress to a system SwiftUI alert."""
+    def test_new_labels_open_androids_full_label_editor_activity(self) -> None:
+        """ManageLabels creation must open LabelEditActivity parity, not a name-only prompt."""
         assignment_source = (
             REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelAssignmentView.swift"
         ).read_text(encoding="utf-8")
         manager_source = (
             REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelManagerView.swift"
         ).read_text(encoding="utf-8")
-        dialog_source = (
-            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/AndroidLabelNameDialog.swift"
+        editor_source = (
+            REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bookmarks/AndroidLabelEditorView.swift"
         ).read_text(encoding="utf-8")
 
         self.assertNotIn(".alert(", assignment_source)
         self.assertNotIn(".alert(", manager_source)
-        self.assertIn("AndroidLabelNameDialog", assignment_source)
-        self.assertIn("AndroidLabelNameDialog", manager_source)
-        self.assertIn('accessibilityIdentifier("androidLabelNameDialog")', dialog_source)
+        self.assertIn("AndroidLabelEditorView(", assignment_source)
+        self.assertIn("draft: newLabelDraft", assignment_source)
+        self.assertIn("AndroidLabelEditorView(", manager_source)
+        self.assertIn("draft: newLabelDraft", manager_source)
+        self.assertIn("newLabelDraft = AndroidLabelEditorDraft", assignment_source)
+        self.assertIn("newLabelDraft = AndroidLabelEditorDraft", manager_source)
+        self.assertNotIn("AndroidLabelNameDialog", assignment_source)
+        self.assertNotIn("AndroidLabelNameDialog", manager_source)
+        self.assertIn("Canonical app-owned equivalent of Android `LabelEditActivity`", editor_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", editor_source)
+        self.assertIn('accessibilityIdentifier: "labelEditScreen"', editor_source)
+        self.assertNotIn('.accessibilityIdentifier("labelEditScreen")', editor_source)
+        self.assertIn("AndroidActivityScreen(", editor_source)
+
+    def test_manage_labels_modes_share_one_android_activity_shell(self) -> None:
+        """All Android ManageLabels modes must inherit one app bar, search strip, and surface."""
+        shared_source = (
+            REPO_ROOT
+            / "Sources/BibleUI/Sources/BibleUI/Bookmarks/AndroidManageLabelsComponents.swift"
+        ).read_text(encoding="utf-8")
+        mode_paths = [
+            "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelAssignmentView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Bookmarks/LabelManagerView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Bookmarks/StudyPadSelectorView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Settings/AndroidHiddenLabelsActivityView.swift",
+        ]
+
+        self.assertIn("struct AndroidManageLabelsActivityScreen", shared_source)
+        self.assertIn("AndroidActivityScreen(", shared_source)
+        self.assertIn("AndroidManageLabelsSearchBar(", shared_source)
+        for relative_path in mode_paths:
+            with self.subTest(relative_path=relative_path):
+                source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn("AndroidManageLabelsActivityScreen(", source)
+                self.assertNotIn("AndroidManageLabelsSearchBar(", source)
 
     def test_unused_native_studypad_sheet_route_is_removed(self) -> None:
         """StudyPad add/edit must stay in the WebView document route, not the old native sheet."""

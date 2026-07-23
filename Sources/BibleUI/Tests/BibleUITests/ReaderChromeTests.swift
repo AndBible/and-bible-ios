@@ -123,6 +123,7 @@ final class ReaderChromeTests: XCTestCase {
             onShowSearch: {},
             onShowSpeak: {},
             onApplyStrongsMode: { _ in },
+            onShowStrongsModeDialog: {},
             onBibleTap: {},
             onBibleLongPress: {},
             onCommentaryTap: {},
@@ -296,6 +297,7 @@ final class ReaderChromeTests: XCTestCase {
         let view = BibleReaderOverflowMenu(
             state: state,
             colorScheme: ColorScheme.light,
+            surfacePalette: .standard,
             onAction: { _ in }
         )
 

@@ -18,12 +18,32 @@ extension AndroidDatabaseBackupCategory {
      - Returns: Localized category label with the stable Android English category label as the
        default fallback.
      - Side effects: reads localization resources through Foundation lookup.
-     - Failure modes: Missing localization keys fall back to `displayName`.
+    - Failure modes: Missing localization keys fall back to `displayName`.
      */
     var localizedBackupSectionName: String {
-        NSLocalizedString(
-            "android_backup_category_\(rawValue.lowercased())",
-            value: displayName,
+        let resource: (key: String, fallback: String) = switch self {
+        case .bookmarks:
+            ("db_bookmarks", "Bookmarks, My Notes, Labels and Study Pads")
+        case .workspaces:
+            ("help_workspaces_title", "Workspaces")
+        case .readingPlans:
+            ("reading_plans_plural", "Reading Plans")
+        case .settings:
+            ("settings", "Application preferences")
+        case .repositories:
+            ("db_repositories", "Repositories and related settings")
+        case .myDocuments:
+            ("my_documents_title", "My Documents")
+        case .aiSettings:
+            ("ai_settings_sync_title", "AI Settings")
+        case .progress:
+            ("progress_sync_title", "Reading Progress")
+        case .modules, .epubs:
+            ("android_backup_category_\(rawValue.lowercased())", displayName)
+        }
+        return NSLocalizedString(
+            resource.key,
+            value: resource.fallback,
             comment: "Android backup category label"
         )
     }
@@ -42,7 +62,7 @@ extension AndroidDatabaseBackupApplyMode {
      - Returns: Localized operation label with the stable Android English operation label as the
        default fallback.
      - Side effects: reads localization resources through Foundation lookup.
-     - Failure modes: Missing localization keys fall back to `displayName`.
+     - Failure modes: Missing localization keys fall back to Android's English resource text.
      */
     var localizedBackupModeName: String {
         switch self {

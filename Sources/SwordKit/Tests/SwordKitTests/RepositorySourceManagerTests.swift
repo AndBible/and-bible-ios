@@ -76,6 +76,65 @@ final class RepositorySourceManagerTests: XCTestCase {
     }
 
     /**
+     Verifies Android's live editor can persist its resolved registration without a second request.
+
+     Setup resolves a manifest once, then replaces the URL protocol handler with a failure before
+     calling `persistResolvedCustomSource`. The expected result is a saved row with no additional
+     HTTP access. A failure means the editor's validity check and Save command duplicate the same
+     remote validation, creating avoidable latency and a race where a checked repository can fail
+     solely because Save fetched it again.
+     */
+    func testRepositorySourceManagerPersistsLiveValidationResultWithoutSecondNetworkRead() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let manifestData = Data(
+            """
+            {
+              "name": "Validated Repo",
+              "description": "Resolved before Save",
+              "type": "sword-https",
+              "host": "example.org",
+              "catalogDirectory": "/validated",
+              "packageDirectory": "/validated/packages",
+              "manifestUrl": "https://example.org/validated/manifest.json"
+            }
+            """.utf8
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, manifestData)
+        }
+        let manager = RepositorySourceManager(
+            basePath: tempDir.path,
+            session: Self.makeMockedURLSession()
+        )
+
+        let resolved = try await manager.resolveCustomSource(
+            from: "https://example.org/validated/manifest.json"
+        )
+        RepositorySourceManagerMockURLProtocol.requestHandler = { request in
+            XCTFail("Save unexpectedly repeated live validation for \(request.url?.absoluteString ?? "nil")")
+            throw URLError(.dataNotAllowed)
+        }
+
+        let persisted = try manager.persistResolvedCustomSource(resolved)
+
+        XCTAssertEqual(persisted.source.name, "Validated Repo")
+        XCTAssertEqual(
+            manager.loadSources().first { $0.name == "Validated Repo" }?.packageDirectory,
+            "/validated/packages"
+        )
+    }
+
+    /**
      Verifies Android's editable SWORD package directory overrides manifest metadata and round-trips.
 
      Setup:

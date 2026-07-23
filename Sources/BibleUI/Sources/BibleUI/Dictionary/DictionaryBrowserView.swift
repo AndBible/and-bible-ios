@@ -11,12 +11,14 @@ import SwordKit
 
  Data dependencies:
  - `source` is the selected dictionary snapshot whose exact keys should be listed
+ - `surfacePalette` is inherited from the launching reader window
+ - `onBack` owns Android Up navigation without relying on iOS sheet dismissal
  - `onSelectKey` notifies the parent when the user chooses a key to open
 
  Side effects:
  - loads the module key list asynchronously when the view appears
- - presents a retry action when the selected backend cannot enumerate keys
- - dismisses the sheet when the user taps the toolbar Done action
+ - presents the shared app-owned Android error dialog when key enumeration fails
+ - invokes the explicit reader-owned Back action from the Android activity bar
 
  Failure modes:
  - a successful empty list renders the ordinary empty/search state
@@ -26,6 +28,12 @@ import SwordKit
 struct DictionaryBrowserView: View {
     /// Immutable backend snapshot whose keys and row presentations are being browsed.
     let source: DictionaryBrowserSource
+
+    /// Reader/workspace palette inherited by this Android activity.
+    let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Explicit Android Up command owned by the reader destination.
+    let onBack: () -> Void
 
     /// Callback invoked when the user chooses a dictionary key.
     let onSelectKey: (String) -> Void
@@ -45,26 +53,32 @@ struct DictionaryBrowserView: View {
     /// Actionable backend error kept distinct from a successfully empty dictionary.
     @State private var loadErrorMessage: String?
 
-    /// Monotonic retry token used to restart the structured key-loading task.
-    @State private var loadAttempt = 0
-
-    /// Dismiss action for closing the browser.
-    @Environment(\.dismiss) private var dismiss
+    /// Android focuses the dictionary filter as soon as the activity opens.
+    @FocusState private var isSearchFocused: Bool
 
     /**
      Creates a dictionary chooser with a browser-scoped display-row cache.
 
      - Parameters:
        - module: Dictionary module whose exact global keys are shown.
+       - surfacePalette: Palette inherited from the launching reader window.
+       - onBack: Explicit Android Up command.
        - onSelectKey: Callback for an exact selected key.
      - Side effects: Allocates an empty bounded row cache.
      - Failure modes: None.
      */
     init(
         module: SwordModule,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: @escaping () -> Void,
         onSelectKey: @escaping (String) -> Void
     ) {
-        self.init(source: DictionaryBrowserSource(swordModule: module), onSelectKey: onSelectKey)
+        self.init(
+            source: DictionaryBrowserSource(swordModule: module),
+            surfacePalette: surfacePalette,
+            onBack: onBack,
+            onSelectKey: onSelectKey
+        )
     }
 
     /**
@@ -72,15 +86,21 @@ struct DictionaryBrowserView: View {
 
      - Parameters:
        - source: Captured SWORD or SQLite dictionary operations and title.
+       - surfacePalette: Palette inherited from the launching reader window.
+       - onBack: Explicit Android Up command.
        - onSelectKey: Callback for an exact selected key.
      - Side effects: Allocates an empty bounded row cache.
      - Failure modes: None; source failures are handled by the structured loading task.
      */
     init(
         source: DictionaryBrowserSource,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: @escaping () -> Void,
         onSelectKey: @escaping (String) -> Void
     ) {
         self.source = source
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
         self.onSelectKey = onSelectKey
         _displayCache = State(initialValue: source.displayCache())
     }
@@ -93,7 +113,7 @@ struct DictionaryBrowserView: View {
     /**
      Builds the loading, searchable list, successful-empty, and retryable-failure states.
 
-     - Returns: A navigation stack bound to the selected module and current search text.
+     - Returns: A full app-owned Android dictionary activity bound to the selected source.
      - Side effects: Starts one cancellation-propagating backend enumeration per `loadAttempt` and
        updates main-actor view state only if the enclosing structured task is still active.
      - Failure modes: Enumeration errors render a diagnostic Retry action; cancellation stops the
@@ -103,53 +123,60 @@ struct DictionaryBrowserView: View {
        cannot mix keys and definitions even if a cancelled detached read finishes later.
      */
     var body: some View {
-        NavigationStack {
-            Group {
+        AndroidActivityScreen(
+            title: String(localized: "dictionary", defaultValue: "Dictionary"),
+            accessibilityIdentifier: "dictionaryBrowserTopAppBar",
+            palette: surfacePalette,
+            onBack: onBack,
+            actions: { EmptyView() }
+        ) {
+            VStack(spacing: 0) {
+                AndroidActivityTextInput(
+                    placeholder: String(
+                        localized: "search_dictionary_hint",
+                        defaultValue: "Search dictionary"
+                    ),
+                    text: $searchText,
+                    foregroundColor: surfacePalette.foregroundColor,
+                    backgroundColor: surfacePalette.controlFillColor,
+                    borderColor: surfacePalette.inactiveBorderColor,
+                    accessibilityIdentifier: "dictionaryBrowserSearchField",
+                    focus: $isSearchFocused,
+                    usesLiteralInputBehavior: true
+                )
+
                 if isLoading {
-                    ProgressView(String(localized: "dictionary_loading_keys"))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let loadErrorMessage {
-                    ContentUnavailableView {
-                        Label(
-                            String(localized: "error_occurred"),
-                            systemImage: "exclamationmark.triangle"
-                        )
-                    } description: {
-                        Text(loadErrorMessage)
-                    } actions: {
-                        Button(String(localized: "retry")) {
-                            retryLoadingKeys()
-                        }
-                    }
-                } else if filteredKeys.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
+                    AndroidActivityLoadingView(
+                        message: String(localized: "dictionary_loading_keys"),
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "dictionaryBrowserLoadingState"
+                    )
                 } else {
-                    List(Array(filteredKeys.enumerated()), id: \.offset) { row in
-                        let key = row.element
-                        Button {
-                            onSelectKey(key)
-                        } label: {
-                            DictionaryEntryDisplayRow(
-                                key: key,
-                                cache: displayCache
-                            )
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(filteredKeys.enumerated()), id: \.offset) { row in
+                                let key = row.element
+                                AndroidActivityListRow(
+                                    palette: surfacePalette,
+                                    accessibilityIdentifier: "dictionaryBrowserRow::\(key)",
+                                    action: { onSelectKey(key) }
+                                ) {
+                                    DictionaryEntryDisplayRow(
+                                        key: key,
+                                        cache: displayCache
+                                    )
+                                }
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
-                    .listStyle(.plain)
+                    .scrollDismissesKeyboard(.interactively)
+                    .background(surfacePalette.backgroundColor)
                 }
             }
-            .searchable(text: $searchText, prompt: String(localized: "dictionary_search_keys"))
-            .navigationTitle(source.title)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done")) { dismiss() }
-                }
+            .task {
+                isSearchFocused = true
             }
-            .task(id: loadAttempt) {
+            .task {
                 let result: Result<[String], Error>
                 do {
                     let keys = try await source.loadKeys()
@@ -172,20 +199,26 @@ struct DictionaryBrowserView: View {
                 }
                 isLoading = false
             }
+            .overlay {
+                if let loadErrorMessage {
+                    AndroidDecisionDialog(
+                        title: String(localized: "error_occurred"),
+                        message: loadErrorMessage,
+                        actions: [
+                            .init(
+                                id: "okay",
+                                title: String(localized: "okay", defaultValue: "OK"),
+                                style: .normal
+                            ) {
+                                self.loadErrorMessage = nil
+                            }
+                        ]
+                    )
+                }
+            }
         }
     }
 
-    /**
-     Restarts key enumeration after a visible backend failure.
-
-     - Side effects: Clears the current error, restores loading UI, and increments the task identity.
-     - Failure modes: A repeated backend failure returns to the same actionable error state.
-     */
-    private func retryLoadingKeys() {
-        loadErrorMessage = nil
-        isLoading = true
-        loadAttempt += 1
-    }
 }
 
 /**
@@ -218,6 +251,8 @@ private struct DictionaryEntryDisplayRow: View {
     /** Builds the stable row label and starts one cache-backed exact-entry lookup. */
     var body: some View {
         Text(displayText)
+            .font(.system(size: 16))
+            .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .task(id: key) {

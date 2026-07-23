@@ -68,7 +68,7 @@ struct ReaderSideDrawerOverlay<DrawerContent: View>: View {
     private var drawerBackground: Color {
         #if os(iOS)
         return colorScheme == .dark
-            ? Color(red: 48.0 / 255.0, green: 48.0 / 255.0, blue: 48.0 / 255.0)
+            ? AndroidResourcePalette.nightDialogBackground
             : Color(uiColor: .systemBackground)
         #elseif os(macOS)
         return Color(nsColor: .windowBackgroundColor)

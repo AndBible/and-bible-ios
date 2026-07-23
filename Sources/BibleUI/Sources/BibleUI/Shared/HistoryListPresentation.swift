@@ -1,32 +1,26 @@
-// HistoryListPresentation.swift - History list presentation and mutation contracts
+// HistoryListPresentation.swift - Android History presentation contracts
 
 import Foundation
-import SwiftData
 import BibleCore
 
 /**
- Centralizes the History screen's value-level presentation and destructive action rules.
+ Centralizes the History dialog's value-level presentation rules.
 
  The SwiftUI `HistoryView` remains responsible for rendering and user gestures, while this helper
- owns deterministic row scoping, accessibility identifiers, exported UI-test state, and the
- SwiftData deletion operations behind Clear and row-delete actions. Keeping those contracts here
- lets app-host-free package tests verify the behavior that used to require expensive XCUITest
- reopen flows.
+ owns deterministic row scoping, Android reference/date formatting, accessibility identifiers,
+ and bounded UI-test state. Android History does not expose clear or row-delete actions, so this
+ type deliberately contains no mutation path for those former iOS-only controls.
 
  Inputs:
  - persisted `HistoryItem` rows ordered by the caller's fetch descriptor
  - an optional active-window identifier matching Android's active pane scoping
- - the `ModelContext` that owns rows when destructive actions are requested
 
- Outputs:
- - filtered history rows, deterministic identifiers/state strings, or the number of rows deleted
+Outputs:
+ - filtered history rows and deterministic formatted/identifier/state strings
 
- Side effects:
- - `clearVisibleItems` and `deleteVisibleItems` delete rows from SwiftData and save the context
+ Side effects: none
 
- Failure modes:
- - save failures are rethrown to test callers; production UI wrappers intentionally discard them
-   because the screen has no retry surface for destructive gestures
+ Failure modes: malformed references preserve their persisted fallback text
  */
 enum HistoryListPresentation {
     /**
@@ -50,17 +44,23 @@ enum HistoryListPresentation {
      - Parameters:
        - key: Stored history key, normally shaped like `Gen.1.1`.
        - bookNameResolver: Optional module-aware OSIS name resolver supplied by the reader.
-     - Returns: `Book Chapter` for recognized OSIS keys, otherwise the original key.
+     - Returns: `Book Chapter:Verse` for verse keys, `Book Chapter` for verse zero/chapter keys,
+       otherwise the original key.
      - Side effects: none.
      - Failure modes: Falls back to the OSIS ID or original key when no localized book name exists.
      */
     static func formattedKey(_ key: String, bookNameResolver: ((String) -> String?)?) -> String {
-        let parts = key.split(separator: ".")
+        let referenceKey = key.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init) ?? key
+        let parts = referenceKey.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count >= 2 else { return key }
         let osisID = String(parts[0])
         let chapter = String(parts[1])
         let bookName = bookNameResolver?(osisID) ?? BibleReaderController.bookName(forOsisId: osisID) ?? osisID
-        return "\(bookName) \(chapter)"
+        guard parts.count >= 3 else { return "\(bookName) \(chapter)" }
+        let verse = parts.dropFirst(2).map(String.init).joined(separator: ".")
+        return verse.isEmpty || verse == "0"
+            ? "\(bookName) \(chapter)"
+            : "\(bookName) \(chapter):\(verse)"
     }
 
     /**
@@ -117,18 +117,6 @@ enum HistoryListPresentation {
     }
 
     /**
-     Resolves the deterministic accessibility identifier for one history row's delete action.
-
-     - Parameter item: History row whose stored key should back the delete-action identifier.
-     - Returns: Accessibility identifier stable across row reordering for the same history key.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    static func deleteButtonIdentifier(for item: HistoryItem) -> String {
-        "historyDeleteButton::\(sanitizedKey(item.key))"
-    }
-
-    /**
      Exports stable History screen state for UI automation without exposing live view internals.
 
      - Parameters:
@@ -179,57 +167,5 @@ enum HistoryListPresentation {
      */
     static func rowStateToken(for item: HistoryItem) -> String {
         "|\(sanitizedKey(item.key))|"
-    }
-
-    /**
-     Deletes every row visible in the active History scope and saves the model context.
-
-     - Parameters:
-       - allHistory: All persisted rows currently loaded by the view.
-       - activeWindowID: Active reader window identifier, or nil to clear every loaded row.
-       - modelContext: SwiftData context that owns the history rows.
-     - Returns: Number of rows deleted.
-     - Side effects: Deletes matching `HistoryItem` rows from SwiftData and saves the context.
-     - Throws: Any SwiftData save error produced after deleting the visible rows.
-     */
-    @discardableResult
-    static func clearVisibleItems(
-        from allHistory: [HistoryItem],
-        activeWindowID: UUID?,
-        in modelContext: ModelContext
-    ) throws -> Int {
-        let items = visibleItems(allHistory, activeWindowID: activeWindowID)
-        for item in items {
-            modelContext.delete(item)
-        }
-        try modelContext.save()
-        return items.count
-    }
-
-    /**
-     Deletes visible rows whose stored key matches the requested deterministic key.
-
-     - Parameters:
-       - key: Persisted history key to remove from the current History scope.
-       - allHistory: All persisted rows currently loaded by the view.
-       - activeWindowID: Active reader window identifier, or nil to search every loaded row.
-       - modelContext: SwiftData context that owns the history rows.
-     - Returns: Number of rows deleted.
-     - Side effects: Deletes matching `HistoryItem` rows from SwiftData and saves the context.
-     - Throws: Any SwiftData save error produced after deleting matching rows.
-     */
-    @discardableResult
-    static func deleteVisibleItems(
-        matchingKey key: String,
-        from allHistory: [HistoryItem],
-        activeWindowID: UUID?,
-        in modelContext: ModelContext
-    ) throws -> Int {
-        let items = visibleItems(allHistory, activeWindowID: activeWindowID).filter { $0.key == key }
-        for item in items {
-            modelContext.delete(item)
-        }
-        try modelContext.save()
-        return items.count
     }
 }

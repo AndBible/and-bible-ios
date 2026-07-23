@@ -108,6 +108,22 @@ extension RemoteSyncWorkspaceFidelityStore {
         try setCodable(row, key: labelOverrideKey(workspaceID: row.workspaceID, labelID: row.labelID))
     }
 
+    /** Reads one validated workspace-label override by its composite Android identity. */
+    func labelOverride(
+        workspaceID: UUID,
+        labelID: UUID
+    ) -> RemoteSyncCurrentWorkspaceLabelOverrideRow? {
+        let key = labelOverrideKey(workspaceID: workspaceID, labelID: labelID)
+        guard let value = settingsStore.getString(key),
+              let data = value.data(using: .utf8),
+              let row = try? JSONDecoder().decode(RemoteSyncCurrentWorkspaceLabelOverrideRow.self, from: data),
+              row.workspaceID == workspaceID,
+              row.labelID == labelID else {
+            return nil
+        }
+        return row
+    }
+
     /** Reads every valid workspace-label override in deterministic key order. */
     func allLabelOverrides() -> [RemoteSyncCurrentWorkspaceLabelOverrideRow] {
         settingsStore.entries(withPrefix: Self.labelOverrideFidelityPrefix)
@@ -137,6 +153,15 @@ extension RemoteSyncWorkspaceFidelityStore {
     func removeLabelOverrides(forWorkspaceID workspaceID: UUID) {
         let prefix = "\(Self.labelOverrideFidelityPrefix).\(workspaceID.uuidString.lowercased())."
         for setting in settingsStore.entries(withPrefix: prefix) {
+            settingsStore.remove(setting.key)
+        }
+    }
+
+    /** Removes every Android workspace override that references one globally deleted label. */
+    func removeLabelOverrides(forLabelID labelID: UUID) {
+        let suffix = ".\(labelID.uuidString.lowercased())"
+        for setting in settingsStore.entries(withPrefix: "\(Self.labelOverrideFidelityPrefix).")
+            where setting.key.hasSuffix(suffix) {
             settingsStore.remove(setting.key)
         }
     }

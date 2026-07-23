@@ -1,5 +1,6 @@
 // BibleWindowPaneMenuModel.swift -- Android parity model for pane hamburger menus
 
+import BibleCore
 import Foundation
 
 /**
@@ -18,16 +19,19 @@ enum BibleWindowPaneMenuAction: Equatable {
     case togglePin
     case disableSync
     case selectSyncGroup(Int)
-    case openColorSettings
-    case toggleSectionTitles
-    case openStrongsMode
-    case toggleVerseNumbers
+    case addWholePageBookmark
+    case exportHTML
+    case exportStudyPad
+    case exportStudyPadCSV
+    case editTextSetting(AndroidTextDisplaySettingType)
     case openAllTextOptions
     case copySettingsToWindow(UUID)
     case copySettingsToWorkspace
     case copySettingsToGlobal
     case openAIActions
     case copyLink
+    case openCopiedReference
+    case openSpeakReference
     case close
 }
 
@@ -41,6 +45,7 @@ enum BibleWindowPaneMenuAction: Equatable {
 struct BibleWindowPaneMenuItem: Equatable, Identifiable {
     let id: String
     let title: String
+    let iconAssetName: String?
     let systemImage: String?
     let isCheckable: Bool
     let isChecked: Bool
@@ -50,6 +55,7 @@ struct BibleWindowPaneMenuItem: Equatable, Identifiable {
     init(
         id: String,
         title: String,
+        iconAssetName: String? = nil,
         systemImage: String? = nil,
         isCheckable: Bool = false,
         isChecked: Bool = false,
@@ -58,6 +64,7 @@ struct BibleWindowPaneMenuItem: Equatable, Identifiable {
     ) {
         self.id = id
         self.title = title
+        self.iconAssetName = iconAssetName
         self.systemImage = systemImage
         self.isCheckable = isCheckable
         self.isChecked = isChecked
@@ -98,6 +105,17 @@ struct BibleWindowPaneMenuSnapshot: Equatable {
     let canClose: Bool
     let canSync: Bool
     let canCopyLink: Bool
+    let canAddWholePageBookmark: Bool
+    let canExportHTML: Bool
+    let canExportStudyPad: Bool
+    let canExportStudyPadCSV: Bool
+    let copiedReferenceName: String?
+    let speakReferenceName: String?
+    let recentTextSettings: [AndroidTextDisplaySettingType]
+    let resolvedTextDisplaySettings: TextDisplaySettings
+    let isBibleShown: Bool
+    let isMyNotesShown: Bool
+    let moduleHasRedLetterWords: Bool
     let autoPinEnabled: Bool
     let moduleHasStrongs: Bool
     let sectionTitlesEnabled: Bool
@@ -177,7 +195,58 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(Self.syncMenu(snapshot: snapshot))
         }
 
-        if snapshot.isVisible {
+        if snapshot.canAddWholePageBookmark {
+            resolvedItems.append(.action(
+                id: "addWholePageBookmark",
+                title: Self.localized(
+                    "add_whole_page_bookmark",
+                    default: "Add bookmark for whole page"
+                ),
+                systemImage: "bookmark",
+                action: .addWholePageBookmark
+            ))
+        }
+
+        if snapshot.canExportHTML {
+            resolvedItems.append(.action(
+                id: "exportHTML",
+                title: String(
+                    format: Self.localized("export_fileformat", default: "Export as %@"),
+                    "HTML"
+                ),
+                systemImage: "square.and.arrow.up",
+                action: .exportHTML
+            ))
+        }
+
+        if snapshot.canExportStudyPad {
+            resolvedItems.append(.action(
+                id: "exportStudyPad",
+                title: String(
+                    format: Self.localized("export_something", default: "Export %@"),
+                    Self.localized("studypad", default: "Study Pad")
+                ),
+                systemImage: "square.and.arrow.up",
+                action: .exportStudyPad
+            ))
+        }
+
+        if snapshot.canExportStudyPadCSV {
+            resolvedItems.append(.action(
+                id: "exportStudyPadCSV",
+                title: String(
+                    format: Self.localized(
+                        "export_bookmarks_csv",
+                        default: "Export Bookmarks as %@"
+                    ),
+                    "CSV"
+                ),
+                systemImage: "square.and.arrow.up",
+                action: .exportStudyPadCSV
+            ))
+        }
+
+        if snapshot.isVisible && !snapshot.recentTextSettings.isEmpty {
             resolvedItems.append(Self.textOptionsMenu(snapshot: snapshot))
         }
 
@@ -196,6 +265,44 @@ struct BibleWindowPaneMenuModel: Equatable {
                 title: Self.localized("copyReference", default: "Copy link to clipboard"),
                 systemImage: "doc.on.clipboard",
                 action: .copyLink
+            ))
+        }
+
+        if let copiedReferenceName = snapshot.copiedReferenceName {
+            resolvedItems.append(.action(
+                id: "goToReference",
+                title: String(
+                    format: Self.localized("go_to_ref", default: "Open %@"),
+                    copiedReferenceName
+                ),
+                systemImage: "doc.on.clipboard",
+                action: .openCopiedReference
+            ))
+        }
+
+        if let speakReferenceName = snapshot.speakReferenceName {
+            resolvedItems.append(.action(
+                id: "goToSpeak",
+                title: String(
+                    format: Self.localized("go_to_ref", default: "Open %@"),
+                    speakReferenceName
+                ),
+                systemImage: "headphones",
+                action: .openSpeakReference
+            ))
+        }
+
+        if snapshot.isVisible && snapshot.recentTextSettings.isEmpty {
+            resolvedItems.append(.action(
+                id: "allTextOptions",
+                title: Self.ellipsis(
+                    Self.localized(
+                        "all_text_options_window_menutitle",
+                        default: "All text options"
+                    )
+                ),
+                iconAssetName: "OverflowTextOptions",
+                action: .openAllTextOptions
             ))
         }
 
@@ -270,45 +377,14 @@ struct BibleWindowPaneMenuModel: Equatable {
     }
 
     private static func textOptionsMenu(snapshot: BibleWindowPaneMenuSnapshot) -> BibleWindowPaneMenuItem {
-        var children: [BibleWindowPaneMenuItem] = [
-            .action(
-                id: "colorSettings",
-                title: ellipsis(localized("prefs_text_colors_menutitle", default: "Color settings")),
-                systemImage: "paintpalette",
-                action: .openColorSettings
-            ),
-            .action(
-                id: "sectionTitles",
-                title: localized("prefs_section_title_title", default: "Section titles"),
-                systemImage: "textformat.size",
-                isCheckable: true,
-                isChecked: snapshot.sectionTitlesEnabled,
-                action: .toggleSectionTitles
-            ),
-        ]
-
-        if snapshot.moduleHasStrongs {
-            children.append(.action(
-                id: "strongsNumbers",
-                title: ellipsis(localized("prefs_show_strongs_title", default: "Strong's numbers")),
-                systemImage: "character.book.closed",
-                action: .openStrongsMode
-            ))
+        var children = snapshot.recentTextSettings.compactMap { type in
+            textSettingItem(type, snapshot: snapshot)
         }
-
         children.append(contentsOf: [
-            .action(
-                id: "verseNumbers",
-                title: localized("prefs_show_verseno_title", default: "Chapter & verse numbers"),
-                systemImage: "number",
-                isCheckable: true,
-                isChecked: snapshot.verseNumbersEnabled,
-                action: .toggleVerseNumbers
-            ),
             .action(
                 id: "allTextOptions",
                 title: ellipsis(localized("all_text_options_window_menutitle", default: "All text options")),
-                systemImage: "textformat",
+                iconAssetName: "OverflowTextOptions",
                 action: .openAllTextOptions
             ),
             copySettingsMenu(snapshot: snapshot),
@@ -317,9 +393,83 @@ struct BibleWindowPaneMenuModel: Equatable {
         return BibleWindowPaneMenuItem(
             id: "textOptions",
             title: ellipsis(localized("text_options_window_menutitle", default: "Text options")),
-            systemImage: "textformat",
+            iconAssetName: "OverflowTextOptions",
             children: children
         )
+    }
+
+    /** Builds one Android recent-setting row after applying the target window's enabled/visible rules. */
+    private static func textSettingItem(
+        _ type: AndroidTextDisplaySettingType,
+        snapshot: BibleWindowPaneMenuSnapshot
+    ) -> BibleWindowPaneMenuItem? {
+        guard type.isAvailableOnIOS, isTextSettingAvailable(type, snapshot: snapshot) else {
+            return nil
+        }
+        let baseTitle = type.localizedTitle(settings: snapshot.resolvedTextDisplaySettings)
+        return .action(
+            id: "textSetting::\(type.rawValue)",
+            title: type.isBoolean ? baseTitle : ellipsis(baseTitle),
+            iconAssetName: AndBibleIconCatalog.settingsIcon(forAndroidKey: type.rawValue)?.assetName,
+            isCheckable: type.isBoolean,
+            isChecked: booleanTextSettingValue(type, snapshot: snapshot),
+            action: .editTextSetting(type)
+        )
+    }
+
+    /** Mirrors Android `getPrefItem(...).enabled && visible` filtering for recent window rows. */
+    private static func isTextSettingAvailable(
+        _ type: AndroidTextDisplaySettingType,
+        snapshot: BibleWindowPaneMenuSnapshot
+    ) -> Bool {
+        switch type {
+        case .strongs, .morphology, .nonStrongsWordItalic:
+            return snapshot.moduleHasStrongs
+        case .footnotesInline:
+            return snapshot.resolvedTextDisplaySettings.showFootNotes ?? true
+        case .expandXrefs:
+            return snapshot.resolvedTextDisplaySettings.showXrefs ?? true
+        case .redLetters:
+            return snapshot.isBibleShown && snapshot.moduleHasRedLetterWords
+        case .topMargin:
+            return snapshot.isBibleShown
+        case .myNotes:
+            return !snapshot.isMyNotesShown
+        default:
+            return true
+        }
+    }
+
+    /** Resolves the checkmark value for every iOS-backed Boolean Android text-setting type. */
+    private static func booleanTextSettingValue(
+        _ type: AndroidTextDisplaySettingType,
+        snapshot: BibleWindowPaneMenuSnapshot
+    ) -> Bool {
+        let settings = snapshot.resolvedTextDisplaySettings
+        switch type {
+        case .justify: return settings.justifyText ?? true
+        case .hyphenation: return settings.hyphenation ?? true
+        case .morphology: return settings.showMorphology ?? false
+        case .footnotes: return settings.showFootNotes ?? true
+        case .footnotesInline: return settings.showFootNotesInline ?? false
+        case .expandXrefs: return settings.expandXrefs ?? false
+        case .xrefs: return settings.showXrefs ?? true
+        case .redLetters: return settings.showRedLetters ?? true
+        case .sectionTitles: return settings.showSectionTitles ?? true
+        case .verseNumbers: return settings.showVerseNumbers ?? true
+        case .versePerLine: return settings.showVersePerLine ?? false
+        case .bookmarksShow: return settings.showBookmarks ?? true
+        case .myNotes: return settings.showMyNotes ?? true
+        case .pageNumber: return settings.showPageNumber ?? false
+        case .infiniteScroll: return settings.infiniteScroll ?? true
+        case .nonStrongsWordItalic: return settings.nonStrongsWordItalic ?? false
+        case .markAsReadButton: return settings.showMarkAsReadButton ?? true
+        case .titleScrollButton: return settings.showTitleScrollButton ?? false
+        case .memorizationIndicators: return settings.showMemorizationIndicators ?? false
+        case .aiDocumentMarkers: return settings.showAiDocMarkers ?? true
+        case .ordinals: return settings.showOrdinals ?? false
+        default: return false
+        }
     }
 
     private static func copySettingsMenu(snapshot: BibleWindowPaneMenuSnapshot) -> BibleWindowPaneMenuItem {
@@ -352,7 +502,7 @@ struct BibleWindowPaneMenuModel: Equatable {
         return BibleWindowPaneMenuItem(
             id: "copySettingsTo",
             title: localized("copy_settings", default: "Copy settings to"),
-            systemImage: "doc.on.doc",
+            iconAssetName: "ActivityCopy",
             children: children
         )
     }
@@ -371,6 +521,7 @@ private extension BibleWindowPaneMenuItem {
     static func action(
         id: String,
         title: String,
+        iconAssetName: String? = nil,
         systemImage: String? = nil,
         isCheckable: Bool = false,
         isChecked: Bool = false,
@@ -379,6 +530,7 @@ private extension BibleWindowPaneMenuItem {
         BibleWindowPaneMenuItem(
             id: id,
             title: title,
+            iconAssetName: iconAssetName,
             systemImage: systemImage,
             isCheckable: isCheckable,
             isChecked: isChecked,
