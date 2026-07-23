@@ -99,11 +99,10 @@ struct AndroidSpeakHelpDialog: View {
 
     /// Android's shared Speak tutorial playlist link.
     private var tutorialLink: some View {
-        Link(
+        AndroidDialogLink(
             String(localized: "watch_tutorial_video", defaultValue: "Watch tutorial video (English)"),
             destination: tutorialURL
         )
         .font(.system(size: 17, weight: .semibold))
-        .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
     }
 }

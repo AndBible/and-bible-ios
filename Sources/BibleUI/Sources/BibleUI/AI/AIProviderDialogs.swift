@@ -119,7 +119,7 @@ struct AIProviderSettingsDialog: View {
                     }
 
                     if let apiKeyURL {
-                        Link(
+                        AndroidDialogLink(
                             "\(String(localized: "easy_setup_api_key_instructions", defaultValue: "Get your API key from:")) \(AIProviderPresentation.displayName(for: providerType))",
                             destination: apiKeyURL
                         )

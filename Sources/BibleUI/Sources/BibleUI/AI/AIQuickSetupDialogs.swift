@@ -112,7 +112,7 @@ struct AIQuickSetupCredentialDialog: View {
                         )
                     )
                     if let apiKeyURL {
-                        Link(
+                        AndroidDialogLink(
                             AIProviderPresentation.displayName(for: option.provider),
                             destination: apiKeyURL
                         )

@@ -35,16 +35,16 @@ struct AndroidTextDisplayHelpDialog: View {
 
                 AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        Link(
+                        AndroidDialogLink(
                             String(
                                 localized: "watch_tutorial_video",
                                 defaultValue: "Watch tutorial video (English)"
                             ),
                             destination: URL(
                                 string: "https://www.youtube.com/playlist?list=PLD-W_Iw-N2Mmiq_X6G-vDhoAIq9sDnrIQ"
-                            )!
+                            )!,
+                            isItalic: true
                         )
-                        .italic()
 
                         scopeExplanation
 
@@ -55,7 +55,7 @@ struct AndroidTextDisplayHelpDialog: View {
                                 .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
                             Text(String(localized: "buy_development2", defaultValue: "Support project") + ":")
                                 .fontWeight(.semibold)
-                            Link(
+                            AndroidDialogLink(
                                 String(localized: "buy_development", defaultValue: "Buy development work"),
                                 destination: URL(string: "https://shop.andbible.org")!
                             )

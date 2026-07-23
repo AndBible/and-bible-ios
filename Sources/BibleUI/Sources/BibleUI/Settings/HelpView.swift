@@ -143,7 +143,7 @@ struct HelpView: View {
                     helpSection(topic)
                 }
 
-                Link(
+                AndroidDialogLink(
                     String(localized: "help_full_documentation_link", defaultValue: "Browse the full documentation"),
                     destination: URL(string: "https://docs.andbible.org/en/latest/")!
                 )
@@ -155,7 +155,7 @@ struct HelpView: View {
                         .accessibilityHidden(true)
                     Text(String(localized: "buy_development2", defaultValue: "Support project") + ":")
                         .fontWeight(.semibold)
-                    Link(
+                    AndroidDialogLink(
                         String(localized: "buy_development", defaultValue: "Sponsor app development"),
                         destination: URL(string: "https://shop.andbible.org")!
                     )
@@ -196,19 +196,21 @@ struct HelpView: View {
             if topic.tutorialURL != nil || topic.documentationURL != nil {
                 VStack(alignment: .leading, spacing: 5) {
                     if let tutorialURL = topic.tutorialURL {
-                        Link(
+                        AndroidDialogLink(
                             "• " + String(localized: "watch_tutorial_video", defaultValue: "Watch tutorial video (English)"),
-                            destination: tutorialURL
+                            destination: tutorialURL,
+                            isItalic: true
                         )
                     }
                     if let documentationURL = topic.documentationURL {
-                        Link(
+                        AndroidDialogLink(
                             "• " + String(localized: "help_read_more_link", defaultValue: "Read more in the manual"),
-                            destination: documentationURL
+                            destination: documentationURL,
+                            isItalic: true
                         )
                     }
                 }
-                .font(.system(size: 17).italic())
+                .font(.system(size: 17))
                 .padding(.top, 5)
             }
         }

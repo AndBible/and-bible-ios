@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -94,6 +95,33 @@ class AndroidHelpDialogContractTests(unittest.TestCase):
             reader_help,
         )
         self.assertNotIn("memorizeDocumentationURL", reader_help)
+
+    def test_modal_hyperlinks_reuse_android_url_span_visuals(self) -> None:
+        """Dialog links must be underlined and share the positive-action accent."""
+        link_source = source("Shared/AndroidDialogLink.swift")
+        action_source = source("Shared/AndroidDialogScaffold.swift")
+        linked_dialog_sources = (
+            "AI/AIProviderDialogs.swift",
+            "AI/AIQuickSetupDialogs.swift",
+            "AI/AIReaderHelpPresentation.swift",
+            "Bookmarks/AndroidManageLabelsComponents.swift",
+            "Settings/AndroidTextDisplayHelpDialog.swift",
+            "Settings/HelpView.swift",
+            "Shared/AndroidFeatureHelpDialog.swift",
+            "Speak/AndroidSpeakHelpDialog.swift",
+        )
+
+        self.assertIn("Text(title).underline()", link_source)
+        self.assertIn("AndroidDialogSurfacePalette.accent(for: colorScheme)", link_source)
+        self.assertIn("AndroidDialogSurfacePalette.accent(for: colorScheme)", action_source)
+
+        for relative_path in linked_dialog_sources:
+            dialog_source = source(relative_path)
+            self.assertIn("AndroidDialogLink(", dialog_source, relative_path)
+            self.assertIsNone(
+                re.search(r"(?<!AndroidDialog)\bLink\(", dialog_source),
+                relative_path,
+            )
 
 
 if __name__ == "__main__":

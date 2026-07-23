@@ -179,14 +179,15 @@ struct AndroidFeatureHelpDialogContent: View {
                         .font(.system(size: 17))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Link(
+                    AndroidDialogLink(
                         String(
                             localized: "help_read_more_link",
                             defaultValue: "Read more in the manual"
                         ),
-                        destination: topic.documentationURL
+                        destination: topic.documentationURL,
+                        isItalic: true
                     )
-                    .font(.system(size: 17).italic())
+                    .font(.system(size: 17))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 22)

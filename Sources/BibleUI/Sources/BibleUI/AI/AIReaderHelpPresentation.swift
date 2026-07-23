@@ -217,14 +217,11 @@ struct AIReaderHelpDialog: View {
     /** Renders one allowlisted URL with its shared localized label. */
     @ViewBuilder
     private func helpLink(_ link: AIReaderHelpLink) -> some View {
-        let label = Text(String(localized: String.LocalizationValue(link.labelKey)))
-        Link(destination: link.destination) {
-            if link.isItalic {
-                label.italic()
-            } else {
-                label
-            }
-        }
+        AndroidDialogLink(
+            String(localized: String.LocalizationValue(link.labelKey)),
+            destination: link.destination,
+            isItalic: link.isItalic
+        )
     }
 
     /** Renders localized content or trusted generic HTML using native attributed text. */

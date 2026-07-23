@@ -563,13 +563,13 @@ struct AndroidManageLabelsHelpDialog: View {
 
                 AndroidAdaptiveDialogScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        Link(
+                        AndroidDialogLink(
                             String(localized: "watch_tutorial_video", defaultValue: "Watch tutorial video (English)"),
                             destination: URL(
                                 string: "https://www.youtube.com/playlist?list=PLD-W_Iw-N2MlzNt0Zpna-QoTBpEpWSden"
-                            )!
+                            )!,
+                            isItalic: true
                         )
-                        .italic()
 
                         Text(introduction)
 
