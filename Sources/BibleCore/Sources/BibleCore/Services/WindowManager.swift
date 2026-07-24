@@ -239,6 +239,41 @@ public final class WindowManager {
         }
     }
 
+    /**
+     Applies Android's restore-strip tap behavior to one managed window.
+
+     Android routes both visible and hidden restore buttons through `WindowControl.restoreWindow`.
+     A minimized window is restored and focused; a visible window is minimized unless it is a
+     terminal non-primary links window, which Android closes instead. The terminal check resolves
+     the target identifier against current manager state so stale target metadata behaves like
+     Android's nullable `ownTargetLinksWindow`.
+
+     - Parameter window: Active-workspace window represented by the tapped restore-strip button.
+     - Side Effects: Delegates to `restoreWindow`, `minimizeWindow`, or `removeWindow`, including
+       their persistence, focus repair, controller cleanup, and published-window refresh behavior.
+     - Failure Modes: Foreign windows are ignored. Existing lifecycle guards keep the final visible
+       pane from being minimized and the final workspace window from being removed.
+     - Note: Visibility is read at execution time rather than accepted from SwiftUI so a stale render
+       snapshot cannot invert the requested transition.
+     */
+    public func toggleWindowVisibility(_ window: Window) {
+        guard allWindows.contains(where: { $0.id == window.id }) else { return }
+
+        if window.layoutState == "minimized" {
+            restoreWindow(window)
+            return
+        }
+
+        let isPrimaryLinksWindow = activeWorkspace?.primaryTargetLinksWindowId == window.id
+        let isTerminalLinksWindow = window.isLinksWindow
+            && explicitLinksWindowTarget(for: window) == nil
+        if isTerminalLinksWindow && !isPrimaryLinksWindow {
+            removeWindow(window)
+        } else {
+            minimizeWindow(window)
+        }
+    }
+
     // MARK: - Window Lifecycle
 
     /**

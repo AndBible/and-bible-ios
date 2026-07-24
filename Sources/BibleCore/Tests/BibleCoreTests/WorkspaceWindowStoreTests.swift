@@ -653,6 +653,73 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies a normal restore-strip button toggles its pane through Android's manager-owned path.
+
+     The setup creates two auto-pinned visible panes, then taps the second pane's restore button
+     twice through `toggleWindowVisibility`. Android's `WindowControl.restoreWindow` first minimizes
+     the visible pane and then restores and focuses it. A failure means iOS or macOS has reverted to
+     treating the bottom control as a focus-only tab or cannot restore the hidden pane.
+     */
+    func testWindowManagerRestoreButtonTogglesNormalWindowVisibilityLikeAndroid() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+
+        manager.toggleWindowVisibility(secondWindow)
+
+        XCTAssertEqual(secondWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, firstWindow.id)
+
+        manager.toggleWindowVisibility(secondWindow)
+
+        XCTAssertEqual(secondWindow.layoutState, "split")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, secondWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, secondWindow.id)
+    }
+
+    /**
+     Protects Android's distinct primary and terminal nested links restore-button behavior.
+
+     The setup creates the workspace primary links window and one nested terminal links window.
+     Android closes a visible non-primary links window with no live chained target, while its primary
+     links window remains durable and follows ordinary minimize/restore toggling. A failure means
+     transient links panes leak as hidden tabs or the reusable primary links pane is deleted.
+     */
+    func testWindowManagerRestoreButtonClosesTerminalNestedLinksButTogglesPrimaryLinks() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Links Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let primaryLinksWindow = try XCTUnwrap(manager.linksWindow(for: firstWindow))
+        let nestedLinksWindow = try XCTUnwrap(manager.linksWindow(for: primaryLinksWindow))
+
+        manager.toggleWindowVisibility(nestedLinksWindow)
+
+        XCTAssertFalse(manager.allWindows.contains(where: { $0.id == nestedLinksWindow.id }))
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == primaryLinksWindow.id }))
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, primaryLinksWindow.id])
+
+        manager.toggleWindowVisibility(primaryLinksWindow)
+
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == primaryLinksWindow.id }))
+        XCTAssertEqual(primaryLinksWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+
+        manager.toggleWindowVisibility(primaryLinksWindow)
+
+        XCTAssertEqual(primaryLinksWindow.layoutState, "split")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, primaryLinksWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, primaryLinksWindow.id)
+    }
+
+    /**
      Verifies visible-window ordering keeps pinned panes before unpinned panes.
 
      The setup flips pin state so a later pane is pinned while the first pane is not. The expected
