@@ -3455,9 +3455,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Emits a transient Vue `MultiDocument` request to the current bridge.
 
      - Parameter request: Stored transient document request with payload and native display labels.
-     - Side effects: Clears the current Vue document, emits labels and document/setup events,
-       resets transient selection/editing state, updates rendered-content state, emits active-window
-       state, clears web selection, and reapplies the reader background.
+     - Side effects: Emits labels and one Android-parity replacement transaction, resets transient
+       selection/editing state, updates rendered-content state, emits active-window state, clears
+       web selection, and reapplies the reader background.
      - Failure modes: Invalid JSON is forwarded unchanged to the bridge, matching the existing
        transient document contract.
      */
@@ -3471,10 +3471,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         clearNativeSelectionState()
         applyTransientPageIdentity(request)
 
-        bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
-        bridge.emit(event: "add_documents", data: request.documentJSON)
-        emitSetupContent(ReaderSetupContentPayload())
+        replaceDocument(
+            documentJSON: request.documentJSON,
+            setup: ReaderSetupContentPayload()
+        )
         setRenderedContentState(
             category: request.renderedCategory,
             moduleName: request.renderedModuleName ?? activeModuleName,
@@ -3585,8 +3586,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
 
-        bridge.emit(event: "clear_document")
-        sendLabelsToVueJS()
         let source = fragment.source
         let localRange = fragment.contentOrdinalRange
         let commentaryRange = ReaderCommentaryRangePayload(
@@ -3626,8 +3625,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
       )
     else { return }
-        bridge.emit(event: "add_documents", data: document)
-        emitSetupContent(ReaderSetupContentPayload())
+        sendLabelsToVueJS()
+        replaceDocument(
+            documentJSON: document,
+            setup: ReaderSetupContentPayload()
+        )
         setRenderedContentState(
             category: .commentary,
             moduleName: source.initials,
@@ -3693,11 +3695,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       return
     }
 
-    bridge.emit(event: "clear_document")
-    sendLabelsToVueJS()
     guard let document = documentPayloadFactory().documentJSON(content.request) else { return }
-    bridge.emit(event: "add_documents", data: document)
-    emitSetupContent(ReaderSetupContentPayload())
+    sendLabelsToVueJS()
+    replaceDocument(
+      documentJSON: document,
+      setup: ReaderSetupContentPayload()
+    )
     setRenderedContentState(
       category: .commentary,
       moduleName: module.info.name,
@@ -3748,16 +3751,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameters:
        - key: Requested commentary OSIS key retained in native rendered state.
        - message: User-visible failure or no-content message.
-     - Side effects: Clears/replaces Vue content, emits the typed setup payload and active state,
-       clears selection, and reapplies the reader background.
-     - Failure modes: If error-document encoding fails, the reader remains cleared.
+     - Side effects: Atomically replaces Vue content/config/setup, emits active state, clears
+       selection, and reapplies the reader background.
+     - Failure modes: If error-document encoding fails, the existing reader document remains.
      */
     private func emitCommentaryErrorDocument(key: String, message: String) {
-        bridge.emit(event: "clear_document")
-        if let document = documentPayloadFactory().errorDocumentJSON(message: message) {
-            bridge.emit(event: "add_documents", data: document)
+        guard let document = documentPayloadFactory().errorDocumentJSON(message: message) else {
+            return
         }
-        emitSetupContent(ReaderSetupContentPayload())
+        replaceDocument(
+            documentJSON: document,
+            setup: ReaderSetupContentPayload()
+        )
         setRenderedContentState(
             category: .commentary,
             moduleName: activeCommentaryModuleName,
@@ -3800,7 +3805,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func auxiliaryContentLoader() -> BibleReaderAuxiliaryContentLoader {
         BibleReaderAuxiliaryContentLoader(
-            bridge: bridge,
+            documentReplacement: documentReplacementEmitter(),
             documentPayloadFactory: documentPayloadFactory(),
             resetReaderState: { [self] in
                 resetAuxiliaryContentState()
@@ -3902,10 +3907,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       pageManager.dictionaryKey = content.key
       onPersistState?()
     }
-    bridge.emit(event: "clear_document")
     guard let document = documentPayloadFactory().documentJSON(content.request) else { return }
-    bridge.emit(event: "add_documents", data: document)
-    emitSetupContent(ReaderSetupContentPayload())
+    replaceDocument(
+      documentJSON: document,
+      setup: ReaderSetupContentPayload()
+    )
     setRenderedContentState(
       category: .dictionary,
       moduleName: module.info.name,
@@ -3915,7 +3921,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     applyNightModeBackground()
   }
 
-  /** Emits one deterministic SQLite auxiliary error without fabricating source markup. */
+  /**
+   Emits one deterministic SQLite auxiliary error without fabricating source markup.
+
+   - Parameters:
+     - category: Reader category whose source failed.
+     - moduleName: Exact serialized source initials.
+     - book: Display label retained in rendered state.
+     - key: Exact requested source key.
+     - message: User-visible failure text.
+   - Side effects: Atomically replaces Vue content/config/setup and updates rendered state.
+   - Failure modes: Serialization failure leaves the existing reader document visible.
+   */
   private func emitSQLiteAuxiliaryError(
     category: DocumentCategory,
     moduleName: String,
@@ -3923,11 +3940,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     key: String,
     message: String
   ) {
-    bridge.emit(event: "clear_document")
-    if let document = documentPayloadFactory().errorDocumentJSON(message: message) {
-      bridge.emit(event: "add_documents", data: document)
+    guard let document = documentPayloadFactory().errorDocumentJSON(message: message) else {
+      return
     }
-    emitSetupContent(ReaderSetupContentPayload())
+    replaceDocument(
+      documentJSON: document,
+      setup: ReaderSetupContentPayload()
+    )
     setRenderedContentState(
       category: category,
       moduleName: moduleName,
@@ -4187,13 +4206,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               let requestedKey = key ?? currentGeneralBookKey ?? reader.firstKey(),
       let content = reader.content(forKey: requestedKey)
     else {
-            bridge.emit(event: "clear_document")
             if let errorDocument = documentPayloadFactory().errorDocumentJSON(
                 message: String(localized: "error_no_content", defaultValue: "No content for this passage")
             ) {
-                bridge.emit(event: "add_documents", data: errorDocument)
+                replaceDocument(
+                    documentJSON: errorDocument,
+                    setup: epubSetupContentPayload(fragment: nil, ordinal: nil)
+                )
             }
-            emitEpubSetupContent(fragment: nil, ordinal: nil)
             setRenderedContentState(
                 category: .generalBook,
                 moduleName: activeGeneralBookModuleName,
@@ -4219,10 +4239,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         let document = buildEpubDocumentJSON(reader: reader, content: content)
-        bridge.emit(event: "clear_document")
         sendLabelsToVueJS()
-        bridge.emit(event: "add_documents", data: document)
-        emitEpubSetupContent(fragment: content.fragment, ordinal: jumpToOrdinal)
+        replaceDocument(
+            documentJSON: document,
+            setup: epubSetupContentPayload(fragment: content.fragment, ordinal: jumpToOrdinal)
+        )
         setRenderedContentState(
             category: .generalBook,
             moduleName: reader.initials,
@@ -4234,13 +4255,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         applyNightModeBackground()
     }
 
-    /// Emits a safely serialized setup-content request for an optional XHTML id.
-    private func emitEpubSetupContent(fragment: String?, ordinal: Int? = nil) {
-    emitSetupContent(
+    /**
+     Builds EPUB setup coordinates for Android's atomic document replacement.
+
+     - Parameters:
+       - fragment: Optional XHTML element identifier.
+       - ordinal: Optional search-result BVA ordinal.
+     - Returns: Typed setup payload consumed by the shared replacement emitter.
+     - Side effects: None.
+     - Failure modes: None; absent targets encode as explicit `null` values.
+     */
+    private func epubSetupContentPayload(
+        fragment: String?,
+        ordinal: Int? = nil
+    ) -> ReaderSetupContentPayload {
       ReaderSetupContentPayload(
             jumpToOrdinal: ordinal,
             jumpToId: fragment
-        ))
+        )
     }
 
     /**
@@ -6542,9 +6574,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             key: page.pageKey
         )
 
-        bridge.emit(event: "clear_document")
-        bridge.emit(event: "add_documents", data: documentJSON)
-        emitSetupContent(ReaderSetupContentPayload())
+        replaceDocument(
+            documentJSON: documentJSON,
+            setup: ReaderSetupContentPayload()
+        )
         bridge.clearSelection()
         applyNightModeBackground()
         return true
@@ -8687,11 +8720,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     selectedOrdinalRange: ClosedRange<Int>?,
     jumpToID: String?
   ) {
-    bridge.emit(event: "clear_document")
-    bridge.emit(event: "add_documents", data: documentJSON)
-    bridge.emit(
-      event: "setup_content",
-      data: ReaderSetupContentPayload(
+    replaceDocument(
+      documentJSON: documentJSON,
+      setup: ReaderSetupContentPayload(
         jumpToOrdinal: selectedOrdinalRange?.lowerBound,
         jumpToId: jumpToID,
         ordinalStart: selectedOrdinalRange?.lowerBound,
@@ -9115,7 +9146,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       else { return }
             loadEpubEntry(key: content.key + (content.fragment.map { "#\($0)" } ?? ""))
         } else if !toId.isEmpty {
-            emitEpubSetupContent(fragment: toId)
+            bridge.emit(
+                event: "setup_content",
+                data: epubSetupContentPayload(fragment: toId)
+            )
         }
     }
 
@@ -9178,15 +9212,44 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     // MARK: - Content Loading
 
-    /** Encodes and emits one typed Android-compatible `setup_content` payload. */
-    private func emitSetupContent(_ payload: ReaderSetupContentPayload) {
-        guard let data = try? bridgeEncoder.encode(payload),
-      let json = String(data: data, encoding: .utf8)
-    else {
-            logger.error("Failed to encode setup_content payload")
+    /**
+     Builds the shared Android-parity replacement emitter for the active reader pane.
+
+     - Returns: An emitter bound to the current bridge and a live `initial: true` config builder.
+     - Side effects: None during construction; the returned emitter dispatches only when invoked.
+     - Failure modes: Configuration encoding failures use the controller's existing `{}` fallback.
+     */
+    private func documentReplacementEmitter() -> BibleReaderDocumentReplacementEmitter {
+        BibleReaderDocumentReplacementEmitter(
+            bridge: bridge,
+            buildInitialConfigJSON: { [weak self] in
+                self?.buildConfigJSON(initial: true) ?? "{}"
+            }
+        )
+    }
+
+    /**
+     Atomically replaces the current Vue document using Android's event ordering.
+
+     - Parameters:
+       - documentJSON: Complete raw JSON replacement document.
+       - setup: Typed setup/scroll payload for the replacement content.
+     - Side effects: Queues one `clear_document`, initial `set_config`, `add_documents`, and
+       `setup_content` JavaScript evaluation.
+     - Failure modes: Logs and leaves the existing document intact when setup encoding or bridge
+       dispatch fails.
+     */
+    private func replaceDocument(
+        documentJSON: String,
+        setup: ReaderSetupContentPayload
+    ) {
+        guard documentReplacementEmitter().replace(
+            documentJSON: documentJSON,
+            setup: setup
+        ) else {
+            logger.error("Failed to emit atomic Vue document replacement")
             return
         }
-        bridge.emit(event: "setup_content", data: json)
     }
 
     /**
@@ -9198,21 +9261,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Parameter document: Localized message and Vue error-document severity.
      - Side effects: Replaces the current WebView payload, clears selection, and reapplies styling.
-     - Failure modes: If payload serialization fails, the reader is cleared and no fabricated
-       persisted document is created.
+     - Failure modes: If payload serialization fails, the existing document remains visible and no
+       fabricated persisted document is created.
      */
     func loadTransientAIDocument(_ document: AIReaderTransientDocument) {
         beginReplacingContentIntent()
-        bridge.emit(event: "clear_document")
         let severity: BibleReaderDocumentPayloadFactory.ErrorDocumentSeverity =
             document.severity == .error ? .error : .normal
         if let payload = documentPayloadFactory().errorDocumentJSON(
             message: document.message,
             severity: severity
         ) {
-            bridge.emit(event: "add_documents", data: payload)
+            replaceDocument(
+                documentJSON: payload,
+                setup: ReaderSetupContentPayload(jumpToId: "top")
+            )
         }
-        emitSetupContent(ReaderSetupContentPayload(jumpToId: "top"))
         bridge.clearSelection()
         applyNightModeBackground()
     }
@@ -9267,16 +9331,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       logger.error(
         "Failed to load active Bible chapter for \(renderedOsisBookId, privacy: .public).\(self.currentChapter)"
       )
-            bridge.emit(event: "clear_document")
             if let document = documentPayloadFactory().errorDocumentJSON(
                 message: String(
                     localized: "error_no_content",
                     defaultValue: "No content for selected verse"
                 )
             ) {
-                bridge.emit(event: "add_documents", data: document)
+                replaceDocument(
+                    documentJSON: document,
+                    setup: ReaderSetupContentPayload(jumpToId: "top")
+                )
             }
-            emitSetupContent(ReaderSetupContentPayload(jumpToId: "top"))
             setRenderedContentState(
                 category: .bible,
                 moduleName: activeModuleName,
@@ -9292,12 +9357,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         // Query bookmarks for this chapter
         let chapterBookmarks = bookmarksForCurrentChapter(verseCount: verseCount)
-
-        // Clear and load new document
-        bridge.emit(event: "clear_document")
-
-        // Send bookmark labels before the document (Vue.js needs labels to render bookmark highlights)
-        sendLabelsToVueJS()
 
     let navigationAnchorRange =
       pendingLinkNavigationOrdinalRange
@@ -9316,7 +9375,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             originalOrdinalRange: navigationAnchorRange
       )
     else { return }
-        bridge.emit(event: "add_documents", data: document)
 
         infiniteScrollCoordinator.reset(book: currentBook, chapter: currentChapter)
 
@@ -9356,7 +9414,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 setupPayload = ReaderSetupContentPayload(jumpToOrdinal: ordinal)
             }
         }
-        emitSetupContent(setupPayload)
+
+        // Send labels before Android's atomic replacement so bookmark highlights can render.
+        sendLabelsToVueJS()
+        replaceDocument(
+            documentJSON: document,
+            setup: setupPayload
+        )
         setRenderedContentState(
             category: .bible,
             moduleName: activeModuleName,
@@ -9971,7 +10035,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func annotationDocumentLoader() -> BibleReaderAnnotationDocumentLoader {
         BibleReaderAnnotationDocumentLoader(
-            bridge: bridge,
+            documentReplacement: documentReplacementEmitter(),
             bookmarkService: bookmarkService,
             sendLabels: { [weak self] in
                 self?.sendLabelsToVueJS()
@@ -10181,6 +10245,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Encodes the combined reader/configuration payload consumed by the Vue.js application.
 
+     - Parameter initial: Whether Vue should apply the payload as an initial/replacement config.
      - Returns: JSON string containing `config` and `appSettings` sections for the current pane.
 
      Side effects:
@@ -10190,8 +10255,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Failure modes:
      - logs and returns `{}` if the typed bridge payload unexpectedly fails to encode
      */
-    private func buildConfigJSON() -> String {
-        guard let json = configurationCoordinator.configJSON(context: buildConfigContext()) else {
+    private func buildConfigJSON(initial: Bool = false) -> String {
+        guard let json = configurationCoordinator.configJSON(
+            context: buildConfigContext(),
+            initial: initial
+        ) else {
             logger.error("Failed to encode set_config bridge payload")
             return "{}"
         }

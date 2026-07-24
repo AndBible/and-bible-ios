@@ -1266,6 +1266,106 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     }
 
     /**
+     Replaces the visible Vue document in the same atomic JavaScript turn used by Android.
+
+     Android's `BibleView.replaceDocument()` evaluates `clear_document`, an initial
+     `set_config`, `add_documents`, and `setup_content` together. Keeping those events in one
+     evaluation prevents Vue's bootstrap palette from becoming visible between separate native
+     bridge calls.
+
+     - Parameters:
+       - configData: Raw JSON for the current `{ config, appSettings, initial: true }` payload.
+       - documentData: Raw JSON for the complete replacement document payload.
+       - setupData: Raw JSON for the replacement document's setup/scroll payload.
+     - Returns: `true` when the transaction was queued for an attached web view or test observer.
+     - Side effects: Clears and replaces the Vue document, reapplies current reader configuration,
+       and performs content setup in one `evaluateJavaScript` call.
+     - Failure modes: JavaScript runtime failures abort the remaining transaction and are reported
+       through the bridge console path; returns `false` when no web view or observer is attached.
+     */
+    @discardableResult
+    public func replaceDocument(
+        configData: String,
+        documentData: String,
+        setupData: String
+    ) -> Bool {
+        let js = """
+        try {
+          void bibleView.emit('clear_document', null); /* bible-bridge-event-end:clear_document */
+          void bibleView.emit('set_config', \(configData)); /* bible-bridge-event-end:set_config */
+          void bibleView.emit('add_documents', \(documentData)); /* bible-bridge-event-end:add_documents */
+          void bibleView.emit('setup_content', \(setupData)); /* bible-bridge-event-end:setup_content */
+        } catch(e) {
+          window.webkit.messageHandlers.bibleView.postMessage({
+            method:'console',
+            args:['BRIDGE','JS DOCUMENT REPLACEMENT ERROR: ' + e.message + ' ' + e.stack]
+          });
+        }
+        """
+        return evaluateJavaScript(js)
+    }
+
+    /**
+     Encodes typed document/setup payloads before queuing Android's atomic replacement transaction.
+
+     - Parameters:
+       - configData: Raw JSON for the current initial reader configuration.
+       - document: Encodable replacement document.
+       - setup: Encodable setup/scroll payload.
+     - Returns: `true` when encoding succeeds and the transaction is queued.
+     - Side effects: Evaluates one document-replacement transaction on successful encoding.
+     - Failure modes: Returns `false` without clearing the current document when either payload
+       cannot be encoded, or when no web view/test observer is attached.
+     */
+    @discardableResult
+    public func replaceDocument<Document: Encodable, Setup: Encodable>(
+        configData: String,
+        document: Document,
+        setup: Setup
+    ) -> Bool {
+        guard let documentBytes = try? bridgeEncoder.encode(document),
+              let documentJSON = String(data: documentBytes, encoding: .utf8),
+              let setupBytes = try? bridgeEncoder.encode(setup),
+              let setupJSON = String(data: setupBytes, encoding: .utf8) else {
+            return false
+        }
+        return replaceDocument(
+            configData: configData,
+            documentData: documentJSON,
+            setupData: setupJSON
+        )
+    }
+
+    /**
+     Encodes a typed setup payload for a replacement document that is already serialized as JSON.
+
+     - Parameters:
+       - configData: Raw JSON for the current initial reader configuration.
+       - documentData: Raw JSON for the complete replacement document.
+       - setup: Encodable setup/scroll payload.
+     - Returns: `true` when setup encoding succeeds and the transaction is queued.
+     - Side effects: Evaluates one document-replacement transaction on successful encoding.
+     - Failure modes: Returns `false` without clearing the current document when setup encoding
+       fails, or when no web view/test observer is attached.
+     */
+    @discardableResult
+    public func replaceDocument<Setup: Encodable>(
+        configData: String,
+        documentData: String,
+        setup: Setup
+    ) -> Bool {
+        guard let setupBytes = try? bridgeEncoder.encode(setup),
+              let setupJSON = String(data: setupBytes, encoding: .utf8) else {
+            return false
+        }
+        return replaceDocument(
+            configData: configData,
+            documentData: documentData,
+            setupData: setupJSON
+        )
+    }
+
+    /**
      Encodes a Swift event payload as JSON and emits it to Vue.js.
 
      This method is intentionally distinct from the raw `String` overload so callers can encode

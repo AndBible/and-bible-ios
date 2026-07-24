@@ -723,7 +723,25 @@ public struct BibleReaderView: View {
         let historyDialogToken = "historyDialog=\(historyDialogRequest == nil ? "none" : "presented")"
         let searchToken = "searchVisible=\(activeReaderDestination == .search ? "true" : "false")"
         let nightModeToken = "nightMode=\(nightMode ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(destinationToken);\(modalToken);\(historyDialogToken);\(searchToken);\(nightModeToken)"
+        let strongsModeToken = "strongsMode=\(strongsMode)"
+        let readerBackgroundToken =
+            "readerBackground=\(readerThemeSurfacePalette.backgroundColorInt)"
+        return [
+            windowToken,
+            contentToken,
+            tabOrdersToken,
+            myNotesToken,
+            studyPadToken,
+            strongsModeToken,
+            drawerToken,
+            overflowToken,
+            destinationToken,
+            modalToken,
+            historyDialogToken,
+            searchToken,
+            nightModeToken,
+            readerBackgroundToken,
+        ].joined(separator: ";")
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.

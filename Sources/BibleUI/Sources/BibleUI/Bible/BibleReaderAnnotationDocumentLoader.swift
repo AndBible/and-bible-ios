@@ -69,10 +69,11 @@ struct MemorizeDocumentEmission {
  - live bookmark/study-pad persistence through `BookmarkService`
  - active reader coordinates and SWORD verse lookup closures supplied by the controller
  - payload factories shared with bookmark bridge events
- - bridge event and rendered-content callbacks
+ - the shared Android-parity replacement emitter and rendered-content callbacks
 
- Outputs:
- - `clear_document`, `add_documents`, and `setup_content` bridge events consumed by Vue/BibleView
+Outputs:
+ - one atomic `clear_document`, `set_config`, `add_documents`, and `setup_content` transaction
+   consumed by Vue/BibleView
  - rendered-content state updates through the supplied callback
  - My Notes mutation revision increments through the supplied callback
 
@@ -80,7 +81,7 @@ struct MemorizeDocumentEmission {
  - reads bookmark, StudyPad, reading-progress, and memorization stores
  - mutates the active SWORD module cursor while building Memorize text, matching the previous
    controller behavior
- - emits JavaScript bridge events through `BibleBridge`
+ - emits JavaScript bridge events through `BibleReaderDocumentReplacementEmitter`
 
  Failure modes:
  - returns `false` when required client/module/range/label data cannot be resolved
@@ -123,8 +124,8 @@ struct BibleReaderAnnotationDocumentLoader {
         ReaderRenderedDocumentKind
     ) -> Void
 
-    /// Bridge used for Vue event emission.
-    private let bridge: BibleBridge
+    /// Shared Android-parity Vue document replacement transaction.
+    private let documentReplacement: BibleReaderDocumentReplacementEmitter
     /// Optional persistence facade for bookmark and StudyPad documents.
     private let bookmarkService: BookmarkService?
     /// Emits the current label list before annotation documents that render bookmark labels.
@@ -142,7 +143,7 @@ struct BibleReaderAnnotationDocumentLoader {
      Creates an annotation document loader for one reader pane.
 
      - Parameters:
-       - bridge: Active WebView bridge.
+       - documentReplacement: Shared atomic Vue document replacement transaction.
        - bookmarkService: Bookmark/StudyPad persistence facade, or `nil` when annotations are
          unavailable.
        - sendLabels: Callback that emits label state to Vue.
@@ -154,7 +155,7 @@ struct BibleReaderAnnotationDocumentLoader {
      - Failure modes: None.
      */
     init(
-        bridge: BibleBridge,
+        documentReplacement: BibleReaderDocumentReplacementEmitter,
         bookmarkService: BookmarkService?,
         sendLabels: @escaping () -> Void,
         setRenderedContentState: @escaping RenderedContentStateSetter,
@@ -162,7 +163,7 @@ struct BibleReaderAnnotationDocumentLoader {
         applyNightModeBackground: @escaping () -> Void,
         clearSelection: @escaping () -> Void
     ) {
-        self.bridge = bridge
+        self.documentReplacement = documentReplacement
         self.bookmarkService = bookmarkService
         self.sendLabels = sendLabels
         self.setRenderedContentState = setRenderedContentState
@@ -218,13 +219,14 @@ struct BibleReaderAnnotationDocumentLoader {
             ordinalRange: [range.start, range.end]
         )
 
-        bridge.emit(event: "clear_document")
         sendLabels()
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(
-            event: "setup_content",
-            data: ReaderSetupContentPayload(jumpToOrdinal: jumpToOrdinal)
-        )
+        guard documentReplacement.replace(
+            document: document,
+            setup: ReaderSetupContentPayload(jumpToOrdinal: jumpToOrdinal)
+        ) else {
+            annotationDocumentLoaderLogger.error("Failed to emit My Notes document replacement")
+            return false
+        }
         setRenderedContentState(.bible, "My Notes", "My Notes", currentChapter, docId, .standard)
         incrementMyNotesRevision()
         return true
@@ -289,13 +291,14 @@ struct BibleReaderAnnotationDocumentLoader {
             journalTextEntries: bookmarkService.studyPadEntries(labelId: labelId).map { studyPadEntryPayload($0) }
         )
 
-        bridge.emit(event: "clear_document")
         sendLabels()
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(
-            event: "setup_content",
-            data: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
-        )
+        guard documentReplacement.replace(
+            document: document,
+            setup: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
+        ) else {
+            annotationDocumentLoaderLogger.error("Failed to emit StudyPad document replacement")
+            return false
+        }
         setRenderedContentState(.bible, "StudyPad", label.name, nil, "journal_\(labelId.uuidString)", .studyPad)
         applyNightModeBackground()
         return true
@@ -391,9 +394,13 @@ struct BibleReaderAnnotationDocumentLoader {
         prepareVisibleState: () -> Void
     ) {
         prepareVisibleState()
-        bridge.emit(event: "clear_document")
-        bridge.emit(event: "add_documents", data: emission.documentJSON)
-        bridge.emit(event: "setup_content", data: ReaderSetupContentPayload())
+        guard documentReplacement.replace(
+            documentJSON: emission.documentJSON,
+            setup: ReaderSetupContentPayload()
+        ) else {
+            annotationDocumentLoaderLogger.error("Failed to emit Memorize document replacement")
+            return
+        }
         setRenderedContentState(
             AndroidSpecialDocumentIdentity.memorizeDocumentCategory,
             AndroidSpecialDocumentIdentity.memorizeDocumentInitials,
