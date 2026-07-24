@@ -502,6 +502,31 @@ public final class ReadingProgressStore {
     }
 
     /**
+     Deletes Android Read History rows as one persistence transaction.
+
+     Android stages any number of row removals inside `ReadHistoryDialog` and applies the complete
+     set when the dialog closes. Saving the filtered snapshot once preserves that all-or-nothing
+     interaction contract and avoids exposing observers to intermediate progress states.
+
+     - Parameter ids: Stable history-row identifiers staged by the dialog.
+     - Returns: Number of stored rows removed; unknown identifiers are ignored.
+     - Side effects: Persists at most one normalized reading-progress snapshot.
+     - Failure modes: Corrupt input, journal, or persistence failures throw before a successful
+       replacement snapshot is reported. An empty or entirely unknown set performs no write.
+     */
+    @discardableResult
+    public func deleteHistoryEntries(ids: Set<UUID>) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        var current = try strictSnapshot()
+        let originalCount = current.history.count
+        current.history.removeAll { ids.contains($0.id) }
+        let removedCount = originalCount - current.history.count
+        guard removedCount > 0 else { return 0 }
+        try save(current)
+        return removedCount
+    }
+
+    /**
      Builds Android's reading-progress analytics for the active cycle.
 
      - Parameters:

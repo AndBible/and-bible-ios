@@ -12,7 +12,7 @@ import Foundation
  */
 internal final class AndroidModuleBackupArchiveExporter {
     /// Android's required literal first ZIP member for module backups.
-    private static let manifestFileName = "AndBibleBackupManifest.json"
+    private static let manifestFileName = AndroidBackupManifestCodec.fileName
 
     /// Producer build number emitted in Android's complete four-field manifest contract.
     private let producerVersion: Int
@@ -117,7 +117,7 @@ internal final class AndroidModuleBackupArchiveExporter {
         }
 
         let entries = [
-            ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: manifestData),
+            ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: try manifestData),
         ] + inventory.entries.map {
             ZipArchiveWriterFileEntry(name: $0.archivePath, pinnedFile: $0.source)
         }
@@ -149,10 +149,12 @@ internal final class AndroidModuleBackupArchiveExporter {
 
     /// Full Android kotlinx-serialization field set in declaration order, including nullable data.
     private var manifestData: Data {
-        Data(
-            "{\"backupType\":\"MODULE_BACKUP\",\"contains\":null,\"manifestVersion\":1,"
-                .appending("\"andBibleVersion\":\(producerVersion)}")
-                .utf8
-        )
+        get throws {
+            try AndroidBackupManifestCodec.encode(
+                backupType: "MODULE_BACKUP",
+                contains: nil,
+                andBibleVersion: producerVersion
+            )
+        }
     }
 }

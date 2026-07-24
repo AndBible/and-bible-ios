@@ -94,11 +94,15 @@ final class EpubAndroidModuleBackupCompatibilityTests: XCTestCase {
             .replacingOccurrences(
                 of: "<dc:language>en</dc:language>",
                 with: "<dc:language>pt-BR</dc:language>"
-            )
+        )
         try Data(package.utf8).write(to: packageURL, options: .atomic)
 
+        let packageDocument = try EpubPackageDocumentParser.parse(packageRootURL: androidTree)
         let metadata = try EpubReader.androidModuleMetadata(epubDirectoryURL: androidTree)
 
+        XCTAssertEqual(packageDocument.title, "Metadata Android Book")
+        XCTAssertEqual(packageDocument.description, "Canonical description")
+        XCTAssertEqual(packageDocument.language, "pt-BR")
         XCTAssertEqual(metadata.title, "Metadata Android Book")
         XCTAssertEqual(metadata.description, "Canonical description")
         XCTAssertEqual(metadata.language, "pt-BR")

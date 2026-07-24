@@ -641,3 +641,84 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "പാഠ്യപുസ്തകം";
+
+/* Android shared translations */
+"administration" = "കാര്യനിര്‍വഹണം";
+"main_menu" = "മെനു";
+"options_menu_night_mode" = "രാത്രി രീതി";
+"rdg_plan_title" = "വായന പദ്ധതി";
+
+/* Android shared translations */
+"backup_and_restore" = "ബാക്കപ്പ് & പൂര്‍വ്വസ്ഥിതിയിലാക്കുക";
+"compare_description" = "പരിഭാഷ താരതമ്യം ചെയ്യുക";
+"prefs_text_size_sample_text" = "സാമ്പിൾ വാചകം";
+"reset_generic" = "പുനഃരാരംഭിക്കൂ";
+"search_bible_section_group_prompt" = "എവിടെ തിരെയണം";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Having these files attached helps app developers a lot in fixing the reported bug.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_email_text" = "Next, please select your preferred email application (Gmail for example) to send the report to the developer team.";
+"bug_report_email_title" = "Send bug report via email";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE";
+"report_bug_email_subject_3" = "[%1$@] Bug report for %2$@ %3$@";
+"report_bug_heading1" = "Instructions:";
+"report_bug_heading_3" = "Attachments:";
+"report_bug_heading_4" = "Device info:";
+"report_bug_line_1" = "Tell us briefly what did you do / what happened when issue took place.";
+"send_bug_report_title" = "Feedback / bug report";
+
+/* Integrated Android app-owned parity translations */
+"label_unlabelled" = "ശീർഷകം ഇല്ലാത്തത്";
+"new_item" = "പുതിയ";
+"assign_labels" = "ശീർഷകം നിർണ്ണയിക്കുക";
+"empty_list" = "കാണിക്കുവാൻ ഒന്നുമില്ല";
+"label_name_prompt" = "പേര്";
+"sort_by_bible_book" = "ബൈബിള്‍ പുസ്തക ക്രമത്തിൽ";
+"sort_by_date" = "തീയതി ക്രമത്തിൽ";
+"next" = "അടുത്ത";
+"previous" = "മുൻപുള്ള";
+"rdg_plan_day" = "ദിവസം %@";
+"rdg_plan_selector_title" = "ഒരു വായന പദ്ധതി തിരഞ്ഞെടുക്കുക";
+"selectPassage" = "ഭാഗം";
+"delete_doc" = "നീക്കി കളയുക %@?";
+"delete_index" = "അന്വേഷണപട്ടിക നീക്കി കളയുക";
+"delete_search_index_doc" = "പട്ടിക നീക്കി കളയുക %@?";
+"doc_type_bible" = "വേദപുസ്തകം";
+"doc_type_book" = "പുസ്തകം";
+"doc_type_dictionary" = "നിഘണ്ഡു";
+"doc_type_map" = "ഭൂപടം";
+"colors_night_mode_title" = "രാത്രി രീതി";
+"repeat_passage" = "ഖണ്ഡിക ആവർത്തിക്കുക";
+"reset_settings" = "പുനഃരാരംഭിക്കൂ";
+"system_speak_settings" = "ഓപ്പൺ സിസ്റ്റം TTS സെറ്റിങ്ങ്സ്";
+"index_create" = "ഉണ്ടാക്കുക";
+"rebuild_index" = "സൂചിക വീണ്ടും ഉണ്ടാക്കുക";
+"search_dictionary_hint" = "നിഘണ്ടുവിൽ തിരയുക";
+"task_kill_warning" = "ഈ പ്രവർത്തനം തീരുന്നതിനു മുമ്പായി മറ്റൊരു പ്രവർത്തനം തുടങ്ങിയാൽ ദീർഘസമയം വേണ്ടിവരുന്ന ഇതു നിലച്ചുപോകാൻ സാധ്യത ഉണ്ട്";
+
+/* Android shared translations */
+"lang_default" = "ഉറപ്പിച്ചിട്ടുള്ളതു";
+"my_notes_abbreviation" = "എന്റെ കുറിപ്പുകൾ";
+"sort_by_alphabetical" = "അക്ഷരമാല ക്രമത്തിൽ";

@@ -31,28 +31,36 @@ extension AndBibleUITests {
 
         openSettings(in: app)
         let initialPinRow = requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20)
-        let pinField = initialPinRow.elementType == .textField
-            ? initialPinRow
-            : initialPinRow.textFields.firstMatch
-        XCTAssertTrue(pinField.waitForExistence(timeout: 10), "Calculator PIN row must contain an editable field.")
+        tapElementReliably(initialPinRow, timeout: 10)
+        let pinField = requireElement("calculatorPinDialogField", in: app, timeout: 10)
         replaceText(in: pinField, with: customPIN, placeholderHints: ["PIN"])
-        XCTAssertEqual(pinField.value as? String, customPIN)
+        // XCTest masks secure-field values. The relaunch and exact-PIN unlock below verify that the
+        // entered value—not merely its length—was persisted through the production settings path.
+        tapAppOwnedDialogAction(
+            "calculatorPinDialogAction::confirm",
+            dialogIdentifier: "calculatorPinDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
 
         let initialShowCalculatorToggle = requireSettingsNavigationControl(
             "showCalculatorToggle",
             in: app,
             timeout: 20
         )
-        if initialShowCalculatorToggle.value as? String != "1" {
+        if !accessibilitySwitchValue(initialShowCalculatorToggle.value as? String, matches: "1") {
             toggleSwitchReliably(
                 initialShowCalculatorToggle,
                 expectedValue: "1",
                 timeout: 10
             )
         }
-        XCTAssertEqual(
-            requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).value as? String,
-            "1",
+        XCTAssertTrue(
+            accessibilitySwitchValue(
+                requireSettingsNavigationControl("showCalculatorToggle", in: app, timeout: 10).value as? String,
+                matches: "1"
+            ),
             "Android keeps Settings visible after enabling the gate and persists it for the next resume."
         )
         XCTAssertFalse(app.otherElements["calculatorGateRoot"].exists)
@@ -117,15 +125,21 @@ extension AndBibleUITests {
         let helpButton = requireSettingsNavigationControl("discreteHelpButton", in: app, timeout: 20)
         tapElementReliably(helpButton, timeout: 10)
         XCTAssertTrue(
-            app.otherElements["discreteModeSecurityHelp"].waitForExistence(timeout: 10)
+            requireElement("androidMyDocumentDecisionDialog", in: app, timeout: 10).exists
         )
         let platformHelpText = "On iOS, the app icon changes to a calculator when 'Hide religious symbols' is enabled, but the app display name cannot be changed at runtime due to platform limitations."
         XCTAssertTrue(
             app.staticTexts.matching(
-                NSPredicate(format: "label == %@", platformHelpText)
-            ).firstMatch.exists
+                NSPredicate(format: "label CONTAINS %@", platformHelpText)
+            ).firstMatch.waitForExistence(timeout: 10)
         )
-        tapElementReliably(requireElement("Done", in: app, timeout: 10), timeout: 10)
+        tapAppOwnedDialogAction(
+            "androidMyDocumentDecisionDialogAction::okay",
+            dialogIdentifier: "androidMyDocumentDecisionDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
 
         XCTAssertTrue(requireSettingsNavigationControl("calculatorPinRow", in: app, timeout: 20).exists)
         XCTAssertTrue(requireSettingsNavigationControl("discreteModeToggle", in: app, timeout: 20).exists)
@@ -184,27 +198,25 @@ extension AndBibleUITests {
             "iOS backup destination copy must not advertise Google Drive as the native backup target."
         )
 
-        let destinationCancelButton = firstExistingElement(
-            [
-                app.buttons["backupDestinationCancelButton"].firstMatch,
-                app.sheets.buttons["Cancel"].firstMatch,
-                app.alerts.buttons["Cancel"].firstMatch,
-                app.buttons["Cancel"].firstMatch,
-            ],
+        tapAppOwnedDialogAction(
+            "backupDestinationDialogAction::cancel",
+            dialogIdentifier: "backupDestinationDialog",
+            expectedTitle: "Cancel",
+            in: app,
             timeout: 10
         )
-        XCTAssertNotNil(destinationCancelButton, "Expected Backup destination dialog to expose a cancel action.")
-        guard let destinationCancelButton else {
-            return
-        }
-        tapElementReliably(destinationCancelButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "idle", in: app, timeout: 10)
 
         tapElementReliably(databaseBackupButton, timeout: 10)
         waitForElementValue("importExportScreen", toEqual: "backupDestinationPresented", in: app, timeout: 20)
 
-        let shareButton = requireElement("backupDestinationShareButton", in: app, timeout: 10)
-        tapElementReliably(shareButton, timeout: 10)
+        tapAppOwnedDialogAction(
+            "backupDestinationDialogAction::share",
+            dialogIdentifier: "backupDestinationDialog",
+            expectedTitle: "Share",
+            in: app,
+            timeout: 10
+        )
         waitForElementValue("importExportScreen", toEqual: "shareSheetPresented", in: app, timeout: 20)
 
         let closeButton = firstExistingElement(
@@ -267,11 +279,18 @@ extension AndBibleUITests {
 
         chooseSyncBootstrapPromptOption(
             "Copy from this device to Cloud",
+            actionIdentifier: "syncBootstrapDialogAction::create",
             expecting: ["pendingConfirmation": "resetCloud:mydocuments"],
             in: app,
             timeout: 10
         )
-        tapAlertButton("OK", in: app, timeout: 10)
+        tapAppOwnedDialogAction(
+            "syncConfirmationDialogAction::confirm",
+            dialogIdentifier: "syncConfirmationDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
 
         waitForSyncState(
             [
@@ -292,8 +311,8 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
-     *   - enters one invalid server URL and commits the inline credential edit through the
-     *     Android-equivalent keyboard commit action
+     *   - opens Android's server `EditTextPreference`, enters one invalid URL, and presses its
+     *     app-owned OK action
      *   - disables the bookmarks category through the production toggle and observes the immediate
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
@@ -307,7 +326,7 @@ extension AndBibleUITests {
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
-     *   - fails if reopening the sheet does not preserve the exported `enabled=none` state token
+     *   - fails if reopening the destination does not preserve the exported `enabled=none` state token
      *   - fails if switching backend does not expose the iCloud section immediately and after
      *     direct reopen
      */
@@ -323,12 +342,27 @@ extension AndBibleUITests {
             enabled: "bookmarks"
         )
 
+        tapElementReliably(
+            requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
+            timeout: 5
+        )
         let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
         replaceText(in: serverField, with: "not-a-url")
-        let commitButton = requireElement("syncNextCloudServerURLCommitButton", in: app, timeout: 5)
-        tapElementReliably(commitButton, timeout: 2)
+        tapAppOwnedDialogAction(
+            "syncNextCloudServerURLAction::confirm",
+            dialogIdentifier: "syncNextCloudServerURL",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
         waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
-        tapAlertButton("OK", in: app, timeout: 10)
+        tapAppOwnedDialogAction(
+            "syncErrorDialogAction::okay",
+            dialogIdentifier: "syncErrorDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
 
         toggleSyncCategory(
             "syncCategoryToggle::bookmarks",
@@ -376,10 +410,14 @@ extension AndBibleUITests {
      `restartRequired=true` / `.pendingRestart`. The live runtime rebuild must keep the settings
      route open while refreshing data-bound reader panes underneath it. It intentionally does not
      require a signed-in iCloud account or successful CloudKit adoption; those outcomes are separate
-     service contracts, while this test protects the production wiring to the live applier.
+     service contracts. Unprovisioned simulator apps cannot launch with CloudKit entitlements, so
+     this test explicitly substitutes a local SwiftData container only at that unavailable boundary.
+     It still exercises the production toggle, mode-change handler, runtime construction, deferred
+     shell swap, persistence, state transition, and app-owned route-survival wiring.
      */
     func testSyncSettingsICloudToggleDoesNotRequireRestart() {
         let app = makeApp()
+        app.launchEnvironment["UITEST_LOCAL_ICLOUD_RUNTIME_CONTAINER"] = "1"
         app.launch()
 
         _ = openSyncSettingsFromReaderAction(in: app)
@@ -401,6 +439,15 @@ extension AndBibleUITests {
         }
 
         waitForICloudSyncRuntimeApplyToSettle(in: app, timeout: 30)
+        waitForSyncState(
+            ["icloudEnabled": "true", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].exists,
+            "The live runtime apply must preserve the app-owned Sync Settings activity."
+        )
     }
 
     /**

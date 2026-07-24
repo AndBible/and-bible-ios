@@ -80,6 +80,9 @@ struct AIQuickSetupCredentialDialog: View {
     /// SwiftData context used for the provider, model, and default-model transaction.
     @Environment(\.modelContext) private var modelContext
 
+    /// Current appearance used by the shared AppCompat dialog marker.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Selected Android-recommended setup.
     let option: AIRecommendedSetup
     /// Device-local Keychain boundary.
@@ -100,7 +103,7 @@ struct AIQuickSetupCredentialDialog: View {
 
     var body: some View {
         AIAndroidDialogSurface(title: dialogTitle) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(
                         String(
@@ -109,7 +112,7 @@ struct AIQuickSetupCredentialDialog: View {
                         )
                     )
                     if let apiKeyURL {
-                        Link(
+                        AndroidDialogLink(
                             AIProviderPresentation.displayName(for: option.provider),
                             destination: apiKeyURL
                         )
@@ -138,7 +141,6 @@ struct AIQuickSetupCredentialDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 360)
         } actions: {
             AIAndroidDialogAction(
                 title: testing
@@ -161,7 +163,11 @@ struct AIQuickSetupCredentialDialog: View {
             )
             .accessibilityIdentifier("aiQuickSetupSaveButton")
         }
-        .accessibilityIdentifier("aiQuickSetupCredentialScreen")
+        .androidAccessibilityIdentityMarker(
+            label: dialogTitle,
+            accessibilityIdentifier: "aiQuickSetupCredentialScreen",
+            surfaceColor: AndroidDialogSurfacePalette.background(for: colorScheme)
+        )
         .onDisappear { apiKey = "" }
     }
 

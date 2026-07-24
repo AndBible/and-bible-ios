@@ -97,6 +97,15 @@ public struct ImportExportView: View {
     /// SwiftData context used by backup import/export services.
     @Environment(\.modelContext) private var modelContext
 
+    /// Fallback navigation dismissal for standalone callers outside the reader destination owner.
+    @Environment(\.dismiss) private var dismiss
+
+    /// Reader/workspace palette shared with other app-owned Android activity surfaces.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Optional reader-owned destination dismissal that avoids relying on native navigation chrome.
+    private let onDismiss: (() -> Void)?
+
     /// Controls presentation of the share sheet after a successful export.
     @State private var showExportSheet = false
 
@@ -250,6 +259,8 @@ public struct ImportExportView: View {
     public init(speakService: SpeakService? = nil) {
         self.startupRestoreImportTarget = nil
         self.speakService = speakService
+        self.surfacePalette = .standard
+        self.onDismiss = nil
     }
 
     /**
@@ -269,10 +280,14 @@ public struct ImportExportView: View {
      */
     init(
         startupRestoreImportTarget: RestoreWorkflowTarget?,
-        speakService: SpeakService? = nil
+        speakService: SpeakService? = nil,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onDismiss: (() -> Void)? = nil
     ) {
         self.startupRestoreImportTarget = startupRestoreImportTarget
         self.speakService = speakService
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
     }
 
     /**
@@ -396,142 +411,44 @@ public struct ImportExportView: View {
     }
 
     /**
-     Builds Android's BackupActivity sections using native iOS file plumbing.
+     Builds Android's app-owned BackupActivity and attaches only legitimate external file/share
+     handoffs plus app-owned dialogs.
+
+     Side effects: Activity commands mutate parent workflow state; platform presenters activate only
+     after explicit Files/share actions.
+
+     Failure modes: Operation failures are retained in `statusMessage` and presented by the shared
+     Android decision dialog layer.
      */
     public var body: some View {
-        List {
-            Section {
-                ForEach(BackupWorkflowTarget.allCases) { target in
-                    BackupWorkflowOptionRow(
-                        title: target.localizedTitle,
-                        description: target.localizedDescription,
-                        value: target,
-                        selection: backupTarget,
-                        accessibilityIdentifier: "backupWorkflowTarget.\(target.rawValue)Button"
-                    )
-                }
-
-                Button {
-                    beginBackup()
-                } label: {
-                    HStack {
-                        Text(String(localized: "backup_to", defaultValue: "Backup to..."))
-                        Spacer()
-                        if isBackingUp {
-                            ProgressView()
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("backupWorkflowBackupButton")
-                .disabled(isBackupWorkflowBusy)
-            } header: {
-                Text(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
-            }
-
-            Section {
-                ForEach(RestoreWorkflowTarget.allCases) { target in
-                    BackupWorkflowOptionRow(
-                        title: target.localizedTitle,
-                        description: target.localizedDescription,
-                        value: target,
-                        selection: restoreTarget,
-                        accessibilityIdentifier: "restoreWorkflowTarget.\(target.rawValue)Button"
-                    )
-                }
-
-                Button {
-                    beginRestoreOrImport()
-                } label: {
-                    HStack {
-                        Text(String(localized: "backup_restore_from2", defaultValue: "Restore or Import from..."))
-                        Spacer()
-                        if isRestoringOrImporting {
-                            ProgressView()
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("backupWorkflowRestoreButton")
-                .disabled(isBackupWorkflowBusy)
-
-                if isInstallingDocument {
-                    let progress = documentInstallProgress ?? ModuleInstallProgress(phase: .queued)
-                    HStack(spacing: 12) {
-                        Text(ModuleBrowserView.installPhaseText(
-                            progress.phase,
-                            progressPercent: progress.percent
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        Spacer()
-                        if let fraction = progress.fraction {
-                            ProgressView(value: fraction)
-                                .frame(width: 84)
-                        } else {
-                            ProgressView()
-                        }
-                    }
-                    .accessibilityIdentifier("documentInstallProgress")
-                }
-            } header: {
-                Text(String(localized: "backup_restore2", defaultValue: "Restore or Import"))
-            }
-
-            Section {
-                Text(String(
-                    localized: "reset_databases_description",
-                    defaultValue: "Reset individual databases to their initial empty state. This cannot be undone."
-                ))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-                ForEach(resetCategories) { category in
-                    Button(role: .destructive) {
-                        pendingResetCategory = category
-                    } label: {
-                        Text(category.localizedBackupResetButtonTitle)
-                    }
-                    .accessibilityIdentifier(category.backupResetAccessibilityIdentifier)
-                    .disabled(isBackupWorkflowBusy)
-                }
-            } header: {
-                Text(String(localized: "reset_databases_title", defaultValue: "Reset Databases"))
-            }
-
-        }
-        .accessibilityIdentifier("importExportScreen")
-        .accessibilityValue(accessibilityState)
-        .navigationTitle(String(localized: "backup_and_restore", defaultValue: "Backup & Restore"))
+        AndroidBackupRestoreActivityView(
+            surfacePalette: surfacePalette,
+            backupTarget: backupTarget,
+            restoreTarget: restoreTarget,
+            resetCategories: resetCategories,
+            isBackingUp: isBackingUp,
+            isRestoringOrImporting: isRestoringOrImporting,
+            isWorkflowBusy: isBackupWorkflowBusy,
+            documentInstallProgress: isInstallingDocument
+                ? documentInstallProgress ?? ModuleInstallProgress(phase: .queued)
+                : nil,
+            accessibilityValue: accessibilityState,
+            onBack: dismissActivity,
+            onBackup: beginBackup,
+            onRestoreOrImport: beginRestoreOrImport,
+            onReset: { pendingResetCategory = $0 }
+        )
         .onAppear {
             presentStartupRestoreImportPickerIfNeeded()
         }
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .alert(
-            String(localized: "backup_backup_title", defaultValue: "Backup to where?"),
-            isPresented: $showBackupDestinationDialog,
-        ) {
-            Button(String(localized: "backup_phone_storage", defaultValue: "Phone storage")) {
-                finishPendingBackupExport(to: .phoneStorage)
+        .overlay {
+            if showBackupDestinationDialog {
+                AndroidDecisionDialog(title: String(localized: "backup_backup_title", defaultValue: "Backup to where?"), message: String(localized: "backup_backup_message_ios", defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"), actions: [
+                    .init(id: "phone", title: String(localized: "backup_phone_storage", defaultValue: "Phone storage"), style: .normal) { chooseBackupDestination(.phoneStorage) },
+                    .init(id: "share", title: String(localized: "share", defaultValue: "Share"), style: .normal) { chooseBackupDestination(.share) },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal, perform: cancelBackupDestinationChoice)
+                ], accessibilityIdentifier: "backupDestinationDialog")
             }
-            .accessibilityIdentifier("backupDestinationPhoneStorageButton")
-            Button(String(localized: "share", defaultValue: "Share")) {
-                finishPendingBackupExport(to: .share)
-            }
-            .accessibilityIdentifier("backupDestinationShareButton")
-            Button(String(localized: "cancel"), role: .cancel) {
-                cancelPendingBackupExport()
-            }
-            .accessibilityIdentifier("backupDestinationCancelButton")
-        } message: {
-            Text(String(
-                localized: "backup_backup_message",
-                defaultValue: "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
-            ))
         }
         .fileExporter(
             isPresented: $showBackupFileExporter,
@@ -546,15 +463,17 @@ public struct ImportExportView: View {
                 ShareSheet(items: [url], onCompletion: handleBackupShareCompletion)
             }
         }
-        .sheet(item: $androidBackupArchive, onDismiss: cleanupDismissedAndroidBackupArchive) { archive in
-            AndroidDatabaseBackupImportSheet(
-                archive: archive,
-                isApplying: isApplyingAndroidBackup,
-                onCancel: dismissAndroidBackupArchive,
-                onApply: applyAndroidBackupSelections
-            )
-            .onAppear {
-                androidBackupArchivePendingCleanup = archive
+        .overlay {
+            if let archive = androidBackupArchive {
+                AndroidDatabaseBackupImportDialog(
+                    archive: archive,
+                    isApplying: isApplyingAndroidBackup,
+                    onDismiss: dismissAndroidBackupArchive,
+                    onApply: applyAndroidBackupSelections
+                )
+                .onAppear {
+                    androidBackupArchivePendingCleanup = archive
+                }
             }
         }
         .fileImporter(
@@ -564,93 +483,55 @@ public struct ImportExportView: View {
         ) { result in
             handleRestoreImportPickerResult(result)
         }
-        .sheet(
-            isPresented: $showAndroidModuleBackupExportSheet,
-            onDismiss: {
-                if !isExportingAndroidModuleBackup {
-                    dismissAndroidModuleBackupExportSelection()
-                }
-            }
-        ) {
-            AndroidModuleBackupExportSheet(
-                modules: androidModuleBackupExportModules,
-                isExporting: isExportingAndroidModuleBackup,
-                onCancel: dismissAndroidModuleBackupExportSelection,
-                onExport: exportAndroidModuleBackup(moduleNames:)
-            )
-        }
-        .alert(item: $pendingResetCategory) { category in
-            Alert(
-                title: Text(category.localizedBackupResetButtonTitle),
-                message: Text(String(
-                    format: String(
-                        localized: "reset_database_confirm",
-                        defaultValue: "This will permanently delete all data in \"%@\" and reset it to the initial state. This cannot be undone.\n\nAre you sure?"
-                    ),
-                    category.localizedBackupResetTitle
-                )),
-                primaryButton: .destructive(Text(String(localized: "reset", defaultValue: "Reset"))) {
-                    resetDatabase(category)
-                },
-                secondaryButton: .cancel(Text(String(localized: "cancel")))
-            )
-        }
-        .alert(
-            String(
-                localized: "android_module_backup_overwrite_title",
-                defaultValue: "Overwrite existing module files?"
-            ),
-            isPresented: Binding(
-                get: { pendingLocalModuleOverwrite != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingLocalModuleOverwrite = nil
-                    }
-                }
-            ),
-            presenting: pendingLocalModuleOverwrite
-        ) { confirmation in
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingLocalModuleOverwrite = nil
-            }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                pendingLocalModuleOverwrite = nil
-                performSupportedDocumentInstall(
-                    confirmation.request,
-                    overwritePolicy: .replaceExisting(
-                        confirmation.inspection.overwriteAuthorization
+        .overlay {
+            if showAndroidModuleBackupExportSheet {
+                AndroidModuleBackupExportDialog(
+                    isExporting: isExportingAndroidModuleBackup,
+                    onCancel: dismissAndroidModuleBackupExportSelection
+                ) {
+                    AndroidModuleBackupExportSheet(
+                        modules: androidModuleBackupExportModules,
+                        isExporting: isExportingAndroidModuleBackup,
+                        onCancel: dismissAndroidModuleBackupExportSelection,
+                        onExport: exportAndroidModuleBackup(moduleNames:)
                     )
-                )
+                }
             }
-        } message: { confirmation in
-            Text(ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection))
         }
-        .alert(
-            String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"),
-            isPresented: $showAndroidModuleBackupOverwriteAlert
-        ) {
-            Button(String(localized: "cancel"), role: .cancel) {
-                clearPendingAndroidModuleBackup()
+        .overlay {
+            if let category = pendingResetCategory {
+                AndroidDecisionDialog(title: category.localizedBackupResetButtonTitle, message: String(format: String(localized: "reset_database_confirm", defaultValue: "This will permanently delete all data in \"%@\" and reset it to the initial state. This cannot be undone.\n\nAre you sure?"), category.localizedBackupResetTitle), actions: [
+                    .init(id: "reset", title: String(localized: "reset", defaultValue: "Reset"), style: .destructive) { pendingResetCategory = nil; resetDatabase(category) },
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingResetCategory = nil }
+                ])
             }
-            Button(String(localized: "overwrite", defaultValue: "Overwrite"), role: .destructive) {
-                restorePendingAndroidModuleBackup()
+        }
+        .overlay {
+            if let confirmation = pendingLocalModuleOverwrite {
+                AndroidDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection), actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingLocalModuleOverwrite = nil },
+                    .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), style: .destructive) { pendingLocalModuleOverwrite = nil; performSupportedDocumentInstall(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization)) }
+                ])
             }
-        } message: {
-            Text(androidModuleBackupOverwriteMessage())
+        }
+        .overlay {
+            if showAndroidModuleBackupOverwriteAlert {
+                AndroidDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: androidModuleBackupOverwriteMessage(), actions: [
+                    .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { clearPendingAndroidModuleBackup() },
+                    .init(id: "overwrite", title: String(localized: "overwrite", defaultValue: "Overwrite"), style: .destructive) { restorePendingAndroidModuleBackup() }
+                ])
+            }
         }
         .androidToastFeedback(transientStatusMessage, bottomPadding: 48)
         .onChange(of: statusMessage) { _, newValue in
             showStatusAlert = newValue != nil
         }
-        .alert(
-            String(localized: "backup_and_restore", defaultValue: "Backup & Restore"),
-            isPresented: $showStatusAlert
-        ) {
-            Button(String(localized: "ok"), role: .cancel) {
-                statusMessage = nil
+        .overlay {
+            if showStatusAlert {
+                AndroidDecisionDialog(title: String(localized: "backup_and_restore", defaultValue: "Backup & Restore"), message: statusMessage ?? "", actions: [
+                    .init(id: "okay", title: String(localized: "ok"), style: .normal) { statusMessage = nil; showStatusAlert = false }
+                ])
             }
-        } message: {
-            Text(statusMessage ?? "")
         }
         .onDisappear {
             androidModuleBackupExportOperationID = nil
@@ -662,6 +543,40 @@ public struct ImportExportView: View {
             androidModuleBackupRestoreTask = nil
             isRestoringAndroidModuleBackup = false
         }
+    }
+
+    /**
+     Closes the app-owned BackupActivity through its reader owner or navigation fallback.
+
+     Side effects: Clears the reader destination when supplied; otherwise invokes SwiftUI's route
+     dismissal environment.
+
+     Failure modes: none; one and only one dismissal path is invoked.
+     */
+    private func dismissActivity() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
+    /**
+     Commits one Android backup-destination choice after dismissing the app-owned dialog.
+
+     - Parameter destination: Phone-storage or share handoff selected by the user.
+     - Side effects: Clears dialog state and advances the pending archive to its platform boundary.
+     - Failure modes: Missing pending payload is handled by `finishPendingBackupExport`.
+     */
+    private func chooseBackupDestination(_ destination: BackupExportDestination) {
+        showBackupDestinationDialog = false
+        finishPendingBackupExport(to: destination)
+    }
+
+    /** Dismisses Android's destination dialog and removes its pending temporary archive. */
+    private func cancelBackupDestinationChoice() {
+        showBackupDestinationDialog = false
+        cancelPendingBackupExport()
     }
 
     /**

@@ -1051,6 +1051,7 @@ extension AndBibleUITests {
         case "readerOpenBookmarksAction",
              "readerOpenHistoryAction",
              "readerOpenReadingPlansAction",
+             "readerOpenReadingProgressAction",
              "readerOpenDownloadsAction",
              "readerOpenSettingsAction",
              "readerOpenAboutAction",

@@ -487,6 +487,64 @@ public final class BookmarkStore {
        - save failures are swallowed by `save()`
      */
     public func delete(_ label: Label) {
+        delete(
+            label,
+            deletingBibleBookmarkIDs: [],
+            deletingGenericBookmarkIDs: []
+        )
+    }
+
+    /**
+     Deletes one label and, when requested, bookmarks that would be orphaned by that deletion.
+
+     This is the atomic persistence owner for Android's `deleteLabels(...,
+     deleteOrphanedBookmarks)` contract. The caller supplies bookmark identifiers produced by the
+     service-layer deletion preview; this store validates those identifiers against bookmarks that
+     still carry the target label before deleting anything.
+
+     - Parameters:
+       - label: Label to delete.
+       - deletingBibleBookmarkIDs: Bible bookmarks to remove with the label.
+       - deletingGenericBookmarkIDs: Generic bookmarks to remove with the label.
+     - Side effects: Deletes the requested bookmark graphs, detaches the target label from retained
+       bookmarks, repairs retained primary-label references, deletes the label, and commits one
+       bookmark-category journal transaction.
+     - Failure modes: Missing or stale requested bookmark identifiers are ignored. Fetch and commit
+       failures retain the store's existing best-effort logging behavior.
+     */
+    public func delete(
+        _ label: Label,
+        deletingBibleBookmarkIDs: Set<UUID>,
+        deletingGenericBookmarkIDs: Set<UUID>
+    ) {
+        stageDelete(
+            label,
+            deletingBibleBookmarkIDs: deletingBibleBookmarkIDs,
+            deletingGenericBookmarkIDs: deletingGenericBookmarkIDs
+        )
+        save()
+    }
+
+    /**
+     Stages Android label and optional orphan-bookmark deletion without committing the context.
+
+     This is the graph primitive used by the cross-category label service. Keeping persistence out
+     of this operation allows bookmark rows, workspace auto-assignment state, fidelity overrides,
+     and both remote-sync journals to share one outer transaction.
+
+     - Parameters:
+       - label: Label to delete in the caller-owned model context.
+       - deletingBibleBookmarkIDs: Bible bookmarks to remove with the label.
+       - deletingGenericBookmarkIDs: Generic bookmarks to remove with the label.
+     - Side effects: Stages bookmark graph and label deletions in `modelContext`; does not save.
+     - Failure modes: Missing or stale requested bookmark identifiers are ignored. The enclosing
+       transaction owns validation, journaling, commit, and rollback failures.
+     */
+    func stageDelete(
+        _ label: Label,
+        deletingBibleBookmarkIDs: Set<UUID>,
+        deletingGenericBookmarkIDs: Set<UUID>
+    ) {
         let labelId = label.id
 
         let bibleLinksDescriptor = FetchDescriptor<BibleBookmarkToLabel>()
@@ -503,7 +561,29 @@ public final class BookmarkStore {
                 return linkedLabel.id == labelId
             }
 
+        let bibleBookmarksToDelete = Set(
+            bibleLinks.compactMap { link -> UUID? in
+                guard let bookmarkID = link.bookmark?.id,
+                      deletingBibleBookmarkIDs.contains(bookmarkID) else {
+                    return nil
+                }
+                return bookmarkID
+            }
+        )
+        let genericBookmarksToDelete = Set(
+            genericLinks.compactMap { link -> UUID? in
+                guard let bookmarkID = link.bookmark?.id,
+                      deletingGenericBookmarkIDs.contains(bookmarkID) else {
+                    return nil
+                }
+                return bookmarkID
+            }
+        )
+
         for link in bibleLinks {
+            if let bookmarkID = link.bookmark?.id, bibleBookmarksToDelete.contains(bookmarkID) {
+                continue
+            }
             if link.bookmark?.primaryLabelId == labelId {
                 link.bookmark?.primaryLabelId = nil
             }
@@ -512,6 +592,9 @@ public final class BookmarkStore {
         }
 
         for link in genericLinks {
+            if let bookmarkID = link.bookmark?.id, genericBookmarksToDelete.contains(bookmarkID) {
+                continue
+            }
             if link.bookmark?.primaryLabelId == labelId {
                 link.bookmark?.primaryLabelId = nil
             }
@@ -519,8 +602,17 @@ public final class BookmarkStore {
             modelContext.delete(link)
         }
 
+        let allBibleBookmarks = (try? modelContext.fetch(FetchDescriptor<BibleBookmark>())) ?? []
+        for bookmark in allBibleBookmarks where bibleBookmarksToDelete.contains(bookmark.id) {
+            modelContext.delete(bookmark)
+        }
+
+        let allGenericBookmarks = (try? modelContext.fetch(FetchDescriptor<GenericBookmark>())) ?? []
+        for bookmark in allGenericBookmarks where genericBookmarksToDelete.contains(bookmark.id) {
+            modelContext.delete(bookmark)
+        }
+
         modelContext.delete(label)
-        save()
     }
 
     /**

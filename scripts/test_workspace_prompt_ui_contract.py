@@ -6,6 +6,7 @@ Regression tests for the workspace prompt UI-test lookup contract.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -177,10 +178,10 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         prompt_source = source[prompt_start:]
 
         self.assertIn(".focused($isNameFieldFocused)", prompt_source)
-        self.assertIn(".onAppear", prompt_source)
-        self.assertIn("requestNameFieldFocus()", prompt_source)
-        self.assertIn(".task(id: prompt.id)", prompt_source)
+        self.assertIn(".onAppear { isNameFieldFocused = true }", prompt_source)
+        self.assertIn(".task(id: prompt)", prompt_source)
         self.assertIn("await Task.yield()", prompt_source)
+        self.assertGreaterEqual(prompt_source.count("isNameFieldFocused = true"), 2)
 
     def test_workspace_prompt_is_selector_owned_instead_of_nested_sheet(self) -> None:
         """The create/rename/clone prompt is owned by the selector, matching Android dialog scope.
@@ -201,15 +202,21 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         ).read_text()
 
         self.assertNotIn(".sheet(item: $workspacePrompt", source)
-        self.assertIn("workspacePromptOverlay(prompt)", source)
+        self.assertIn("private var selectorDialogOverlay", source)
+        self.assertIn("if let prompt = workspacePrompt", source)
+        self.assertIn("WorkspaceNamePromptView(", source)
+        prompt_source = source[source.index("private struct WorkspaceNamePromptView") :]
+        self.assertIn("AndroidDialogWindow(", prompt_source)
+        self.assertIn("AndroidDialogTextInput(", prompt_source)
 
     def test_workspace_prompt_screen_exports_accessibility_container(self) -> None:
-        """The prompt surface itself is an accessibility container, not only a visual `VStack`.
+        """The prompt exports a stable identity without replacing its child-control identities.
 
         XCTest waits for `workspaceNamePromptScreen` before resolving the text field so failures are
-        attributed to prompt presentation instead of broad text-field queries. A SwiftUI container
-        with only an identifier is not consistently queryable, so the production prompt must export
-        the container while preserving child controls.
+        attributed to prompt presentation instead of broad text-field queries. SwiftUI propagates
+        identifiers attached to composite containers into their descendants on current iOS
+        releases, so the shared dialog must retain semantic containment on the visible surface and
+        export its automation identity from a noninteractive sibling marker.
         """
         source = (
             REPO_ROOT
@@ -222,16 +229,35 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
         ).read_text()
         prompt_start = source.index("private struct WorkspaceNamePromptView")
         prompt_source = source[prompt_start:]
+        shared_dialog_source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Shared"
+            / "AndroidDialogWindow.swift"
+        ).read_text()
 
-        self.assertIn('.accessibilityIdentifier("workspaceNamePromptScreen")', prompt_source)
-        self.assertIn(".accessibilityElement(children: .contain)", prompt_source)
+        self.assertIn('accessibilityIdentifier: "workspaceNamePromptScreen"', prompt_source)
+        self.assertIn(".accessibilityElement(children: .contain)", shared_dialog_source)
+        self.assertIn("AndroidActivityAccessibilityMarker(", shared_dialog_source)
+        self.assertIn("accessibilityIdentifier: accessibilityIdentifier", shared_dialog_source)
+        self.assertIn(
+            "UITestRuntimeConfiguration.enablesDetailedAccessibilityExports",
+            shared_dialog_source,
+        )
+        self.assertNotIn(
+            ".accessibilityIdentifier(accessibilityIdentifier)",
+            shared_dialog_source,
+        )
 
     def test_workspace_selector_identifier_stays_scoped_to_list(self) -> None:
-        """The selector screen identifier does not overwrite the prompt overlay identity.
+        """The selector screen identifier does not overwrite child or prompt identities.
 
         The prompt is rendered inside the selector `ZStack`. If `workspaceSelectorScreen` is applied
-        to that outer stack, SwiftUI can export the prompt card with the selector identifier and make
-        `workspaceNamePromptScreen` unobservable. The identifier must stay on the list surface.
+        directly to that composite tree, SwiftUI can overwrite row and prompt identifiers. The
+        selector therefore exports its identity through the shared sibling marker.
         """
         source = (
             REPO_ROOT
@@ -242,20 +268,60 @@ class WorkspacePromptUITestContractTests(unittest.TestCase):
             / "Workspace"
             / "WorkspaceSelectorView.swift"
         ).read_text()
-        body_start = source.index("public var body: some View")
-        overlay_start = source.index("private func workspacePromptOverlay", body_start)
-        body_source = source[body_start:overlay_start]
+        list_start = source.index("private var workspaceList")
+        row_start = source.index("private func workspaceRow", list_start)
+        list_source = source[list_start:row_start]
+        selector_start = source.index("private var selectorActivity")
+        search_start = source.index("private var workspaceSearchBar", selector_start)
+        selector_source = source[selector_start:search_start]
 
-        self.assertIn(
-            '.accessibilityIdentifier("workspaceSelectorScreen")\n'
-            "            .disabled(workspacePrompt != nil)",
-            body_source,
-        )
-        self.assertNotIn(
-            '.accessibilityIdentifier("workspaceSelectorScreen")\n'
-            "        .navigationTitle",
-            body_source,
-        )
+        self.assertNotIn('.accessibilityIdentifier("workspaceSelectorScreen")', list_source)
+        self.assertNotIn('.accessibilityIdentifier("workspaceSelectorScreen")', selector_source)
+        self.assertIn(".androidAccessibilityIdentityMarker(", selector_source)
+        self.assertIn('accessibilityIdentifier: "workspaceSelectorScreen"', selector_source)
+        self.assertIn("selectorDialogOverlay", selector_source)
+
+    def test_workspace_selector_uses_shared_android_activity_contracts(self) -> None:
+        """The selector cannot regress to native iOS presentation or cosmetic-only parity.
+
+        Android owns the action bar, RecyclerView rows, per-row PopupMenu, Help dialog, staged
+        Dismiss/Save boundary, and selective settings-copy workflow. The iOS route must compose the
+        shared app-owned equivalents and keep mutations in value drafts until commit.
+        """
+        source = (
+            REPO_ROOT
+            / "Sources"
+            / "BibleUI"
+            / "Sources"
+            / "BibleUI"
+            / "Workspace"
+            / "WorkspaceSelectorView.swift"
+        ).read_text()
+
+        for required_contract in (
+            "AndroidActivityScreen(",
+            "AndroidActivityCommitBar(",
+            ".androidAnchoredPopupMenu(",
+            "AndroidPopupMenuSurface(",
+            "AndroidHelpDialog(topics: [.workspaces]",
+            "AndroidMultiselectDialogContent(",
+            "TextDisplaySettingsView(",
+            "WorkspaceSelectorDraft",
+            "initialDrafts",
+            "private func applyDrafts()",
+        ):
+            self.assertIn(required_contract, source)
+
+        for forbidden_native_contract in (
+            "List {",
+            ".contextMenu {",
+            ".navigationTitle(",
+            ".toolbar {",
+            "EditButton(",
+            ".sheet(",
+        ):
+            self.assertNotIn(forbidden_native_contract, source)
+        self.assertIsNone(re.search(r"(?<![A-Za-z])Menu\s*\(", source))
 
 
 if __name__ == "__main__":

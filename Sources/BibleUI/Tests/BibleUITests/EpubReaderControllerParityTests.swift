@@ -67,6 +67,56 @@ final class EpubReaderControllerParityTests: XCTestCase {
     }
 
     /**
+     Adopts an explicitly rebuilt EPUB generation without losing Android general-book position.
+
+     The controller opens the second numeric key, BibleCore atomically publishes a replacement
+     index generation, and the controller adopts it through the same activation contract used by
+     ordinary EPUB switching. The current key and PageManager identity must remain exact. A reader
+     from a separately installed EPUB must be rejected without changing the adopted generation.
+     Failure means Rebuild index can jump content, leave resource URLs on a pruned generation, or
+     replace the active pane after a stale cross-document callback.
+     */
+    func testRebuiltEpubGenerationAdoptionPreservesKeyAndRejectsDifferentDocument() throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try EpubReader.install(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+        controller.loadEpubEntry(key: "2")
+        let originalGeneration = try XCTUnwrap(controller.activeEpubReader).generationIdentifier
+
+        let rebuiltReader = try EpubReader.rebuildSearchIndex(identifier: identifier)
+
+        XCTAssertTrue(controller.adoptRebuiltEpubReader(rebuiltReader))
+        XCTAssertNotEqual(rebuiltReader.generationIdentifier, originalGeneration)
+        XCTAssertEqual(
+            controller.activeEpubReader?.generationIdentifier,
+            rebuiltReader.generationIdentifier
+        )
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookDocument, rebuiltReader.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+
+        let foreignArchiveURL = try makeArchive()
+        defer {
+            try? FileManager.default.removeItem(at: foreignArchiveURL.deletingLastPathComponent())
+        }
+        let foreignIdentifier = try EpubReader.install(epubURL: foreignArchiveURL)
+        defer { try? EpubReader.delete(identifier: foreignIdentifier) }
+        let foreignReader = try XCTUnwrap(EpubReader(identifier: foreignIdentifier))
+
+        XCTAssertFalse(controller.adoptRebuiltEpubReader(foreignReader))
+        XCTAssertEqual(
+            controller.activeEpubReader?.generationIdentifier,
+            rebuiltReader.generationIdentifier
+        )
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+    }
+
+    /**
      Migrates legacy EPUB fields into Android's durable general-book identity exactly once.
 
      Setup persists the legacy package identifier and an XHTML href with an anchor. Restore must

@@ -134,7 +134,7 @@ struct AIResponseLanguageDialog: View {
         AIAndroidDialogSurface(
             title: String(localized: "ai_language_title", defaultValue: "AI response language")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(AIResponseLanguageCatalog.options()) { option in
                         Button {
@@ -159,7 +159,6 @@ struct AIResponseLanguageDialog: View {
                     }
                 }
             }
-            .frame(maxHeight: 460)
         } actions: {
             Spacer()
             AIAndroidDialogAction(
@@ -167,7 +166,7 @@ struct AIResponseLanguageDialog: View {
                 action: onCancel
             )
         }
-        .accessibilityIdentifier("aiResponseLanguageDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiResponseLanguageDialog")
     }
 
     /** Returns whether one standard option represents the current stored value. */
@@ -230,7 +229,7 @@ struct AICustomLanguageDialog: View {
                 }
             )
         }
-        .accessibilityIdentifier("aiCustomLanguageDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiCustomLanguageDialog")
     }
 }
 
@@ -273,7 +272,7 @@ struct AIPermissionModeDialog: View {
                 action: onCancel
             )
         }
-        .accessibilityIdentifier("aiPermissionModeDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiPermissionModeDialog")
     }
 }
 
@@ -340,7 +339,7 @@ struct AINumericSettingDialog: View {
                 action: { onSave(max(Int(value) ?? invalidFallback, minimum)) }
             )
         }
-        .accessibilityIdentifier("aiNumericSettingDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiNumericSettingDialog")
     }
 }
 
@@ -399,12 +398,14 @@ struct AISystemPromptDialog: View {
                 }
             )
         }
-        .accessibilityIdentifier("aiSystemPromptDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiSystemPromptDialog")
     }
 }
 
 /** Android raw-log retention dialog with arbitrary positive days or disabled retention. */
 struct AIRawLogRetentionDialog: View {
+    /// Appearance used by the shared dialog input and checkbox palette.
+    @Environment(\.colorScheme) private var colorScheme
     /// Number-of-days draft.
     @State private var days: String
     /// Whether automatic deletion is disabled.
@@ -428,17 +429,27 @@ struct AIRawLogRetentionDialog: View {
             title: String(localized: "raw_log_retention_title", defaultValue: "Auto-delete old logs")
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("30", text: $days)
+                AndroidDialogTextInput(
+                    placeholder: "30",
+                    text: $days,
+                    colorScheme: colorScheme,
+                    isMultiline: false,
+                    accessibilityIdentifier: "aiRawLogRetentionDaysField"
+                )
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     #endif
                     .disabled(keepsAllLogs)
-                    .textFieldStyle(.plain)
-                    .padding(.vertical, 8)
-                    .overlay(alignment: .bottom) { Divider() }
-                Toggle(
-                    String(localized: "raw_log_retention_summary_disabled", defaultValue: "Disabled (keep all)"),
-                    isOn: $keepsAllLogs
+                    .opacity(keepsAllLogs ? 0.45 : 1)
+                AndroidCheckboxRow(
+                    title: String(
+                        localized: "raw_log_retention_summary_disabled",
+                        defaultValue: "Disabled (keep all)"
+                    ),
+                    isOn: $keepsAllLogs,
+                    foregroundColor: AndroidDialogSurfacePalette.primaryText(for: colorScheme),
+                    accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme),
+                    accessibilityIdentifier: "aiRawLogRetentionDisabledCheckbox"
                 )
             }
             .padding(.horizontal, 20)
@@ -454,7 +465,7 @@ struct AIRawLogRetentionDialog: View {
                 action: { onSave(keepsAllLogs ? nil : max(Int(days) ?? 30, 1)) }
             )
         }
-        .accessibilityIdentifier("aiRawLogRetentionDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiRawLogRetentionDialog")
     }
 }
 
@@ -489,6 +500,6 @@ struct AIResetUsageDialog: View {
                 action: onConfirm
             )
         }
-        .accessibilityIdentifier("aiResetUsageDialog")
+        .androidDialogAccessibilityIdentity(accessibilityIdentifier: "aiResetUsageDialog")
     }
 }

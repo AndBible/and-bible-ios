@@ -9,6 +9,9 @@ Checks:
 4. The iOS locale_pref picker must match Android arrays.xml values that have iOS resources.
 5. Runtime Calculator security help must use Android copy plus the truthful iOS name limitation.
 6. Every AI source key and literal fallback must have exact Android provenance.
+7. Product-feedback copy must cover every shipped locale with Android provenance or truthful iOS fallback.
+8. Every statically declared shipped localization key must participate in Android-source discovery.
+9. Shipped SwiftUI presentation code may not embed user-visible prose as an unlocalized literal.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -17,6 +20,7 @@ Usage:
   python3 scripts/check_settings_localization_guardrails.py --sync-android-shared-translations
   python3 scripts/check_settings_localization_guardrails.py --sync-android-ai-translations
   python3 scripts/check_settings_localization_guardrails.py --sync-discrete-security-copy
+  python3 scripts/check_settings_localization_guardrails.py --sync-product-feedback-copy
 """
 
 from __future__ import annotations
@@ -187,6 +191,60 @@ OBSOLETE_DISCRETE_MODE_SENTENCE = (
     "When enabled, the app always launches as a calculator. Tap = seven times to temporarily "
     "access the Bible. Disable this toggle to return to normal."
 )
+PRODUCT_FEEDBACK_ANDROID_KEYS = (
+    "bug_report_attachment_line_1",
+    "bug_report_email_text",
+    "bug_report_email_title",
+    "cancel",
+    "report_bug_big_heading",
+    "report_bug_email_subject_3",
+    "report_bug_heading1",
+    "report_bug_heading_3",
+    "report_bug_heading_4",
+    "report_bug_line_1",
+    "send_bug_report_title",
+)
+"""Android-owned strings used by the manual feedback and crash-evidence flow."""
+
+PRODUCT_FEEDBACK_IOS_FALLBACKS = {
+    "bug_report_not_sent": "Bug report not sent",
+    "bug_report_mail_unavailable": (
+        "Mail is not configured on this device. No bug report has been sent."
+    ),
+    "bug_report_export_failed": (
+        "The report could not be exported. No bug report has been sent."
+    ),
+    "bug_report_export": "Export report",
+    "bug_report_collecting_evidence": (
+        "Collecting available diagnostic evidence. Nothing has been sent."
+    ),
+    "bug_report_export_preparing": (
+        "Preparing your report for export. Nothing has been sent."
+    ),
+    "bug_report_no_attachments": "No diagnostic attachments were available.",
+    "bug_report_preparation_notes": "Preparation notes:",
+    "bug_report_app_id": "App id:",
+    "bug_report_version": "Version:",
+    "bug_report_operating_system": "Operating system:",
+    "bug_report_device": "Device:",
+    "bug_report_locale": "Locale:",
+    "bug_report_time_zone": "Time zone:",
+    "bug_report_physical_memory": "Physical memory bytes:",
+    "bug_report_free_storage": "Free storage bytes:",
+    "bug_report_unavailable": "Unavailable",
+    "bug_report_screenshot_unavailable": "Current app-window screenshot could not be captured.",
+    "bug_report_log_empty": "Current-process application log contained no exportable entries.",
+    "bug_report_log_unavailable": "Current-process application log could not be captured.",
+    "bug_report_attachment_too_large": "Attachment is too large to export: %@",
+    "bug_report_archive_too_large": "The complete bug report is too large to export.",
+}
+"""Truthful iOS-only report copy shipped as English fallback until Android owns an equivalent."""
+
+REMOVED_PRODUCT_FEEDBACK_KEYS = {
+    "bug_report_attached_evidence",
+    "bug_report_reproduction_prompt",
+}
+"""Superseded iOS-only strings replaced by Android's report-body resources."""
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -222,7 +280,9 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "ai_hidden_status": "hidden",
     "app_name": "app_name_andbible",
     "application_preferences": "settings",
+    "backup_backup_message_ios": "backup_backup_message",
     "bookmark": "add_bookmark1",
+    "buy_development2": "buy_development2",
     "calculator_pin": "prefs_calculator_pin",
     "calculator_pin_description": "prefs_calculator_pin_desc",
     "choose_book": "choosePassageBookName",
@@ -244,6 +304,7 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "footnotes": "prefs_show_footnotes_title",
     "fullscreen": "toggle_fullscreen",
     "help_bookmarks": "bookmarks",
+    "help_full_documentation_link": "help_full_documentation_link",
     "help_navigation": "help_nav_title",
     "help_search": "help_search_title",
     "help_workspaces": "help_workspaces_title",
@@ -253,7 +314,10 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "install_failed_reason": "install_failed_reason",
     "install_zip_successfull": "install_zip_successfull",
     "label_edit_name": "label_name_prompt",
+    "labels_search_hint": "labels_search_hint",
+    "paragraph_break": "add_paragraph_break",
     "links": "strongs_links",
+    "main_menu": "menu",
     "map": "doc_type_map",
     "mark_as_read_button": "prefs_mark_as_read_button_title",
     "memorization_indicators": "prefs_show_memorization_indicators_title",
@@ -319,10 +383,25 @@ ANDROID_SHARED_KEY_MAPPINGS = {
 """Explicit iOS-key to Android-key localization mappings.
 
 Entries cover iOS keys whose English text matches Android under a different
-resource name. They are intentionally one-to-one so the generated snapshot can
-show the exact Android source for every imported value. The table performs no
-file I/O by itself; build/sync code ignores entries whose keys are absent from a
-particular fixture or checkout.
+resource name or whose translated copy is Android-owned but requires an explicit
+iOS English platform boundary. They are intentionally one-to-one so the
+generated snapshot can show the exact Android source for every imported value.
+The table performs no file I/O by itself; build/sync code ignores entries whose
+keys are absent from a particular fixture or checkout.
+"""
+
+
+IOS_PLATFORM_ENGLISH_OVERRIDES = {
+    "backup_backup_message_ios": (
+        "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
+    ),
+}
+"""English platform-boundary copy layered on Android translation provenance.
+
+Each key must also appear in ``ANDROID_SHARED_KEY_MAPPINGS``. Non-English values
+continue to come from that Android source resource, so every shipped locale stays
+translated and tree-aligned; only English terminology that would be false or
+misleading on iOS is replaced explicitly.
 """
 
 
@@ -367,6 +446,240 @@ AI_LOCALIZATION_DEFAULT_RE = re.compile(
     r'defaultValue:\s*"((?:[^"\\]|\\.)*)"',
     re.DOTALL,
 )
+ANDROID_RUNTIME_RESOURCE_KEY_PATTERNS = (
+    re.compile(r'localizedDrawerString\(\s*"([^"]+)"'),
+    re.compile(r'localizedAndroidOverflowString\(\s*androidKey:\s*"([^"]+)"'),
+)
+SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES = (
+    "AndBible",
+    "Sources",
+)
+SHIPPED_SWIFT_LOCALIZATION_PATTERNS = (
+    re.compile(r'String\s*\(\s*localized:\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'\.localized\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'String\.LocalizationValue\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'NSLocalizedString\(\s*"([^"]+)"', re.DOTALL),
+    re.compile(r'localizedString\(\s*forKey:\s*"([^"]+)"', re.DOTALL),
+    re.compile(
+        r'\b(?:titleKey|bodyKey|labelKey|emphasizedTextKey|localizationKey|'
+        r'messageKey|summaryKey|descriptionKey|placeholderKey)\s*:\s*"([^"]+)"',
+        re.DOTALL,
+    ),
+)
+SHIPPED_SWIFT_UI_LITERAL_START_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9_])'
+    r'(?P<owner>Text|Button|Label|TextField|SecureField|Toggle|Picker|Menu|Section|'
+    r'navigationTitle|alert|confirmationDialog)'
+    r'\s*\(\s*"',
+)
+SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST = frozenset(
+    {
+        "AI",
+        "F",
+        "M",
+        "RRGGBB",
+        "W",
+    }
+)
+ANDROID_EXACT_DEFAULT_KEYS = frozenset(
+    {
+        "creating_index_for",
+        "help",
+        "help_ai_connection_text",
+        "help_ai_document_filter_text",
+        "help_ai_models_text",
+        "help_ai_providers_text",
+        "help_ai_settings_text",
+        "help_document_sync_text",
+        "help_global_tool_permissions_text",
+        "help_memorize_text",
+        "help_prompt_edit_text",
+        "help_read_more_link",
+        "help_reading_progress_text",
+        "help_tool_info_text",
+        "label_blue",
+        "label_green",
+        "label_red",
+        "label_salvation",
+        "label_underline",
+        "okay",
+        "plan_description_y1ntpspr",
+        "plan_description_y1ot1nt1_OTandNT",
+        "plan_description_y1ot1nt1_OTthenNT",
+        "plan_description_y1ot1nt1_chronological",
+        "plan_description_y1ot1nt2_mcheyne",
+        "plan_description_y1ot6nt4_profHorner",
+        "plan_description_y2ot1ntps2",
+        "plan_name_y1ntpspr",
+        "plan_name_y1ot1nt1_OTandNT",
+        "plan_name_y1ot1nt1_OTthenNT",
+        "plan_name_y1ot1nt1_chronological",
+        "plan_name_y1ot1nt2_mcheyne",
+        "plan_name_y1ot6nt4_profHorner",
+        "plan_name_y2ot1ntps2",
+        "workspace_number",
+    }
+)
+
+
+def discover_shipped_swift_localization_keys(repo_root: Path) -> set[str]:
+    """Return every statically declared localization key used by shipped Swift.
+
+    The inventory deliberately walks product code rather than a feature allowlist. It
+    recognizes direct Foundation/Swift localization APIs, typed `.localized` values,
+    and indirect localization-key fields used by presentation models. Test fixtures
+    and interpolated localization values are excluded because interpolated values are
+    format patterns rather than stable resource keys. The function performs read-only
+    source-file I/O and returns an empty set for focused fixtures without product
+    source directories.
+    """
+    keys: set[str] = set()
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
+            for pattern in SHIPPED_SWIFT_LOCALIZATION_PATTERNS:
+                keys.update(key for key in pattern.findall(source) if r"\(" not in key)
+    return keys
+
+
+def discover_unlocalized_swift_ui_literals(repo_root: Path) -> list[str]:
+    """Return shipped SwiftUI prose that bypasses named localization resources.
+
+    Literal-only technical glyphs and the exact Android calendar/format tokens in
+    ``SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST`` are permitted. Interpolated values are
+    permitted only when their non-interpolated remainder contains no letters; this
+    allows dynamic values such as a verse number while rejecting prose such as
+    ``"Page \\(number)"``. Each deterministic result includes source path, line,
+    constructor, and literal so CI failures point directly at the escape path.
+
+    The scan is read-only. It intentionally covers the standard SwiftUI controls
+    that create visible text while excluding accessibility-only automation markers.
+    """
+    failures: list[str] = []
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
+            for match in SHIPPED_SWIFT_UI_LITERAL_START_PATTERN.finditer(source):
+                parsed_literal = parse_swift_string_literal(source, match.end())
+                if parsed_literal is None:
+                    continue
+                literal, prose = parsed_literal
+                if literal in SHIPPED_SWIFT_UI_VERBATIM_ALLOWLIST:
+                    continue
+                if not any(character.isalpha() for character in prose):
+                    continue
+                line = source.count("\n", 0, match.start()) + 1
+                relative_path = source_path.relative_to(repo_root)
+                failures.append(
+                    f"{relative_path}:{line}:{match.group('owner')}:{literal}"
+                )
+    return failures
+
+
+def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | None:
+    """Parse one ordinary Swift string after its opening quote.
+
+    - Parameters:
+      - source: Complete Swift source text.
+      - start: Offset immediately after the opening quote.
+    - Returns: Raw literal content plus only the text outside interpolations, or
+      ``None`` for an unterminated literal.
+    - Side effects: none.
+    - Failure modes: malformed source returns ``None`` rather than inventing a
+      localization violation.
+    """
+    raw: list[str] = []
+    prose: list[str] = []
+    interpolation_depth = 0
+    index = start
+
+    while index < len(source):
+        character = source[index]
+
+        if interpolation_depth == 0:
+            if character == '"':
+                return "".join(raw), "".join(prose)
+            if character == "\\" and index + 1 < len(source):
+                next_character = source[index + 1]
+                raw.extend((character, next_character))
+                index += 2
+                if next_character == "(":
+                    interpolation_depth = 1
+                continue
+            raw.append(character)
+            prose.append(character)
+            index += 1
+            continue
+
+        raw.append(character)
+        if character == '"':
+            index += 1
+            while index < len(source):
+                nested_character = source[index]
+                raw.append(nested_character)
+                index += 1
+                if nested_character == "\\" and index < len(source):
+                    raw.append(source[index])
+                    index += 1
+                elif nested_character == '"':
+                    break
+            continue
+        if character == "(":
+            interpolation_depth += 1
+        elif character == ")":
+            interpolation_depth -= 1
+        index += 1
+
+    return None
+
+
+def discover_android_owned_swift_localization_keys(
+    repo_root: Path,
+    android_base: dict[str, str],
+) -> dict[str, str]:
+    """Map shipped literal Swift keys with Android provenance to Android resources.
+
+    A same-name Android resource establishes ownership directly; an explicit
+    mapping establishes ownership where platforms use different resource names.
+    Swift-only keys are intentionally omitted because Android cannot provide a
+    translation contract for them. The result is deterministic and performs no
+    writes beyond the source reads delegated to the shipped-key inventory.
+    """
+    source_keys: dict[str, str] = {}
+    for ios_key in discover_shipped_swift_localization_keys(repo_root):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        if android_key in android_base:
+            source_keys[ios_key] = android_key
+    return dict(sorted(source_keys.items()))
+
+
+def discover_android_runtime_resource_keys(repo_root: Path) -> set[str]:
+    """Return literal Android resource keys used by iOS runtime lookup helpers.
+
+    Drawer and overflow code intentionally resolves Android-named resources through
+    ``Bundle.main.localizedString`` rather than Swift ``String(localized:)``. Those keys are
+    invisible to the ordinary iOS-English intersection, so this source scan makes them explicit
+    Android-owned catalog inputs. Dynamic keys are deliberately excluded because they cannot be
+    validated without a concrete resource contract.
+    """
+    keys: set[str] = set()
+    for source_path in sorted((repo_root / "Sources").rglob("*.swift")):
+        source = source_path.read_text(encoding="utf-8")
+        for pattern in ANDROID_RUNTIME_RESOURCE_KEY_PATTERNS:
+            keys.update(pattern.findall(source))
+    return keys
+
+
 def discover_ai_localization_keys(repo_root: Path) -> set[str]:
     """Return every statically declared localization key in the AI feature.
 
@@ -419,6 +732,28 @@ def discover_ai_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
     return defaults
 
 
+def discover_shipped_swift_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
+    """Return every shipped literal localization fallback grouped by resource key.
+
+    Product code can render a ``defaultValue`` whenever a resource is unavailable, so
+    Android parity requires those fallbacks to match Android English just as strictly
+    as the bundled `.strings` value. Test sources are excluded, interpolation remains
+    outside this literal-only contract, and all file access is read-only.
+    """
+    defaults: dict[str, set[str]] = {}
+    for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
+        root = repo_root / relative_directory
+        if not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*.swift")):
+            if "Tests" in source_path.parts:
+                continue
+            source = source_path.read_text(encoding="utf-8")
+            for key, raw_default in AI_LOCALIZATION_DEFAULT_RE.findall(source):
+                defaults.setdefault(key, set()).add(unescape_ios(raw_default))
+    return defaults
+
+
 def missing_ai_localization_catalog_keys(
     repo_root: Path,
     catalog: AndroidSharedLocalization,
@@ -430,6 +765,29 @@ def missing_ai_localization_catalog_keys(
     including ``llm_actions``, has recorded Android provenance and values.
     """
     return sorted(discover_ai_localization_keys(repo_root) - set(catalog.english_by_key))
+
+
+def missing_android_owned_localization_catalog_keys(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Return Android-owned source keys absent from a generated catalog.
+
+    This extends the previous AI-only stale-snapshot check to every shipped
+    literal Swift localization key with Android provenance and to runtime
+    Android-resource helpers. A non-empty result means CI could otherwise pass
+    while the app falls back to a raw localization key at runtime.
+    """
+    catalog_keys = set(catalog.english_by_key)
+    android_resource_keys = set(catalog.android_resource_keys)
+    android_owned_source_keys = {
+        key
+        for key in discover_shipped_swift_localization_keys(repo_root)
+        if ANDROID_SHARED_KEY_MAPPINGS.get(key, key) in android_resource_keys
+    }
+    android_owned_source_keys.update(discover_ai_localization_keys(repo_root))
+    android_owned_source_keys.update(discover_android_runtime_resource_keys(repo_root))
+    return sorted(android_owned_source_keys - catalog_keys)
 
 
 def default_repo_root() -> Path:
@@ -642,6 +1000,7 @@ class AndroidSharedLocalization:
 
     safe_keys: list[str]
     english_mismatch_keys: list[str]
+    android_resource_keys: list[str]
     source_key_by_key: dict[str, str]
     english_by_key: dict[str, str]
     non_english_by_key: dict[str, list[str]]
@@ -818,6 +1177,110 @@ def audit_discrete_security_localizations(
                 for value in actual.values()
             ):
                 failures.append(f"obsolete false security sentence remains: {tree}:{locale}")
+
+    return failures
+
+
+def product_feedback_values_for_locale(
+    catalog: AndroidSharedLocalization,
+    locale: str,
+) -> dict[str, str]:
+    """Return complete product-feedback copy for one iOS locale.
+
+    Android-owned dialog, subject, and report-body text uses Android's translation when available
+    and Android English otherwise. iOS-only evidence, delivery, and export statements use a
+    truthful English fallback until Android owns equivalent resources. The function performs no
+    file I/O and raises ``ValueError`` if the Android-derived catalog is stale or incomplete.
+    """
+    missing = sorted(set(PRODUCT_FEEDBACK_ANDROID_KEYS) - set(catalog.english_by_key))
+    if missing:
+        raise ValueError(f"Android product-feedback copy missing source keys: {', '.join(missing)}")
+
+    translations = catalog.translations_by_locale.get(locale, {})
+    values = {
+        key: translations.get(key, catalog.english_by_key[key])
+        for key in PRODUCT_FEEDBACK_ANDROID_KEYS
+    }
+    values.update(PRODUCT_FEEDBACK_IOS_FALLBACKS)
+    return values
+
+
+def sync_product_feedback_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> SharedLocalizationSyncResult:
+    """Write complete product-feedback copy to both shipped iOS localization trees.
+
+    Every supported locale receives Android-owned values plus all iOS-only evidence and export
+    fallbacks. Superseded one-off report-body keys are removed from the same files. Writes are
+    limited to ``Localizable.strings`` resources beneath ``repo_root`` and ``ValueError`` is
+    propagated before the first write when Android provenance is incomplete.
+    """
+    values_by_locale = {
+        locale: product_feedback_values_for_locale(catalog, locale)
+        for locale in sorted(LOCALE_TO_ANDROID_VALUES)
+    }
+    changed_paths: set[Path] = set()
+    values_written = 0
+
+    for tree in ("AndBible", "Localizations"):
+        for locale, values in values_by_locale.items():
+            path = repo_root / tree / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                continue
+            changed, written = update_ios_strings_file(path, values)
+            if changed:
+                changed_paths.add(path)
+                values_written += written
+            changed, removed = remove_ios_strings_keys(path, REMOVED_PRODUCT_FEEDBACK_KEYS)
+            if changed:
+                changed_paths.add(path)
+                values_written += removed
+
+    return SharedLocalizationSyncResult(
+        files_changed=len(changed_paths),
+        values_written=values_written,
+    )
+
+
+def audit_product_feedback_localizations(
+    repo_root: Path,
+    catalog: AndroidSharedLocalization,
+) -> list[str]:
+    """Enforce complete, provenance-backed product-feedback copy in both resource trees.
+
+    The returned failures identify missing locale directories, missing resources, value drift, and
+    obsolete keys. The audit is read-only and raises ``ValueError`` when required Android source
+    keys are absent from the catalog.
+    """
+    failures: list[str] = []
+    expected_locales = set(LOCALE_TO_ANDROID_VALUES)
+
+    for tree in ("AndBible", "Localizations"):
+        root = repo_root / tree
+        actual_locales = {
+            path.name.removesuffix(".lproj")
+            for path in root.glob("*.lproj")
+            if path.is_dir()
+        }
+        for locale in sorted(expected_locales - actual_locales):
+            failures.append(f"product feedback missing locale: {tree}:{locale}")
+
+        for locale in sorted(expected_locales & actual_locales):
+            path = root / f"{locale}.lproj" / "Localizable.strings"
+            if not path.exists():
+                failures.append(f"product feedback missing resource: {tree}:{locale}")
+                continue
+            actual = parse_ios_strings(path)
+            expected = product_feedback_values_for_locale(catalog, locale)
+            for key, expected_value in sorted(expected.items()):
+                raw_value = actual.get(key)
+                if raw_value is None:
+                    failures.append(f"product feedback missing key: {tree}:{locale}:{key}")
+                elif unescape_ios(raw_value) != expected_value:
+                    failures.append(f"product feedback value drift: {tree}:{locale}:{key}")
+            for key in sorted(REMOVED_PRODUCT_FEEDBACK_KEYS & set(actual)):
+                failures.append(f"obsolete product feedback key remains: {tree}:{locale}:{key}")
 
     return failures
 
@@ -1025,6 +1488,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         for key, value in parse_android_strings(android_root / "values" / "strings.xml").items()
     }
     required_ai_keys = discover_ai_localization_keys(repo_root)
+    required_runtime_resource_keys = discover_android_runtime_resource_keys(repo_root)
     source_key_by_key = {
         key: key
         for key in set(ios_english) & set(android_base)
@@ -1050,14 +1514,27 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
             missing_android_sources.append(f"{ios_key} -> {android_key}")
             continue
         source_key_by_key[ios_key] = android_key
+    for ios_key in sorted(required_runtime_resource_keys):
+        android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
+        if android_key not in android_base:
+            missing_android_sources.append(f"{ios_key} -> {android_key}")
+            continue
+        source_key_by_key[ios_key] = android_key
+    source_key_by_key.update(
+        discover_android_owned_swift_localization_keys(repo_root, android_base)
+    )
     if missing_android_sources:
         raise ValueError(
-            "AI localization keys have no Android string resource: "
+            "Android-owned localization keys have no Android string resource: "
             + ", ".join(missing_android_sources)
         )
 
     mismatched_defaults: list[str] = []
-    for ios_key, defaults in sorted(discover_ai_localization_defaults(repo_root).items()):
+    exact_defaults = discover_ai_localization_defaults(repo_root)
+    for ios_key, defaults in discover_shipped_swift_localization_defaults(repo_root).items():
+        if ios_key in ANDROID_EXACT_DEFAULT_KEYS:
+            exact_defaults.setdefault(ios_key, set()).update(defaults)
+    for ios_key, defaults in sorted(exact_defaults.items()):
         android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
         expected = android_base.get(android_key)
         if expected is None:
@@ -1069,20 +1546,24 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
                 )
     if mismatched_defaults:
         raise ValueError(
-            "AI localization defaults differ from Android English: "
+            "Shipped localization defaults differ from Android English: "
             + "; ".join(mismatched_defaults)
         )
 
     safe_keys = sorted(source_key_by_key)
+    expected_english_by_key = {
+        key: IOS_PLATFORM_ENGLISH_OVERRIDES.get(
+            key,
+            android_base[source_key_by_key[key]],
+        )
+        for key in safe_keys
+    }
     english_mismatch_keys = sorted(
         key
         for key in safe_keys
-        if ios_english.get(key) != android_base[source_key_by_key[key]]
+        if ios_english.get(key) != expected_english_by_key[key]
     )
-    english_by_key = {
-        key: android_base[source_key_by_key[key]]
-        for key in safe_keys
-    }
+    english_by_key = expected_english_by_key
 
     non_english_by_key: dict[str, list[str]] = {key: [] for key in safe_keys}
     translations_by_locale: dict[str, dict[str, str]] = {}
@@ -1110,6 +1591,7 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     return AndroidSharedLocalization(
         safe_keys=safe_keys,
         english_mismatch_keys=english_mismatch_keys,
+        android_resource_keys=sorted(android_base),
         source_key_by_key=dict(sorted(source_key_by_key.items())),
         english_by_key=english_by_key,
         non_english_by_key=non_english_by_key,
@@ -1155,6 +1637,11 @@ def load_android_shared_localization_from_snapshot(path: Path) -> AndroidSharedL
         raw.get("english_mismatch_keys"),
         path,
         "english_mismatch_keys",
+    )
+    android_resource_keys = _load_string_list(
+        raw.get("android_resource_keys"),
+        path,
+        "android_resource_keys",
     )
 
     raw_source_key_by_key = raw.get("source_key_by_key")
@@ -1227,6 +1714,7 @@ def load_android_shared_localization_from_snapshot(path: Path) -> AndroidSharedL
     return AndroidSharedLocalization(
         safe_keys=safe_keys,
         english_mismatch_keys=english_mismatch_keys,
+        android_resource_keys=android_resource_keys,
         source_key_by_key=source_key_by_key,
         english_by_key=english_by_key,
         non_english_by_key=non_english_by_key,
@@ -1261,7 +1749,7 @@ def audit_android_shared_translations(
     value_mismatch_by_key: dict[str, list[str]] = {}
     tree_mismatch_by_key: dict[str, list[str]] = {}
 
-    for key in missing_ai_localization_catalog_keys(repo_root, catalog):
+    for key in missing_android_owned_localization_catalog_keys(repo_root, catalog):
         missing_key_by_key[key] = ["android-catalog"]
 
     for key, expected_value in catalog.english_by_key.items():
@@ -1388,7 +1876,8 @@ def sync_android_shared_translations(
     missing_catalog_keys = sorted(requested_keys - set(catalog.english_by_key))
     if included_keys is None:
         missing_catalog_keys = sorted(
-            set(missing_catalog_keys) | set(missing_ai_localization_catalog_keys(repo_root, catalog))
+            set(missing_catalog_keys)
+            | set(missing_android_owned_localization_catalog_keys(repo_root, catalog))
         )
     if missing_catalog_keys:
         raise ValueError(
@@ -1516,6 +2005,7 @@ def write_android_non_english_snapshot(
         "android_shared_localization": {
             "safe_keys": shared_localization.safe_keys,
             "english_mismatch_keys": shared_localization.english_mismatch_keys,
+            "android_resource_keys": shared_localization.android_resource_keys,
             "source_key_by_key": shared_localization.source_key_by_key,
             "english_by_key": shared_localization.english_by_key,
             "non_english_by_key": shared_localization.non_english_by_key,
@@ -1686,6 +2176,11 @@ def main() -> int:
         action="store_true",
         help="Update runtime Calculator security help from Android plus the iOS limitation",
     )
+    parser.add_argument(
+        "--sync-product-feedback-copy",
+        action="store_true",
+        help="Update product-feedback copy from Android plus truthful iOS-only fallbacks",
+    )
     args = parser.parse_args()
 
     if args.write_android_snapshot:
@@ -1760,6 +2255,19 @@ def main() -> int:
         print(f"- android source: {android_source}")
         return 0
 
+    if args.sync_product_feedback_copy:
+        try:
+            result = sync_product_feedback_localizations(args.repo_root, shared_localization)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print("Product-feedback localization sync summary")
+        print(f"- files changed: {result.files_changed}")
+        print(f"- values written or removed: {result.values_written}")
+        print(f"- locales checked: {len(LOCALE_TO_ANDROID_VALUES)}")
+        print(f"- android source: {android_source}")
+        return 0
+
     audit = run_audit(args.repo_root, non_english_by_key, android_source, shared_localization)
     locale_pref_audit = audit_locale_pref_contract(args.repo_root, locale_pref_options)
 
@@ -1781,6 +2289,11 @@ def main() -> int:
 
     failures: list[str] = []
 
+    unlocalized_swift_ui_literals = discover_unlocalized_swift_ui_literals(args.repo_root)
+    if unlocalized_swift_ui_literals:
+        failures.append("Unlocalized shipped SwiftUI literals:")
+        failures.extend(f"  - {item}" for item in unlocalized_swift_ui_literals)
+
     try:
         discrete_security_failures = audit_discrete_security_localizations(
             args.repo_root,
@@ -1791,6 +2304,17 @@ def main() -> int:
     if discrete_security_failures:
         failures.append("Runtime Calculator security-copy failures:")
         failures.extend(f"  - {item}" for item in discrete_security_failures)
+
+    try:
+        product_feedback_failures = audit_product_feedback_localizations(
+            args.repo_root,
+            shared_localization,
+        )
+    except ValueError as exc:
+        product_feedback_failures = [str(exc)]
+    if product_feedback_failures:
+        failures.append("Product-feedback localization failures:")
+        failures.extend(f"  - {item}" for item in product_feedback_failures)
 
     if audit.tree_mismatches:
         failures.append("Tree consistency failures:")
@@ -1868,6 +2392,8 @@ def main() -> int:
     print(f"- locale_pref unavailable Android values: {len(locale_pref_audit.unsupported_values)}")
     print(f"- locale_pref extra iOS-only resource locales: {len(locale_pref_audit.extra_ios_locales)}")
     print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
+    print(f"- product-feedback localization locales: {len(LOCALE_TO_ANDROID_VALUES)}")
+    print(f"- unlocalized shipped SwiftUI literals: {len(unlocalized_swift_ui_literals)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")
         print(f"- android shared explicit mapped keys: {len(ANDROID_SHARED_KEY_MAPPINGS)}")

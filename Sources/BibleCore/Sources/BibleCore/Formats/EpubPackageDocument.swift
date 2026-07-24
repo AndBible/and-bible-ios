@@ -183,8 +183,11 @@ struct EpubNavigationPoint: Equatable, Sendable {
  paths are canonical and package-contained, making it safe for indexing and later resource lookup.
  */
 struct EpubPackageDocument: Sendable {
-    /// Package title from Dublin Core metadata.
-    let title: String
+    /// Package title from Dublin Core metadata, or `nil` for Android's filename fallback.
+    let title: String?
+
+    /// Package description from Dublin Core metadata, or `nil` for Android's filename fallback.
+    let description: String?
 
     /// Creator/author metadata.
     let author: String
@@ -243,16 +246,17 @@ enum EpubPackageDocumentParser {
         let opfURL = try resolver.fileURL(for: resolvedOPF.path)
         let opfRoot = try EpubXMLTreeParser.parse(Data(contentsOf: opfURL))
         let allOPFElements = opfRoot.descendants(includeSelf: true)
-        guard let metadata = allOPFElements.first(where: { $0.localName == "metadata" }),
+        guard allOPFElements.contains(where: { $0.localName == "metadata" }),
               let manifest = allOPFElements.first(where: { $0.localName == "manifest" }),
               let spineElement = allOPFElements.first(where: { $0.localName == "spine" }) else {
             throw EpubError.invalidEpub("Package document is missing metadata, manifest, or spine")
         }
 
-        let title = firstMetadataText(named: "title", in: metadata) ?? "Untitled"
-        let author = firstMetadataText(named: "creator", in: metadata) ?? ""
-        let language = firstMetadataText(named: "language", in: metadata) ?? "en"
-        let packageIdentifier = firstMetadataText(named: "identifier", in: metadata)
+        let title = firstMetadataText(named: "title", in: opfRoot)
+        let description = firstMetadataText(named: "description", in: opfRoot)
+        let author = firstMetadataText(named: "creator", in: opfRoot) ?? ""
+        let language = firstMetadataText(named: "language", in: opfRoot) ?? "en"
+        let packageIdentifier = firstMetadataText(named: "identifier", in: opfRoot)
 
         var manifestByID: [String: EpubManifestItem] = [:]
         var manifestIDByPath: [String: String] = [:]
@@ -312,6 +316,7 @@ enum EpubPackageDocumentParser {
 
         return EpubPackageDocument(
             title: title,
+            description: description,
             author: author,
             language: language,
             packageIdentifier: packageIdentifier,
@@ -331,11 +336,66 @@ enum EpubPackageDocumentParser {
         }
     }
 
-    /// Reads and normalizes the first non-empty Dublin Core metadata value.
-    private static func firstMetadataText(named name: String, in metadata: EpubXMLElement) -> String? {
-        metadata.descendants().first { element in
-            element.localName == name && !element.textContent().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }?.textContent().trimmingCharacters(in: .whitespacesAndNewlines)
+    /**
+     Reads the first non-empty metadata value whose resolved namespace is Dublin Core.
+
+     Namespace declarations may live on the OPF package element rather than the metadata element,
+     so traversal starts at the package root and carries inherited prefix bindings into descendants.
+     Matching a local name alone is insufficient because EPUB metadata may legally contain extension
+     elements such as `<vendor:title>` beside the canonical `<dc:title>`.
+
+     - Parameters:
+       - name: Dublin Core local name to resolve, such as `title` or `language`.
+       - packageRoot: Parsed OPF root whose namespace scope owns the metadata descendants.
+     - Returns: The normalized first non-empty Dublin Core value, or `nil` when none exists.
+     - Side effects: none.
+     - Failure modes: none; malformed XML is rejected before this parsed tree is supplied.
+     */
+    private static func firstMetadataText(
+        named name: String,
+        in packageRoot: EpubXMLElement
+    ) -> String? {
+        let dublinCoreNamespace = "http://purl.org/dc/elements/1.1/"
+
+        func firstMatch(
+            in element: EpubXMLElement,
+            inheritedNamespaces: [String: String]
+        ) -> String? {
+            var namespaces = inheritedNamespaces
+            for (qualifiedName, value) in element.attributes {
+                if qualifiedName == "xmlns" {
+                    namespaces[""] = value
+                } else if qualifiedName.hasPrefix("xmlns:") {
+                    namespaces[String(qualifiedName.dropFirst("xmlns:".count))] = value
+                }
+            }
+
+            let qualifiedComponents = element.name
+                .split(separator: ":", maxSplits: 1)
+                .map(String.init)
+            let prefix = qualifiedComponents.count == 2 ? qualifiedComponents[0] : ""
+            if element.localName == name, namespaces[prefix] == dublinCoreNamespace {
+                let value = element.textContent()
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    return value
+                }
+            }
+
+            for child in element.children {
+                guard case .element(let childElement) = child,
+                      let value = firstMatch(
+                          in: childElement,
+                          inheritedNamespaces: namespaces
+                      ) else {
+                    continue
+                }
+                return value
+            }
+            return nil
+        }
+
+        return firstMatch(in: packageRoot, inheritedNamespaces: [:])
     }
 
     /**

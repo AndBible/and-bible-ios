@@ -1092,6 +1092,27 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
+    /**
+     Applies one normalized settings snapshot and coordinates persistence, bookmark updates, and
+     active-provider reconfiguration.
+
+     - Parameters:
+       - value: Complete Android-compatible speech settings to adopt.
+       - persist: Whether the normalized settings should be written to `settingsStore`.
+       - notifyWorkspace: Whether persistence should also notify the active workspace callback.
+       - updateBookmark: Whether a changed playback configuration should be copied to the current
+         Speak bookmark.
+       - restartPlayback: Whether an active, unpaused provider should restart after a playback
+         configuration change.
+     - Side effects: Mutates published settings, may persist settings, may resolve and update one
+       Speak bookmark, and may restart or stop the active provider.
+     - Failure modes: Reentrant application is ignored. Missing bookmark positions or managers skip
+       bookmark mutation, and providers that reject changed settings stop without persisting a new
+       position.
+     - Important: The stopped-reader position callback can reconstruct a full SWORD-backed speech
+       session, so it is invoked only for a genuine playback-setting edit that requested bookmark
+       mutation.
+     */
     private func applySettings(
         _ value: SpeakSettings,
         persist: Bool,
@@ -1106,28 +1127,29 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         applyingSettings = false
 
         if persist { persistSettings(notifyWorkspace: notifyWorkspace) }
-        let bookmarkUpdatePosition: SpeakStreamPosition?
-        if isPaused {
-            bookmarkUpdatePosition = provider?.currentPosition
-        } else if !isSpeaking,
-                  let visibleBiblePosition = onRequestStoppedBibleBookmarkPosition?(),
-                  visibleBiblePosition.category == .bible {
-            bookmarkUpdatePosition = visibleBiblePosition
-        } else {
-            bookmarkUpdatePosition = nil
+        let playbackSettingsChanged = oldPlayback != settings.playbackSettings
+        if updateBookmark, playbackSettingsChanged {
+            let bookmarkUpdatePosition: SpeakStreamPosition?
+            if isPaused {
+                bookmarkUpdatePosition = provider?.currentPosition
+            } else if !isSpeaking,
+                      let visibleBiblePosition = onRequestStoppedBibleBookmarkPosition?(),
+                      visibleBiblePosition.category == .bible {
+                bookmarkUpdatePosition = visibleBiblePosition
+            } else {
+                bookmarkUpdatePosition = nil
+            }
+            if let position = bookmarkUpdatePosition {
+                bookmarkManager?.updateSpeakBookmarkPlaybackSettings(
+                    at: position,
+                    settings: settings.playbackSettings
+                )
+                reloadResumeBookmarks()
+            }
         }
-        if updateBookmark,
-           oldPlayback != settings.playbackSettings,
-           let position = bookmarkUpdatePosition {
-            bookmarkManager?.updateSpeakBookmarkPlaybackSettings(
-                at: position,
-                settings: settings.playbackSettings
-            )
-            reloadResumeBookmarks()
-        }
-        if restartPlayback, oldPlayback != settings.playbackSettings, isSpeaking, !isPaused {
+        if restartPlayback, playbackSettingsChanged, isSpeaking, !isPaused {
             checkpointAndRestartActiveSession()
-        } else if oldPlayback != settings.playbackSettings,
+        } else if playbackSettingsChanged,
                   let provider,
                   !provider.prepare(settings: effectiveSettings) {
             stopInternal(persistPosition: false, clearProvider: true, notifyStopped: true)

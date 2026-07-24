@@ -1,519 +1,1004 @@
-// WorkspaceSelectorView.swift — Workspace selection and management
+// WorkspaceSelectorView.swift — App-owned Android workspace selection and management activity
 
+import Foundation
 import SwiftUI
 import SwiftData
 import BibleCore
 
 /**
- Lets the user switch workspaces and manage workspace lifecycle actions from one list.
+ Presents Android's complete Workspace Selector activity without native iOS list, toolbar, sheet,
+ context-menu, or edit-mode presentation.
 
- The view shows all persisted workspaces in display order, supports switching the active workspace,
- and exposes create, rename, clone, delete, and reorder actions.
+ The activity owns a searchable and reorderable staged data set, exact per-row overflow actions,
+ selective settings-copy workflows, workspace Text Options routing, Help, and the persistent
+ Dismiss/Save bar. Existing workspaces are not mutated until Save or an explicitly confirmed
+ workspace switch, so Android's discard/apply behavior remains real instead of cosmetic.
 
  Data dependencies:
- - `windowManager` provides the active workspace and performs active-workspace switching
- - `speakService` owns the speech session and selected workspace's structured speech settings
- - `modelContext` is used by `WorkspaceStore` for create/update/delete/reorder operations
- - `WorkspaceSelectionService` keeps active workspace state persisted for launch restore
- - `workspaces` is a live SwiftData query ordered by persisted workspace order
+ - `windowManager` and `WorkspaceSelectionService` coordinate live/persisted activation
+ - `WorkspaceStore` applies accepted create/clone/update/remove/order operations
+ - `SettingsStore` owns global text-display settings used by selective copy and the parent route
+ - `workspaces` supplies the initial SwiftData snapshot only; edits occur in value drafts
 
  Side effects:
- - selecting a row switches and persists the active workspace, then dismisses the sheet
- - selector-owned prompts create, rename, or clone workspaces through `WorkspaceStore`
- - swipe deletion, context-menu deletion, and move actions mutate persisted workspace state
+ - Save applies staged workspace mutations and repairs active selection when needed
+ - selecting a row activates it immediately when clean, or after Android's Apply changes decision
+ - New creates and activates a workspace after resolving any existing staged edits
+ - global settings-copy and Global Text Options update application settings immediately
+
+ Failure modes:
+ - missing persisted rows during commit are skipped rather than retargeting another workspace
+ - removing the last draft is disabled, preserving a valid workspace graph
  */
 public struct WorkspaceSelectorView: View {
     /// Live speech runtime stopped and rebound atomically when a workspace is selected.
     private let speakService: SpeakService?
 
-    /// Shared window manager used to switch the active workspace.
+    /// Reader/workspace palette that owns this activity and its child activities.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Explicit reader-destination dismissal, with environment dismissal as a standalone fallback.
+    private let onDismiss: (() -> Void)?
+
     @Environment(WindowManager.self) private var windowManager
-
-    /// SwiftData context used by `WorkspaceStore` mutations.
     @Environment(\.modelContext) private var modelContext
-
-    /// Current system color scheme used to resolve Android-parity surface colors.
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Currently presented workspace-name prompt, if any.
-    @State private var workspacePrompt: WorkspaceNamePrompt?
-
-    /// Draft name used by the active workspace prompt.
-    @State private var workspacePromptName = ""
-
-    /// Dismiss action for closing the selector screen.
-    @Environment(\.dismiss) private var dismiss
-
-    /// Persisted workspaces ordered by `orderNumber`.
+    /// Persisted workspaces used to seed drafts when the activity first attaches.
     @Query(sort: \Workspace.orderNumber) private var workspaces: [Workspace]
 
-    /**
-     Creates the workspace selector screen with an optional live speech runtime.
+    /// Mutable Android activity data set; this is the only state changed before Save.
+    @State private var drafts: [WorkspaceSelectorDraft] = []
 
-     - Parameter speakService: Reader-owned speech service to stop and reconfigure on activation.
+    /// Initial activity snapshot used for deterministic dirty-state comparison.
+    @State private var initialDrafts: [WorkspaceSelectorDraft] = []
+
+    /// Prevents SwiftData query refreshes from replacing in-progress activity edits.
+    @State private var hasLoadedDrafts = false
+
+    /// Expanded Android toolbar search state.
+    @State private var isSearchVisible = false
+
+    /// Current name/summary filter.
+    @State private var searchText = ""
+
+    /// Workspace whose exact row overflow popup is visible.
+    @State private var activeRowMenuID: UUID?
+
+    /// Workspace row currently moved from Android's drag handle.
+    @State private var draggedWorkspaceID: UUID?
+
+    /// Selector-owned create, rename, or clone name prompt.
+    @State private var workspacePrompt: WorkspaceNamePrompt?
+
+    /// Draft shared with the active name prompt.
+    @State private var workspacePromptName = ""
+
+    /// App-owned workspace/global Text Options child route.
+    @State private var settingsDestination: WorkspaceSelectorSettingsDestination?
+
+    /// Global settings value used by the nested Global Text Options activity.
+    @State private var globalDisplaySettings = TextDisplaySettings.appDefaults
+
+    /// Whether Android's workspace-only Help dialog is visible.
+    @State private var showsHelp = false
+
+    /// Current stage of Android's selective settings-copy workflow.
+    @State private var copyStage: WorkspaceSelectorCopyStage?
+
+    /// Selected raw field identities shared by both copy stages.
+    @State private var selectedCopyIDs: Set<String> = []
+
+    /// Field identities retained while the second-stage target dialog is visible.
+    @State private var copyFieldIDs: Set<String> = []
+
+    /// Pending row/new-workspace target for Android's Apply changes decision.
+    @State private var pendingActivation: WorkspaceSelectorPendingActivation?
+
+    /**
+     Creates the standalone selector using the standard application palette.
+
+     - Parameter speakService: Optional live speech runtime to rebind on workspace activation.
      - Side effects: none during construction.
-     - Failure modes: Passing `nil` preserves standalone previews and headless callers; workspace
-       activation then changes only window and persistence state.
+     - Failure modes: nil speech service preserves headless and preview callers.
      */
     public init(speakService: SpeakService? = nil) {
         self.speakService = speakService
+        surfacePalette = .standard
+        onDismiss = nil
     }
 
-    private var dialogBackground: Color {
-        AndroidDialogSurfacePalette.background(for: colorScheme)
+    /**
+     Creates the reader-owned workspace activity with explicit palette and dismissal.
+
+     - Parameters:
+       - speakService: Reader speech runtime to checkpoint and rebind on activation.
+       - surfacePalette: Workspace/window palette shared with the launching reader.
+       - onDismiss: Explicit reader destination close command.
+     - Side effects: none during construction.
+     - Failure modes: none.
+     */
+    init(
+        speakService: SpeakService?,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.speakService = speakService
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
     }
 
-    private var dialogPrimaryText: Color {
-        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
-    }
-
-    private var dialogSecondaryText: Color {
-        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
-    }
-
-    private var dialogAccent: Color {
-        AndroidDialogSurfacePalette.accent(for: colorScheme)
-    }
-
+    /// Store used for grouped workspace graph mutations.
     private var workspaceStore: WorkspaceStore {
         WorkspaceStore(modelContext: modelContext)
     }
 
+    /// Store used for active identity and global Text Options persistence.
+    private var settingsStore: SettingsStore {
+        SettingsStore(modelContext: modelContext)
+    }
+
+    /// Shared active-workspace coordinator used by selector commits and row activation.
     private var workspaceSelectionService: WorkspaceSelectionService {
         WorkspaceSelectionService(
             workspaceStore: workspaceStore,
-            settingsStore: SettingsStore(modelContext: modelContext),
+            settingsStore: settingsStore,
             windowManager: windowManager,
             speakService: speakService
         )
     }
 
-    /**
-     Builds the workspace list, selector-owned name prompt, and toolbar actions.
-     */
-    public var body: some View {
-        ZStack {
-            List {
-                if workspaces.isEmpty {
-                    Section {
-                        VStack(spacing: 8) {
-                            Text(String(localized: "workspace_no_workspaces"))
-                                .foregroundStyle(dialogSecondaryText)
-                            Text(String(localized: "workspace_create_first"))
-                                .font(.caption)
-                                .foregroundStyle(dialogSecondaryText)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical)
-                    }
-                    .listRowBackground(dialogBackground)
-                } else {
-                    Section {
-                        ForEach(workspaces) { workspace in
-                            workspaceSelectionButton(workspace)
-                        }
-                        .onDelete(perform: deleteWorkspaces)
-                        .onMove(perform: moveWorkspaces)
-                    } header: {
-                        Text(String(localized: "workspaces"))
-                            .foregroundStyle(dialogSecondaryText)
-                    }
-                }
-            }
-            .accessibilityIdentifier("workspaceSelectorScreen")
-            .disabled(workspacePrompt != nil)
+    /// Whether staged activity rows differ from the initial persisted snapshot.
+    private var isDirty: Bool {
+        drafts != initialDrafts
+    }
 
-            if let prompt = workspacePrompt {
-                workspacePromptOverlay(prompt)
+    /// Draft rows matching Android's case-insensitive name/summary search.
+    private var filteredDrafts: [WorkspaceSelectorDraft] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return drafts }
+        return drafts.filter { draft in
+            draft.name.localizedCaseInsensitiveContains(query)
+                || (draft.contentsText?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    /// Whether a dialog currently blocks the underlying activity.
+    private var hasBlockingDialog: Bool {
+        workspacePrompt != nil || showsHelp || copyStage != nil || pendingActivation != nil
+    }
+
+    /** Builds the selector or its app-owned Text Options child activity. */
+    public var body: some View {
+        Group {
+            if let settingsDestination {
+                settingsActivity(settingsDestination)
+            } else {
+                selectorActivity
             }
         }
-        .navigationTitle(String(localized: "workspaces"))
-        .scrollContentBackground(.hidden)
-        .background(dialogBackground.ignoresSafeArea())
-        .tint(dialogAccent)
-        #if os(iOS)
-        .toolbarBackground(dialogBackground, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        #endif
-        .toolbar {
-            if workspacePrompt == nil {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done")) { dismiss() }
-                        .accessibilityIdentifier("workspaceSelectorDoneButton")
+        .onAppear(perform: loadDraftsIfNeeded)
+    }
+
+    /** Complete app-owned Workspace Selector activity. */
+    private var selectorActivity: some View {
+        AndroidActivityScreen(
+            title: String(
+                localized: "workspace_selector_title",
+                defaultValue: "Select workspace"
+            ),
+            accessibilityIdentifier: "workspaceSelectorTopAppBar",
+            palette: surfacePalette,
+            onBack: discardAndClose
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivitySearch"),
+                accessibilityLabel: String(localized: "search", defaultValue: "Search"),
+                accessibilityIdentifier: "workspaceSelectorSearchButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: toggleSearch
+            )
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityAddCircle"),
+                accessibilityLabel: String(localized: "new_item", defaultValue: "New"),
+                accessibilityIdentifier: "workspaceSelectorAddButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: prepareCreate
+            )
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityHelp"),
+                accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                accessibilityIdentifier: "workspaceSelectorHelpButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: { showsHelp = true }
+            )
+        } content: {
+            VStack(spacing: 0) {
+                if isSearchVisible {
+                    workspaceSearchBar
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    #if os(iOS)
-                    EditButton()
-                    #endif
-                    Button(String(localized: "add"), systemImage: "plus") {
-                        prepareCreate()
+
+                workspaceList
+
+                AndroidActivityCommitBar(
+                    dismissTitle: String(localized: "dismiss", defaultValue: "Dismiss"),
+                    commitTitle: String(localized: "save_and_exit", defaultValue: "Save"),
+                    backgroundColor: surfacePalette.backgroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    disabledColor: surfacePalette.disabledForegroundColor,
+                    isCommitEnabled: isDirty,
+                    accessibilityPrefix: "workspaceSelector",
+                    onDismiss: discardAndClose,
+                    onCommit: saveAndClose
+                )
+            }
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: activeRowMenuID.map(rowMenuAnchorID) ?? "workspaceSelectorNoMenuAnchor",
+            isPresented: rowMenuPresentationBinding,
+            menuWidth: 270,
+            estimatedMenuHeight: 292,
+            accessibilityIdentifier: "workspaceSelectorRowMenu"
+        ) {
+            workspaceRowMenu
+        }
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "workspace_selector_title", defaultValue: "Select workspace"),
+            accessibilityIdentifier: "workspaceSelectorScreen",
+            surfaceColor: surfacePalette.backgroundColor
+        )
+        .disabled(hasBlockingDialog)
+        .overlay {
+            selectorDialogOverlay
+        }
+    }
+
+    /// Android toolbar search expansion rendered on the same owner palette.
+    private var workspaceSearchBar: some View {
+        HStack(spacing: 0) {
+            AndroidActivityTextInput(
+                placeholder: String(localized: "search", defaultValue: "Search"),
+                text: $searchText,
+                foregroundColor: surfacePalette.foregroundColor,
+                backgroundColor: surfacePalette.controlFillColor,
+                borderColor: surfacePalette.controlAccentColor,
+                accessibilityIdentifier: "workspaceSelectorSearchField"
+            )
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    AndBibleIconView(name: "ActivityClose", size: 22)
+                        .frame(width: 48, height: 48)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                .accessibilityLabel(String(localized: "clear", defaultValue: "Clear"))
+                .accessibilityIdentifier("workspaceSelectorClearSearchButton")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(surfacePalette.backgroundColor)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(surfacePalette.inactiveBorderColor)
+                .frame(height: 1)
+        }
+    }
+
+    /// Android RecyclerView equivalent with explicit row dividers and drag targets.
+    private var workspaceList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if filteredDrafts.isEmpty {
+                    Text(
+                        searchText.isEmpty
+                            ? String(localized: "workspace_no_workspaces", defaultValue: "No workspaces")
+                            : String(localized: "no_results", defaultValue: "No results")
+                    )
+                    .font(.system(size: 16))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 32)
+                } else {
+                    ForEach(filteredDrafts) { draft in
+                        workspaceRow(draft)
+                            .onDrop(
+                                of: [.text],
+                                delegate: WorkspaceSelectorDropDelegate(
+                                    targetID: draft.id,
+                                    drafts: $drafts,
+                                    draggedID: $draggedWorkspaceID,
+                                    isEnabled: searchText.isEmpty
+                                )
+                            )
+
+                        Divider()
+                            .overlay(surfacePalette.inactiveBorderColor)
                     }
-                    .accessibilityIdentifier("workspaceSelectorAddButton")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(surfacePalette.backgroundColor)
+    }
+
+    /** Builds one Android `workspace_list_item` row. */
+    private func workspaceRow(_ draft: WorkspaceSelectorDraft) -> some View {
+        let isActive = draft.persistedID == windowManager.activeWorkspace?.id
+        let displayName = workspaceDisplayName(draft)
+
+        return HStack(spacing: 0) {
+            AndBibleIconView(name: "MyDocumentDragHandle", size: 24)
+                .foregroundStyle(Color(argbInt: draft.workspaceColor ?? Workspace.defaultWorkspaceColor))
+                .frame(width: 60)
+                .frame(minHeight: 66)
+                .contentShape(Rectangle())
+                .opacity(searchText.isEmpty ? 1 : 0)
+                .allowsHitTesting(searchText.isEmpty)
+                .onDrag {
+                    draggedWorkspaceID = draft.id
+                    return NSItemProvider(object: draft.id.uuidString as NSString)
+                }
+                .accessibilityLabel(String(localized: "reorder", defaultValue: "Reorder"))
+                .accessibilityIdentifier("workspaceSelectorDragHandle::\(draft.id.uuidString)")
+
+            Button {
+                requestActivation(of: draft)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(activeWorkspaceTitle(displayName, isActive: isActive))
+                        .font(.system(size: 18, weight: isActive ? .bold : .regular))
+                        .foregroundStyle(surfacePalette.foregroundColor)
+                        .lineLimit(1)
+
+                    if let summary = draft.contentsText, !summary.isEmpty {
+                        Text(summary)
+                            .font(.system(size: 14))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("workspaceSelectorRowButton")
+            .accessibilityLabel(displayName)
+            .accessibilityValue(isActive ? "activeWorkspace" : "inactiveWorkspace")
+
+            Button {
+                activeRowMenuID = activeRowMenuID == draft.id ? nil : draft.id
+            } label: {
+                AndBibleIconView(name: "ToolbarOverflow", size: 24)
+                    .frame(width: 45)
+                    .frame(minHeight: 66)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+            .androidPopupMenuAnchor(id: rowMenuAnchorID(draft.id))
+            .accessibilityLabel(
+                String(
+                    localized: "more_options_for",
+                    defaultValue: "More options for \(displayName)"
+                )
+            )
+            .accessibilityIdentifier("workspaceSelectorMenuButton")
+        }
+        .background(isActive ? surfacePalette.controlFillColor : surfacePalette.backgroundColor)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Shared Android popup surface for the currently selected row.
+    @ViewBuilder
+    private var workspaceRowMenu: some View {
+        if let draftID = activeRowMenuID,
+           let draft = drafts.first(where: { $0.id == draftID }) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "workspaceSelectorRowMenuSurface",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                VStack(alignment: .leading, spacing: 0) {
+                    workspaceMenuRow(
+                        title: String(localized: "delete_workspace", defaultValue: "Remove"),
+                        identifier: "workspaceSelectorDeleteAction",
+                        draft: draft,
+                        isEnabled: drafts.count > 1,
+                        action: removeDraft
+                    )
+                    workspaceMenuRow(
+                        title: String(localized: "rename", defaultValue: "Rename"),
+                        identifier: "workspaceSelectorRenameAction",
+                        draft: draft,
+                        action: prepareRename
+                    )
+                    workspaceMenuRow(
+                        title: String(localized: "new_copied_workspace", defaultValue: "Copy as new"),
+                        identifier: "workspaceSelectorCloneAction",
+                        draft: draft,
+                        action: prepareClone
+                    )
+                    workspaceMenuRow(
+                        title: String(localized: "workspace_settings", defaultValue: "Settings…"),
+                        identifier: "workspaceSelectorSettingsAction",
+                        draft: draft,
+                        action: openWorkspaceSettings
+                    )
+                    workspaceMenuRow(
+                        title: String(localized: "copy_workspace_settings", defaultValue: "Copy settings…"),
+                        identifier: "workspaceSelectorCopySettingsAction",
+                        draft: draft,
+                        action: beginCopyToWorkspaces
+                    )
+                    workspaceMenuRow(
+                        title: String(localized: "copy_settings_to_global", defaultValue: "Copy settings to global"),
+                        identifier: "workspaceSelectorCopySettingsToGlobalAction",
+                        draft: draft,
+                        action: beginCopyToGlobal
+                    )
                 }
             }
         }
     }
 
-    /**
-     Builds the selector-owned transient prompt overlay for workspace name entry.
-     *
-     * Android shows create, rename, and clone from `WorkspaceSelectorActivity` using an
-     * `AlertDialog` rather than launching another activity. This overlay keeps the same ownership
-     * model on iOS and avoids presenting a second SwiftUI sheet from inside the selector sheet.
-     *
-     * - Parameter prompt: Workspace action currently awaiting a name.
-     * - Returns: A dimmed modal overlay containing the workspace name prompt.
-     * - Side effects:
-     *   - prompt buttons call the supplied cancel or confirm handlers
-     *   - underlying selector rows are visually present but disabled while the prompt is active
-     * - Failure modes: This helper cannot fail.
-     */
-    private func workspacePromptOverlay(_ prompt: WorkspaceNamePrompt) -> some View {
-        ZStack {
-            Color.black.opacity(colorScheme == .dark ? 0.52 : 0.32)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
+    /** Builds one exact row in Android's `workspace_popup_menu`. */
+    private func workspaceMenuRow(
+        title: String,
+        identifier: String,
+        draft: WorkspaceSelectorDraft,
+        isEnabled: Bool = true,
+        action: @escaping (WorkspaceSelectorDraft) -> Void
+    ) -> some View {
+        AndroidPopupMenuRow(
+            title: title,
+            accessibilityIdentifier: identifier,
+            isEnabled: isEnabled
+        ) {
+            activeRowMenuID = nil
+            action(draft)
+        }
+        .accessibilityLabel(workspaceDisplayName(draft))
+    }
 
+    /// App-owned dialogs displayed above the disabled selector activity.
+    @ViewBuilder
+    private var selectorDialogOverlay: some View {
+        if let prompt = workspacePrompt {
             WorkspaceNamePromptView(
                 prompt: prompt,
                 name: $workspacePromptName,
                 onCancel: dismissWorkspacePrompt,
                 onConfirm: { submitWorkspacePrompt(prompt) }
             )
-            .padding(.horizontal, 24)
-            .frame(maxWidth: 420)
+        } else if showsHelp {
+            AndroidHelpDialog(topics: [.workspaces], showsVersion: false) {
+                showsHelp = false
+            }
+        } else if let copyStage {
+            copyDialog(copyStage)
+        } else if pendingActivation != nil {
+            applyChangesDecisionDialog
         }
-        .zIndex(1)
     }
 
-    /**
-     Builds one workspace row with color indicator, summary text, and active-workspace marker.
-
-     Nil workspace colors render with Android's `#ff444444` fallback so legacy or restored rows
-     still show the same selector affordance Android provides.
-     */
-    private func workspaceRow(_ workspace: Workspace) -> some View {
-        HStack {
-            Circle()
-                .fill(Color(argbInt: workspace.workspaceColor ?? Workspace.defaultWorkspaceColor))
-                .frame(width: 12, height: 12)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.name.isEmpty ? String(localized: "untitled") : workspace.name)
-                    .font(.body)
-                    .foregroundStyle(dialogPrimaryText)
-                if let contents = workspace.contentsText, !contents.isEmpty {
-                    Text(contents)
-                        .font(.caption)
-                        .foregroundStyle(dialogSecondaryText)
-                } else {
-                    let windowCount = workspace.windows?.count ?? 0
-                    Text("\(windowCount) window\(windowCount == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(dialogSecondaryText)
+    /** Android selective-copy dialog for fields or target workspaces. */
+    private func copyDialog(_ stage: WorkspaceSelectorCopyStage) -> some View {
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "workspaceSelectorCopyDialog",
+            onOutsideTap: cancelCopyWorkflow
+        ) {
+            AndroidMultiselectDialogContent(
+                title: copyDialogTitle(stage),
+                rows: copyDialogRows(stage),
+                selectedIDs: $selectedCopyIDs,
+                isBusy: false,
+                accessibilityIdentifier: "workspaceSelectorCopyDialogContent",
+                accessibilityPrefix: "workspaceSelectorCopy",
+                onCancel: cancelCopyWorkflow,
+                onConfirm: { selectedIDs in
+                    advanceCopyWorkflow(stage, selectedIDs: selectedIDs)
                 }
-            }
-            Spacer()
-            if workspace.id == windowManager.activeWorkspace?.id {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(dialogAccent)
-            }
+            )
         }
     }
 
-    /**
-     Builds the main workspace-selection button for one row.
-     *
-     * - Parameter workspace: Workspace represented by the selectable row body.
-     * - Returns: A button that switches the active workspace and dismisses the selector.
-     * - Side effects:
-     *   - switches the active workspace through `WorkspaceSelectionService`
-     *   - persists the selected workspace identifier for launch restore
-     *   - dismisses the selector sheet after the switch
-     * - Failure modes: This helper cannot fail.
-     */
-    private func workspaceSelectionButton(_ workspace: Workspace) -> some View {
-        Button {
-            activateWorkspace(workspace)
-            dismiss()
-        } label: {
-            workspaceRow(workspace)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .listRowBackground(dialogBackground)
-        .accessibilityIdentifier("workspaceSelectorRowButton")
-        .accessibilityLabel(workspaceDisplayName(workspace))
-        .accessibilityValue(
-            workspace.id == windowManager.activeWorkspace?.id
-                ? "activeWorkspace"
-                : "inactiveWorkspace"
+    /// Android Yes/No/Cancel prompt shown before activating with dirty drafts.
+    private var applyChangesDecisionDialog: some View {
+        AndroidDecisionDialog(
+            title: "",
+            message: String(
+                localized: "workspace_save_changes",
+                defaultValue: "Apply changes to workspaces?"
+            ),
+            actions: [
+                .init(
+                    id: "cancel",
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    style: .normal,
+                    placement: .neutral,
+                    perform: { pendingActivation = nil }
+                ),
+                .init(
+                    id: "no",
+                    title: String(localized: "no", defaultValue: "No"),
+                    style: .normal,
+                    perform: activateAfterDiscardingChanges
+                ),
+                .init(
+                    id: "yes",
+                    title: String(localized: "yes", defaultValue: "Yes"),
+                    style: .normal,
+                    perform: activateAfterApplyingChanges
+                ),
+            ],
+            accessibilityIdentifier: "workspaceSelectorApplyChangesDialog"
         )
-        .contextMenu {
-            Button(String(localized: "rename"), systemImage: "pencil") {
-                prepareRename(for: workspace)
-            }
-            .accessibilityIdentifier("workspaceSelectorRenameAction")
+    }
 
-            Button(String(localized: "clone"), systemImage: "doc.on.doc") {
-                prepareClone(for: workspace)
+    /** Builds workspace/global Text Options without native navigation presentation. */
+    @ViewBuilder
+    private func settingsActivity(_ destination: WorkspaceSelectorSettingsDestination) -> some View {
+        switch destination {
+        case .workspace(let draftID):
+            if let draft = drafts.first(where: { $0.id == draftID }) {
+                TextDisplaySettingsView(
+                    settings: textDisplaySettingsBinding(for: draftID),
+                    workspaceColor: workspaceColorBinding(for: draftID),
+                    navigationTitle: String.localizedStringWithFormat(
+                        String(
+                            localized: "workspace_text_display_settings_title",
+                            defaultValue: "Text options - %@"
+                        ),
+                        workspaceDisplayName(draft)
+                    ),
+                    scope: .workspace,
+                    workspaceName: workspaceDisplayName(draft),
+                    surfacePalette: surfacePalette,
+                    onBack: { settingsDestination = nil },
+                    onOpenGlobalSettings: {
+                        globalDisplaySettings = settingsStore.globalTextDisplaySettings()
+                        settingsDestination = .global(returningTo: draftID)
+                    }
+                )
+            } else {
+                Color.clear.onAppear { settingsDestination = nil }
             }
-            .accessibilityIdentifier("workspaceSelectorCloneAction")
-
-            Divider()
-
-            Button(String(localized: "delete"), systemImage: "trash", role: .destructive) {
-                deleteWorkspace(workspace)
-            }
-            .accessibilityIdentifier("workspaceSelectorDeleteAction")
-            .disabled(workspaces.count <= 1)
+        case .global(let returningDraftID):
+            TextDisplaySettingsView(
+                settings: $globalDisplaySettings,
+                workspaceColor: workspaceColorBinding(for: returningDraftID),
+                navigationTitle: String(
+                    localized: "global_text_display_settings_title",
+                    defaultValue: "Global text options"
+                ),
+                scope: .global,
+                workspaceName: drafts.first(where: { $0.id == returningDraftID }).map(workspaceDisplayName),
+                surfacePalette: surfacePalette,
+                onBack: { settingsDestination = .workspace(returningDraftID) },
+                onChange: { settingsStore.setGlobalTextDisplaySettings(globalDisplaySettings) }
+            )
         }
     }
 
-    /**
-     Switches the live and persisted active workspace together.
-
-     - Parameter workspace: Workspace to activate and restore on next launch.
-     - Side effects:
-       - updates `WindowManager.activeWorkspace`
-       - writes `SettingsStore.activeWorkspaceId`
-     */
-    private func activateWorkspace(_ workspace: Workspace) {
-        workspaceSelectionService.activate(workspace)
+    /// Presents or clears Android's toolbar search UI.
+    private func toggleSearch() {
+        isSearchVisible.toggle()
+        if !isSearchVisible { searchText = "" }
+        activeRowMenuID = nil
     }
 
-    /**
-     Resolves the user-visible workspace name used by the row and UI tests.
-     *
-     * - Parameter workspace: Workspace whose display name should be derived.
-     * - Returns: The persisted workspace name, or the localized untitled fallback when blank.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func workspaceDisplayName(_ workspace: Workspace) -> String {
-        workspace.name.isEmpty ? String(localized: "untitled") : workspace.name
+    /// Seeds activity drafts and global parent settings once per presentation.
+    private func loadDraftsIfNeeded() {
+        guard !hasLoadedDrafts else { return }
+        let loaded = workspaces.map(WorkspaceSelectorDraft.init(workspace:))
+        drafts = loaded
+        initialDrafts = loaded
+        globalDisplaySettings = settingsStore.globalTextDisplaySettings()
+        hasLoadedDrafts = true
     }
 
-    /**
-     Prepares the create prompt with an empty workspace name draft.
-     *
-     * - Side effects:
-     *   - resets the shared prompt draft
-     *   - presents the create-workspace prompt dialog
-     * - Failure modes: This helper cannot fail.
-     */
+    /** Requests activation immediately when clean or through Android's decision when dirty. */
+    private func requestActivation(of draft: WorkspaceSelectorDraft) {
+        activeRowMenuID = nil
+        if isDirty {
+            pendingActivation = .draft(draft.id)
+        } else if let workspace = persistedWorkspace(for: draft) {
+            activateAndClose(workspace)
+        }
+    }
+
+    /// Prepares Android's default new-workspace name.
     private func prepareCreate() {
-        workspacePromptName = ""
+        activeRowMenuID = nil
+        workspacePromptName = String.localizedStringWithFormat(
+            String(localized: "workspace_number", defaultValue: "Workspace %d"),
+            drafts.count + 1
+        )
         workspacePrompt = .create
     }
 
-    /**
-     Prepares the rename prompt for the selected workspace.
-     *
-     * - Parameter workspace: Workspace that should be renamed.
-     * - Side effects:
-     *   - stores the selected workspace in local prompt state
-     *   - pre-fills the rename field and presents the rename prompt dialog
-     * - Failure modes: This helper cannot fail.
-     */
-    private func prepareRename(for workspace: Workspace) {
-        workspacePromptName = workspace.name
-        workspacePrompt = .rename(workspace)
+    /// Prepares Android's rename prompt for one exact draft identity.
+    private func prepareRename(_ draft: WorkspaceSelectorDraft) {
+        workspacePromptName = draft.name
+        workspacePrompt = .rename(draft.id)
     }
 
-    /**
-     Prepares the clone prompt for the selected workspace.
-     *
-     * - Parameter workspace: Workspace that should be deep-cloned.
-     * - Side effects:
-     *   - stores the selected workspace in local prompt state
-     *   - pre-fills the clone field and presents the clone prompt dialog
-     * - Failure modes: This helper cannot fail.
-     */
-    private func prepareClone(for workspace: Workspace) {
-        workspacePromptName = String(format: String(localized: "copy_of %@"), workspace.name)
-        workspacePrompt = .clone(workspace)
+    /// Prepares Android's Copy as new prompt for one exact draft identity.
+    private func prepareClone(_ draft: WorkspaceSelectorDraft) {
+        workspacePromptName = String.localizedStringWithFormat(
+            String(localized: "copy_of_workspace", defaultValue: "Copy of %@"),
+            workspaceDisplayName(draft)
+        )
+        workspacePrompt = .clone(draft.id)
     }
 
-    /**
-     Dismisses the active workspace prompt and clears its draft state.
-     *
-     * - Side effects:
-     *   - closes the presented prompt dialog
-     *   - resets the shared draft name
-     * - Failure modes: This helper cannot fail.
-     */
+    /// Clears selector-owned name-prompt state without mutating drafts.
     private func dismissWorkspacePrompt() {
         workspacePrompt = nil
         workspacePromptName = ""
     }
 
-    /**
-     Commits the active workspace prompt action using the current shared draft name.
-     *
-     * - Parameter prompt: Prompt action being confirmed.
-     * - Side effects:
-     *   - dismisses the prompt dialog before mutating workspace state
-     *   - routes the current draft name into create, rename, or clone flows
-     * - Failure modes:
-     *   - returns without mutation when the current draft name is empty
-     */
+    /** Commits one name prompt into staged state or a confirmed new-workspace activation. */
     private func submitWorkspacePrompt(_ prompt: WorkspaceNamePrompt) {
-        let name = workspacePromptName
+        let name = workspacePromptName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-
-        workspacePrompt = nil
+        dismissWorkspacePrompt()
 
         switch prompt {
         case .create:
-            createWorkspace(named: name)
-        case .rename(let workspace):
-            renameWorkspace(workspace, to: name)
-        case .clone(let workspace):
-            cloneWorkspace(workspace, as: name)
+            if isDirty {
+                pendingActivation = .newWorkspace(name: name)
+            } else {
+                createActivateAndClose(named: name)
+            }
+        case .rename(let draftID):
+            updateDraft(id: draftID) { $0.name = name }
+        case .clone(let draftID):
+            guard let source = drafts.first(where: { $0.id == draftID }),
+                  let index = drafts.firstIndex(where: { $0.id == draftID }) else {
+                return
+            }
+            drafts.insert(WorkspaceSelectorDraft(cloning: source, name: name), at: index + 1)
         }
     }
 
+    /// Stages removal while preserving Android's cannot-delete-final-workspace rule.
+    private func removeDraft(_ draft: WorkspaceSelectorDraft) {
+        guard drafts.count > 1 else { return }
+        drafts.removeAll { $0.id == draft.id }
+    }
+
+    /// Opens workspace-scoped Text Options for a staged row.
+    private func openWorkspaceSettings(_ draft: WorkspaceSelectorDraft) {
+        settingsDestination = .workspace(draft.id)
+    }
+
+    /// Starts Android's field-then-workspace selective copy workflow.
+    private func beginCopyToWorkspaces(_ draft: WorkspaceSelectorDraft) {
+        selectedCopyIDs = []
+        copyFieldIDs = []
+        copyStage = .fieldsToWorkspaces(sourceID: draft.id)
+    }
+
+    /// Starts Android's field selection for copying to global defaults.
+    private func beginCopyToGlobal(_ draft: WorkspaceSelectorDraft) {
+        selectedCopyIDs = []
+        copyFieldIDs = []
+        copyStage = .fieldsToGlobal(sourceID: draft.id)
+    }
+
+    /// Clears every temporary copy-workflow value.
+    private func cancelCopyWorkflow() {
+        copyStage = nil
+        selectedCopyIDs = []
+        copyFieldIDs = []
+    }
+
+    /** Advances or commits Android's selective copy workflow. */
+    private func advanceCopyWorkflow(_ stage: WorkspaceSelectorCopyStage, selectedIDs: [String]) {
+        switch stage {
+        case .fieldsToWorkspaces(let sourceID):
+            copyFieldIDs = Set(selectedIDs)
+            copyStage = .targetWorkspaces(sourceID: sourceID)
+            selectedCopyIDs = []
+        case .targetWorkspaces(let sourceID):
+            copySelectedFields(from: sourceID, to: selectedIDs.compactMap(UUID.init(uuidString:)))
+            cancelCopyWorkflow()
+        case .fieldsToGlobal(let sourceID):
+            copyFieldIDs = Set(selectedIDs)
+            copySelectedFieldsToGlobal(from: sourceID)
+            cancelCopyWorkflow()
+        }
+    }
+
+    /// Localized title for the active Android multiselect stage.
+    private func copyDialogTitle(_ stage: WorkspaceSelectorCopyStage) -> String {
+        switch stage {
+        case .fieldsToWorkspaces, .fieldsToGlobal:
+            String(localized: "copy_settings_title", defaultValue: "Which settings do you want to copy?")
+        case .targetWorkspaces:
+            String(
+                localized: "copy_settings_workspaces_title",
+                defaultValue: "To which workspaces do you want to copy settings?"
+            )
+        }
+    }
+
+    /// Ordered rows matching Android's TextDisplaySettings Types or workspace order.
+    private func copyDialogRows(_ stage: WorkspaceSelectorCopyStage) -> [AndroidMultiselectDialogRow<String>] {
+        switch stage {
+        case .fieldsToWorkspaces, .fieldsToGlobal:
+            TextDisplaySettingsCopyField.allCases.map { field in
+                AndroidMultiselectDialogRow(
+                    id: field.rawValue,
+                    title: field.title,
+                    accessibilityIdentifier: "workspaceSelectorCopyField::\(field.rawValue)"
+                )
+            }
+        case .targetWorkspaces(let sourceID):
+            drafts.map { draft in
+                AndroidMultiselectDialogRow(
+                    id: draft.id.uuidString,
+                    title: workspaceDisplayName(draft),
+                    isEnabled: draft.id != sourceID,
+                    accessibilityIdentifier: "workspaceSelectorCopyTarget::\(draft.id.uuidString)"
+                )
+            }
+        }
+    }
+
+    /** Copies selected text-setting fields from one draft to target drafts. */
+    private func copySelectedFields(from sourceID: UUID, to targetIDs: [UUID]) {
+        guard let source = drafts.first(where: { $0.id == sourceID }) else { return }
+        let sourceSettings = source.textDisplaySettings ?? TextDisplaySettings()
+        let fields = selectedCopyFields
+        let targets = Set(targetIDs)
+        for index in drafts.indices where targets.contains(drafts[index].id) {
+            let target = drafts[index].textDisplaySettings ?? TextDisplaySettings()
+            drafts[index].textDisplaySettings = target.copyingSelectedFields(
+                from: sourceSettings,
+                fields: fields
+            )
+        }
+    }
+
+    /** Copies selected fields from one workspace draft into application defaults. */
+    private func copySelectedFieldsToGlobal(from sourceID: UUID) {
+        guard let source = drafts.first(where: { $0.id == sourceID }) else { return }
+        let sourceSettings = source.textDisplaySettings ?? TextDisplaySettings()
+        let updated = settingsStore.globalTextDisplaySettings().copyingSelectedFields(
+            from: sourceSettings,
+            fields: selectedCopyFields
+        )
+        globalDisplaySettings = updated
+        settingsStore.setGlobalTextDisplaySettings(updated)
+    }
+
+    /// Selected copy fields reconstructed from their stable raw identities.
+    private var selectedCopyFields: Set<TextDisplaySettingsCopyField> {
+        Set(copyFieldIDs.compactMap(TextDisplaySettingsCopyField.init(rawValue:)))
+    }
+
+    /// Applies drafts, then activates the pending target and closes the activity.
+    private func activateAfterApplyingChanges() {
+        guard let pendingActivation else { return }
+        self.pendingActivation = nil
+        let resolved = applyDrafts()
+        activate(pendingActivation, resolvedDrafts: resolved)
+    }
+
+    /// Discards drafts, then activates the pending persisted/new target and closes the activity.
+    private func activateAfterDiscardingChanges() {
+        guard let pendingActivation else { return }
+        self.pendingActivation = nil
+        activate(pendingActivation, resolvedDrafts: [:])
+    }
+
+    /** Resolves one pending activation after applying or discarding drafts. */
+    private func activate(
+        _ target: WorkspaceSelectorPendingActivation,
+        resolvedDrafts: [UUID: Workspace]
+    ) {
+        switch target {
+        case .draft(let draftID):
+            if let workspace = resolvedDrafts[draftID]
+                ?? drafts.first(where: { $0.id == draftID }).flatMap(persistedWorkspace) {
+                activateAndClose(workspace)
+            }
+        case .newWorkspace(let name):
+            createActivateAndClose(named: name)
+        }
+    }
+
+    /// Applies staged changes and exits through the explicit owner route.
+    private func saveAndClose() {
+        _ = applyDrafts()
+        closeActivity()
+    }
+
+    /// Discards all value drafts by closing without persistence.
+    private func discardAndClose() {
+        closeActivity()
+    }
+
     /**
-     Creates one workspace and applies the normal post-create selection behavior when appropriate.
-     *
-     * - Parameter name: User-visible name to assign to the new workspace.
-     * - Side effects:
-     *   - persists one new workspace through `WorkspaceStore`
-     *   - switches and persists the active workspace before dismissing the selector
-     * - Failure modes:
-     *   - returns without mutation when `name` is empty
+     Applies the full staged data set as one logical workspace activity commit.
+
+     Existing rows are updated first, clones are deep-created before source removals, deletions use
+     `WorkspaceSelectionService` so active state is repaired, and final order is persisted last.
+
+     - Returns: A map from selector draft identity to its resolved persisted workspace.
+     - Side effects: Mutates and saves workspace graphs and may repair active workspace selection.
+     - Failure modes: Missing source rows are skipped; surviving rows still commit in order.
      */
-    private func createWorkspace(named name: String) {
-        guard !name.isEmpty else { return }
+    @discardableResult
+    private func applyDrafts() -> [UUID: Workspace] {
+        let store = workspaceStore
+        let selection = workspaceSelectionService
+        let originalWorkspaces = store.workspaces()
+        var resolved: [UUID: Workspace] = [:]
+
+        for draft in drafts {
+            guard case .persisted(let workspaceID) = draft.origin,
+                  let workspace = store.workspace(id: workspaceID) else {
+                continue
+            }
+            apply(draft, to: workspace)
+            resolved[draft.id] = workspace
+        }
+        store.persistChanges()
+
+        for draft in drafts {
+            guard case .clone(let sourceID) = draft.origin,
+                  let source = store.workspace(id: sourceID) else {
+                continue
+            }
+            let clone = store.cloneWorkspace(source, newName: draft.name)
+            apply(draft, to: clone)
+            resolved[draft.id] = clone
+        }
+        store.persistChanges()
+
+        let retainedPersistedIDs = Set(drafts.compactMap(\.persistedID))
+        let removed = originalWorkspaces.filter { !retainedPersistedIDs.contains($0.id) }
+        if !removed.isEmpty {
+            _ = selection.deleteWorkspaces(removed)
+        }
+
+        let finalOrder = drafts.compactMap { resolved[$0.id] }
+        if !finalOrder.isEmpty {
+            store.reorderWorkspaces(finalOrder)
+        }
+        return resolved
+    }
+
+    /// Copies staged scalar/settings fields onto a resolved persisted graph owner.
+    private func apply(_ draft: WorkspaceSelectorDraft, to workspace: Workspace) {
+        workspace.name = draft.name
+        workspace.contentsText = draft.contentsText
+        workspace.textDisplaySettings = draft.textDisplaySettings
+        workspace.workspaceColor = draft.workspaceColor ?? Workspace.defaultWorkspaceColor
+    }
+
+    /// Creates a new workspace from the current active defaults, activates it, and exits.
+    private func createActivateAndClose(named name: String) {
         let workspace = workspaceStore.createWorkspace(
             name: name,
             inheritingDefaultsFrom: windowManager.activeWorkspace
         )
-        activateWorkspace(workspace)
-        dismiss()
+        activateAndClose(workspace)
     }
 
-    /**
-     Renames one workspace through `WorkspaceStore`.
-     *
-     * - Parameters:
-     *   - workspace: Workspace to rename.
-     *   - name: Replacement user-visible name.
-     * - Side effects:
-     *   - persists the renamed workspace through `WorkspaceStore`
-     * - Failure modes:
-     *   - returns without mutation when `name` is empty
-     */
-    private func renameWorkspace(_ workspace: Workspace, to name: String) {
-        guard !name.isEmpty else { return }
-        workspaceStore.renameWorkspace(workspace, to: name)
+    /// Activates one persisted workspace and closes the selector activity.
+    private func activateAndClose(_ workspace: Workspace) {
+        workspaceSelectionService.activate(workspace)
+        closeActivity()
     }
 
-    /**
-     Clones one workspace through `WorkspaceStore`.
-     *
-     * - Parameters:
-     *   - workspace: Workspace to deep-clone.
-     *   - name: User-visible name to assign to the cloned workspace.
-     * - Side effects:
-     *   - persists one deep-cloned workspace graph through `WorkspaceStore`
-     * - Failure modes:
-     *   - returns without mutation when `name` is empty
-     */
-    private func cloneWorkspace(_ workspace: Workspace, as name: String) {
-        guard !name.isEmpty else { return }
-        workspaceStore.cloneWorkspace(workspace, newName: name)
+    /// Resolves an existing persisted draft without accepting staged scalar changes.
+    private func persistedWorkspace(for draft: WorkspaceSelectorDraft) -> Workspace? {
+        draft.persistedID.flatMap(workspaceStore.workspace(id:))
     }
 
-    /**
-     Deletes one workspace from the selector, repairing active selection when needed.
-     *
-     * - Parameter workspace: Workspace that should be removed.
-     * - Side effects:
-     *   - refuses to delete the final workspace
-     *   - switches to a surviving workspace before deleting the current active workspace
-     *   - deletes the workspace through `WorkspaceStore`
-     * - Failure modes:
-     *   - returns without mutation when the requested workspace is the only workspace
-     */
-    private func deleteWorkspace(_ workspace: Workspace) {
-        workspaceSelectionService.deleteWorkspace(workspace)
+    /// Calls the reader destination owner or standalone environment dismiss action.
+    private func closeActivity() {
+        if let onDismiss { onDismiss() }
+        else { dismiss() }
     }
 
-    /**
-     Deletes the selected workspaces, preserving and persisting a valid active workspace.
-     */
-    private func deleteWorkspaces(at offsets: IndexSet) {
-        let selectedWorkspaces = offsets.map { workspaces[$0] }
-        workspaceSelectionService.deleteWorkspaces(selectedWorkspaces)
+    /// Mutates one exact draft without index assumptions after filtering/reordering.
+    private func updateDraft(id: UUID, mutation: (inout WorkspaceSelectorDraft) -> Void) {
+        guard let index = drafts.firstIndex(where: { $0.id == id }) else { return }
+        mutation(&drafts[index])
     }
 
-    /**
-     Persists a reordered workspace list after drag-and-drop movement.
-     */
-    private func moveWorkspaces(from source: IndexSet, to destination: Int) {
-        var reordered = Array(workspaces)
-        reordered.move(fromOffsets: source, toOffset: destination)
-        workspaceStore.reorderWorkspaces(reordered)
+    /// Mutable binding for one draft's workspace-scoped Text Options.
+    private func textDisplaySettingsBinding(for draftID: UUID) -> Binding<TextDisplaySettings> {
+        Binding(
+            get: {
+                drafts.first(where: { $0.id == draftID })?.textDisplaySettings
+                    ?? TextDisplaySettings()
+            },
+            set: { value in
+                updateDraft(id: draftID) { $0.textDisplaySettings = value }
+            }
+        )
+    }
+
+    /// Mutable binding for one draft's Android workspace color.
+    private func workspaceColorBinding(for draftID: UUID) -> Binding<Int?> {
+        Binding(
+            get: { drafts.first(where: { $0.id == draftID })?.workspaceColor },
+            set: { value in
+                updateDraft(id: draftID) {
+                    $0.workspaceColor = value ?? Workspace.defaultWorkspaceColor
+                }
+            }
+        )
+    }
+
+    /// User-visible workspace name with Android's untitled fallback for malformed legacy rows.
+    private func workspaceDisplayName(_ draft: WorkspaceSelectorDraft) -> String {
+        draft.name.isEmpty ? String(localized: "untitled", defaultValue: "Untitled") : draft.name
+    }
+
+    /// Android current-workspace title format.
+    private func activeWorkspaceTitle(_ name: String, isActive: Bool) -> String {
+        guard isActive else { return name }
+        return String.localizedStringWithFormat(
+            String(localized: "workspace_listing_with_current", defaultValue: "%@ (current)"),
+            name
+        )
+    }
+
+    /// Stable anchor identity for one row's app-owned popup.
+    private func rowMenuAnchorID(_ draftID: UUID) -> String {
+        "workspaceSelectorRowMenuAnchor::\(draftID.uuidString)"
+    }
+
+    /// Converts optional row identity into the shared popup visibility binding.
+    private var rowMenuPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { activeRowMenuID != nil },
+            set: { isPresented in
+                if !isPresented { activeRowMenuID = nil }
+            }
+        )
     }
 }
 
-/// Supported workspace-name prompt actions shown from the selector dialog.
-private enum WorkspaceNamePrompt: Identifiable {
+/// Selector-owned workspace name prompt operation.
+private enum WorkspaceNamePrompt: Equatable {
     case create
-    case rename(Workspace)
-    case clone(Workspace)
+    case rename(UUID)
+    case clone(UUID)
 
-    var id: String {
-        switch self {
-        case .create:
-            "create"
-        case .rename(let workspace):
-            "rename-\(workspace.id.uuidString)"
-        case .clone(let workspace):
-            "clone-\(workspace.id.uuidString)"
-        }
-    }
-
+    /// Android uses one shared title for create, rename, and clone name entry.
     var title: String {
-        switch self {
-        case .create:
-            String(localized: "workspace_new")
-        case .rename:
-            String(localized: "rename")
-        case .clone:
-            String(localized: "clone")
-        }
-    }
-
-    var confirmTitle: String {
-        switch self {
-        case .rename:
-            String(localized: "save")
-        case .create, .clone:
-            String(localized: "create")
-        }
+        String(
+            localized: "give_name_workspace",
+            defaultValue: "Give name for new workspace"
+        )
     }
 }
 
 /**
- Selector-owned workspace prompt used for create, rename, and clone flows on iOS.
+ Thin semantic wrapper around the shared Android dialog window and dialog text input.
 
- The prompt mirrors Android's `WorkspaceSelectorActivity` `AlertDialog`: it appears above the
- selector, accepts a single workspace name, and delegates all mutations to the selector through
- explicit cancel and confirm closures. It owns only local focus and presentation styling.
-
- Inputs:
- - `prompt` supplies the title and confirm button label
- - `name` is the editable draft shared with the selector
- - `onCancel` and `onConfirm` perform prompt dismissal or workspace mutation
-
- Side effects:
- - focuses the name field when the prompt appears
- - invokes the supplied closures from buttons or text-field submission
-
- Failure modes:
- - disables confirmation while the draft name is empty
+ The wrapper retains established workspace automation identifiers and keyboard focus while shared
+ components own the scrim, AppCompat palette, field chrome, geometry, and actions. It therefore
+ does not recreate a feature-local modal card or invoke a native iOS alert/sheet.
  */
 private struct WorkspaceNamePromptView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -525,113 +1010,60 @@ private struct WorkspaceNamePromptView: View {
 
     @FocusState private var isNameFieldFocused: Bool
 
+    /// Whether the prompt has a non-blank name Android can persist.
     private var canConfirm: Bool {
-        !name.isEmpty
-    }
-
-    private var dialogBackground: Color {
-        AndroidDialogSurfacePalette.background(for: colorScheme)
-    }
-
-    private var dialogPrimaryText: Color {
-        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
-    }
-
-    private var dialogSecondaryText: Color {
-        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
-    }
-
-    private var dialogAccent: Color {
-        AndroidDialogSurfacePalette.accent(for: colorScheme)
-    }
-
-    private var fieldBackground: Color {
-        AndroidDialogSurfacePalette.fieldBackground(for: colorScheme)
-    }
-
-    private var fieldBorder: Color {
-        AndroidDialogSurfacePalette.fieldBorder(for: colorScheme)
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(prompt.title)
-                .font(.headline)
-                .foregroundStyle(dialogPrimaryText)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "workspaceNamePromptScreen",
+            onOutsideTap: onCancel
+        ) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(prompt.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(String(localized: "name"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(dialogSecondaryText)
+                AndroidDialogTextInput(
+                    placeholder: String(localized: "name", defaultValue: "Name"),
+                    text: $name,
+                    colorScheme: colorScheme,
+                    isMultiline: false,
+                    accessibilityIdentifier: "workspaceNamePromptTextField"
+                )
+                .focused($isNameFieldFocused)
+                .onSubmit {
+                    guard canConfirm else { return }
+                    onConfirm()
+                }
 
-                TextField(String(localized: "name"), text: $name)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    #endif
-                    .focused($isNameFieldFocused)
-                    .foregroundStyle(dialogPrimaryText)
-                    .tint(dialogAccent)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(fieldBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(fieldBorder, lineWidth: 1)
-                    )
-                    .accessibilityIdentifier("workspaceNamePromptTextField")
-                    .onSubmit {
-                        guard canConfirm else { return }
-                        onConfirm()
-                    }
+                HStack(spacing: 20) {
+                    Spacer()
+                    Button(String(localized: "cancel", defaultValue: "Cancel"), action: onCancel)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                        .accessibilityIdentifier("workspaceNamePromptCancelButton")
+                    Button(String(localized: "okay", defaultValue: "OK"), action: onConfirm)
+                        .buttonStyle(.plain)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(
+                            canConfirm
+                                ? AndroidDialogSurfacePalette.accent(for: colorScheme)
+                                : AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
+                        )
+                        .disabled(!canConfirm)
+                        .accessibilityIdentifier("workspaceNamePromptConfirmButton")
+                }
             }
-
-            HStack(spacing: 12) {
-                Spacer()
-
-                Button(String(localized: "cancel"), action: onCancel)
-                    .foregroundStyle(dialogAccent)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("workspaceNamePromptCancelButton")
-
-                Button(prompt.confirmTitle, action: onConfirm)
-                    .disabled(!canConfirm)
-                    .foregroundStyle(canConfirm ? dialogAccent : dialogSecondaryText.opacity(0.6))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("workspaceNamePromptConfirmButton")
-            }
+            .padding(22)
+            .frame(maxWidth: 480)
         }
-        .padding(20)
-        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(fieldBorder.opacity(0.65), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.18), radius: 20, y: 8)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("workspaceNamePromptScreen")
-        .tint(dialogAccent)
-        .onAppear {
-            requestNameFieldFocus()
+        .onAppear { isNameFieldFocused = true }
+        .task(id: prompt) {
+            await Task.yield()
+            isNameFieldFocused = true
         }
-        .task(id: prompt.id) {
-            await requestNameFieldFocusAfterAttachment()
-        }
-    }
-
-    @MainActor
-    private func requestNameFieldFocus() {
-        isNameFieldFocused = true
-    }
-
-    @MainActor
-    private func requestNameFieldFocusAfterAttachment() async {
-        requestNameFieldFocus()
-        await Task.yield()
-        requestNameFieldFocus()
     }
 }

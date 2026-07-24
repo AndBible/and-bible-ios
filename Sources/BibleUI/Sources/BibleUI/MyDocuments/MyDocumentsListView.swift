@@ -1,4 +1,4 @@
-// MyDocumentsListView.swift -- Android-parity My Documents library management
+// MyDocumentsListView.swift -- App-owned Android My Documents activity
 
 import BibleCore
 import Foundation
@@ -7,23 +7,29 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /**
- Manages the complete My Documents library with explicit Save and Cancel boundaries.
+ Manages the complete My Documents library with Android's activity structure and transaction rules.
 
- Android exposes document creation, multi-file import, rename/description editing, delete, reorder,
- export, and a nested page manager. This view provides the same workflows over a value-based
- `MyDocumentManagementSession`; SwiftData is touched only by Save, so Cancel reliably discards
- creates, imports, deletes, reorders, and edits together.
+ Presentation mirrors `MyDocumentsActivity`: an app-owned action bar, + command, anchored Import
+ overflow, draggable flat rows, per-row popup commands, centered empty message, and persistent
+ Dismiss/Save actions. The stronger value-based `MyDocumentManagementSession` remains the single
+ mutation owner, so iOS can honor Android's explicit boundaries without Android's intermediate DB
+ writes leaking through Cancel.
 
- - Side effects: Loads SwiftData on first appearance, writes one transactional graph on Save,
-   imports security-scoped text files, and creates temporary export files for native sharing.
- - Failure modes: Validation, UTF-8 import, export, and persistence failures are shown to the user
-   and leave the current draft available for correction or retry.
+ Side effects:
+ - loads and transactionally saves the SwiftData document graph
+ - reads security-scoped imports and hands completed exports to the platform file destination
+ - invokes the reader owner only after a persisted page is selected
+
+ Failure modes:
+ - validation, transfer, and persistence errors stay on the app-owned route for retry
+ - protected AI Documents remain visible and cannot be deleted while they contain pages
  */
 public struct MyDocumentsListView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     private let reservedInitials: Set<String>
+    private let surfacePalette: ReaderThemeSurfacePalette
     private let onDismiss: (() -> Void)?
     private let onLibrarySaved: (() -> Void)?
     private let onOpenPage: (String, String) -> Void
@@ -38,20 +44,21 @@ public struct MyDocumentsListView: View {
     @State private var activeDocumentID: UUID?
     @State private var showsCloseDecision = false
     @State private var showsOpenDocumentDecision = false
-    @State private var exportURLs: [URL] = []
-    @State private var showsExport = false
+    @State private var showsOverflowMenu = false
+    @State private var activeDocumentMenuID: UUID?
+    @State private var documentExportDocuments: [MyDocumentExportDocument] = []
+    @State private var showsDocumentFileExporter = false
+    @State private var toastMessage: String?
     @State private var errorMessage: String?
 
     /**
-     Creates the My Documents manager.
+     Creates a standalone My Documents route using the application palette.
 
      - Parameters:
        - reservedInitials: Installed module initials unavailable to generated My Documents.
-       - onDismiss: Optional owner callback used when the manager is a reader-stack destination.
+       - onDismiss: Optional owner callback used when the manager is a reader destination.
        - onLibrarySaved: Optional callback that refreshes readers after persistence succeeds.
        - onOpenPage: Opens a persisted page in the owning reader pane.
-     - Side effects: None until the view appears or the user invokes a workflow.
-     - Failure modes: None.
      */
     public init(
         reservedInitials: Set<String> = [],
@@ -60,199 +67,163 @@ public struct MyDocumentsListView: View {
         onOpenPage: @escaping (String, String) -> Void
     ) {
         self.reservedInitials = reservedInitials
+        surfacePalette = .standard
         self.onDismiss = onDismiss
         self.onLibrarySaved = onLibrarySaved
         self.onOpenPage = onOpenPage
     }
 
-    /** Builds the document library, editing surfaces, and explicit transaction controls. */
+    /** Creates a reader-owned route using its resolved workspace/window palette. */
+    init(
+        reservedInitials: Set<String>,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: (() -> Void)?,
+        onLibrarySaved: (() -> Void)?,
+        onOpenPage: @escaping (String, String) -> Void
+    ) {
+        self.reservedInitials = reservedInitials
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
+        self.onLibrarySaved = onLibrarySaved
+        self.onOpenPage = onOpenPage
+    }
+
+    /** Builds either the document activity or its app-owned nested Pages activity. */
     public var body: some View {
-        Group {
-            if session.documents.isEmpty {
-                ContentUnavailableView(
-                    String(localized: "my_documents", defaultValue: "My Documents"),
-                    systemImage: "doc.text",
-                    description: Text(
-                        String(
-                            localized: "my_documents_empty",
-                            defaultValue: "No documents yet. Tap + to create one."
-                        )
-                    )
+        ZStack {
+            surfacePalette.backgroundColor.ignoresSafeArea()
+
+            if let activeDocumentID {
+                MyDocumentPagesListView(
+                    documentID: activeDocumentID,
+                    session: $session,
+                    surfacePalette: surfacePalette,
+                    onDismiss: { self.activeDocumentID = nil },
+                    onSave: saveSession,
+                    onOpenPage: onOpenPage
                 )
-                .accessibilityIdentifier("myDocumentsListScreen")
-                .accessibilityValue(myDocumentsAccessibilityValue)
             } else {
-                List {
-                    ForEach(session.documents) { document in
-                        Button {
-                            requestOpenDocument(document.id)
-                        } label: {
-                            MyDocumentRow(document: document)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier(documentRowIdentifier(for: document))
-                        .accessibilityLabel(document.name)
-                        .accessibilityValue(
-                            "initials=\(document.initials);pages=\(document.pages.count)"
-                        )
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                pendingDeleteDocument = document
-                            } label: {
-                                Label(String(localized: "delete"), systemImage: "trash")
-                            }
-                            Button {
-                                edit(document)
-                            } label: {
-                                Label(String(localized: "rename"), systemImage: "pencil")
-                            }
-                            .tint(.accentColor)
-                        }
-                        .contextMenu {
-                            Button {
-                                edit(document)
-                            } label: {
-                                Label(String(localized: "rename"), systemImage: "pencil")
-                            }
-                            Button {
-                                export(document)
-                            } label: {
-                                Label(String(localized: "export"), systemImage: "square.and.arrow.up")
-                            }
-                            Button(role: .destructive) {
-                                pendingDeleteDocument = document
-                            } label: {
-                                Label(String(localized: "delete"), systemImage: "trash")
-                            }
-                        }
-                    }
-                    .onMove { offsets, destination in
-                        session.moveDocuments(fromOffsets: offsets, toOffset: destination)
-                    }
-                }
-                .accessibilityIdentifier("myDocumentsListScreen")
-                .accessibilityValue(myDocumentsAccessibilityValue)
+                libraryActivity
             }
         }
-        .overlay(alignment: .topLeading) { myDocumentsListStateExport }
-        .navigationTitle(String(localized: "my_documents", defaultValue: "My Documents"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(true)
-        .toolbar { documentToolbar }
         .onAppear(perform: loadSessionIfNeeded)
-        .navigationDestination(item: $activeDocumentID) { documentID in
-            MyDocumentPagesListView(
-                documentID: documentID,
-                session: $session,
-                onSave: saveSession,
-                onOpenPage: onOpenPage
-            )
-        }
-        .sheet(item: $metadataEditorRequest) { request in
-            MyDocumentMetadataEditor(request: request) { name, description in
-                applyMetadataEditor(request, name: name, description: description)
-            }
-        }
-        .sheet(isPresented: $showsExport) {
-            ShareSheet(items: exportURLs.map { $0 as Any })
-        }
         .fileImporter(
             isPresented: $isImportingDocument,
             allowedContentTypes: [.plainText, .html, .text],
             allowsMultipleSelection: true,
             onCompletion: prepareDocumentImport
         )
-        .confirmationDialog(
-            String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
-            isPresented: $showsCloseDecision,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "save")) {
-                if saveSession() { close() }
-            }
-            Button(String(localized: "no", defaultValue: "Don't Save"), role: .destructive) {
-                session.discardChanges()
-                close()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {}
-        }
-        .confirmationDialog(
-            String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
-            isPresented: $showsOpenDocumentDecision,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "save")) {
-                if saveSession() { openPendingDocument() }
-            }
-            Button(String(localized: "no", defaultValue: "Don't Save"), role: .destructive) {
-                session.discardChanges()
-                openPendingDocument()
-            }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingOpenDocumentID = nil
-            }
-        }
-        .confirmationDialog(
-            deleteConfirmationTitle,
-            isPresented: Binding(
-                get: { pendingDeleteDocument != nil },
-                set: { if !$0 { pendingDeleteDocument = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "delete"), role: .destructive, action: deletePendingDocument)
-            Button(String(localized: "cancel"), role: .cancel) {}
-        }
-        .alert(
-            String(localized: "errorTitle", defaultValue: "Error occurred"),
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
+        .fileExporter(
+            isPresented: $showsDocumentFileExporter,
+            documents: documentExportDocuments,
+            contentTypes: [.plainText, .html, .text],
+            onCompletion: completeDocumentExport
+        )
+        .overlay { dialogLayer }
+        .androidToastFeedback(toastMessage, bottomPadding: 72)
+        #if os(iOS)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
+    }
+
+    /// Android's complete top/content/bottom activity hierarchy.
+    private var libraryActivity: some View {
+        AndroidMyDocumentsActivityView(
+            documents: session.documents,
+            surfacePalette: surfacePalette,
+            isDirty: session.isDirty,
+            accessibilityValue: myDocumentsAccessibilityValue,
+            showsOverflowMenu: $showsOverflowMenu,
+            activeDocumentMenuID: $activeDocumentMenuID,
+            onBack: requestClose,
+            onCreate: createDocument,
+            onImport: { isImportingDocument = true },
+            onDismiss: discardAndClose,
+            onSave: saveAndClose,
+            onOpen: requestOpenDocument,
+            onRename: beginRename,
+            onEditDescription: beginDescriptionEdit,
+            onExport: export,
+            onDelete: requestDelete,
+            onMove: { moveDocument($0, before: $1) }
+        )
+        .overlay(alignment: .topLeading) { myDocumentsListStateExport }
+    }
+
+    /// Highest-priority app-owned dialog retained over the activity surface.
+    @ViewBuilder
+    private var dialogLayer: some View {
+        if let request = metadataEditorRequest {
+            AndroidMyDocumentMetadataDialog(
+                request: request,
+                onDismiss: { metadataEditorRequest = nil },
+                onSave: { value in
+                    applyMetadataEditor(request, value: value)
+                    metadataEditorRequest = nil
+                }
             )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+        } else if showsCloseDecision {
+            saveChangesDialog(
+                onDiscard: { session.discardChanges(); close() },
+                onSave: { if saveSession() { close() } },
+                onCancel: { showsCloseDecision = false }
+            )
+        } else if showsOpenDocumentDecision {
+            saveChangesDialog(
+                onDiscard: { session.discardChanges(); openPendingDocument() },
+                onSave: { if saveSession() { openPendingDocument() } },
+                onCancel: {
+                    pendingOpenDocumentID = nil
+                    showsOpenDocumentDecision = false
+                }
+            )
+        } else if pendingDeleteDocument != nil {
+            AndroidDecisionDialog(
+                title: "",
+                message: deleteConfirmationTitle,
+                actions: [
+                    .init(id: "no", title: String(localized: "no"), style: .normal) {
+                        pendingDeleteDocument = nil
+                    },
+                    .init(id: "yes", title: String(localized: "yes"), style: .normal) {
+                        deletePendingDocument()
+                    },
+                ],
+                accessibilityIdentifier: "myDocumentsDeleteDialog"
+            )
+        } else if let errorMessage {
+            AndroidDecisionDialog(
+                title: "",
+                message: errorMessage,
+                actions: [
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) { self.errorMessage = nil },
+                ],
+                accessibilityIdentifier: "myDocumentsErrorDialog"
+            )
         }
     }
 
-    @ToolbarContentBuilder
-    private var documentToolbar: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button(String(localized: "cancel"), action: requestClose)
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            #if os(iOS)
-            EditButton()
-            #endif
-            Menu {
-                Button(action: createDocument) {
-                    Label(
-                        String(localized: "my_document_create_title", defaultValue: "Create new document"),
-                        systemImage: "doc.badge.plus"
-                    )
-                }
-                Button { isImportingDocument = true } label: {
-                    Label(
-                        String(localized: "my_document_import_document", defaultValue: "Import files as document"),
-                        systemImage: "square.and.arrow.down"
-                    )
-                }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .accessibilityLabel(String(
-                localized: "my_document_create_title",
-                defaultValue: "Create new document"
-            ))
-
-            Button(String(localized: "save")) {
-                if saveSession() { close() }
-            }
-            .disabled(!session.isDirty)
-        }
+    /// Builds Android's three-action Save changes dialog in platform button order.
+    private func saveChangesDialog(
+        onDiscard: @escaping () -> Void,
+        onSave: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) -> some View {
+        AndroidDecisionDialog(
+            title: "",
+            message: String(localized: "my_document_save_changes", defaultValue: "Save changes?"),
+            actions: [
+                .init(id: "cancel", title: String(localized: "cancel"), style: .normal, perform: onCancel),
+                .init(id: "no", title: String(localized: "no"), style: .normal, perform: onDiscard),
+                .init(id: "yes", title: String(localized: "yes"), style: .normal, perform: onSave),
+            ],
+            accessibilityIdentifier: "myDocumentsSaveChangesDialog"
+        )
     }
 
     private var deleteConfirmationTitle: String {
@@ -267,9 +238,7 @@ public struct MyDocumentsListView: View {
 
     private var myDocumentsAccessibilityValue: String {
         let baseState = "total=\(session.documents.count);dirty=\(session.isDirty)"
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return baseState }
         let rowTokens = session.documents
             .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
             .map { "|\(myDocumentsAccessibilitySegment($0.initials))|" }
@@ -290,6 +259,7 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Loads the value session once and leaves failures on the owning activity. */
     private func loadSessionIfNeeded() {
         guard !didLoad else { return }
         didLoad = true
@@ -300,75 +270,81 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Opens Android's create-name dialog without inventing a description field. */
     private func createDocument() {
+        closePopups()
         metadataEditorRequest = MyDocumentMetadataEditorRequest(
-            documentID: nil,
+            purpose: .create,
             title: String(localized: "my_document_create_title", defaultValue: "Create new document"),
-            initialName: String(
+            initialValue: String(
                 format: String(localized: "my_document_new_name", defaultValue: "Document %d"),
                 session.documents.count + 1
-            ),
-            initialDescription: "",
-            importsPendingFiles: false
+            )
         )
     }
 
-    private func edit(_ document: MyDocumentDraft) {
+    /** Opens Android's rename-only dialog for one draft document. */
+    private func beginRename(_ document: MyDocumentDraft) {
+        closePopups()
         metadataEditorRequest = MyDocumentMetadataEditorRequest(
-            documentID: document.id,
+            purpose: .rename(documentID: document.id),
             title: String(localized: "my_document_rename_title", defaultValue: "Rename document"),
-            initialName: document.name,
-            initialDescription: document.documentDescription ?? "",
-            importsPendingFiles: false
+            initialValue: document.name
         )
     }
 
-    private func applyMetadataEditor(
-        _ request: MyDocumentMetadataEditorRequest,
-        name: String,
-        description: String?
-    ) {
+    /** Opens Android's independent description editor for one draft document. */
+    private func beginDescriptionEdit(_ document: MyDocumentDraft) {
+        closePopups()
+        metadataEditorRequest = MyDocumentMetadataEditorRequest(
+            purpose: .editDescription(documentID: document.id),
+            title: String(
+                localized: "my_document_edit_description",
+                defaultValue: "Edit description"
+            ),
+            initialValue: document.documentDescription ?? ""
+        )
+    }
+
+    /** Applies exactly the mutation represented by one Android text-entry request. */
+    private func applyMetadataEditor(_ request: MyDocumentMetadataEditorRequest, value: String) {
         do {
-            if request.importsPendingFiles {
-                let documentID = try session.importDocument(
-                    name: name,
+            switch request.purpose {
+            case .create:
+                _ = try session.createDocument(name: value, reservedInitials: reservedInitials)
+            case .rename(let documentID):
+                try session.renameDocument(id: documentID, name: value)
+            case .editDescription(let documentID):
+                try session.setDocumentDescription(id: documentID, description: value)
+            case .importDocument:
+                _ = try session.importDocument(
+                    name: value,
                     files: pendingImportFiles,
                     reservedInitials: reservedInitials
                 )
-                try session.setDocumentDescription(id: documentID, description: description)
                 pendingImportFiles = []
-            } else if let documentID = request.documentID {
-                try session.renameDocument(id: documentID, name: name)
-                try session.setDocumentDescription(id: documentID, description: description)
-            } else {
-                _ = try session.createDocument(
-                    name: name,
-                    documentDescription: description,
-                    reservedInitials: reservedInitials
-                )
             }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
+    /** Stages Android's sorted multi-file import, then asks for the new document name. */
     private func prepareDocumentImport(_ result: Result<[URL], Error>) {
         do {
             let files = try MyDocumentNativeFileTransfer.importFiles(at: result.get())
             guard !files.isEmpty else { throw MyDocumentManagementError.emptyImport }
             pendingImportFiles = files
             metadataEditorRequest = MyDocumentMetadataEditorRequest(
-                documentID: nil,
+                purpose: .importDocument,
                 title: String(
-                    localized: "my_document_import_document",
-                    defaultValue: "Import files as document"
+                    localized: "my_document_create_title",
+                    defaultValue: "Create new document"
                 ),
-                initialName: String(
+                initialValue: String(
                     format: String(localized: "my_document_new_name", defaultValue: "Document %d"),
                     session.documents.count + 1
-                ),
-                initialDescription: "",
-                importsPendingFiles: true
+                )
             )
         } catch {
             pendingImportFiles = []
@@ -376,18 +352,43 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Starts Android's directory-style export as individually named page files. */
     private func export(_ document: MyDocumentDraft) {
-        do {
-            exportURLs = try MyDocumentNativeFileTransfer.exportURLs(
-                for: MyDocumentTransferService.exportDocument(document),
-                directoryName: document.name
-            )
-            showsExport = true
-        } catch {
+        closePopups()
+        let files = MyDocumentTransferService.exportDocument(document)
+        guard !files.isEmpty else { return }
+        documentExportDocuments = files.map(MyDocumentExportDocument.init(file:))
+        showsDocumentFileExporter = true
+    }
+
+    /** Converts the system file handoff result into Android toast/error feedback. */
+    private func completeDocumentExport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success:
+            showToast(String(
+                localized: "my_document_export_success",
+                defaultValue: "Pages exported successfully"
+            ))
+        case .failure(let error):
             errorMessage = error.localizedDescription
         }
     }
 
+    /** Preserves Android's protected AI Documents check before confirmation. */
+    private func requestDelete(_ document: MyDocumentDraft) {
+        closePopups()
+        if document.initials == MyDocumentManagementSession.aiDocumentsInitials,
+           !document.pages.isEmpty {
+            errorMessage = String(
+                localized: "my_document_cannot_delete_ai_documents",
+                defaultValue: "AI Documents cannot be deleted while it contains pages. Delete the pages first."
+            )
+        } else {
+            pendingDeleteDocument = document
+        }
+    }
+
+    /** Deletes the confirmed draft and retains failures on the route. */
     private func deletePendingDocument() {
         guard let document = pendingDeleteDocument else { return }
         pendingDeleteDocument = nil
@@ -398,6 +399,7 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Persists the complete draft graph transactionally and advances its clean baseline. */
     private func saveSession() -> Bool {
         var candidate = session
         do {
@@ -414,7 +416,9 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Matches Android's dirty prompt before opening the nested Pages activity. */
     private func requestOpenDocument(_ documentID: UUID) {
+        closePopups()
         guard session.isDirty else {
             activeDocumentID = documentID
             return
@@ -423,7 +427,9 @@ public struct MyDocumentsListView: View {
         showsOpenDocumentDecision = true
     }
 
+    /** Opens a still-existing pending document after Save or Discard. */
     private func openPendingDocument() {
+        showsOpenDocumentDecision = false
         guard let documentID = pendingOpenDocumentID else { return }
         pendingOpenDocumentID = nil
         if session.document(id: documentID) != nil {
@@ -431,7 +437,9 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Android Up prompts when dirty; its persistent Dismiss action does not. */
     private func requestClose() {
+        closePopups()
         if session.isDirty {
             showsCloseDecision = true
         } else {
@@ -439,57 +447,49 @@ public struct MyDocumentsListView: View {
         }
     }
 
+    /** Discards the complete draft when Android's persistent Dismiss action is tapped. */
+    private func discardAndClose() {
+        session.discardChanges()
+        close()
+    }
+
+    /** Saves and closes only after the transactional store accepts the complete draft. */
+    private func saveAndClose() {
+        if saveSession() { close() }
+    }
+
+    /** Returns ownership to the reader route or standalone SwiftUI host. */
     private func close() {
-        if let onDismiss {
-            onDismiss()
-        } else {
-            dismiss()
+        if let onDismiss { onDismiss() } else { dismiss() }
+    }
+
+    /** Dismisses both popup owners before opening another route or dialog. */
+    private func closePopups() {
+        showsOverflowMenu = false
+        activeDocumentMenuID = nil
+    }
+
+    /** Reorders by stable drag payload while delegating AI pinning/order normalization to BibleCore. */
+    private func moveDocument(_ payloads: [String], before targetID: UUID) -> Bool {
+        guard let payload = payloads.first,
+              let sourceID = UUID(uuidString: payload),
+              sourceID != targetID,
+              let sourceIndex = session.documents.firstIndex(where: { $0.id == sourceID }),
+              let targetIndex = session.documents.firstIndex(where: { $0.id == targetID }) else {
+            return false
+        }
+        let destination = sourceIndex < targetIndex ? targetIndex + 1 : targetIndex
+        session.moveDocuments(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destination)
+        return true
+    }
+
+    /** Shows one Android short toast and removes only the same still-current message. */
+    private func showToast(_ message: String) {
+        toastMessage = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(AndroidToastFeedback.shortDuration))
+            if toastMessage == message { toastMessage = nil }
         }
     }
 
-    private func documentRowIdentifier(for document: MyDocumentDraft) -> String {
-        "myDocumentsDocumentRow::\(myDocumentsAccessibilitySegment(document.initials))"
-    }
-}
-
-/** Android-style document row showing the name and description, without internal key metadata. */
-private struct MyDocumentRow: View {
-    let document: MyDocumentDraft
-
-    private var descriptionText: String {
-        guard let description = document.documentDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !description.isEmpty else {
-            return String(localized: "my_document_no_description", defaultValue: "No description")
-        }
-        return description
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: document.sourcePromptId != nil
-                ? "sparkles"
-                : "doc.text")
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(document.name)
-                    .foregroundStyle(.primary)
-                Text(descriptionText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-/** Sanitizes My Documents values into stable UI-test tokens. */
-private func myDocumentsAccessibilitySegment(_ value: String) -> String {
-    value.replacingOccurrences(
-        of: "[^A-Za-z0-9]+",
-        with: "_",
-        options: .regularExpression
-    )
-    .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
 }

@@ -1,660 +1,831 @@
-// RepositoryManagerView.swift — Repository source management
+// RepositoryManagerView.swift — Android custom-repository activities
 
 import SwiftUI
 import SwordKit
 
-/**
- Manages Downloads repository sources with Android custom-repository parity.
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
- The screen separates built-in Android repositories from user-added custom repositories. Built-in
- normal, beta, and legacy FTP rows are read-only, while custom rows can be added, replaced, or
- deleted through the same HTTPS manifest/direct-catalog validation flow Android uses.
+/**
+ Hosts Android's Custom repositories list and editor as app-owned activity surfaces.
+
+ Android's `CustomRepositories` activity lists only user-installed repositories; built-in sources
+ belong to Downloads and are not editable here. Its empty-state card owns Add and Information,
+ while a populated row opens `CustomRepositoryEditor`. The editor owns live URL validation,
+ Paste/validity feedback, and Save/Delete/Help action-bar commands. This projection deliberately
+ avoids native `List`, `Form`, swipe actions, navigation toolbars, and feature-local color guesses.
 
  Data dependencies:
- - `RepositorySourceManager` reads and mutates `InstallMgr.conf`
- - `InstallManager` classifies packaged Android default repositories through the manager
- - `openURL` opens the shared Android custom repositories help wiki
+ - `RepositorySourceManager` loads, validates, persists, replaces, and deletes repository sources.
+ - `ReaderThemeSurfacePalette` supplies the owning reader/workspace colors.
+ - the platform pasteboard supplies Android's explicit Paste command.
 
  Side effects:
- - `onAppear` loads the persisted source list
- - add, replace, delete, and reset actions rewrite `InstallMgr.conf` through `RepositorySourceManager`
- - help opens an external browser when the user chooses the wiki action
+ - appearing reloads persisted source configuration;
+ - editor validation performs cancellable HTTPS reads after the Android debounce;
+ - Save/Delete mutate repository configuration and notify Downloads;
+ - Help can hand the documented wiki URL to the platform browser.
+
+ Failure modes:
+ - invalid/unreachable URLs remain unchecked and cannot be saved;
+ - persistence failures stay in the editor and render an app-owned error dialog;
+ - stale edit/delete targets report the manager error without dismissing the activity.
  */
 public struct RepositoryManagerView: View {
-    /// Opens the Android custom repository help URL when the help alert action is selected.
+    /// Pops the full app-owned activity destination.
+    @Environment(\.dismiss) private var dismiss
+
+    /// Opens the Android custom-repository wiki after the app-owned Help dialog.
     @Environment(\.openURL) private var openURL
 
-    /// Source-management service used for validation and config persistence.
+    /// Repository validation and persistence owner.
     private let sourceManager: RepositorySourceManager
 
-    /// All configured repository sources loaded from `InstallMgr.conf`.
+    /// Reader/workspace palette inherited from Document Downloader.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Complete persisted source inventory; presentation filters it to custom sources.
     @State private var sources: [SourceConfig] = []
 
-    /// Currently presented custom-source editor state, or `nil` when no editor sheet is open.
+    /// Active Android editor activity state, or `nil` while the list activity is visible.
     @State private var editorState: RepositorySourceEditorState?
 
-    /// Validation or persistence error shown inside the editor sheet.
-    @State private var editorErrorMessage: String?
+    /// Registration produced by live validation for the current editor URL.
+    @State private var validatedRegistration: RepositorySourceRegistration?
 
-    /// Whether an add or replace request is currently validating remote HTTPS resources.
+    /// Trimmed URL that produced `validatedRegistration`.
+    @State private var validatedRepositoryURL: String?
+
+    /// Whether the current URL is undergoing Android-style manifest/catalog validation.
+    @State private var isValidatingSource = false
+
+    /// Whether a validated registration is being committed to local configuration.
     @State private var isSavingSource = false
 
-    /// Whether the destructive reset confirmation alert is currently presented.
-    @State private var showResetConfirm = false
-
-    /// Custom repository selected for destructive deletion confirmation.
-    @State private var deletionCandidate: RepositorySourceDeletionCandidate?
-
-    /// Whether the Android custom repositories help alert is currently presented.
+    /// Whether the context-sensitive Android Help dialog is visible.
     @State private var showHelp = false
 
-    /// Last source-management error raised outside the editor sheet.
+    /// Whether Back is waiting for confirmation to discard changed editor input.
+    @State private var showDiscardConfirmation = false
+
+    /// Existing repository awaiting Android's Yes/No delete confirmation.
+    @State private var deletionCandidate: RepositorySourceDeletionCandidate?
+
+    /// Validation-independent source-management error shown in the app-owned dialog layer.
     @State private var sourceErrorMessage: String?
 
     /**
-     Creates the repository manager with an injectable source-management service.
+     Creates the public repository route with the application-default palette.
 
-     - Parameter sourceManager: Service that owns source validation and `InstallMgr.conf` writes.
-
-     Side effects:
-     - none; repository configuration is loaded lazily in `onAppear`
+     - Parameter sourceManager: Repository service used by list and editor activities.
+     - Side effects: none; sources load on appearance.
+     - Failure modes: none.
      */
     public init(sourceManager: RepositorySourceManager = RepositorySourceManager()) {
         self.sourceManager = sourceManager
+        surfacePalette = .standard
     }
 
     /**
-     Builds the repository list, custom-source editor sheet, help, and reset controls.
+     Creates the reader-owned repository route used by Document Downloader.
+
+     - Parameters:
+       - sourceManager: Repository service used by list and editor activities.
+       - surfacePalette: Active reader/workspace palette inherited from Downloads.
+     - Side effects: none; sources load on appearance.
+     - Failure modes: none.
      */
-    public var body: some View {
-        List {
-            if sources.isEmpty {
-                emptySourceSection
-            } else {
-                defaultRepositoriesSection
-                customRepositoriesSection
-                resetSection
-            }
-        }
-        .navigationTitle(String(localized: "repositories", defaultValue: "Repositories"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .accessibilityIdentifier("repositoryManagerScreen")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    beginAddingSource()
-                } label: {
-                    SwiftUI.Label(String(localized: "add", defaultValue: "Add"), systemImage: "plus")
-                }
-                .accessibilityIdentifier("repositoryManagerAddButton")
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    showHelp = true
-                } label: {
-                    SwiftUI.Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
-                }
-                .accessibilityIdentifier("repositoryManagerHelpButton")
-            }
-        }
-        .sheet(item: $editorState) { _ in
-            NavigationStack {
-                sourceEditorView
-            }
-            .presentationDetents([.medium])
-        }
-        .alert(String(localized: "reset_sources_title", defaultValue: "Reset repositories"), isPresented: $showResetConfirm) {
-            Button(String(localized: "reset", defaultValue: "Reset"), role: .destructive) {
-                resetToDefaults()
-            }
-            Button(String(localized: "cancel", defaultValue: "Cancel"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "reset_sources_message",
-                defaultValue: "Remove custom repositories and restore the built-in Android source list?"
-            ))
-        }
-        .alert(item: $deletionCandidate) { candidate in
-            Alert(
-                title: Text(String(
-                    localized: "delete_custom_repository_title",
-                    defaultValue: "Delete repository"
-                )),
-                message: Text(String(
-                    format: String(
-                        localized: "delete_custom_repository_message_format",
-                        defaultValue: "Delete %@?"
-                    ),
-                    candidate.source.name
-                )),
-                primaryButton: .destructive(Text(String(localized: "delete", defaultValue: "Delete"))) {
-                    deleteSource(candidate.source)
-                },
-                secondaryButton: .cancel(Text(String(localized: "cancel", defaultValue: "Cancel")))
-            )
-        }
-        .alert(String(localized: "custom_repositories", defaultValue: "Custom repositories"), isPresented: $showHelp) {
-            Button(String(localized: "open_wiki", defaultValue: "Open Wiki")) {
-                openURL(Self.customRepositoriesWikiURL)
-            }
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(String(
-                localized: "custom_repositories_help_summary",
-                defaultValue: "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs."
-            ))
-        }
-        .alert(
-            String(localized: "repository_source_error", defaultValue: "Repository source error"),
-            isPresented: sourceErrorPresented
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(sourceErrorMessage ?? "")
-        }
-        .onAppear {
-            loadSources()
-        }
+    init(
+        sourceManager: RepositorySourceManager = RepositorySourceManager(),
+        surfacePalette: ReaderThemeSurfacePalette
+    ) {
+        self.sourceManager = sourceManager
+        self.surfacePalette = surfacePalette
     }
 
+    /**
+     Renders exactly one full activity plus its shared dialog layer.
+
+     - Returns: Custom-repository list or editor content using owner-themed Android components.
+     - Side effects: `onAppear` reloads persisted sources; editor URL changes start validation.
+     - Failure modes: Source errors are retained in `repositoryDialogOverlay`.
+     */
+    public var body: some View {
+        ZStack {
+            if editorState == nil {
+                repositoryListActivity
+            } else {
+                repositoryEditorActivity
+            }
+
+            repositoryDialogOverlay
+        }
+        .onAppear(perform: loadSources)
+    }
+
+    /// Android's documented custom-repositories wiki.
     private static let customRepositoriesWikiURL = URL(
         string: "https://github.com/AndBible/and-bible/wiki/Custom-repositories"
     )!
 
-    /// Sources that match Android's built-in normal, beta, or legacy FTP repositories.
-    private var defaultSources: [SourceConfig] {
-        sources.filter(sourceManager.isDefaultSource)
-    }
-
-    /// Sources that were added by the user and can be managed from this screen.
+    /// Persisted sources Android exposes in this activity; packaged defaults remain in Downloads.
     private var customSources: [SourceConfig] {
         sources.filter { !sourceManager.isDefaultSource($0) }
     }
 
-    /// Binding used by the source-error alert because SwiftUI alerts require a Boolean presenter.
-    private var sourceErrorPresented: Binding<Bool> {
-        Binding(
-            get: { sourceErrorMessage != nil },
-            set: { presented in
-                if !presented {
-                    sourceErrorMessage = nil
-                }
-            }
-        )
-    }
-
-    /// Binding for the URL text field inside the optional editor state.
+    /// Editable URL binding that invalidates any result derived from the previous value.
     private var editorURLBinding: Binding<String> {
         Binding(
             get: { editorState?.repositoryURL ?? "" },
             set: { newValue in
-                if var current = editorState {
-                    current.repositoryURL = newValue
-                    editorState = current
-                    editorErrorMessage = nil
-                }
+                editorState?.repositoryURL = newValue
+                validatedRegistration = nil
+                validatedRepositoryURL = nil
             }
         )
     }
 
-    /// Binding for Android's editable SWORD package-directory field.
-    private var editorPackageDirectoryBinding: Binding<String> {
-        Binding(
-            get: { editorState?.packageDirectory ?? "" },
-            set: { newValue in
-                if var current = editorState {
-                    current.packageDirectory = newValue
-                    editorState = current
-                    editorErrorMessage = nil
-                }
-            }
-        )
-    }
-
-    /// Whether the current editor URL is empty or a validation request is already in flight.
+    /// Whether Android's Save command must stay disabled for the current editor state.
     private var editorSaveDisabled: Bool {
-        editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false || isSavingSource
+        guard let editorState else { return true }
+        let trimmedURL = editorState.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isSavingSource
+            || isValidatingSource
+            || trimmedURL.isEmpty
+            || validatedRepositoryURL != trimmedURL
+            || validatedRegistration == nil
     }
 
-    /// Stable sheet identifier that preserves the existing add-source UI test contract.
+    /// Whether Back must ask to discard URL changes before returning to the list activity.
+    private var editorHasUnsavedChanges: Bool {
+        guard let editorState else { return false }
+        return editorState.repositoryURL != editorState.initialRepositoryURL
+    }
+
+    /// Stable screen identity retained for existing editor automation.
     private var editorScreenAccessibilityIdentifier: String {
-        editorState?.originalName == nil ? "repositoryManagerAddSourceScreen" : "repositoryManagerSourceEditorScreen"
-    }
-
-    /// Stable cancel-button identifier that preserves the existing add-source UI test contract.
-    private var editorCancelAccessibilityIdentifier: String {
         editorState?.originalName == nil
-            ? "repositoryManagerAddSourceCancelButton"
-            : "repositoryManagerSourceEditorCancelButton"
-    }
-
-    // MARK: - Sections
-
-    /**
-     Builds the repair section shown when no source rows are available.
-     */
-    private var emptySourceSection: some View {
-        Section {
-            VStack(spacing: 12) {
-                Text(String(localized: "no_sources_configured", defaultValue: "No repositories configured"))
-                    .foregroundStyle(.secondary)
-                Button(String(localized: "reset_to_defaults", defaultValue: "Reset to defaults")) {
-                    resetToDefaults()
-                }
-                .buttonStyle(.bordered)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical)
-        }
+            ? "repositoryManagerAddSourceScreen"
+            : "repositoryManagerSourceEditorScreen"
     }
 
     /**
-     Builds the read-only built-in repository section.
+     Builds Android's Custom repositories list activity.
+
+     - Returns: Shared action bar plus either the exact empty card or custom repository rows.
+     - Side effects: Add/Help/Back and row taps mutate presentation state.
+     - Failure modes: An unreadable inventory is represented by the manager's empty result.
      */
-    private var defaultRepositoriesSection: some View {
-        Section {
-            ForEach(defaultSources, id: \.repositoryManagerListID) { source in
-                sourceRow(source, isCustom: false)
-            }
-        } header: {
-            Text(String(localized: "default_repositories", defaultValue: "Default repositories"))
-        }
-    }
-
-    /**
-     Builds the custom repository section with edit and delete affordances.
-     */
-    private var customRepositoriesSection: some View {
-        Section {
-            if customSources.isEmpty {
-                Button {
-                    beginAddingSource()
-                } label: {
-                    SwiftUI.Label(
-                        String(localized: "add_custom_repository", defaultValue: "Add custom repository"),
-                        systemImage: "plus.circle"
-                    )
-                }
-                .accessibilityIdentifier("repositoryManagerEmptyAddCustomButton")
-            } else {
-                ForEach(customSources, id: \.repositoryManagerListID) { source in
-                    sourceRow(source, isCustom: true)
-                }
-            }
-        } header: {
-            Text(String(localized: "custom_repositories", defaultValue: "Custom repositories"))
-        }
-    }
-
-    /**
-     Builds the iOS repair action for restoring packaged defaults.
-     */
-    private var resetSection: some View {
-        Section {
-            Button(String(localized: "reset_to_defaults", defaultValue: "Reset to defaults"), role: .destructive) {
-                showResetConfirm = true
-            }
-        }
-    }
-
-    // MARK: - Row Views
-
-    /**
-     Builds one repository row with Android-parity source metadata and custom-only actions.
-
-     - Parameters:
-       - source: Source definition to render.
-       - isCustom: Whether edit/delete actions are available for the row.
-     - Returns: A row showing repository name, URL, protocol support state, and management affordances.
-     */
-    private func sourceRow(_ source: SourceConfig, isCustom: Bool) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: isCustom ? "globe" : "checkmark.seal.fill")
-                .foregroundStyle(isCustom ? Color.accentColor : Color.green)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(source.name)
-                    .font(.body)
-                Text(source.displayAddress)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 8)
-
-            sourceProtocolBadge(source)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if isCustom {
-                beginEditingSource(source)
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if isCustom {
-                Button(String(localized: "delete", defaultValue: "Delete"), role: .destructive) {
-                    deletionCandidate = RepositorySourceDeletionCandidate(source: source)
-                }
-            }
-        }
-    }
-
-    /**
-     Builds the protocol/support badge for a repository row.
-
-     - Parameter source: Source whose protocol should be shown.
-     - Returns: A compact badge indicating HTTPS support or unsupported FTP state.
-     */
-    private func sourceProtocolBadge(_ source: SourceConfig) -> some View {
-        Group {
-            if source.isMyBibleRepository {
-                Text(String(localized: "mybible", defaultValue: "MyBible"))
-                    .foregroundStyle(.secondary)
-                    .background(Color.secondary.opacity(0.1))
-            } else if source.type == "FTP" {
-                Text(String(localized: "ftp_unsupported", defaultValue: "FTP unsupported"))
-                    .foregroundStyle(.red)
-                    .background(Color.red.opacity(0.1))
-            } else {
-                Text(String(localized: "https", defaultValue: "HTTPS"))
-                    .foregroundStyle(.secondary)
-                    .background(Color.secondary.opacity(0.1))
-            }
-        }
-        .font(.caption2)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Source Editor
-
-    /**
-     Builds the add/replace sheet for custom repositories.
-     */
-    private var sourceEditorView: some View {
-        Form {
-            Section(String(localized: "repository_url", defaultValue: "Repository URL")) {
-                TextField(
-                    String(localized: "repository_url_placeholder", defaultValue: "https://example.org/repository"),
-                    text: editorURLBinding
+    private var repositoryListActivity: some View {
+        ZStack(alignment: .topLeading) {
+            AndroidActivityScreen(
+                title: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+                accessibilityIdentifier: "repositoryManagerTopAppBar",
+                palette: surfacePalette,
+                onBack: { dismiss() }
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityAddCircle"),
+                    accessibilityLabel: String(localized: "new_item", defaultValue: "New item"),
+                    accessibilityIdentifier: "repositoryManagerAddButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: beginAddingSource
                 )
-                .textContentType(.URL)
+
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("DrawerHelp"),
+                    accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                    accessibilityIdentifier: "repositoryManagerHelpButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { showHelp = true }
+                )
+            } content: {
+                if customSources.isEmpty {
+                    repositoryEmptyCard
+                } else {
+                    repositoryRows
+                }
+            }
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+                accessibilityIdentifier: "repositoryManagerScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+    }
+
+    /**
+     Builds Android's elevated empty-list guidance card.
+
+     - Returns: Empty message followed by shared Add and Information raised buttons.
+     - Side effects: Buttons open the editor or Help dialog.
+     - Failure modes: none.
+     */
+    private var repositoryEmptyCard: some View {
+        VStack {
+            Spacer(minLength: 24)
+
+            VStack(spacing: 15) {
+                Text(String(
+                    localized: "custom_repositories_empty_list_message",
+                    defaultValue: "No custom repositories are defined"
+                ))
+                .font(.system(size: 16))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+                AndroidRaisedTextButton(
+                    title: String(
+                        localized: "custom_repositories_create_button_label",
+                        defaultValue: "Add Custom Repository"
+                    ),
+                    icon: .asset("ActivityAddCircle"),
+                    foregroundColor: surfacePalette.foregroundColor,
+                    backgroundColor: surfacePalette.controlFillColor,
+                    accessibilityIdentifier: "repositoryManagerEmptyAddCustomButton",
+                    action: beginAddingSource
+                )
+
+                AndroidRaisedTextButton(
+                    title: String(
+                        localized: "custom_repositories_info_button_label",
+                        defaultValue: "Information"
+                    ),
+                    icon: .asset("DocumentInfo"),
+                    foregroundColor: surfacePalette.foregroundColor,
+                    backgroundColor: surfacePalette.controlFillColor,
+                    accessibilityIdentifier: "repositoryManagerEmptyInformationButton",
+                    action: { showHelp = true }
+                )
+            }
+            .padding(15)
+            .background(surfacePalette.backgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+            .shadow(color: Color.black.opacity(0.34), radius: 20, y: 8)
+            .padding(25)
+
+            Spacer(minLength: 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /**
+     Builds the Android `ListView` projection containing custom repositories only.
+
+     - Returns: Lazily rendered title/description rows with Android separators.
+     - Side effects: Row taps open the editor activity.
+     - Failure modes: none.
+     */
+    private var repositoryRows: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(customSources, id: \.repositoryManagerListID) { source in
+                    sourceRow(source)
+                }
+            }
+        }
+        .scrollIndicators(.visible)
+    }
+
+    /**
+     Builds one Android `custom_repository_item` row.
+
+     - Parameter source: Custom source whose name and description are shown.
+     - Returns: A plain full-width title/description row with no invented icon or swipe command.
+     - Side effects: A tap opens the dedicated editor activity.
+     - Failure modes: Missing manifest descriptions fall back to the editable HTTPS URL.
+     */
+    private func sourceRow(_ source: SourceConfig) -> some View {
+        Button {
+            beginEditingSource(source)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.name)
+                    .font(.system(size: 16))
+                    .foregroundStyle(surfacePalette.foregroundColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(source.repositoryManagerDescription)
+                    .font(.system(size: 14))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(surfacePalette.inactiveBorderColor)
+                .frame(height: 1)
+        }
+        .accessibilityIdentifier("repositoryManagerSourceRow_\(source.name)")
+    }
+
+    /**
+     Builds Android's dedicated Custom repository editor activity.
+
+     - Returns: Shared action bar plus URL/Paste/validity/info/progress content.
+     - Side effects: URL changes start cancellable validation; toolbar commands save, delete, help,
+       or request Back/discard behavior.
+     - Failure modes: Invalid URLs stay unchecked and keep Save disabled.
+     */
+    private var repositoryEditorActivity: some View {
+        ZStack(alignment: .topLeading) {
+            AndroidActivitySurface(palette: surfacePalette) {
+                repositoryEditorTopAppBar
+            } content: {
+                repositoryEditorContent
+            }
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+                accessibilityIdentifier: editorScreenAccessibilityIdentifier,
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .task(id: editorState?.repositoryURL) {
+            await validateCurrentEditorURL()
+        }
+    }
+
+    /**
+     Builds editor Save/Delete/Help actions in Android menu order.
+
+     - Returns: Owner-themed shared activity app bar.
+     - Side effects: Commands commit, confirm deletion, open Help, or return to the list.
+     - Failure modes: Save is disabled until live validation owns the current URL.
+     */
+    private var repositoryEditorTopAppBar: some View {
+        AndroidActivityTopAppBar(
+            title: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+            accessibilityIdentifier: "repositoryManagerEditorTopAppBar",
+            backgroundColor: surfacePalette.toolbarBackgroundColor,
+            foregroundColor: surfacePalette.toolbarForegroundColor,
+            onBack: requestCloseEditor
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivitySave"),
+                accessibilityLabel: String(localized: "okay", defaultValue: "OK"),
+                accessibilityIdentifier: "repositoryManagerSourceEditorSaveButton",
+                foregroundColor: editorSaveDisabled
+                    ? surfacePalette.toolbarDisabledForegroundColor
+                    : surfacePalette.toolbarForegroundColor,
+                action: saveEditorSource
+            )
+            .disabled(editorSaveDisabled)
+
+            if editorState?.originalName != nil {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityDelete"),
+                    accessibilityLabel: String(localized: "delete", defaultValue: "Delete"),
+                    accessibilityIdentifier: "repositoryManagerSourceEditorDeleteButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: requestDeleteEditedSource
+                )
+            }
+
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("DrawerHelp"),
+                accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                accessibilityIdentifier: "repositoryManagerSourceEditorHelpButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: { showHelp = true }
+            )
+        }
+    }
+
+    /**
+     Builds the owner-themed editor body from Android's `custom_repository_editor.xml`.
+
+     - Returns: Repository URL, exact Paste drawable, validity check, resolved metadata, and
+       validation progress.
+     - Side effects: Editing and Paste mutate `editorState.repositoryURL`.
+     - Failure modes: Empty or invalid URLs intentionally produce no metadata/checkmark.
+     */
+    private var repositoryEditorContent: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                AndroidActivityTextInput(
+                    placeholder: String(
+                        localized: "repository_specification",
+                        defaultValue: "Repository specification"
+                    ),
+                    text: editorURLBinding,
+                    foregroundColor: surfacePalette.foregroundColor,
+                    backgroundColor: surfacePalette.controlFillColor,
+                    borderColor: surfacePalette.inactiveBorderColor,
+                    accessibilityIdentifier: "repositoryManagerRepositoryURLField"
+                )
                 #if os(iOS)
-                .autocapitalization(.none)
+                .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
                 #endif
-                .disabled(isSavingSource)
-                .accessibilityIdentifier("repositoryManagerRepositoryURLField")
-            }
+                .autocorrectionDisabled()
 
-            Section {
-                TextField(
-                    String(localized: "package_directory", defaultValue: "Package directory"),
-                    text: editorPackageDirectoryBinding
-                )
-                #if os(iOS)
-                .autocapitalization(.none)
-                #endif
-                .disabled(isSavingSource)
-                .accessibilityIdentifier("repositoryManagerPackageDirectoryField")
-            } header: {
-                Text(String(localized: "package_directory", defaultValue: "Package directory"))
-            } footer: {
-                Text(String(
-                    localized: "package_directory_optional_help",
-                    defaultValue: "Optional for SWORD repositories. Leave blank to use the repository-provided packages path."
-                ))
-            }
+                Button(action: pasteRepositoryURL) {
+                    AndBibleIconView(name: "ActivityPaste", size: 24)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(surfacePalette.foregroundColor)
+                .accessibilityLabel(String(localized: "paste", defaultValue: "Paste"))
+                .accessibilityIdentifier("repositoryManagerPasteButton")
 
-            if isSavingSource {
-                Section {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text(String(localized: "validating_repository", defaultValue: "Validating repository"))
-                            .foregroundStyle(.secondary)
+                Group {
+                    if validatedRegistration != nil {
+                        AndBibleIconView(name: "ActivitySave", size: 24)
+                            .foregroundStyle(AndroidResourcePalette.documentInstalledGreen)
+                    } else {
+                        Color.clear
                     }
                 }
+                .frame(width: 48, height: 48)
+                .accessibilityHidden(validatedRegistration == nil)
+                .accessibilityLabel(String(localized: "success", defaultValue: "Success"))
+                .accessibilityIdentifier("repositoryManagerValidCheck")
             }
 
-            if let editorErrorMessage {
-                Section {
-                    SwiftUI.Label(editorErrorMessage, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
+            if let validatedRegistration {
+                Text("\(validatedRegistration.source.name)\n\n\(validatedRegistration.description)")
+                    .font(.system(size: 16))
+                    .foregroundStyle(surfacePalette.foregroundColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .accessibilityIdentifier("repositoryManagerResolvedInformation")
             }
+
+            if isValidatingSource || isSavingSource {
+                ProgressView()
+                    .tint(surfacePalette.foregroundColor)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .accessibilityLabel(String(
+                        localized: "validating_repository",
+                        defaultValue: "Validating repository"
+                    ))
+                    .accessibilityIdentifier("repositoryManagerValidationProgress")
+            }
+
+            Spacer(minLength: 0)
         }
-        .navigationTitle(editorState?.title ?? String(localized: "custom_repository", defaultValue: "Custom repository"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .accessibilityIdentifier(editorScreenAccessibilityIdentifier)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "cancel", defaultValue: "Cancel")) {
-                    closeEditor()
-                }
-                .disabled(isSavingSource)
-                .accessibilityIdentifier(editorCancelAccessibilityIdentifier)
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button(editorState?.saveTitle ?? String(localized: "save", defaultValue: "Save")) {
-                    saveEditorSource()
-                }
-                .disabled(editorSaveDisabled)
-                .accessibilityIdentifier("repositoryManagerSourceEditorSaveButton")
-            }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /**
+     Builds every transient repository prompt through the shared Android dialog owner.
+
+     - Returns: At most one discard/delete/help/error dialog in deterministic priority order.
+     - Side effects: Dialog actions clear state, mutate sources, open the wiki, or close the editor.
+     - Failure modes: Failed delete operations retain the editor and continue to the error dialog.
+     */
+    @ViewBuilder
+    private var repositoryDialogOverlay: some View {
+        if showDiscardConfirmation {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    localized: "discard_changes_confirmation",
+                    defaultValue: "Discard changes?"
+                ),
+                actions: [
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .normal
+                    ) {
+                        showDiscardConfirmation = false
+                        closeEditor()
+                    },
+                    .init(
+                        id: "no",
+                        title: String(localized: "no", defaultValue: "No"),
+                        style: .normal
+                    ) {
+                        showDiscardConfirmation = false
+                    },
+                ]
+            )
+        } else if let candidate = deletionCandidate {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    format: String(
+                        localized: "delete_custom_repository",
+                        defaultValue: "Do you want to remove custom repository %@?"
+                    ),
+                    candidate.source.name
+                ),
+                actions: [
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .destructive
+                    ) {
+                        deletionCandidate = nil
+                        if deleteSource(candidate.source) {
+                            closeEditor()
+                        }
+                    },
+                    .init(
+                        id: "no",
+                        title: String(localized: "no", defaultValue: "No"),
+                        style: .normal
+                    ) {
+                        deletionCandidate = nil
+                    },
+                ]
+            )
+        } else if showHelp {
+            AndroidDecisionDialog(
+                title: String(localized: "custom_repositories", defaultValue: "Custom repositories"),
+                message: repositoryHelpMessage,
+                actions: [
+                    .init(
+                        id: "wiki",
+                        title: String(localized: "wiki_page", defaultValue: "Wiki page"),
+                        style: .normal
+                    ) {
+                        showHelp = false
+                        openURL(Self.customRepositoriesWikiURL)
+                    },
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) {
+                        showHelp = false
+                    },
+                ]
+            )
+        } else if let sourceErrorMessage {
+            AndroidDecisionDialog(
+                title: String(localized: "error_occurred", defaultValue: "Error occurred"),
+                message: sourceErrorMessage,
+                actions: [
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) {
+                        self.sourceErrorMessage = nil
+                    },
+                ]
+            )
         }
     }
 
-    // MARK: - Actions
+    /// Android Help copy, including editor-only URL instructions when the editor owns the dialog.
+    private var repositoryHelpMessage: String {
+        var paragraphs = [String(
+            localized: "custom_repositories_help0",
+            defaultValue: "You can install documents from external custom repositories by installing custom repositories."
+        )]
+        if editorState != nil {
+            paragraphs.append(String(
+                localized: "custom_repositories_help1",
+                defaultValue: "To add a new custom repository, type or copy & paste custom repository URL here."
+            ))
+        }
+        paragraphs.append(String(
+            format: String(
+                localized: "custom_repositories_help2",
+                defaultValue: "You can read more information about custom repositories in %@."
+            ),
+            String(localized: "wiki_page", defaultValue: "Wiki page")
+        ))
+        return paragraphs.joined(separator: "\n\n")
+    }
 
-    /**
-     Reloads repository definitions from the source manager.
-
-     Side effects:
-     - replaces the local `sources` array with the current on-disk configuration
-     */
+    /** Reloads persisted sources without altering the active editor. */
     private func loadSources() {
         sources = sourceManager.loadSources()
     }
 
-    /**
-     Opens the editor for adding a new custom source.
-
-     Side effects:
-     - resets transient editor error state
-     - presents the editor sheet
-     */
+    /** Opens a blank Android editor activity and clears validation/error state. */
     private func beginAddingSource() {
-        editorErrorMessage = nil
+        clearEditorValidation()
+        sourceErrorMessage = nil
         editorState = RepositorySourceEditorState(
             originalName: nil,
+            initialRepositoryURL: "",
             repositoryURL: "",
             packageDirectory: ""
         )
     }
 
     /**
-     Opens the editor for replacing an existing custom source.
+     Opens Android's editor activity for one custom source.
 
-     - Parameter source: Custom source whose persisted row should be replaced after validation.
-
-     Side effects:
-     - resets transient editor error state
-     - presents the editor sheet with the source's current HTTPS catalog URL
+     - Parameter source: Persisted custom source to replace after validation.
+     - Side effects: Clears transient feedback and starts live validation through the editor task.
+     - Failure modes: none; stale targets are detected when Save/Delete commits.
      */
     private func beginEditingSource(_ source: SourceConfig) {
-        editorErrorMessage = nil
+        clearEditorValidation()
+        sourceErrorMessage = nil
+        let editableURL = source.editableURLString
         editorState = RepositorySourceEditorState(
             originalName: source.name,
-            repositoryURL: source.editableURLString,
+            initialRepositoryURL: editableURL,
+            repositoryURL: editableURL,
             packageDirectory: source.packageDirectory ?? ""
         )
     }
 
-    /**
-     Dismisses the editor sheet and clears in-flight editor state.
+    /** Requests editor Back, preserving Android's discard confirmation for changed input. */
+    private func requestCloseEditor() {
+        if editorHasUnsavedChanges {
+            showDiscardConfirmation = true
+        } else {
+            closeEditor()
+        }
+    }
 
-     Side effects:
-     - clears local editor state and validation errors
-     */
+    /** Closes the editor activity and clears every editor-owned transient state. */
     private func closeEditor() {
         editorState = nil
-        editorErrorMessage = nil
+        showDiscardConfirmation = false
+        deletionCandidate = nil
+        clearEditorValidation()
+    }
+
+    /** Clears results and activity flags derived from an editor URL. */
+    private func clearEditorValidation() {
+        validatedRegistration = nil
+        validatedRepositoryURL = nil
+        isValidatingSource = false
         isSavingSource = false
     }
 
     /**
-     Validates and persists the currently edited custom repository source.
+     Debounces and validates the current editor URL without persisting it.
 
-     Side effects:
-     - starts an asynchronous HTTPS validation request
-     - writes `InstallMgr.conf` through `RepositorySourceManager` on success
-     - reloads the local source list and dismisses the editor on success
-     - keeps the editor open with an error message on failure
+     - Side effects: Performs HTTPS reads and replaces validation/check/info state only when the
+       result still belongs to the current URL.
+     - Failure modes: Cancellation or validation errors quietly leave Save disabled, matching
+       Android's editor.
      */
-    private func saveEditorSource() {
-        guard let editorState else { return }
-        isSavingSource = true
-        editorErrorMessage = nil
+    @MainActor
+    private func validateCurrentEditorURL() async {
+        validatedRegistration = nil
+        validatedRepositoryURL = nil
+        isValidatingSource = false
 
-        Task {
-            do {
-                if let originalName = editorState.originalName {
-                    try await sourceManager.replaceCustomSource(
-                        named: originalName,
-                        with: editorState.repositoryURL,
-                        packageDirectory: editorState.packageDirectory
-                    )
-                } else {
-                    try await sourceManager.addCustomSource(
-                        from: editorState.repositoryURL,
-                        packageDirectory: editorState.packageDirectory
-                    )
-                }
+        guard let rawURL = editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawURL.isEmpty else { return }
 
-                await MainActor.run {
-                    loadSources()
-                    closeEditor()
-                }
-            } catch {
-                await MainActor.run {
-                    isSavingSource = false
-                    editorErrorMessage = error.localizedDescription
-                }
+        do {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        } catch {
+            return
+        }
+        guard !Task.isCancelled else { return }
+
+        isValidatingSource = true
+        defer {
+            if editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines) == rawURL {
+                isValidatingSource = false
             }
+        }
+
+        do {
+            let registration = try await sourceManager.resolveCustomSource(from: rawURL)
+            guard !Task.isCancelled,
+                  editorState?.repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines) == rawURL else {
+                return
+            }
+            validatedRegistration = registration
+            validatedRepositoryURL = rawURL
+        } catch {
+            guard !Task.isCancelled else { return }
+            validatedRegistration = nil
+            validatedRepositoryURL = nil
         }
     }
 
     /**
-     Deletes one custom source from persisted configuration.
+     Commits the exact registration produced by live validation.
 
-     - Parameter source: Custom source definition to remove.
-
-     Side effects:
-     - rewrites `InstallMgr.conf` through `RepositorySourceManager`
-     - reloads local source state after successful deletion
-     - stores a presentable error if deletion fails
+     - Side effects: Persists add/replace configuration, reloads rows, and returns to the list on
+       success; presents an app-owned error dialog on failure.
+     - Failure modes: Missing/stale validation is ignored because Save is disabled for that state.
      */
-    private func deleteSource(_ source: SourceConfig) {
+    private func saveEditorSource() {
+        guard !editorSaveDisabled,
+              let editorState,
+              let validatedRegistration else { return }
+
+        isSavingSource = true
+        do {
+            try sourceManager.persistResolvedCustomSource(
+                validatedRegistration,
+                replacing: editorState.originalName,
+                packageDirectory: editorState.packageDirectory
+            )
+            loadSources()
+            closeEditor()
+        } catch {
+            isSavingSource = false
+            sourceErrorMessage = error.localizedDescription
+        }
+    }
+
+    /** Selects the currently edited custom source for Android's delete confirmation. */
+    private func requestDeleteEditedSource() {
+        guard let originalName = editorState?.originalName,
+              let source = customSources.first(where: { $0.name == originalName }) else {
+            sourceErrorMessage = RepositorySourceManagementError
+                .sourceNotFound(editorState?.originalName ?? "")
+                .localizedDescription
+            return
+        }
+        deletionCandidate = RepositorySourceDeletionCandidate(source: source)
+    }
+
+    /**
+     Deletes one custom source and reloads the list.
+
+     - Parameter source: Confirmed source to remove.
+     - Returns: `true` only when persistence and reload succeed.
+     - Side effects: Rewrites repository configuration or records an app-owned error message.
+     - Failure modes: Manager errors return `false` and preserve the editor.
+     */
+    @discardableResult
+    private func deleteSource(_ source: SourceConfig) -> Bool {
         do {
             try sourceManager.deleteCustomSource(named: source.name)
             loadSources()
+            return true
         } catch {
             sourceErrorMessage = error.localizedDescription
+            return false
         }
     }
 
-    /**
-     Restores the repository configuration file to the packaged Android source set.
-
-     Side effects:
-     - rewrites `InstallMgr.conf` through `RepositorySourceManager`
-     - reloads local source state after successful reset
-     - stores a presentable error if reset fails
-     */
-    private func resetToDefaults() {
-        do {
-            try sourceManager.resetToDefaults()
-            loadSources()
-        } catch {
-            sourceErrorMessage = error.localizedDescription
-        }
+    /** Pastes the current platform text payload into Android's repository URL field. */
+    private func pasteRepositoryURL() {
+        #if canImport(UIKit)
+        guard let text = UIPasteboard.general.string else { return }
+        editorURLBinding.wrappedValue = text
+        #elseif canImport(AppKit)
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        editorURLBinding.wrappedValue = text
+        #endif
     }
 }
 
-private struct RepositorySourceEditorState: Identifiable {
-    /// Stable sheet identity for SwiftUI modal presentation.
-    let id = UUID()
-
-    /// Name of the custom source being replaced, or `nil` when adding a new source.
+/** Value state retained while Android's dedicated custom-repository editor is active. */
+private struct RepositorySourceEditorState {
+    /// Existing custom source name, or `nil` for a new repository.
     let originalName: String?
 
-    /// User-entered HTTPS manifest or direct SWORD catalog URL.
+    /// URL captured when the editor opened for Back/discard comparison.
+    let initialRepositoryURL: String
+
+    /// Current user-entered manifest or direct catalog URL.
     var repositoryURL: String
 
-    /// Optional Android SWORD package directory; blank preserves repository discovery/defaulting.
-    var packageDirectory: String
-
-    /// Navigation title matching the current add or replace mode.
-    var title: String {
-        if originalName == nil {
-            return String(localized: "add_custom_repository", defaultValue: "Add custom repository")
-        }
-        return String(localized: "edit_custom_repository", defaultValue: "Edit custom repository")
-    }
-
-    /// Confirmation button title matching the current add or replace mode.
-    var saveTitle: String {
-        if originalName == nil {
-            return String(localized: "add", defaultValue: "Add")
-        }
-        return String(localized: "save", defaultValue: "Save")
-    }
+    /// Existing SWORD package directory preserved while Android keeps that field hidden.
+    let packageDirectory: String
 }
 
-/// Identifiable wrapper for presenting destructive custom-source delete confirmation.
-private struct RepositorySourceDeletionCandidate: Identifiable {
-    /// Stable identity for the current delete prompt.
-    let id = UUID()
-
-    /// Custom source selected for deletion.
+/** Existing custom source selected for Android's Yes/No delete confirmation. */
+private struct RepositorySourceDeletionCandidate {
+    /// Custom source that will be deleted after confirmation.
     let source: SourceConfig
 }
 
 private extension SourceConfig {
-    /// Stable identity for lists where Android default HTTP and FTP rows can share a source name.
+    /// Stable identity for custom rows that can share names across repository families.
     var repositoryManagerListID: String {
         "\(repositoryType)|\(type)|\(name)|\(host)|\(catalogPath)"
     }
 
-    /// User-visible address for repository rows.
-    var displayAddress: String {
-        if isMyBibleRepository, let manifestURL {
-            return manifestURL.absoluteString
-        }
-        return "\(scheme)://\(host)\(catalogPath)"
+    /// Android row description with a durable HTTPS fallback for migrated source-only records.
+    var repositoryManagerDescription: String {
+        let trimmedDescription = description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedDescription?.isEmpty == false ? trimmedDescription! : editableURLString
     }
 
     /**
-     HTTPS URL prefilled when replacing custom sources.
+     HTTPS URL prefilled when replacing a custom source.
 
-     Persisted non-HTTPS manifest metadata is ignored so stale sidecars fall back to the
-     synthesized HTTPS catalog URL accepted by save.
+     Persisted non-HTTPS manifest metadata is ignored so legacy rows fall back to the synthesized
+     HTTPS catalog URL accepted by Android-style validation.
      */
     var editableURLString: String {
         if let manifestURL, manifestURL.scheme?.lowercased() == "https" {
             return manifestURL.absoluteString
         }
         return "https://\(host)\(catalogPath)"
-    }
-
-    private var scheme: String {
-        type == "FTP" ? "ftp" : "https"
     }
 }

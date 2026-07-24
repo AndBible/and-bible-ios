@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftUI
+import BibleCore
 import SwordKit
 
 /**
@@ -75,44 +76,65 @@ struct ModuleBrowserStatusSlotPresentation: Equatable {
     }
 
     /**
-     System image used for standalone status-icon states.
+     Exact ported Android drawable used in the shared leading status slot.
 
-     Composite branches that render progress/cancel controls return `nil`. Android
-     `NOT_INSTALLED` also returns `nil` because that branch intentionally clears the status icon.
+     Android `NOT_INSTALLED` and pseudo/unavailable rows clear the status drawable. Active install,
+     error, update, and installed states use the packaged vectors from `DocumentListItem` rather than
+     substituting platform SF Symbols.
 
-     - Returns: SF Symbol name for standalone icon-backed states, otherwise `nil`.
+     - Returns: Packaged Android asset name for icon-backed states, otherwise `nil`.
      - Side effects: none.
      - Failure modes: none.
      */
-    var statusIconSystemName: String? {
+    var statusIconAssetName: String? {
         switch kind {
         case .installed:
-            return "checkmark.circle.fill"
+            return "DocumentInstalledStatus"
         case .progress:
-            return nil
+            return "DocumentDownloadingStatus"
         case .retryError:
-            return "exclamationmark.triangle.fill"
+            return "DocumentErrorStatus"
         case .update:
-            return "arrow.up.circle.fill"
-        case .unavailable:
-            return "lock.slash"
-        case .emptyInstallableSlot:
+            return "DocumentUpdateStatus"
+        case .unavailable, .emptyInstallableSlot:
             return nil
+        }
+    }
+
+    /**
+     Exact Android resource color paired with `statusIconAssetName`.
+
+     - Returns: Installed/download green, update amber, error red, or transparent when Android
+       clears the status drawable.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var statusIconColor: Color {
+        switch kind {
+        case .installed, .progress:
+            return AndroidResourcePalette.documentInstalledGreen
+        case .retryError:
+            return AndroidResourcePalette.documentErrorRed
+        case .update:
+            return AndroidResourcePalette.documentUpgradeAmber
+        case .unavailable, .emptyInstallableSlot:
+            return .clear
         }
     }
 
     /**
      Whether the status slot itself exposes an action control.
 
-     - Returns: `true` for retry, update, and cancel controls; `false` for passive or empty slots.
+     - Returns: `true` only for active progress, whose adjacent cancel control is interactive;
+       update and retry icons remain passive because Android owns those operations at row-tap level.
      - Side effects: none.
      - Failure modes: none.
      */
     var isActionControl: Bool {
         switch kind {
-        case .progress, .retryError, .update:
+        case .progress:
             return true
-        case .installed, .unavailable, .emptyInstallableSlot:
+        case .installed, .retryError, .update, .unavailable, .emptyInstallableSlot:
             return false
         }
     }
@@ -415,6 +437,33 @@ struct ModuleBrowserModuleDetails: Identifiable {
         primaryVersionKind = .latestVersion
         primaryVersion = installedModule.version
         primaryVersionDate = installedModule.aboutMetadata.swordVersionDate
+        installedVersion = nil
+        installedVersionDate = nil
+    }
+
+    /**
+     Creates Android's installed-document About payload for one imported EPUB general book.
+
+     Android registers EPUBs as generated `SwordGenBook` documents. `CommonUtils.showAbout(...)`
+     therefore displays the package title, Dublin Core description (or source filename fallback),
+     optimizer version, and generated OSIS initials through the same dialog used for SWORD modules.
+
+     - Parameter epub: Installed EPUB metadata selected from Choose Document.
+     - Side effects: none.
+     - Failure modes: Missing optional package fields were resolved by `EpubReader` when the
+       immutable index opened, so the shared About renderer can omit no required identity.
+     */
+    init(epub: EpubInfo) {
+        id = "epub:\(epub.identifier)"
+        moduleName = epub.initials
+        moduleDescription = epub.title
+        aboutMetadata = ModuleAboutMetadata(
+            about: epub.description,
+            osisId: epub.initials
+        )
+        primaryVersionKind = .latestVersion
+        primaryVersion = EpubReader.androidOptimizerVersion
+        primaryVersionDate = nil
         installedVersion = nil
         installedVersionDate = nil
     }
@@ -886,19 +935,14 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
     }
 
     /**
-     Alert title for the pending operation.
+     Empty alert title matching Android's message-only destructive document dialogs.
 
-     - Returns: Localized title text.
+     - Returns: An empty string for both operations.
      - Side effects: none.
      - Failure modes: none.
      */
     var title: String {
-        switch kind {
-        case .uninstall:
-            return String(localized: "uninstall_module_title", defaultValue: "Uninstall Module")
-        case .deleteIndex:
-            return String(localized: "delete_module_index_title", defaultValue: "Delete Search Index")
-        }
+        ""
     }
 
     /**
@@ -912,16 +956,48 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
         switch kind {
         case .uninstall:
             let format = String(
-                localized: "uninstall_module_message_format",
-                defaultValue: "Remove %@ from this device?"
+                localized: "delete_doc",
+                defaultValue: "Delete %@?"
             )
-            return String(format: format, displayName)
+            return String(format: format, moduleName)
         case .deleteIndex:
             let format = String(
-                localized: "delete_module_index_message_format",
-                defaultValue: "Delete the search index for %@?"
+                localized: "delete_search_index_doc",
+                defaultValue: "Delete index of %@?"
             )
-            return String(format: format, displayName)
+            return String(format: format, moduleName)
+        }
+    }
+
+    /**
+     Android positive-button label for the selected destructive operation.
+
+     - Returns: `Yes` for document deletion or `OK` for search-index deletion.
+     - Side effects: Reads the application localization bundle.
+     - Failure modes: Missing translations use the Android English fallback.
+     */
+    var confirmButtonTitle: String {
+        switch kind {
+        case .uninstall:
+            return String(localized: "yes", defaultValue: "Yes")
+        case .deleteIndex:
+            return String(localized: "okay", defaultValue: "OK")
+        }
+    }
+
+    /**
+     Android negative-button label for the selected destructive operation.
+
+     - Returns: `No` for document deletion or `Cancel` for search-index deletion.
+     - Side effects: Reads the application localization bundle.
+     - Failure modes: Missing translations use the Android English fallback.
+     */
+    var cancelButtonTitle: String {
+        switch kind {
+        case .uninstall:
+            return String(localized: "no", defaultValue: "No")
+        case .deleteIndex:
+            return String(localized: "cancel", defaultValue: "Cancel")
         }
     }
 }
@@ -944,9 +1020,6 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
  - missing optional metadata rows are omitted by `ModuleBrowserModuleDetails.androidAboutRows`
  */
 struct ModuleBrowserModuleDetailsDialog: View {
-    /// Current system color scheme used by the shared Android dialog palette.
-    @Environment(\.colorScheme) private var colorScheme
-
     /// Normalized module metadata to display.
     let details: ModuleBrowserModuleDetails
 
@@ -961,11 +1034,10 @@ struct ModuleBrowserModuleDetailsDialog: View {
      - Failure modes: Empty row lists render only the module heading and OK action.
      */
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
+        AndroidDialogScaffold(title: "") {
+            AndroidAdaptiveDialogScrollView {
                 Text(details.androidAboutAttributedMessage)
                     .font(.body)
-                    .foregroundStyle(dialogPrimaryText)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("moduleDetailsDialogMessage")
@@ -973,58 +1045,13 @@ struct ModuleBrowserModuleDetailsDialog: View {
                     .padding(.vertical, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 420)
-
-            Divider()
-                .background(dialogSecondaryText.opacity(0.25))
-
-            HStack {
-                Spacer()
-                Button(String(localized: "okay", defaultValue: "OK")) {
-                    onDismiss()
-                }
-                .fontWeight(.semibold)
-                .foregroundStyle(dialogAccent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-                .accessibilityIdentifier("moduleDetailsOKButton")
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+        } actions: {
+            AndroidDialogTextAction(
+                title: String(localized: "okay", defaultValue: "OK"),
+                accessibilityIdentifier: "moduleDetailsOKButton",
+                action: onDismiss
+            )
         }
-        .frame(maxWidth: 430)
-        .background(dialogBackground, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .strokeBorder(dialogSecondaryText.opacity(0.28), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 12)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("moduleDetailsDialogScreen")
-        .tint(dialogAccent)
-    }
-
-    /// Android-dialog background color for the current system appearance.
-    private var dialogBackground: Color {
-        AndroidDialogSurfacePalette.background(for: colorScheme)
-    }
-
-    /// Android-dialog primary text color for the current system appearance.
-    private var dialogPrimaryText: Color {
-        AndroidDialogSurfacePalette.primaryText(for: colorScheme)
-    }
-
-    /// Android-dialog secondary text color for the current system appearance.
-    private var dialogSecondaryText: Color {
-        AndroidDialogSurfacePalette.secondaryText(for: colorScheme)
-    }
-
-    /// Android-dialog accent color for the OK action.
-    private var dialogAccent: Color {
-        AndroidDialogSurfacePalette.accent(for: colorScheme)
     }
 }
 
@@ -1058,23 +1085,19 @@ private struct ModuleBrowserModuleDetailsDialogOverlay: View {
      - Failure modes: none.
      */
     var body: some View {
-        ZStack {
-            Color.black.opacity(colorScheme == .dark ? 0.52 : 0.32)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {}
-                .accessibilityHidden(true)
-
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "moduleDetailsDialogScreen",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
             ModuleBrowserModuleDetailsDialog(
                 details: details,
                 onDismiss: onDismiss
             )
-            .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .zIndex(2)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("moduleDetailsDialogOverlay")
     }
 }
 

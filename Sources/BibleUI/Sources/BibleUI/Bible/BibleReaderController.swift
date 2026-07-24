@@ -869,6 +869,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /// Whether Android enables the recent Red Letter preference for the active Bible document.
+    var hasRedLetterWords: Bool {
+        guard currentCategory == .bible else { return false }
+        return activeModule?.info.features.contains(.redLetterWords) == true
+            || activeSQLiteBibleModule?.metadata.hasWordsOfChrist == true
+    }
+
     /**
      Whether actions that depend on an active Bible verse reference are valid for the visible page.
 
@@ -1158,14 +1165,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     var onShowStrongsSearch: ((String) -> Void)?
 
     /**
-     Legacy callback for native cross-reference sheets.
-
-     Multi-reference Bible links intentionally bypass this callback and render Vue
-     `MultiDocument` payloads so iOS follows Android's shared document pipeline.
-     */
-    var onShowCrossReferences: (([CrossReference]) -> Void)?
-
-    /**
      Callback for opening a transient multi-reference Vue document in the Android-style links window.
 
      The string parameter is a serialized `MultiDocument` payload. The owning pane decides whether
@@ -1211,6 +1210,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
   /// Callback for Android's workspace-level AI action menu entry.
   var onRequestWorkspaceAIAction: (() -> Void)?
+
+  /// Callback for Android's exact current-window AI action menu entry.
+  var onRequestWindowAIAction: (() -> Void)?
 
   /// Live Android-compatible provider-row predicate used by native and Vue AI action visibility.
   var isAIProviderConfigured: (() -> Bool)?
@@ -2553,6 +2555,58 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return false
         }
         navigateTo(book: bookName, chapter: target.chapter, verse: target.verse)
+        return true
+    }
+
+    /**
+     Opens Android SearchResults' complete visible match set in the configured links window.
+
+     Android converts every displayed translation match into a `BookAndKey` and opens the resulting
+     `FakeBookFactory.multiDocument`. iOS preserves each match's exact module and source
+     versification, builds the shared Vue `MultiDocument`, and routes it through the same links-window
+     callback used by cross references and dictionary results.
+
+     - Parameter results: Canonically grouped Search results in current display order.
+     - Returns: `true` only when at least one exact fragment was serialized and routed.
+     - Side effects: May create/select the configured links window or replace the current pane with
+       the transient Multi document when no owner callback is installed.
+     - Failure modes: Empty results, stale modules, unmappable coordinates, unreadable exact verse
+       entries, and serialization failure return `false` without dismissing Search.
+     */
+    @MainActor
+    @discardableResult
+    func openSearchResultsInLinksWindow(_ results: SearchGroupedResults) -> Bool {
+        guard let registry = makeSearchIndexSourceRegistry() else { return false }
+        let references: [OsisRef] = results.groups.flatMap { group in
+            group.matches.compactMap { hit in
+                guard let source = registry.source(named: hit.moduleName) else { return nil }
+                let moduleInfo = source.searchIndexModuleInfo
+                let configuredVersification = moduleInfo.aboutMetadata.versification
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let sourceVersification = (source as? SwordModule)
+                    .map(VersificationMapper.versificationName(for:))
+                    ?? (configuredVersification.isEmpty
+                        ? JSwordKJVAVersification.name
+                        : configuredVersification)
+                return OsisRef(
+                    book: hit.displayBook,
+                    chapter: hit.identity.chapter,
+                    verse: hit.identity.verse,
+                    osisId: hit.identity.osisBookId,
+                    sourceVersification: sourceVersification,
+                    targetBookInitials: moduleInfo.name
+                )
+            }
+        }
+        guard !references.isEmpty,
+              let documentJSON = buildBibleMultiReferenceDocumentJSON(refs: references) else {
+            return false
+        }
+        if let openInLinksWindow = onOpenMultiReferenceDocumentInLinksWindow {
+            openInLinksWindow(documentJSON)
+        } else {
+            loadMultiReferenceDocument(documentJSON)
+        }
         return true
     }
 
@@ -4013,6 +4067,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if clientReady {
             loadEpubEntry()
         }
+    }
+
+    /**
+     Adopts an explicitly rebuilt generation for the currently active EPUB.
+
+     Android's EPUB Search Rebuild index flow replaces the current backend index while preserving
+     the selected document and key. The native reader uses immutable generations, so this method
+     accepts only the same stable EPUB identity, reuses the existing activation contract, and
+     immediately re-renders the current key before the prior generation lease can be released.
+
+     - Parameter reader: Newly published reader returned by `EpubReader.rebuildSearchIndex`.
+     - Returns: `true` when the active EPUB was safely replaced; `false` for a stale callback or a
+       different document identity.
+     - Side effects: Replaces the active EPUB generation, preserves/persists the current key, and
+       reloads its Vue document when the bridge is ready.
+     - Failure modes: A mismatched identifier or initials fails closed without changing reader,
+       PageManager, rendered content, or persistence state.
+     */
+    @discardableResult
+    public func adoptRebuiltEpubReader(_ reader: EpubReader) -> Bool {
+        guard activeEpubIdentifier == reader.identifier,
+              activeEpubReader?.initials == reader.initials else {
+            return false
+        }
+        let requestedKey = currentGeneralBookKey ?? reader.firstKey()
+        activateEpub(reader, identifier: reader.identifier, requestedKey: requestedKey)
+        if clientReady {
+            loadEpubEntry(key: requestedKey)
+        }
+        return true
     }
 
   /**
@@ -7999,6 +8083,173 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   }
 
   /**
+   Captures Android's exact non-special `BookAndKey` state for the shared window popup.
+
+   - Returns: A proven Bible reference or exact generic module/key destination.
+   - Side effects: Reads source versification metadata and may temporarily inspect a SWORD verse
+     cursor; the module restores its prior key.
+   - Failure modes: Special documents, absent source identity, invalid current verses, and
+     unverified source-to-KJVA mappings return nil without substituting stale Bible state.
+   */
+  func windowMenuReference() -> BibleWindowMenuReference? {
+    guard !showingMyNotes,
+      !showingStudyPad,
+      !isShowingAndroidMultiDocument,
+      !isShowingAndroidMemorizeDocument,
+      let initials = aiCurrentSourceInitials(for: currentCategory),
+      let key = aiCurrentSourceKey(for: currentCategory)
+    else {
+      return nil
+    }
+
+    if currentCategory == .bible {
+      let osisBookID = osisBookId(for: currentBook)
+      let verse = max(1, currentVerse)
+      guard !osisBookID.isEmpty else { return nil }
+
+      let sourceVersification: String
+      let sourceOrdinal: Int?
+      if let module = activeSQLiteBibleModule, module.info.name == initials {
+        sourceVersification = BibleReaderSQLiteSourceMetadata(module: module).versification
+        sourceOrdinal = JSwordKJVAVersification.verseOrdinal(
+          osisId: osisBookID,
+          chapter: currentChapter,
+          verse: verse
+        )
+      } else if let module = activeModule, module.info.name == initials {
+        sourceVersification = VersificationMapper.versificationName(for: module)
+        sourceOrdinal = module.verseOrdinal(
+          osisBookId: osisBookID,
+          chapter: currentChapter,
+          verse: verse
+        )
+      } else {
+        return nil
+      }
+
+      guard let sourceOrdinal,
+        let verified = VerifiedKJVAOrdinalRange(
+          resolvingSourceBookInitials: initials,
+          sourceVersification: sourceVersification,
+          sourceOrdinalStart: sourceOrdinal,
+          sourceOrdinalEnd: sourceOrdinal
+        )
+      else {
+        return nil
+      }
+      let sourceOSISReference = "\(osisBookID).\(currentChapter).\(verse)"
+      return BibleWindowMenuReference.bible(
+        displayName: "\(currentBook) \(currentChapter):\(verse)",
+        sourceBookName: currentBook,
+        sourceOSISReference: sourceOSISReference,
+        verifiedRange: verified
+      )
+    }
+
+    return BibleWindowMenuReference.generic(
+      displayName: windowMenuReferenceDisplayName(key: key),
+      moduleInitials: initials,
+      key: key
+    )
+  }
+
+  /** Whether Android exposes Export as HTML for the currently rendered special document. */
+  var isWindowMenuHTMLExportAvailable: Bool {
+    showingMyNotes || showingStudyPad || isShowingAndroidMultiDocument
+  }
+
+  /** Exact active Study Pad label used by Android's archive and CSV export commands. */
+  var windowMenuStudyPadLabelID: UUID? {
+    showingStudyPad ? activeStudyPadLabelId : nil
+  }
+
+  /// Whether the current exact source satisfies Android's whole-page bookmark visibility rule.
+  var createWindowMenuWholePageBookmarkEligibility: Bool {
+    guard currentCategory != .bible,
+      let reference = windowMenuReference(),
+      case .generic = reference.navigationTarget
+    else {
+      return false
+    }
+    return true
+  }
+
+  /**
+   Creates Android's whole-page bookmark for the current non-Bible, non-special document.
+
+   - Returns: True only when an exact generic request was emitted to the canonical annotation path.
+   - Side effects: Persists and emits a generic bookmark through the same bridge handler as Vue.
+   - Failure modes: Bible pages, special documents, and missing source identity are no-ops.
+   */
+  @discardableResult
+  func createWindowMenuWholePageBookmark() -> Bool {
+    guard currentCategory != .bible,
+      let reference = windowMenuReference(),
+      case .generic(let target) = reference.navigationTarget
+    else {
+      return false
+    }
+    self.bridge(
+      bridge,
+      createGenericWholePageBookmark: GenericWholePageBookmarkRequest(
+        sourceInitials: target.moduleInitials,
+        sourceKey: target.key
+      )
+    )
+    return true
+  }
+
+  /** Emits Vue's existing shared HTML-export event for Android-supported special documents. */
+  func requestWindowMenuHTMLExport() {
+    guard isWindowMenuHTMLExportAvailable else { return }
+    bridge.emit(event: "export_html")
+  }
+
+  /**
+   Applies a copied or speech-owned reference using Android's target-page rules.
+
+   Bible references keep the target's current Bible or commentary document when it is already a
+   verse page. Other targets use the exact bookmark navigation planner, which may switch to the
+   source document and key. This mirrors `CurrentPageManager.isVersePageShown` and
+   `setCurrentDocumentAndKey` without flattening generic keys into Bible coordinates.
+
+   - Parameter reference: Typed source destination from the reader-session reference store.
+   - Side effects: May navigate the current verse page or switch/render an exact source document.
+   - Throws: Existing bookmark commit failures when the target cannot be proven or serialized.
+   */
+    @MainActor
+    func navigateToWindowMenuReference(_ reference: BibleWindowMenuReference) throws {
+    if let bibleReference = reference.bibleReference {
+      if currentCategory == .bible {
+        guard navigateToBibleLink(bibleReference) else {
+          throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
+        }
+        return
+      }
+      if currentCategory == .commentary {
+        guard let target = navigationReference(for: bibleReference) else {
+          throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
+        }
+        navigateTo(book: target.book, chapter: target.chapter, verse: target.verse)
+        return
+      }
+    }
+    try navigate(toBookmarkTarget: reference.navigationTarget)
+  }
+
+  /** Formats the generic source key shown in Android's Open-reference menu row. */
+  private func windowMenuReferenceDisplayName(key: String) -> String {
+    switch currentCategory {
+    case .commentary:
+      return "\(currentBook) \(currentChapter):\(max(1, currentVerse))"
+    case .epub:
+      return currentEpubTitle ?? key
+    case .bible, .dictionary, .generalBook, .map, .dailyDevotion:
+      return key
+    }
+  }
+
+  /**
    Opens one persisted bookmark through an exact Android-compatible identity proof.
 
    The planner runs before any pane mutation. A successful plan is revalidated against the live
@@ -8558,46 +8809,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
     }
 
-    /** Resolves cross-reference previews through each link's selected installed Bible backend. */
-    private func lookupCrossReferences(_ refs: [OsisRef]) -> [CrossReference] {
-        return refs.map { ref in
-            let requestedName = ref.targetBookInitials?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let sourceName = requestedName?.isEmpty == false ? requestedName! : activeModuleName
-            guard let source = installedModuleResolver().scripture(named: sourceName) else {
-                return CrossReference(ref: ref, text: "")
-            }
-            var references: [VerseKeyReference] = []
-            for sourceReference in ref.sourceVerses {
-                guard let mapped = source.mappedReference(
-                          osisBookId: sourceReference.osisBookId,
-                          chapter: sourceReference.chapter,
-                          verse: sourceReference.verse,
-                          from: ref.sourceVersification
-                      ) else {
-                    return CrossReference(ref: ref, text: "")
-                }
-                if let previous = references.last {
-                    if previous == mapped { continue }
-                    guard source.isCanonicallyAdjacent(mapped, after: previous) else {
-                        return CrossReference(ref: ref, text: "")
-                    }
-                }
-                references.append(mapped)
-            }
-            guard let first = references.first,
-                  let last = references.last,
-                  let passage = try? source.passage(
-                      startOrdinal: first.ordinal,
-                      endOrdinal: last.ordinal
-                  ),
-                  !passage.plainText.isEmpty else {
-                return CrossReference(ref: ref, text: "")
-            }
-            return CrossReference(ref: ref, text: passage.plainText)
-        }
-    }
-
     /**
      Requests that the owning SwiftUI view present the downloads/install UI.
      */
@@ -8779,8 +8990,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   public func bridge(_ bridge: BibleBridge, showHelp scope: BibleBridgeHelpScope) {
     switch scope {
     case .memorize:
-      guard let presentation = AIReaderHelpCatalog.memorize() else { return }
-      onShowReaderHelp?(presentation)
+      onShowReaderHelp?(AIReaderHelpCatalog.memorize())
     }
   }
 
@@ -9512,6 +9722,35 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             bookCatalog: bookCatalog,
             unlabeledLabelID: Self.unlabeledLabelId
         )
+    }
+
+    /**
+     Resolves Android's emphasized Bookmark-list text for one Bible bookmark.
+
+     The controller exposes the current reader/source boundary while the annotation factory retains
+     ownership of SWORD range loading and UTF-16 selection slicing. Existing bridge payload callers
+     remain unchanged.
+
+     - Parameter bookmark: Persisted Bible bookmark displayed by the app-owned Bookmark route.
+     - Returns: Prefix, selected text, suffix, and normalized full preview.
+     - Side effects: May move the active SWORD module cursor while reading the bookmark range.
+     - Failure modes: Missing source content returns an empty projection.
+     */
+    func bookmarkListTextProjection(for bookmark: BibleBookmark) -> BookmarkListTextProjection {
+        annotationPayloadFactory().bookmarkListTextProjection(bookmark)
+    }
+
+    /**
+     Resolves Android's emphasized Bookmark-list text for one generic bookmark.
+
+     - Parameter bookmark: Persisted generic bookmark displayed by the app-owned Bookmark route.
+     - Returns: Prefix, selected text, suffix, and normalized full preview from its stored source.
+     - Side effects: May read SwiftData, EPUB, or SWORD source content for the exact stored key.
+     - Failure modes: Missing or ambiguous source content returns an empty projection without using
+       the active reader document as a substitute.
+     */
+    func bookmarkListTextProjection(for bookmark: GenericBookmark) -> BookmarkListTextProjection {
+        annotationPayloadFactory().bookmarkListTextProjection(bookmark)
     }
 
     /**
@@ -11112,23 +11351,4 @@ struct OsisRef {
         }
         return "\(book) \(chapter):\(verse)-\(endBook) \(last.chapter):\(last.verse)"
     }
-}
-
-/// Cross-reference row containing both the parsed reference and preview verse text.
-public struct CrossReference: Identifiable {
-    /// Stable identifier for SwiftUI list rendering.
-    public let id = UUID()
-
-    /// Parsed reference coordinates.
-    let ref: OsisRef
-
-    /// Verse text preview resolved for the reference.
-    let text: String
-
-    /// Human-readable display string for the reference.
-    var displayName: String { ref.displayName }
-    /// Human-readable book name for navigation callbacks.
-    var book: String { ref.book }
-    /// Chapter number for navigation callbacks.
-    var chapter: Int { ref.chapter }
 }

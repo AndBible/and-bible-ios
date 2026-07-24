@@ -243,13 +243,17 @@ final class WindowTabBarLayoutTests: XCTestCase {
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
         )
+        let snapshotFactorySource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPaneMenuSnapshotFactory.swift"
+        )
 
-        XCTAssertTrue(source.contains("isPinned: windowManager.isEffectivelyPinned(window)"))
-        XCTAssertTrue(source.contains("isPinned: windowManager.isEffectivelyPinned(candidate)"))
+        XCTAssertTrue(source.contains("BibleWindowPaneMenuSnapshotFactory.snapshot("))
+        XCTAssertTrue(snapshotFactorySource.contains("isPinned: windowManager.isEffectivelyPinned(window)"))
+        XCTAssertTrue(snapshotFactorySource.contains("isPinned: windowManager.isEffectivelyPinned(candidate)"))
         XCTAssertTrue(source.contains("windowManager.activateWindow(window)"))
         XCTAssertTrue(source.contains("wm.activateWindow(window)"))
-        XCTAssertFalse(source.contains("isPinned: window.isPinMode"))
-        XCTAssertFalse(source.contains("isPinned: candidate.isPinMode"))
+        XCTAssertFalse(snapshotFactorySource.contains("isPinned: window.isPinMode"))
+        XCTAssertFalse(snapshotFactorySource.contains("isPinned: candidate.isPinMode"))
         XCTAssertFalse(source.contains("windowManager.activeWindow = window"))
         XCTAssertFalse(source.contains("wm.activeWindow = window"))
     }

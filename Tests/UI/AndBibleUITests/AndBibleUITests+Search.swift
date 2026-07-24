@@ -10,15 +10,13 @@ extension AndBibleUITests {
      Verifies reader administration actions and Settings route Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
-     * route contract: About, Label Settings, and AI Settings remain reachable from the reader menu;
-     * AI Settings reproduces Android's setup-to-connection hierarchy and explicit disclaimer gate;
+     * route contract: AI Settings remains reachable from the Android reader drawer and reproduces
+     * Android's setup-to-connection hierarchy and explicit disclaimer gate;
      * Application Preferences opens the same AI screen; and Global text options opens root-scoped
      * Text Display settings.
      *
      * - Side effects:
      *   - launches the app with deterministic in-memory persistence
-     *   - opens and dismisses About from the reader menu
-     *   - opens and dismisses Label Manager from the reader menu's Label Settings action
      *   - opens AI Settings directly from the reader drawer and pushes Connection settings
      *   - verifies Android's zero-provider row visibility and cancels both protected entry points
      *   - explicitly accepts once, then verifies Quick Setup resumes at provider selection
@@ -27,8 +25,6 @@ extension AndBibleUITests {
      *   - opens the shared AI Settings destination from Application Preferences
      *   - activates the production Global text options row
      * - Failure modes:
-     *   - fails if About no longer opens from the reader menu or cannot return to the reader shell
-     *   - fails if Label Settings cannot reach `LabelManagerView` readiness exports
      *   - fails if AI Settings skips Android's centered setup or separate Connection settings screen
      *   - fails if zero-provider Connection settings exposes configured-only rows
      *   - fails if cancellation counts as disclaimer acceptance
@@ -42,37 +38,8 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        openAboutFromReaderMenu(in: app)
-        let aboutSheet = requireElement("aboutSheetScreen", in: app, timeout: 10)
-        tapElementReliably(requireElement("aboutDoneButton", in: app, timeout: 10), timeout: 10)
-        waitForElementToDisappear(aboutSheet, timeout: 10)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected About dismissal to return to the reader shell."
-        )
-
-        XCTAssertTrue(openLabelManager(in: app).exists)
-        _ = requireElement("labelManagerAddButton", in: app, timeout: 10)
-        _ = requireElement("labelManagerStateExport", in: app, timeout: 10)
-        let labelManagerDoneButton = firstExistingElement(
-            [
-                app.navigationBars.buttons["Done"].firstMatch,
-                app.buttons["Done"].firstMatch,
-            ],
-            timeout: 10
-        )
-        XCTAssertNotNil(labelManagerDoneButton, "Expected Label Manager to expose a Done action.")
-        guard let labelManagerDoneButton else {
-            return
-        }
-        tapElementReliably(labelManagerDoneButton, timeout: 10)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected Label Manager dismissal to return to the reader shell."
-        )
-
         tapReaderAction("readerOpenAISettingsAction", in: app, timeout: 20)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
+        XCTAssertTrue(requireElement("aiSettingsTopAppBarBackButton", in: app, timeout: 20).exists)
         waitForReaderRenderedContentState(containing: "readerDestination=aiSettings", in: app, timeout: 10)
         XCTAssertTrue(
             app.staticTexts["Configure AI"].waitForExistence(timeout: 10),
@@ -83,7 +50,7 @@ extension AndBibleUITests {
         XCTAssertFalse(unresolvedElement("aiAddProviderLink", in: app).exists)
 
         tapElementReliably(requireElement("aiConfigureConnectionButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("aiQuickSetupButton", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("aiProvidersLink", in: app, timeout: 10).exists)
         XCTAssertFalse(
@@ -107,33 +74,40 @@ extension AndBibleUITests {
             "Android's modal disclaimer must block the underlying Quick Setup row."
         )
         XCTAssertFalse(
-            app.navigationBars.buttons.element(boundBy: 0).isEnabled,
-            "Android's modal disclaimer must block the underlying navigation toolbar."
+            requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).isHittable,
+            "Android's modal disclaimer must block the underlying app-owned action bar."
         )
         tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
             requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
             "Add Provider must use Android's same explicit disclaimer gate."
         )
         tapElementReliably(requireElement("aiDisclaimerCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
-        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapElementReliably(
+            requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
             requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
             "Cancelling the disclaimer must not count as acceptance."
         )
-        let disclaimerScreen = requireElement("aiDisclaimerScreen", in: app, timeout: 10)
+        let disclaimerScrollView = app.scrollViews["aiDisclaimerScrollView"].firstMatch
+        XCTAssertTrue(
+            disclaimerScrollView.waitForExistence(timeout: 10),
+            "Expected the app-owned disclaimer's visible scroll container."
+        )
         let disclaimerAcceptButton = requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10)
         for _ in 0..<8 where !disclaimerAcceptButton.isHittable {
-            disclaimerScreen.swipeUp()
+            disclaimerScrollView.swipeUp()
         }
         XCTAssertTrue(
             disclaimerAcceptButton.isHittable,
@@ -148,7 +122,7 @@ extension AndBibleUITests {
         XCTAssertTrue(requireElement("aiQuickSetupCredentialScreen", in: app, timeout: 10).exists)
         XCTAssertTrue(requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists)
         tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
         XCTAssertTrue(
@@ -157,7 +131,7 @@ extension AndBibleUITests {
         )
         XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
         tapElementReliably(requireElement("aiQuickSetupCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
 
         tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
         tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
@@ -169,17 +143,17 @@ extension AndBibleUITests {
             "Persisted acceptance must resume Add Provider without another disclaimer."
         )
         tapElementReliably(requireElement("aiProviderCancelButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiProvidersScreen", in: app, timeout: 10).exists)
-        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsScreen", in: app, timeout: 10).exists)
-        tapElementReliably(app.navigationBars.buttons.element(boundBy: 0), timeout: 10)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 10).exists)
-
-        let aiSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(
-            aiSettingsBackButton.waitForExistence(timeout: 10),
-            "Expected direct AI Settings to expose reader-stack back navigation."
+        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapElementReliably(
+            requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
         )
+        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapElementReliably(
+            requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        let aiSettingsBackButton = requireElement("aiSettingsTopAppBarBackButton", in: app, timeout: 10)
         tapElementReliably(aiSettingsBackButton, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -188,7 +162,7 @@ extension AndBibleUITests {
 
         openSettings(in: app)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=settings", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsGlobalTextOptionsLink", in: app, timeout: 10)
         waitForSettingsState(containing: "settingsSyncLink", in: app, timeout: 10)
@@ -197,11 +171,10 @@ extension AndBibleUITests {
         waitForSettingsState(containing: "adminFlows=readerActions", in: app, timeout: 10)
 
         tapSettingsElement("settingsAISettingsLink", in: app, timeout: 20)
-        XCTAssertTrue(requireElement("aiSettingsScreen", in: app, timeout: 20).exists)
-        let nestedAISettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(
-            nestedAISettingsBackButton.waitForExistence(timeout: 10),
-            "Expected nested AI Settings to return to Application Preferences."
+        let nestedAISettingsBackButton = requireElement(
+            "aiSettingsTopAppBarBackButton",
+            in: app,
+            timeout: 20
         )
         tapElementReliably(nestedAISettingsBackButton, timeout: 10)
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
@@ -243,7 +216,7 @@ extension AndBibleUITests {
 
         let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
-        waitForReaderRenderedContentState(containing: "readerSheet=none", in: app, timeout: 10)
+        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(containing: "readerDestination=textOptions", in: app, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
         XCTAssertFalse(
@@ -262,12 +235,19 @@ extension AndBibleUITests {
         XCTAssertEqual(resolvedElementSemanticText("colorSettingsScreen", in: app), "colorCustom")
 
         tapElementReliably(requireElement("colorSettingsResetButton", in: app, timeout: 10), timeout: 10)
+        tapAppOwnedDialogAction(
+            "colorSettingsResetDialogAction::yes",
+            dialogIdentifier: "colorSettingsResetDialog",
+            expectedTitle: "Yes",
+            in: app,
+            timeout: 10
+        )
         waitForElementValue("colorSettingsScreen", toEqual: "colorDefaults", in: app, timeout: 10)
 
-        let colorSettingsBackButton = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(
-            colorSettingsBackButton.waitForExistence(timeout: 10),
-            "Expected Colors to expose NavigationStack back chrome to Text Options."
+        let colorSettingsBackButton = requireElement(
+            "colorSettingsTopAppBarBackButton",
+            in: app,
+            timeout: 10
         )
         tapElementReliably(colorSettingsBackButton, timeout: 10)
         waitForElementValue("textDisplaySettingsScreen", toContain: "scope=workspace", in: app, timeout: 10)
@@ -293,23 +273,28 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Android's per-window Text Options route, parent-link ladder, and pane Close action.
+    Verifies Android's per-window Text Options route, parent-link back stack, and pane Close action.
 
-     Android's pane/window menu owns both per-window Text Options and Close. These are distinct
-     commands, but both require the same setup: create a second reader pane, open that pane's
-     hamburger menu, and exercise a pane-scoped command. Keeping them in one workflow removes a
-     duplicate cold launch while preserving the visible window-scope route and delete transaction.
+    Android's pane/window menu owns both per-window Text Options and Close. These are distinct
+    commands, but both require the same setup: create a second reader pane, open that pane's
+    hamburger menu, and exercise a pane-scoped command. Android's single-top
+    `TextDisplaySettingsActivity` pushes each parent scope onto its internal bundle stack, so Back
+    from workspace scope must first restore window scope before a second Back returns to the reader.
+    Keeping both commands in one workflow removes a duplicate cold launch while preserving that
+    visible scope ladder and the pane-delete transaction.
      *
      * - Side effects:
      *   - launches the app, creates a second reader window through the tab bar, and opens the
      *     active pane hamburger menu
      *   - activates the pane-level All text options command
      *   - taps the workspace parent link from the window-scoped Text Display screen
-     *   - exits the Text Options route, reopens the same pane menu, and activates Close
+     *   - navigates Back through window scope to the reader, reopens the same pane menu, and
+     *     activates Close
      * - Failure modes:
      *   - fails if pane All text options routes to workspace/global scope
      *   - fails if window scope lacks either Android parent link
      *   - fails if the workspace parent link does not navigate to `scope=workspace`
+     *   - fails if Back skips or cannot restore the preceding `scope=window` activity
      *   - fails if pane-menu Close terminates the app, leaves the deleted tab visible, or removes
      *     the remaining pane menu/add-window affordances
      */
@@ -320,8 +305,6 @@ extension AndBibleUITests {
         addWindowTab(expectingOrder: 1, in: app, timeout: 15)
         let paneMenu = requireElement("windowPaneMenuButton::1", in: app, timeout: 10)
         openPaneMenu(paneMenu, in: app, timeout: 10)
-        let textOptionsSubmenu = requirePaneMenuItem("windowPaneMenuItem::textOptions", in: app, timeout: 10)
-        tapElementReliably(textOptionsSubmenu, timeout: 10)
         let allTextOptionsAction = requirePaneMenuItem("windowPaneMenuItem::allTextOptions", in: app, timeout: 10)
         tapElementReliably(allTextOptionsAction, timeout: 10)
 
@@ -334,20 +317,22 @@ extension AndBibleUITests {
         XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
         XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
 
-        let nestedTextOptionsBackButton = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(
-            nestedTextOptionsBackButton.waitForExistence(timeout: 10),
-            "Expected workspace Text Options to expose NavigationStack back chrome."
+        tapElementReliably(
+            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
         )
-        tapElementReliably(nestedTextOptionsBackButton, timeout: 10)
-        if !waitForReaderShellReady(in: app, timeout: 5) {
-            waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
-            tapElementReliably(requireElement("readerDestinationBackButton", in: app, timeout: 10), timeout: 10)
-            XCTAssertTrue(
-                waitForReaderShellReady(in: app, timeout: 20),
-                "Expected Text Options back navigation to return to the reader shell before closing the pane."
-            )
-        }
+        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=window", in: app, timeout: 10)
+        XCTAssertTrue(requireElement("textDisplayOpenWorkspaceSettingsButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(requireElement("textDisplayOpenGlobalSettingsButton", in: app, timeout: 10).exists)
+
+        tapElementReliably(
+            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 20),
+            "Expected app-owned Text Options back navigation to return to the reader shell before closing the pane."
+        )
         openPaneMenu(requireElement("windowPaneMenuButton::1", in: app, timeout: 10), in: app, timeout: 10)
         tapElementReliably(
             requirePaneMenuItem("windowPaneMenuItem::close", in: app, timeout: 12),
@@ -580,14 +565,14 @@ extension AndBibleUITests {
      */
 
     /**
-     Verifies Search opens as an integrated reader destination, mutates active-query state, and
-     returns to the reader from result selection.
+     Verifies Search and SearchResults remain distinct app-owned activities and navigate to reader.
      *
      * Exact Android search semantics for scope filters and word modes are covered in
      * `SearchIndexServiceQueryTests`. This UI smoke stays focused on the live Search surface:
      * Search must open as an Android-style reader destination rather than an iOS sheet, preserve
-     * the launch-seeded query, expose tappable scope and word-mode rows, update exported state, and
-     * rerender the seeded result list after each option change. The same live Search route then
+     * the launch-seeded query, expose tappable scope and word-mode rows, retain criteria while
+     * SearchResults is open, and execute changes only through Android's explicit Search command.
+     * The same live Search route then
      * enters a deterministic fixture query, verifies the live translation picker Cancel,
      * outside-dismiss, and empty-OK paths, commits a second translation through the live picker,
      * verifies grouped unique-verse and translation-hit totals plus both visible module rows, and
@@ -598,19 +583,19 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the app directly into Search with the initial query `earth void`
      *   - opens Search through the reader entry and verifies destination/no-sheet chrome
-     *   - switches Search scope between NT and OT
-     *   - switches Search word mode from all words to phrase and then to any word
+     *   - returns from SearchResults before each scope/word-mode change and explicitly resubmits
      *   - enters a deterministic fixture query, exercises negative Search translation-picker
-     *     dialog paths, commits the seeded two-module translation selection, and taps its visible
-     *     AATESTWEB result row
+     *     dialog paths, commits the seeded two-module translation selection from Search Results,
+     *     verifies Android's immediate result refresh, and taps its visible AATESTWEB result row
      * - Failure modes:
      *   - fails if Search regresses to sheet/modal presentation or drops the launch-seeded query
      *   - fails if visible Search option controls are not accessible
-     *   - fails if scope or word-mode changes do not update the Search state export
-     *   - fails if the visible seeded result list does not rerender after option changes
+     *   - fails if scope or word-mode changes do not remain in criteria until explicit submission
+     *   - fails if each submission does not open the separate SearchResults activity
      *   - fails if live translation-picker Cancel, outside-dismiss, or empty OK commits draft
      *     changes instead of preserving the previous selection
-     *   - fails if the translation picker cannot commit a second module with KJV first
+     *   - fails if the translation picker cannot commit a second module with KJV first or refresh
+     *     Search Results in place as Android does
      *   - fails if matching translations are not grouped into one Android-compatible unique verse
      *     while retaining accessible result rows for both translation hits
      *   - fails if selecting the final result row does not navigate the reader to the selected
@@ -630,8 +615,11 @@ extension AndBibleUITests {
         waitForSearchQuery("earth void", in: app, timeout: 20)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
+        returnToSearchCriteria(in: app)
         tapSearchScope(.newTestament, in: app)
         waitForSearchState(containing: "scope=newTestament", in: app, timeout: 20)
+        waitForSearchState(containing: "stage=criteria", in: app, timeout: 20)
+        submitSearchCriteria(in: app)
         waitForSearchResultRow(
             "searchResultRow::Genesis_1_2",
             in: app,
@@ -639,12 +627,18 @@ extension AndBibleUITests {
             timeout: 20
         )
 
+        returnToSearchCriteria(in: app)
         tapSearchScope(.oldTestament, in: app)
         waitForSearchState(containing: "scope=oldTestament", in: app, timeout: 20)
+        waitForSearchState(containing: "stage=criteria", in: app, timeout: 20)
+        submitSearchCriteria(in: app)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
+        returnToSearchCriteria(in: app)
         tapSearchWordMode("Phrase", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=phrase", in: app, timeout: 20)
+        waitForSearchState(containing: "stage=criteria", in: app, timeout: 20)
+        submitSearchCriteria(in: app)
         waitForSearchResultRow(
             "searchResultRow::Genesis_1_2",
             in: app,
@@ -652,14 +646,19 @@ extension AndBibleUITests {
             timeout: 20
         )
 
+        returnToSearchCriteria(in: app)
         tapSearchWordMode("Any Word", in: app, timeout: 10)
         waitForSearchState(containing: "wordMode=anyWord", in: app, timeout: 20)
+        waitForSearchState(containing: "stage=criteria", in: app, timeout: 20)
+        submitSearchCriteria(in: app)
         waitForSearchResultRow("searchResultRow::Genesis_1_2", in: app, shouldExist: true, timeout: 20)
 
+        returnToSearchCriteria(in: app)
         let searchField = requireSearchInput(in: app, timeout: 10)
         replaceText(in: searchField, with: "earth", placeholderHints: ["Search Bible text", "Search Bible", "Search"])
-        dismissSearchFieldFocusIfNeeded(in: app)
         waitForSearchQuery("earth", in: app, timeout: 20)
+        submitSearchCriteria(in: app)
+        waitForSearchState(containing: "stage=results", in: app, timeout: 20)
 
         waitForSearchSelectedModules(
             in: app,
@@ -719,6 +718,7 @@ extension AndBibleUITests {
             app.staticTexts["KJV, AATESTWEB"].waitForExistence(timeout: 5),
             "Expected the Search translation button to show Android's selected abbreviation list."
         )
+        waitForSearchState(containing: "stage=results", in: app, timeout: 20)
         waitForSearchState(containing: "groupedTotal=1", in: app, timeout: 20)
         waitForSearchState(containing: "groupedHitTotal=2", in: app, timeout: 20)
         waitForSearchState(containing: "KJV:1", in: app, timeout: 20)

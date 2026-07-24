@@ -29,6 +29,15 @@ struct AIConnectionSettingsVisibility: Equatable {
     }
 }
 
+/** Full-screen app-owned destinations reached from Android Connection settings preferences. */
+private enum AIConnectionSettingsActivity: Equatable {
+    case providers
+    case models
+    case toolPermissions
+    case documentAccess
+    case rawLogHistory
+}
+
 /**
  App-owned Connection settings destination matching Android's preference hierarchy.
 
@@ -37,6 +46,10 @@ struct AIConnectionSettingsVisibility: Equatable {
  destinations; disclaimer and Quick Setup use Android-style dialogs over this screen.
  */
 struct AIConnectionSettingsView: View {
+    /// Pops the app-owned activity for standalone callers.
+    @Environment(\.dismiss) private var dismiss
+    /// Current appearance used by the shared popup surface.
+    @Environment(\.colorScheme) private var colorScheme
     /// SwiftData context used only by the debug reset action and summary lookups.
     @Environment(\.modelContext) private var modelContext
     /// Live provider rows drive conditional section visibility and summaries.
@@ -50,6 +63,10 @@ struct AIConnectionSettingsView: View {
     let swordManager: SwordManager?
     /// Device-only credential boundary forwarded to provider flows.
     let credentialStore: AICredentialStore
+    /// Reader/workspace palette shared across the Connection settings hierarchy.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command supplied by the owning AI Settings activity.
+    let onBack: (() -> Void)?
 
     /// Credential-free failure text for debug reset errors.
     @State private var failureMessage: String?
@@ -79,6 +96,33 @@ struct AIConnectionSettingsView: View {
     @State private var rawLogRetentionDays: Int? = 30
     /// Prevents initial state hydration from writing defaults back to SwiftData.
     @State private var hasLoadedSettings = false
+    /// Nested Android activity currently replacing the Connection settings root.
+    @State private var activeActivity: AIConnectionSettingsActivity?
+    /// Whether Android's app-owned toolbar overflow popup is visible.
+    @State private var showsOverflowMenu = false
+
+    /**
+     Creates the app-owned Connection settings hierarchy.
+
+     - Parameters:
+       - swordManager: Optional installed-module source for document access.
+       - credentialStore: Device-only provider credential boundary.
+       - surfacePalette: Owner-resolved application/workspace palette.
+       - onBack: Explicit Android Up action; nil uses environment dismissal.
+     - Side effects: none during construction.
+     - Failure modes: child persistence failures are surfaced inside their owning activity.
+     */
+    init(
+        swordManager: SwordManager?,
+        credentialStore: AICredentialStore,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.swordManager = swordManager
+        self.credentialStore = credentialStore
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Providers in Android's persisted display order.
     private var providers: [LLMProviderConfig] {
@@ -106,101 +150,101 @@ struct AIConnectionSettingsView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Button {
-                    activeDialog = .disclaimerInformation
-                } label: {
-                    AIConnectionSettingsRow(
-                        title: String(
-                            localized: "ai_disclaimer_warning_title",
-                            defaultValue: "Important: Read before using AI tools"
-                        ),
-                        summary: String(
-                            localized: "ai_disclaimer_warning_summary",
-                            defaultValue: "Risks and responsibilities of using AI"
-                        ),
-                        systemImage: "exclamationmark.triangle.fill",
-                        imageColor: .red
-                    )
-                }
-                .accessibilityIdentifier("aiDisclaimerInformationLink")
-            }
-
-            Section(String(localized: "ai_providers_models_category", defaultValue: "Providers & Models")) {
-                if visibility.showsQuickSetup {
-                    Button {
-                        requestConfiguration(.quickSetup)
-                    } label: {
-                        AIConnectionSettingsRow(
-                            title: String(localized: "easy_setup_title", defaultValue: "Quick Setup"),
-                            summary: String(
-                                localized: "easy_setup_pref_summary",
-                                defaultValue: "Set up AI with a recommended provider in a few steps"
-                            ),
-                            systemImage: "cloud"
-                        )
-                    }
-                    .accessibilityIdentifier("aiQuickSetupButton")
-                }
-
-                NavigationLink {
-                    AIProvidersView(credentialStore: credentialStore)
-                } label: {
-                    AIConnectionSettingsRow(
-                        title: String(localized: "ai_providers_category", defaultValue: "Providers"),
-                        summary: providerSummary,
-                        systemImage: "cloud"
-                    )
-                }
-                .accessibilityIdentifier("aiProvidersLink")
-
-                if visibility.showsConfiguredSections {
-                    NavigationLink {
-                        AIModelsView()
-                    } label: {
-                        AIConnectionSettingsRow(
-                            title: String(localized: "ai_models_category", defaultValue: "Models"),
-                            summary: modelSummary,
-                            systemImage: "cpu"
-                        )
-                    }
-                    .accessibilityIdentifier("aiModelsLink")
-                }
-            }
-
-            if visibility.showsConfiguredSections {
-                behaviorSection
-                advancedSection
-                usageSection
-
+        Group {
+            switch activeActivity {
+            case .providers:
+                AIProvidersView(
+                    credentialStore: credentialStore,
+                    surfacePalette: surfacePalette,
+                    onBack: { activeActivity = nil }
+                )
+            case .models:
+                AIModelsView(
+                    surfacePalette: surfacePalette,
+                    onBack: { activeActivity = nil }
+                )
+            case .toolPermissions:
+                AIToolPermissionsView(
+                    surfacePalette: surfacePalette,
+                    onBack: { activeActivity = nil }
+                )
+            case .documentAccess:
+                AIDocumentAccessView(
+                    swordManager: swordManager,
+                    surfacePalette: surfacePalette,
+                    onBack: { activeActivity = nil }
+                )
+            case .rawLogHistory:
+                AIRawLogHistoryView(
+                    surfacePalette: surfacePalette,
+                    onBack: { activeActivity = nil }
+                )
+            case nil:
+                connectionSettingsRoot
             }
         }
-        .listStyle(.plain)
-        .accessibilityIdentifier("aiConnectionSettingsScreen")
-        .navigationTitle(String(localized: "ai_connection_settings", defaultValue: "Connection settings"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        activeDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_ai_connection_text",
-                                defaultValue: "Configure your AI providers, models, permissions and other connection options here. Each provider needs its own API key. You can add multiple providers and select a default model."
-                            )
-                        )
-                    } label: {
-                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+    }
+
+    /** Full app-owned root activity for Android Connection settings. */
+    private var connectionSettingsRoot: some View {
+        AndroidActivityScreen(
+            title: String(localized: "ai_connection_settings", defaultValue: "Connection settings"),
+            accessibilityIdentifier: "aiConnectionSettingsTopAppBar",
+            palette: surfacePalette,
+            onBack: performBack
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ToolbarOverflow"),
+                accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                accessibilityIdentifier: "aiConnectionSettingsOverflowButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                showsOverflowMenu.toggle()
+            }
+            .androidPopupMenuAnchor(id: "aiConnectionSettingsOverflowAnchor")
+        } content: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    disclaimerSection
+                    providersAndModelsSection
+                    if visibility.showsConfiguredSections {
+                        behaviorSection
+                        advancedSection
+                        usageSection
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .disabled(activeDialog != nil)
+                .padding(.vertical, 8)
+            }
+            .disabled(activeDialog != nil || showsOverflowMenu)
+        }
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "ai_connection_settings", defaultValue: "Connection settings"),
+            accessibilityIdentifier: "aiConnectionSettingsScreen",
+            surfaceColor: surfacePalette.backgroundColor
+        )
+        .androidAnchoredPopupMenu(
+            anchorID: "aiConnectionSettingsOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 220,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiConnectionSettingsOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiConnectionSettingsOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    icon: .asset("DrawerHelp"),
+                    accessibilityIdentifier: "aiConnectionSettingsHelpMenuItem"
+                ) {
+                    showsOverflowMenu = false
+                    activeDialog = .help(.aiConnection)
+                }
             }
         }
         .aiConfigurationDialog(
@@ -211,179 +255,276 @@ struct AIConnectionSettingsView: View {
         .task { refreshSettings() }
         .onChange(of: asksModelBeforeRun) { persistInlineSwitchesIfLoaded() }
         .onChange(of: hidesCompletedAIPanel) { persistInlineSwitchesIfLoaded() }
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
+        }
+    }
+
+    /** Android warning row shown before provider configuration. */
+    private var disclaimerSection: some View {
+        AndroidPreferenceSection(palette: surfacePalette) {
+            AndroidCatalogActionPreferenceRow(
+                title: String(
+                    localized: "ai_disclaimer_warning_title",
+                    defaultValue: "Important: Read before using AI tools"
+                ),
+                summary: String(
+                    localized: "ai_disclaimer_warning_summary",
+                    defaultValue: "Risks and responsibilities of using AI"
+                ),
+                icon: aiPreferenceIcon("ai_disclaimer_warning"),
+                iconColor: .red,
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiDisclaimerInformationLink"
+            ) {
+                activeDialog = .disclaimerInformation
+            }
+        }
+    }
+
+    /** Android Providers & Models preference category. */
+    private var providersAndModelsSection: some View {
+        AndroidPreferenceSection(
+            title: String(localized: "ai_providers_models_category", defaultValue: "Providers & Models"),
+            palette: surfacePalette
         ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+            if visibility.showsQuickSetup {
+                AndroidCatalogActionPreferenceRow(
+                    title: String(localized: "easy_setup_title", defaultValue: "Quick Setup"),
+                    summary: String(
+                        localized: "easy_setup_pref_summary",
+                        defaultValue: "Set up AI with a recommended provider in a few steps"
+                    ),
+                    icon: aiPreferenceIcon("ai_getting_started"),
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "aiQuickSetupButton"
+                ) {
+                    requestConfiguration(.quickSetup)
+                }
+                AndroidPreferenceDivider(palette: surfacePalette)
+            }
+
+            AndroidCatalogActionPreferenceRow(
+                title: String(localized: "ai_providers_category", defaultValue: "Providers"),
+                summary: providerSummary,
+                icon: aiPreferenceIcon("ai_providers_shortcut"),
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiProvidersLink"
+            ) {
+                activeActivity = .providers
+            }
+
+            if visibility.showsConfiguredSections {
+                AndroidPreferenceDivider(palette: surfacePalette)
+                AndroidCatalogActionPreferenceRow(
+                    title: String(localized: "ai_models_category", defaultValue: "Models"),
+                    summary: modelSummary,
+                    icon: aiPreferenceIcon("ai_models_shortcut"),
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "aiModelsLink"
+                ) {
+                    activeActivity = .models
+                }
+            }
         }
     }
 
     /// Android's Behavior rows with their exact dialog, destination, or inline-switch interaction.
     private var behaviorSection: some View {
-        Section(String(localized: "ai_behavior_category", defaultValue: "Behavior")) {
-            Button {
-                activeDialog = .responseLanguage(currentCode: responseLanguage)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "ai_language_title", defaultValue: "AI response language"),
-                    summary: responseLanguageSummary,
-                    systemImage: "doc.text"
-                )
-            }
-            Button {
-                activeDialog = .permissionMode(permissionMode)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "prompt_permission_mode", defaultValue: "Permission mode"),
-                    summary: String(
-                        localized: "agent_permission_mode_summary",
-                        defaultValue: "Controls when user confirmation is required before AI write operations"
-                    ),
-                    systemImage: "shield"
-                )
-            }
-            NavigationLink {
-                AIToolPermissionsView()
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "manage_tool_permissions_title", defaultValue: "Tool permissions"),
-                    summary: toolPermissionsSummary,
-                    systemImage: "shield"
-                )
-            }
-            NavigationLink {
-                AIDocumentAccessView(swordManager: swordManager)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "ai_document_filter_title", defaultValue: "Document access"),
-                    summary: documentAccessSummary,
-                    systemImage: "doc.text"
-                )
-            }
-            Button {
-                activeDialog = .commentaryResponseLimit(commentaryResponseLimit)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(
-                        localized: "commentary_max_response_title",
-                        defaultValue: "Commentary response size limit"
-                    ),
-                    summary: commentaryResponseSummary,
-                    systemImage: "doc.text"
-                )
-            }
-            Button {
-                activeDialog = .maximumAgentIterations(maximumAgentIterations)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "agent_max_iterations_title", defaultValue: "Max agent iterations"),
-                    summary: maximumAgentIterationsSummary,
-                    systemImage: "doc.text"
-                )
-            }
-            Toggle(isOn: $asksModelBeforeRun) {
-                AIConnectionSettingsRow(
-                    title: String(localized: "ask_model_before_run_title", defaultValue: "Ask model before run"),
-                    summary: String(
-                        localized: "ask_model_before_run_summary",
-                        defaultValue: "Show a model selection dialog before executing a prompt (skipped when the prompt has an explicit model override)"
-                    ),
-                    systemImage: "doc.text"
-                )
-            }
-            Toggle(isOn: $hidesCompletedAIPanel) {
-                AIConnectionSettingsRow(
-                    title: String(
-                        localized: "auto_hide_agent_log_title",
-                        defaultValue: "Hide AI panel when done"
-                    ),
-                    summary: String(
-                        localized: "auto_hide_agent_log_summary",
-                        defaultValue: "Automatically hide the AI panel when a task finishes successfully or is cancelled. On error the panel stays visible."
-                    ),
-                    systemImage: "doc.text"
-                )
-            }
+        AndroidPreferenceSection(
+            title: String(localized: "ai_behavior_category", defaultValue: "Behavior"),
+            palette: surfacePalette
+        ) {
+            preferenceAction(
+                key: "ai_language",
+                title: String(localized: "ai_language_title", defaultValue: "AI response language"),
+                summary: responseLanguageSummary,
+                identifier: "aiLanguagePreference"
+            ) { activeDialog = .responseLanguage(currentCode: responseLanguage) }
+            preferenceDivider
+            preferenceAction(
+                key: "agent_permission_mode",
+                title: String(localized: "prompt_permission_mode", defaultValue: "Permission mode"),
+                summary: String(
+                    localized: "agent_permission_mode_summary",
+                    defaultValue: "Controls when user confirmation is required before AI write operations"
+                ),
+                identifier: "aiPermissionModePreference"
+            ) { activeDialog = .permissionMode(permissionMode) }
+            preferenceDivider
+            preferenceAction(
+                key: "manage_tool_permissions",
+                title: String(localized: "manage_tool_permissions_title", defaultValue: "Tool permissions"),
+                summary: toolPermissionsSummary,
+                identifier: "aiToolPermissionsLink"
+            ) { activeActivity = .toolPermissions }
+            preferenceDivider
+            preferenceAction(
+                key: "manage_ai_documents",
+                title: String(localized: "ai_document_filter_title", defaultValue: "Document access"),
+                summary: documentAccessSummary,
+                identifier: "aiDocumentAccessLink"
+            ) { activeActivity = .documentAccess }
+            preferenceDivider
+            preferenceAction(
+                key: "commentary_max_response_chars",
+                title: String(
+                    localized: "commentary_max_response_title",
+                    defaultValue: "Commentary response size limit"
+                ),
+                summary: commentaryResponseSummary,
+                identifier: "aiCommentaryResponseLimitPreference"
+            ) { activeDialog = .commentaryResponseLimit(commentaryResponseLimit) }
+            preferenceDivider
+            preferenceAction(
+                key: "agent_max_iterations",
+                title: String(localized: "agent_max_iterations_title", defaultValue: "Max agent iterations"),
+                summary: maximumAgentIterationsSummary,
+                identifier: "aiMaximumIterationsPreference"
+            ) { activeDialog = .maximumAgentIterations(maximumAgentIterations) }
+            preferenceDivider
+            AndroidCatalogSwitchPreferenceRow(
+                title: String(localized: "ask_model_before_run_title", defaultValue: "Ask model before run"),
+                summary: String(
+                    localized: "ask_model_before_run_summary",
+                    defaultValue: "Show a model selection dialog before executing a prompt (skipped when the prompt has an explicit model override)"
+                ),
+                icon: aiPreferenceIcon("ask_model_before_run"),
+                isOn: $asksModelBeforeRun,
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiAskModelBeforeRunSwitch"
+            )
+            preferenceDivider
+            AndroidCatalogSwitchPreferenceRow(
+                title: String(
+                    localized: "auto_hide_agent_log_title",
+                    defaultValue: "Hide AI panel when done"
+                ),
+                summary: String(
+                    localized: "auto_hide_agent_log_summary",
+                    defaultValue: "Automatically hide the AI panel when a task finishes successfully or is cancelled. On error the panel stays visible."
+                ),
+                icon: aiPreferenceIcon("auto_hide_agent_log_on_completion"),
+                isOn: $hidesCompletedAIPanel,
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiAutoHideAgentLogSwitch"
+            )
         }
     }
 
     /// Android's Advanced rows, each editing only its own bundled system-prompt override.
     private var advancedSection: some View {
-        Section(String(localized: "ai_advanced_category", defaultValue: "Advanced")) {
-            Button {
-                activeDialog = .systemPrompt(kind: .agent, currentValue: agentSystemPrompt)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(
-                        localized: "custom_agent_system_prompt_title",
-                        defaultValue: "Agent system prompt"
-                    ),
-                    summary: systemPromptSummary(agentSystemPrompt),
-                    systemImage: "doc.text"
-                )
-            }
-            Button {
+        AndroidPreferenceSection(
+            title: String(localized: "ai_advanced_category", defaultValue: "Advanced"),
+            palette: surfacePalette
+        ) {
+            preferenceAction(
+                key: "custom_agent_system_prompt",
+                title: String(
+                    localized: "custom_agent_system_prompt_title",
+                    defaultValue: "Agent system prompt"
+                ),
+                summary: systemPromptSummary(agentSystemPrompt),
+                identifier: "aiAgentSystemPromptPreference"
+            ) { activeDialog = .systemPrompt(kind: .agent, currentValue: agentSystemPrompt) }
+            preferenceDivider
+            preferenceAction(
+                key: "custom_text_transform_system_prompt",
+                title: String(
+                    localized: "custom_text_transform_system_prompt_title",
+                    defaultValue: "Text transformation system prompt"
+                ),
+                summary: systemPromptSummary(transformationSystemPrompt),
+                identifier: "aiTransformationSystemPromptPreference"
+            ) {
                 activeDialog = .systemPrompt(kind: .transformation, currentValue: transformationSystemPrompt)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(
-                        localized: "custom_text_transform_system_prompt_title",
-                        defaultValue: "Text transformation system prompt"
-                    ),
-                    summary: systemPromptSummary(transformationSystemPrompt),
-                    systemImage: "doc.text"
-                )
             }
         }
     }
 
     /// Android's Usage rows with nonselectable totals, reset/retention dialogs, and log destination.
     private var usageSection: some View {
-        Section(String(localized: "ai_usage_category", defaultValue: "Usage")) {
-            AIConnectionSettingsRow(
+        AndroidPreferenceSection(
+            title: String(localized: "ai_usage_category", defaultValue: "Usage"),
+            palette: surfacePalette
+        ) {
+            AndroidCatalogValuePreferenceRow(
                 title: String(localized: "llm_usage_summary_title", defaultValue: "Token usage"),
                 summary: usageSummary,
-                systemImage: "doc.text"
+                detail: nil,
+                icon: aiPreferenceIcon("llm_usage_summary"),
+                trailingValue: nil,
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiUsageSummary"
             )
-            Button {
-                activeDialog = .resetUsage
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "llm_reset_usage_title", defaultValue: "Reset usage data"),
-                    summary: String(
-                        localized: "llm_reset_usage_summary",
-                        defaultValue: "Clear cumulative token and cost tracking"
-                    ),
-                    systemImage: "arrow.clockwise"
-                )
-            }
-            NavigationLink {
-                AIRawLogHistoryView()
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "raw_log_history_title", defaultValue: "AI Log History"),
-                    summary: String(
-                        localized: "raw_log_history_summary",
-                        defaultValue: "View and manage saved AI conversation logs"
-                    ),
-                    systemImage: "doc.text"
-                )
-            }
-            Button {
-                activeDialog = .rawLogRetention(rawLogRetentionDays)
-            } label: {
-                AIConnectionSettingsRow(
-                    title: String(localized: "raw_log_retention_title", defaultValue: "Auto-delete old logs"),
-                    summary: rawLogRetentionSummary,
-                    systemImage: "trash"
-                )
-            }
+            preferenceDivider
+            preferenceAction(
+                key: "llm_reset_usage",
+                title: String(localized: "llm_reset_usage_title", defaultValue: "Reset usage data"),
+                summary: String(
+                    localized: "llm_reset_usage_summary",
+                    defaultValue: "Clear cumulative token and cost tracking"
+                ),
+                identifier: "aiResetUsagePreference"
+            ) { activeDialog = .resetUsage }
+            preferenceDivider
+            preferenceAction(
+                key: "raw_log_history",
+                title: String(localized: "raw_log_history_title", defaultValue: "AI Log History"),
+                summary: String(
+                    localized: "raw_log_history_summary",
+                    defaultValue: "View and manage saved AI conversation logs"
+                ),
+                identifier: "aiRawLogHistoryLink"
+            ) { activeActivity = .rawLogHistory }
+            preferenceDivider
+            preferenceAction(
+                key: "raw_log_retention",
+                title: String(localized: "raw_log_retention_title", defaultValue: "Auto-delete old logs"),
+                summary: rawLogRetentionSummary,
+                identifier: "aiRawLogRetentionPreference"
+            ) { activeDialog = .rawLogRetention(rawLogRetentionDays) }
+        }
+    }
+
+    /// Shared inset divider used between AI preference rows.
+    private var preferenceDivider: some View {
+        AndroidPreferenceDivider(palette: surfacePalette)
+    }
+
+    /** Builds one shared Android action preference from the canonical AI icon catalog. */
+    private func preferenceAction(
+        key: String,
+        title: String,
+        summary: String?,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        AndroidCatalogActionPreferenceRow(
+            title: title,
+            summary: summary,
+            icon: aiPreferenceIcon(key),
+            palette: surfacePalette,
+            accessibilityIdentifier: identifier,
+            action: action
+        )
+    }
+
+    /// Returns exact Android drawable metadata for one AI connection preference key.
+    private func aiPreferenceIcon(_ key: String) -> AndBibleIcon? {
+        AndBibleIconCatalog.settingsIcon(forAndroidKey: key)
+    }
+
+    /** Returns through the explicit AI Settings owner or SwiftUI dismissal fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 
@@ -584,41 +725,12 @@ struct AIConnectionSettingsView: View {
 
 }
 
-/** Compact title-and-summary row matching Android's preference presentation. */
-private struct AIConnectionSettingsRow: View {
-    /// Primary row title.
-    let title: String
-    /// Optional secondary summary beneath the title.
-    var summary: String?
-    /// Optional leading symbol used only when Android supplies a semantic icon.
-    var systemImage: String?
-    /// Optional semantic symbol color.
-    var imageColor: Color = .accentColor
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .foregroundStyle(imageColor)
-                    .frame(width: 24)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .foregroundStyle(.primary)
-                if let summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
-
 /** App-owned provider list with Android's blank empty state and toolbar Add action. */
 private struct AIProvidersView: View {
+    /// Pops the provider activity for standalone callers.
+    @Environment(\.dismiss) private var dismiss
+    /// Current appearance used by the shared overflow surface.
+    @Environment(\.colorScheme) private var colorScheme
     /// SwiftData context used to read the durable disclaimer gate.
     @Environment(\.modelContext) private var modelContext
     /// Live provider rows keep the list current after pushed editor changes.
@@ -626,11 +738,28 @@ private struct AIProvidersView: View {
 
     /// Device-only credential boundary forwarded to provider editors.
     let credentialStore: AICredentialStore
+    /// Reader/workspace palette inherited from Connection settings.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up action returning to Connection settings.
+    let onBack: (() -> Void)?
 
     /// Android dialog currently presented over the Providers screen.
     @State private var activeDialog: AIConfigurationDialog?
     /// Credential-free persistence failure text.
     @State private var failureMessage: String?
+    /// Whether Android's app-owned provider overflow popup is visible.
+    @State private var showsOverflowMenu = false
+
+    /** Creates the app-owned Providers activity without reading credentials. */
+    init(
+        credentialStore: AICredentialStore,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.credentialStore = credentialStore
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Providers in Android's persisted display order.
     private var providers: [LLMProviderConfig] {
@@ -641,71 +770,98 @@ private struct AIProvidersView: View {
     }
 
     var body: some View {
-        List {
-            ForEach(providers) { provider in
-                Button {
-                    activeDialog = .providerEditor(
-                        providerID: provider.id,
-                        providerType: provider.provider
-                    )
-                } label: {
-                    AIConnectionSettingsRow(
-                        title: provider.displayName,
-                        summary: credentialSummary(for: provider.id),
-                        systemImage: "cloud"
-                    )
-                }
+        AndroidActivityScreen(
+            title: String(localized: "ai_providers_category", defaultValue: "Providers"),
+            accessibilityIdentifier: "aiProvidersTopAppBar",
+            palette: surfacePalette,
+            onBack: performBack
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityAddCircle"),
+                accessibilityLabel: String(localized: "ai_add_provider", defaultValue: "Add provider"),
+                accessibilityIdentifier: "aiAddProviderLink",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: requestAddProvider
+            )
+            .disabled(activeDialog != nil)
+
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ToolbarOverflow"),
+                accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                accessibilityIdentifier: "aiProvidersOverflowButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor
+            ) {
+                showsOverflowMenu.toggle()
             }
-        }
-        .listStyle(.plain)
-        .accessibilityIdentifier("aiProvidersScreen")
-        .navigationTitle(String(localized: "ai_providers_category", defaultValue: "Providers"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    requestAddProvider()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel(String(localized: "ai_add_provider", defaultValue: "Add provider"))
-                .accessibilityIdentifier("aiAddProviderLink")
-                .disabled(activeDialog != nil)
-                Menu {
-                    Button {
-                        activeDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_ai_providers_text",
-                                defaultValue: "Manage AI providers (Google Gemini, OpenAI, Anthropic, etc.). Each provider needs its own API key. You can add multiple providers and assign different ones to specific prompts."
+            .androidPopupMenuAnchor(id: "aiProvidersOverflowAnchor")
+            .disabled(activeDialog != nil)
+        } content: {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                        if index > 0 {
+                            AndroidPreferenceDivider(palette: surfacePalette)
+                        }
+                        AndroidCatalogActionPreferenceRow(
+                            title: provider.displayName,
+                            summary: credentialSummary(for: provider.id),
+                            icon: AndBibleIconCatalog.settingsIcon(
+                                forAndroidKey: "ai_providers_shortcut"
+                            ),
+                            palette: surfacePalette,
+                            accessibilityIdentifier: "aiProviderRow_\(provider.id.uuidString)"
+                        ) {
+                            activeDialog = .providerEditor(
+                                providerID: provider.id,
+                                providerType: provider.provider
                             )
-                        )
-                    } label: {
-                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                        }
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .disabled(activeDialog != nil)
+                .padding(.vertical, 8)
+            }
+            .disabled(activeDialog != nil || showsOverflowMenu)
+        }
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "ai_providers_category", defaultValue: "Providers"),
+            accessibilityIdentifier: "aiProvidersScreen",
+            surfaceColor: surfacePalette.backgroundColor
+        )
+        .androidAnchoredPopupMenu(
+            anchorID: "aiProvidersOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 220,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiProvidersOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiProvidersOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    icon: .asset("DrawerHelp"),
+                    accessibilityIdentifier: "aiProvidersHelpMenuItem"
+                ) {
+                    showsOverflowMenu = false
+                    activeDialog = .help(.aiProviders)
+                }
             }
         }
         .aiConfigurationDialog(
             $activeDialog,
             credentialStore: credentialStore
         )
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -730,6 +886,15 @@ private struct AIProvidersView: View {
             activeDialog = .initial(for: .addProvider, isDisclaimerAccepted: accepted)
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Returns through the explicit Connection settings owner or environment fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 }

@@ -6,8 +6,8 @@ import SwiftUI
 
 /** Dialog states used by Android's disclaimer-protected AI configuration workflows. */
 enum AIConfigurationDialog: Equatable {
-    /// Android's app-owned Help dialog with screen-specific source copy.
-    case information(title: String, message: String)
+    /// Android's typed, app-owned `CommonUtils.showHelpDialog` contract.
+    case help(AndroidFeatureHelpTopic)
     /// Read-only responsibility notice opened from Connection settings.
     case disclaimerInformation
     /// One-time acceptance gate retaining the exact requested action.
@@ -70,6 +70,21 @@ enum AIConfigurationDialog: Equatable {
         case .addProvider: return .providerType
         }
     }
+
+    /**
+     Returns whether Android permits a scrim tap to cancel the represented dialog.
+
+     - Returns: `true` only for informational feature Help; configuration and destructive workflows
+       remain blocking until an explicit action is selected.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    var allowsOutsideDismissal: Bool {
+        if case .help = self {
+            return true
+        }
+        return false
+    }
 }
 
 /**
@@ -95,34 +110,22 @@ private struct AIConfigurationDialogOverlay: View {
     @State private var failureMessage: String?
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(colorScheme == .dark ? 0.62 : 0.38)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {}
-                    .accessibilityHidden(true)
-
-                dialogContent
-                    .frame(maxHeight: geometry.size.height * 0.9)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 16)
-            }
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiConfigurationDialogOverlay",
+            allowsOutsideDismissal: dialog?.allowsOutsideDismissal ?? false,
+            onOutsideTap: dismissDialog
+        ) {
+            dialogContent
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("aiConfigurationDialogOverlay")
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -130,12 +133,8 @@ private struct AIConfigurationDialogOverlay: View {
     @ViewBuilder
     private var dialogContent: some View {
         switch dialog {
-        case .information(let title, let message):
-            AIInformationDialog(
-                title: title,
-                message: message,
-                onDismiss: dismissDialog
-            )
+        case .help(let topic):
+            AndroidFeatureHelpDialogContent(topic: topic, onDismiss: dismissDialog)
         case .disclaimerInformation:
             AIDisclaimerDialog(mode: .information, onCancel: dismissDialog)
         case .disclaimerAcceptance(let request):
@@ -348,35 +347,6 @@ private struct AIConfigurationDialogOverlay: View {
     }
 }
 
-/** Android's shared one-message Help dialog. */
-private struct AIInformationDialog: View {
-    /// Localized dialog heading.
-    let title: String
-    /// Localized screen-specific help copy.
-    let message: String
-    /// Positive dismissal callback.
-    let onDismiss: () -> Void
-
-    var body: some View {
-        AIAndroidDialogSurface(title: title) {
-            ScrollView {
-                Text(message)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-            }
-            .frame(maxHeight: 520)
-        } actions: {
-            Spacer()
-            AIAndroidDialogAction(
-                title: String(localized: "okay", defaultValue: "OK"),
-                action: onDismiss
-            )
-        }
-        .accessibilityIdentifier("aiInformationDialog")
-    }
-}
-
 /** Shared presenter for Android's app-owned AI dialog workflows. */
 extension View {
     /**
@@ -421,85 +391,18 @@ extension View {
     }
 }
 
-/** Shared Android AppCompat-shaped dialog panel with fixed title and action regions. */
-struct AIAndroidDialogSurface<Content: View, Actions: View>: View {
-    /// Current appearance for Android's explicit dialog palette.
-    @Environment(\.colorScheme) private var colorScheme
+/** Compatibility name that resolves directly to the application's shared Android dialog scaffold. */
+typealias AIAndroidDialogSurface<Content: View, Actions: View> =
+    AndroidDialogScaffold<Content, Actions>
 
-    /// Localized dialog title.
-    let title: String
-    /// Dialog-specific scrollable or fixed content.
-    @ViewBuilder let content: () -> Content
-    /// Android-ordered neutral, negative, and positive actions.
-    @ViewBuilder let actions: () -> Actions
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(AndroidDialogSurfacePalette.primaryText(for: colorScheme))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 12)
-
-            content()
-
-            HStack(spacing: 6) {
-                actions()
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-        }
-        .frame(maxWidth: 430)
-        .background(
-            AndroidDialogSurfacePalette.background(for: colorScheme),
-            in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 18, x: 0, y: 10)
-        .tint(AndroidDialogSurfacePalette.accent(for: colorScheme))
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-    }
-}
-
-/** Text action matching Android AlertDialog's uppercase button treatment. */
-struct AIAndroidDialogAction: View {
-    /// Current appearance for Android's dialog accent.
-    @Environment(\.colorScheme) private var colorScheme
-
-    /// Localized action label.
-    let title: String
-    /// Whether the action should use destructive red instead of Android teal.
-    var isDestructive = false
-    /// Whether the action may currently run.
-    var isEnabled = true
-    /// Action callback.
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .textCase(.uppercase)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(
-            isDestructive
-                ? Color.red
-                : AndroidDialogSurfacePalette.accent(for: colorScheme)
-        )
-        .opacity(isEnabled ? 1 : 0.38)
-        .disabled(!isEnabled)
-    }
-}
+/** Compatibility name that resolves directly to the application's shared Android text action. */
+typealias AIAndroidDialogAction = AndroidDialogTextAction
 
 /** Android's informational and one-time acceptance variants of the AI disclaimer dialog. */
 private struct AIDisclaimerDialog: View {
+    /// Current appearance used by the shared AppCompat dialog marker.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Information or explicit acceptance behavior.
     enum Mode {
         case information
@@ -516,9 +419,24 @@ private struct AIDisclaimerDialog: View {
     /// Credential-free persistence failure returned by the acceptance callback.
     @State private var failureMessage: String?
 
+    /**
+     Builds Android's scrollable disclaimer content and information/acceptance actions.
+
+     The scroll container has its own semantic identity because the dialog-level identity is a
+     noninteractive sibling marker. Accessibility automation and assistive interaction must scroll
+     the visible content rather than attempting gestures on that marker.
+
+     - Returns: Shared Android dialog content for the selected disclaimer mode.
+     - Side effects: Cancel invokes `onCancel`; acceptance invokes `onAccept` and may expose a
+       credential-free persistence error dialog.
+     - Failure modes: A persistence error leaves the disclaimer visible and presents localized
+       error copy without treating the disclaimer as accepted.
+     */
     var body: some View {
         AIAndroidDialogSurface(title: title) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView(
+                accessibilityIdentifier: "aiDisclaimerScrollView"
+            ) {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(AIDisclaimerCopy.localized().segments.enumerated()), id: \.offset) { _, segment in
                         disclaimerSegment(segment)
@@ -545,7 +463,6 @@ private struct AIDisclaimerDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: mode == .acceptance ? 600 : 520)
         } actions: {
             Spacer()
             AIAndroidDialogAction(
@@ -558,17 +475,17 @@ private struct AIDisclaimerDialog: View {
                 mode == .acceptance ? "aiDisclaimerCancelButton" : "aiDisclaimerOKButton"
             )
         }
-        .accessibilityIdentifier("aiDisclaimerScreen")
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .androidAccessibilityIdentityMarker(
+            label: title,
+            accessibilityIdentifier: "aiDisclaimerScreen",
+            surfaceColor: AndroidDialogSurfacePalette.background(for: colorScheme)
+        )
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -610,6 +527,9 @@ private struct AIProviderTypeDialog: View {
     /// Persisted provider rows used to hide duplicate known-provider types.
     @Query private var providerConfigurations: [LLMProviderConfig]
 
+    /// Current appearance used by the shared AppCompat dialog marker.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Selected provider callback.
     let onSelect: (LLMProvider) -> Void
     /// Negative action callback.
@@ -635,7 +555,7 @@ private struct AIProviderTypeDialog: View {
         AIAndroidDialogSurface(
             title: String(localized: "ai_provider_select_type", defaultValue: "Select provider type")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if unsupportedProviders.contains(where: availableProviders.contains) {
                         Button {
@@ -679,7 +599,6 @@ private struct AIProviderTypeDialog: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
             }
-            .frame(maxHeight: 500)
         } actions: {
             Spacer()
             AIAndroidDialogAction(
@@ -688,7 +607,11 @@ private struct AIProviderTypeDialog: View {
             )
             .accessibilityIdentifier("aiProviderTypeCancelButton")
         }
-        .accessibilityIdentifier("aiProviderTypeSelectionScreen")
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "ai_provider_select_type", defaultValue: "Select provider type"),
+            accessibilityIdentifier: "aiProviderTypeSelectionScreen",
+            surfaceColor: AndroidDialogSurfacePalette.background(for: colorScheme)
+        )
     }
 
     /** Builds one Android provider tier with non-selectable heading and selectable rows. */

@@ -287,17 +287,17 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies the Search criteria screen uses Android's form structure instead of iOS controls.
+     Verifies both Search activities compose shared Android-owned presentation primitives.
 
      Android `Search` renders a top edit field, two radio groups, a translations row, and a bottom
-     submit button from `app/src/main/res/layout/search.xml`. The iOS Search destination should
-     therefore avoid SwiftUI-only segmented controls, toolbar filter toggles, and empty-state cards
-     on the criteria screen.
+     submit button from `search.xml`; submitting launches the separate `SearchResults` activity.
+     Both activities use the shared action bar, dialogs, and popup-menu infrastructure rather than
+     native iOS navigation, lists, sheets, or one-off picker/menu facsimiles.
 
-     - Expected result: `SearchView` exposes named Android-form building blocks and omits the
-       previous iOS-specific segmented/card/toggle affordances.
-     - Failure meaning: Search has drifted into a visually custom iOS screen even if the
-       translation picker itself uses an Android-style dialog.
+     - Expected result: `SearchView` contains the shared activity, input, radio, multiselect, and
+       anchored-popup components plus distinct results content and exact Android-derived icons.
+     - Failure meaning: Search has drifted into a native iOS surface, recombined criteria/results,
+       or reinvented an app-owned component instead of reusing the established implementation.
      - Side effects: Reads `SearchView.swift` from the checked-out source tree.
      */
     func testSearchCriteriaScreenUsesAndroidFormStructure() throws {
@@ -305,12 +305,27 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
         )
 
+        XCTAssertTrue(source.contains("AndroidActivityScreen("))
+        XCTAssertTrue(source.contains("AndroidActivityTextInput("))
+        XCTAssertTrue(source.contains("AndroidRadioRow("))
+        XCTAssertTrue(source.contains("AndroidMultiselectDialogContent("))
+        XCTAssertTrue(source.contains(".androidAnchoredPopupMenu("))
         XCTAssertTrue(source.contains("private var searchCriteriaForm"))
         XCTAssertTrue(source.contains("private var searchSubmitButton"))
-        XCTAssertTrue(source.contains("private func searchRadioRow"))
+        XCTAssertTrue(source.contains("private var searchResultsContent"))
+        XCTAssertTrue(source.contains(".asset(\"SearchDocuments\")"))
+        XCTAssertTrue(source.contains("AndBibleIconView(name: \"SearchExpand\""))
         XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
         XCTAssertFalse(source.contains("ContentUnavailableView("))
         XCTAssertFalse(source.contains("searchOptionsToggleButton"))
+        XCTAssertFalse(source.contains("List {"))
+        XCTAssertFalse(source.contains(".navigationTitle"))
+        XCTAssertFalse(source.contains(".sheet("))
+        XCTAssertFalse(source.contains("Menu {"))
+        XCTAssertFalse(source.split(separator: "\n").contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("Picker(")
+        })
+        XCTAssertFalse(source.contains("makeTranslationPicker"))
     }
 
     func testStrongsQueryNormalizationHandlesLeadingZeroes() {

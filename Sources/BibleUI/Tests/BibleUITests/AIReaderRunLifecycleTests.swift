@@ -195,4 +195,91 @@ final class AIReaderRunLifecycleTests: XCTestCase {
       )
     )
   }
+
+  /**
+   Guards reader AI presentation against native-container and feature-local-overlay regressions.
+
+   - Setup: Reads the route host, transient dialogs, embedded agent widget, raw-log activity,
+     shared dialog scaffold, and pane palette wiring from the checked-out production sources.
+   - Expected result: Every application-owned surface composes shared Android windows, activities,
+     popup/menu controls, palette values, text inputs, checkboxes, and packaged Android assets; the
+     embedded widget has no modal scrim and the pane supplies its actual workspace color.
+   - Failure meaning: A future change has reintroduced native iOS `List`/`Form`/`Picker`/`Toggle`/
+     `Menu`/navigation presentation, a hand-drawn material card, or screenshot-sampled colors.
+   - Side effects: Performs read-only UTF-8 source loading; it does not launch SwiftUI or persist.
+   */
+  func testAIRuntimePresentationUsesSharedAndroidStructures() throws {
+    let hostSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/AI/AIReaderRunViews.swift"
+    )
+    let dialogSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/AI/AIReaderTransientDialogs.swift"
+    )
+    let widgetSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/AI/AIReaderAgentLogWidget.swift"
+    )
+    let rawLogSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/AI/AIReaderLiveRawLogView.swift"
+    )
+    let paneSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
+    )
+    let scaffoldSource = try BibleUITestSourceLocator.source(
+      at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDialogScaffold.swift"
+    )
+
+    XCTAssertTrue(hostSource.contains("AIReaderPromptChooserDialog(coordinator:"))
+    XCTAssertTrue(hostSource.contains("AIReaderAgentLogWidget("))
+    XCTAssertTrue(hostSource.contains("surfacePalette: surfacePalette"))
+    XCTAssertFalse(hostSource.contains("AIReaderAppOwnedOverlay"))
+
+    for required in [
+      "AndroidDialogWindow(",
+      "AndroidDialogScaffold(",
+      "AndroidDialogTextInput(",
+      "AndroidCheckboxRow(",
+      "togglePromptFavorite",
+      "AIReaderPromptGroupCollapseStore",
+      "PromptFavoriteFilled",
+      "PromptExpandIndicator",
+    ] {
+      XCTAssertTrue(dialogSource.contains(required), "Missing shared dialog contract: \(required)")
+    }
+
+    XCTAssertTrue(widgetSource.contains("surfacePalette.backgroundColor"))
+    XCTAssertTrue(widgetSource.contains("AIReaderModelSelectionDialog("))
+    XCTAssertTrue(widgetSource.contains("AndroidDecisionDialog("))
+    XCTAssertTrue(widgetSource.contains("AgentLogAction"))
+    XCTAssertTrue(widgetSource.contains("ActivityClose"))
+    XCTAssertFalse(widgetSource.contains("Color.black.opacity(0.36)"))
+    XCTAssertFalse(widgetSource.contains(".ignoresSafeArea()"))
+
+    XCTAssertTrue(rawLogSource.contains("AndroidActivityScreen("))
+    XCTAssertTrue(rawLogSource.contains("androidAnchoredPopupMenu("))
+    XCTAssertTrue(rawLogSource.contains("AndroidPopupMenuSurface("))
+    XCTAssertTrue(rawLogSource.contains("ActivityCopy"))
+    XCTAssertTrue(rawLogSource.contains("ActivityShare"))
+
+    XCTAssertTrue(paneSource.contains("workspaceColor: window.workspace?.workspaceColor"))
+    XCTAssertTrue(paneSource.contains("surfacePalette: surfacePalette"))
+    XCTAssertTrue(scaffoldSource.contains("struct AndroidDialogScaffold"))
+    XCTAssertTrue(scaffoldSource.contains("struct AndroidDialogListActionRow"))
+
+    let appOwnedSources = hostSource + dialogSource + widgetSource + rawLogSource
+    for forbidden in [
+      "NavigationStack",
+      "List {",
+      "Form {",
+      "Picker(",
+      "Toggle(",
+      "Menu {",
+      ".regularMaterial",
+      "ContentUnavailableView(",
+    ] {
+      XCTAssertFalse(
+        appOwnedSources.contains(forbidden),
+        "Unexpected native or reinvented AI presentation primitive: \(forbidden)"
+      )
+    }
+  }
 }

@@ -20,41 +20,39 @@ private enum AIToolOverrideSelection: String, CaseIterable, Identifiable {
 
 /** App-owned Android discard-confirmation overlay shared by explicit-save AI screens. */
 private struct AISettingsDiscardOverlay: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Confirms discarding all unsaved drafts.
     let onDiscard: () -> Void
     /// Returns to editing without changing draft or persistence.
     let onCancel: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                AIAndroidDialogSurface(title: "") {
-                    Text(String(localized: "discard_changes_confirmation", defaultValue: "Discard unsaved changes?"))
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                } actions: {
-                    Spacer()
-                    AIAndroidDialogAction(
-                        title: String(localized: "no", defaultValue: "No"),
-                        action: onCancel
-                    )
-                    AIAndroidDialogAction(
-                        title: String(localized: "yes", defaultValue: "Yes"),
-                        isDestructive: true,
-                        action: onDiscard
-                    )
-                }
-                .padding(.horizontal, 24)
-                .frame(maxHeight: geometry.size.height * 0.8)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiDiscardChangesDialog",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            AIAndroidDialogSurface(title: "") {
+                Text(String(localized: "discard_changes_confirmation", defaultValue: "Discard unsaved changes?"))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+            } actions: {
+                Spacer()
+                AIAndroidDialogAction(
+                    title: String(localized: "no", defaultValue: "No"),
+                    action: onCancel
+                )
+                AIAndroidDialogAction(
+                    title: String(localized: "yes", defaultValue: "Yes"),
+                    isDestructive: true,
+                    action: onDiscard
+                )
             }
         }
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("aiDiscardChangesDialog")
     }
 }
 
@@ -70,6 +68,13 @@ struct AIToolPermissionsView: View {
     @Environment(\.dismiss) private var dismiss
     /// SwiftData context containing Android's global allow and deny sets.
     @Environment(\.modelContext) private var modelContext
+    /// Current appearance used by the shared overflow menu.
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Reader/workspace palette inherited from Connection settings.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command returning to Connection settings.
+    let onBack: (() -> Void)?
 
     /// Draft tools that bypass write confirmation.
     @State private var allowedTools: Set<AgentTool> = []
@@ -87,6 +92,17 @@ struct AIToolPermissionsView: View {
     @State private var failureMessage: String?
     /// Android's app-owned Help dialog.
     @State private var helpDialog: AIConfigurationDialog?
+    /// Whether Android's app-owned action-bar overflow is visible.
+    @State private var showsOverflowMenu = false
+
+    /** Creates the explicit-save tool-permission activity without loading persistence. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Whether any draft differs from its loaded persisted value.
     private var isDirty: Bool {
@@ -94,81 +110,113 @@ struct AIToolPermissionsView: View {
     }
 
     var body: some View {
-        ZStack {
-            List {
-                ForEach(AIPermissionPresentation.categories, id: \.category.rawValue) { group in
-                    Section {
+        ZStack(alignment: .topLeading) {
+            AndroidActivityScreen(
+                title: String(
+                    localized: "global_tool_permissions_title",
+                    defaultValue: "Default tool settings"
+                ),
+                accessibilityIdentifier: "aiToolPermissionsTopAppBar",
+                palette: surfacePalette,
+                onBack: requestClose
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivitySave"),
+                    accessibilityLabel: String(localized: "okay", defaultValue: "OK"),
+                    accessibilityIdentifier: "aiToolPermissionsSaveButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: saveAndClose
+                )
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "aiToolPermissionsOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showsOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: "aiToolPermissionsOverflowAnchor")
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+            } content: {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(AIPermissionPresentation.categories, id: \.category.rawValue) { group in
+                            categoryHeader(group)
                         if expandedCategories.contains(group.category) {
                             ForEach(group.tools, id: \.self) { tool in
                                 toolRow(tool)
                             }
                         }
-                    } header: {
-                        categoryHeader(group)
+                            AndroidPreferenceDivider(palette: surfacePalette)
+                        }
                     }
+                    .padding(.vertical, 8)
                 }
+                .accessibilityHidden(showsDiscardConfirmation || helpDialog != nil)
+                .disabled(showsDiscardConfirmation || helpDialog != nil || showsOverflowMenu)
             }
-            .accessibilityHidden(showsDiscardConfirmation)
-            .disabled(showsDiscardConfirmation)
+
+            AndroidActivityAccessibilityMarker(
+                label: String(
+                    localized: "global_tool_permissions_title",
+                    defaultValue: "Default tool settings"
+                ),
+                accessibilityIdentifier: "aiToolPermissionsScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+            .accessibilityHidden(showsDiscardConfirmation || helpDialog != nil)
 
             if showsDiscardConfirmation {
                 AISettingsDiscardOverlay(
-                    onDiscard: { dismiss() },
+                    onDiscard: performDismiss,
                     onCancel: { showsDiscardConfirmation = false }
                 )
             }
         }
-        .navigationTitle(String(localized: "global_tool_permissions_title", defaultValue: "Default tool settings"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: requestClose) { Image(systemName: "chevron.left") }
-                    .disabled(showsDiscardConfirmation || helpDialog != nil)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: saveAndClose) { Image(systemName: "checkmark") }
-                    .accessibilityLabel(String(localized: "okay", defaultValue: "OK"))
-                    .disabled(showsDiscardConfirmation || helpDialog != nil)
-                Menu {
-                    Button(action: resetAll) {
-                        Label(
-                            String(localized: "reset_all_permissions", defaultValue: "Reset all"),
-                            systemImage: "arrow.counterclockwise"
-                        )
+        .androidAnchoredPopupMenu(
+            anchorID: "aiToolPermissionsOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 260,
+            estimatedMenuHeight: 104,
+            accessibilityIdentifier: "aiToolPermissionsOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiToolPermissionsOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                VStack(spacing: 0) {
+                    AndroidPopupMenuRow(
+                        title: String(localized: "reset_all_permissions", defaultValue: "Reset all"),
+                        accessibilityIdentifier: "aiToolPermissionsResetMenuItem"
+                    ) {
+                        showsOverflowMenu = false
+                        resetAll()
                     }
-                    Button {
-                        helpDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_global_tool_permissions_text",
-                                defaultValue: "Configure permissions for individual AI tools. For each read tool, choose whether the AI may use it (Enabled or Disabled). For each write tool, choose Always allow, Always deny, or Ask (which falls back to the global permission mode set in AI Connection settings)."
-                            )
-                        )
-                    } label: {
-                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                    Divider()
+                    AndroidPopupMenuRow(
+                        title: String(localized: "help", defaultValue: "Help"),
+                        accessibilityIdentifier: "aiToolPermissionsHelpMenuItem"
+                    ) {
+                        showsOverflowMenu = false
+                        helpDialog = .help(.globalToolPermissions)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .disabled(showsDiscardConfirmation || helpDialog != nil)
             }
         }
         .task { load() }
         .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -185,7 +233,10 @@ struct AIToolPermissionsView: View {
                 }
             } label: {
                 Image(systemName: expandedCategories.contains(group.category) ? "chevron.up" : "chevron.down")
-                Text(group.title).fontWeight(.semibold)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                Text(group.title)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(surfacePalette.foregroundColor)
             }
             .buttonStyle(.plain)
             Spacer(minLength: 4)
@@ -202,7 +253,9 @@ struct AIToolPermissionsView: View {
                 )
             }
         }
-        .textCase(nil)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(surfacePalette.backgroundColor)
     }
 
     /** Builds one Android category checkbox controlling all tools of the supplied access class. */
@@ -219,7 +272,15 @@ struct AIToolPermissionsView: View {
             }
             updateExpansion(for: tools.first?.category)
         } label: {
-            Label(title, systemImage: isEnabled ? "checkmark.square.fill" : "square")
+            HStack(spacing: 4) {
+                AndroidCheckboxIndicator(
+                    isOn: isEnabled,
+                    uncheckedColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor
+                )
+                Text(title)
+                    .foregroundStyle(surfacePalette.foregroundColor)
+            }
         }
         .buttonStyle(.plain)
         .font(.caption)
@@ -230,28 +291,49 @@ struct AIToolPermissionsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(AIPermissionPresentation.title(for: tool))
                 .font(.subheadline.weight(.semibold))
-            Picker("", selection: permissionBinding(for: tool)) {
-                Text(
-                    tool.access == .read
+                .foregroundStyle(surfacePalette.foregroundColor)
+            HStack(alignment: .top, spacing: 8) {
+                AndroidRadioRow(
+                    title: tool.access == .read
                         ? String(localized: "tool_option_enabled", defaultValue: "Enabled")
-                        : String(localized: "permission_status_default", defaultValue: "Ask (default)")
+                        : String(localized: "permission_status_default", defaultValue: "Ask (default)"),
+                    value: AIToolOverrideSelection.ask,
+                    selection: permissionBinding(for: tool),
+                    foregroundColor: surfacePalette.foregroundColor,
+                    secondaryColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    titleFont: .caption
                 )
-                .tag(AIToolOverrideSelection.ask)
                 if tool.access != .read {
-                    Text(String(localized: "permission_option_always_allow", defaultValue: "Always allow"))
-                        .tag(AIToolOverrideSelection.allow)
+                    AndroidRadioRow(
+                        title: String(
+                            localized: "permission_option_always_allow",
+                            defaultValue: "Always allow"
+                        ),
+                        value: AIToolOverrideSelection.allow,
+                        selection: permissionBinding(for: tool),
+                        foregroundColor: surfacePalette.foregroundColor,
+                        secondaryColor: surfacePalette.secondaryForegroundColor,
+                        accentColor: surfacePalette.controlAccentColor,
+                        titleFont: .caption
+                    )
                 }
-                Text(
-                    tool.access == .read
+                AndroidRadioRow(
+                    title: tool.access == .read
                         ? String(localized: "tool_option_disabled", defaultValue: "Disabled")
-                        : String(localized: "permission_option_always_deny", defaultValue: "Always deny")
+                        : String(localized: "permission_option_always_deny", defaultValue: "Always deny"),
+                    value: AIToolOverrideSelection.deny,
+                    selection: permissionBinding(for: tool),
+                    foregroundColor: surfacePalette.foregroundColor,
+                    secondaryColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    titleFont: .caption
                 )
-                .tag(AIToolOverrideSelection.deny)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(surfacePalette.backgroundColor)
     }
 
     /** Resolves and mutates one tool's draft Android override state. */
@@ -308,7 +390,7 @@ struct AIToolPermissionsView: View {
             settings.permanentlyAllowedTools = allowedTools
             settings.permanentlyDeniedTools = deniedTools
             try store.save()
-            dismiss()
+            performDismiss()
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
@@ -316,7 +398,16 @@ struct AIToolPermissionsView: View {
 
     /** Pops clean state immediately or opens Android's dirty-state discard dialog. */
     private func requestClose() {
-        if isDirty { showsDiscardConfirmation = true } else { dismiss() }
+        if isDirty { showsDiscardConfirmation = true } else { performDismiss() }
+    }
+
+    /** Returns through the explicit Connection settings owner or environment fallback. */
+    private func performDismiss() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 
     /** Auto-collapses a category only when every contained tool is denied. */
@@ -343,9 +434,15 @@ struct AIDocumentAccessView: View {
     @Environment(\.dismiss) private var dismiss
     /// SwiftData context containing the exclusion set.
     @Environment(\.modelContext) private var modelContext
+    /// Current appearance used by the shared overflow menu.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Installed SWORD module source supplied by the reader/application host.
     let swordManager: SwordManager?
+    /// Reader/workspace palette inherited from Connection settings.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command returning to Connection settings.
+    let onBack: (() -> Void)?
 
     /// Draft excluded module initials.
     @State private var excludedDocuments: Set<String> = []
@@ -359,6 +456,19 @@ struct AIDocumentAccessView: View {
     @State private var failureMessage: String?
     /// Android's app-owned Help dialog.
     @State private var helpDialog: AIConfigurationDialog?
+    /// Whether Android's app-owned action-bar overflow is visible.
+    @State private var showsOverflowMenu = false
+
+    /** Creates the explicit-save document-access activity without loading module state. */
+    init(
+        swordManager: SwordManager?,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.swordManager = swordManager
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Android-supported categories and their installed modules.
     private var documentGroups: [(category: ModuleCategory, documents: [ModuleInfo])] {
@@ -375,79 +485,114 @@ struct AIDocumentAccessView: View {
     private var isDirty: Bool { excludedDocuments != initialExcludedDocuments }
 
     var body: some View {
-        ZStack {
-            List {
-                ForEach(documentGroups, id: \.category.rawValue) { group in
-                    Section(documentCategoryTitle(group.category)) {
+        ZStack(alignment: .topLeading) {
+            AndroidActivityScreen(
+                title: String(
+                    localized: "ai_document_filter_activity_title",
+                    defaultValue: "AI document access"
+                ),
+                accessibilityIdentifier: "aiDocumentAccessTopAppBar",
+                palette: surfacePalette,
+                onBack: requestClose
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivitySave"),
+                    accessibilityLabel: String(localized: "okay", defaultValue: "OK"),
+                    accessibilityIdentifier: "aiDocumentAccessSaveButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: saveAndClose
+                )
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "aiDocumentAccessOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showsOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: "aiDocumentAccessOverflowAnchor")
+                .disabled(showsDiscardConfirmation || helpDialog != nil)
+            } content: {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(documentGroups, id: \.category.rawValue) { group in
+                            AndBibleSettingsSectionHeader(
+                                title: documentCategoryTitle(group.category),
+                                accentColor: surfacePalette.controlAccentColor
+                            )
                         ForEach(group.documents, id: \.name) { document in
                             documentRow(document)
                         }
+                            AndroidPreferenceDivider(palette: surfacePalette)
+                        }
                     }
+                    .padding(.vertical, 8)
                 }
+                .accessibilityHidden(showsDiscardConfirmation || helpDialog != nil)
+                .disabled(showsDiscardConfirmation || helpDialog != nil || showsOverflowMenu)
             }
-            .accessibilityHidden(showsDiscardConfirmation)
-            .disabled(showsDiscardConfirmation)
+
+            AndroidActivityAccessibilityMarker(
+                label: String(
+                    localized: "ai_document_filter_activity_title",
+                    defaultValue: "AI document access"
+                ),
+                accessibilityIdentifier: "aiDocumentAccessScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+            .accessibilityHidden(showsDiscardConfirmation || helpDialog != nil)
 
             if showsDiscardConfirmation {
                 AISettingsDiscardOverlay(
-                    onDiscard: { dismiss() },
+                    onDiscard: performDismiss,
                     onCancel: { showsDiscardConfirmation = false }
                 )
             }
         }
-        .navigationTitle(
-            String(localized: "ai_document_filter_activity_title", defaultValue: "AI document access")
-        )
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: requestClose) { Image(systemName: "chevron.left") }
-                    .disabled(showsDiscardConfirmation || helpDialog != nil)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: saveAndClose) { Image(systemName: "checkmark") }
-                    .accessibilityLabel(String(localized: "okay", defaultValue: "OK"))
-                    .disabled(showsDiscardConfirmation || helpDialog != nil)
-                Menu {
-                    Button { excludedDocuments = [] } label: {
-                        Label(
-                            String(localized: "reset_all_permissions", defaultValue: "Reset all"),
-                            systemImage: "arrow.counterclockwise"
-                        )
+        .androidAnchoredPopupMenu(
+            anchorID: "aiDocumentAccessOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 260,
+            estimatedMenuHeight: 104,
+            accessibilityIdentifier: "aiDocumentAccessOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiDocumentAccessOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                VStack(spacing: 0) {
+                    AndroidPopupMenuRow(
+                        title: String(localized: "reset_all_permissions", defaultValue: "Reset all"),
+                        accessibilityIdentifier: "aiDocumentAccessResetMenuItem"
+                    ) {
+                        showsOverflowMenu = false
+                        excludedDocuments = []
                     }
-                    Button {
-                        helpDialog = .information(
-                            title: String(localized: "help", defaultValue: "Help"),
-                            message: String(
-                                localized: "help_ai_document_filter_text",
-                                defaultValue: "Limit which Bibles, commentaries and other modules the AI agent can read. By default the AI sees all installed modules; filtering helps reduce noise and cost when you only want it to consider specific sources."
-                            )
-                        )
-                    } label: {
-                        Label(String(localized: "help", defaultValue: "Help"), systemImage: "questionmark.circle")
+                    Divider()
+                    AndroidPopupMenuRow(
+                        title: String(localized: "help", defaultValue: "Help"),
+                        accessibilityIdentifier: "aiDocumentAccessHelpMenuItem"
+                    ) {
+                        showsOverflowMenu = false
+                        helpDialog = .help(.aiDocumentFilter)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                .disabled(showsDiscardConfirmation || helpDialog != nil)
             }
         }
         .task { load() }
         .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -473,13 +618,18 @@ struct AIDocumentAccessView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: isIncluded ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(isIncluded ? Color.accentColor : Color.secondary)
+                AndroidCheckboxIndicator(
+                    isOn: isIncluded,
+                    uncheckedColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor
+                )
                 Text("\(document.name) — \(document.description)")
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(surfacePalette.foregroundColor)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -506,7 +656,7 @@ struct AIDocumentAccessView: View {
             let settings = try store.globalSettings()
             settings.aiExcludedDocuments = excludedDocuments
             try store.save()
-            dismiss()
+            performDismiss()
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
@@ -514,7 +664,16 @@ struct AIDocumentAccessView: View {
 
     /** Pops clean state immediately or asks before discarding dirty document choices. */
     private func requestClose() {
-        if isDirty { showsDiscardConfirmation = true } else { dismiss() }
+        if isDirty { showsDiscardConfirmation = true } else { performDismiss() }
+    }
+
+    /** Returns through the explicit Connection settings owner or environment fallback. */
+    private func performDismiss() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 }
 

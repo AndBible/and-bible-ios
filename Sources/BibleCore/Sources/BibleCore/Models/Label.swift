@@ -165,6 +165,20 @@ public final class Label {
     // MARK: - Icon Mapping (Android canonical name <-> SF Symbol)
 
     /**
+     Android `customIconMap` keys in the exact category and picker order used by Label Edit.
+
+     This ordered owner is shared by app UI and tests; callers must not reconstruct icon lists from
+     `iconToSFSymbol`, whose dictionary order is not a persistence or presentation contract.
+     */
+    public static let customIconNames: [String] = [
+        "book", "book-bible", "cross", "church", "star-of-david", "person-praying",
+        "info", "question", "exclamation", "lightbulb", "bell", "flag", "star", "tag",
+        "envelope", "comment", "share-nodes", "link", "handshake", "clock", "map-marker",
+        "globe", "landmark", "calendar", "user", "music", "microphone", "key", "crown",
+        "heart", "heart-crack", "robot",
+    ]
+
+    /**
      Maps Android canonical bookmark icon names to SF Symbols used by iOS surfaces.
 
      The mapping keeps persisted Android-compatible names stable while allowing iOS to render
@@ -202,6 +216,7 @@ public final class Label {
         "crown": "crown.fill",
         "heart": "heart.fill",
         "heart-crack": "heart.slash.fill",
+        "robot": "cpu.fill",
     ]
 
     /**

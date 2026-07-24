@@ -1,169 +1,469 @@
-// LabelManagerView.swift — Label management screen
+// LabelManagerView.swift -- Android Manage Labels WORKSPACE mode
 
-import SwiftUI
-import SwiftData
 import BibleCore
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 /**
- Applies Label Manager persistence mutations without depending on SwiftUI presentation state.
+ Owns label-deletion preview and commit operations shared by Manage Labels and Label Edit.
 
- The visible Label Manager keeps Android's `ManageLabels` route behavior in SwiftUI, while this
- helper owns the underlying create, edit-save, and delete persistence contract so package tests can
- validate it without launching the app.
-
- Side effects:
- - inserts labels into SwiftData and saves successful create operations
- - saves any pending bound-label edits made by `LabelEditView`
- - deletes labels through `BookmarkService`, preserving its relationship cleanup semantics
-
- Failure modes:
- - create and edit-save propagate SwiftData save errors to package tests and non-UI callers
- - delete follows the existing `BookmarkService` behavior, where fetch/save failures are swallowed
-   by the store layer and surfaced only through final persisted state
+ The full editor needs the exact bookmark-orphan preview before it can render Android's deletion
+ choices. Both preview and mutation stay behind the canonical bookmark/workspace service boundary;
+ the SwiftUI routes never detach relationships or edit live persistence objects themselves.
  */
 enum LabelManagerMutation {
-    /**
-     Creates one user label when the supplied name is non-empty.
+    /** Returns Android's deterministic orphan-bookmark deletion preview for one live label. */
+    static func deletionImpact(
+        for label: BibleCore.Label,
+        in modelContext: ModelContext
+    ) -> BookmarkLabelDeletionImpact? {
+        BookmarkService(store: BookmarkStore(modelContext: modelContext))
+            .labelDeletionImpact(id: label.id)
+    }
 
-     - Parameters:
-       - name: Exact user-visible label name. Empty names are ignored to match the current Label
-         Manager alert behavior.
-       - modelContext: SwiftData context receiving the new label.
-     - Returns: The inserted label, or `nil` when `name` is empty.
-     - Side effects: Inserts a `Label` and saves `modelContext` when `name` is non-empty.
-     - Throws: SwiftData save errors after the insert.
-     */
+    /** Deletes one label and applies the caller's explicit orphan-bookmark choice atomically. */
     @discardableResult
-    static func createLabel(named name: String, in modelContext: ModelContext) throws -> BibleCore.Label? {
-        guard !name.isEmpty else { return nil }
-        let label = BibleCore.Label(name: name)
-        modelContext.insert(label)
-        try modelContext.save()
-        return label
-    }
-
-    /**
-     Persists any pending Label Edit changes already applied to a bound `Label`.
-
-     `LabelEditView` mutates the live SwiftData model through `@Bindable`, so the only explicit
-     persistence action is saving the context after the bound fields change.
-
-     - Parameter modelContext: SwiftData context containing pending label edits.
-     - Side effects: Saves `modelContext`.
-     - Throws: SwiftData save errors.
-     */
-    static func persistLabelEdits(in modelContext: ModelContext) throws {
-        try modelContext.save()
-    }
-
-    /**
-     Deletes one label through the same service path used by bookmark and StudyPad flows.
-
-     - Parameters:
-       - label: Label that should be removed.
-       - modelContext: SwiftData context containing label and bookmark relationship records.
-     - Side effects: Removes the label, detaches bookmark-label relationships, clears matching
-       primary-label references, and saves through `BookmarkStore`.
-     - Failure modes: `BookmarkStore` swallows fetch and save errors, matching the pre-existing
-       Label Manager UI behavior.
-     */
-    static func deleteLabel(_ label: BibleCore.Label, in modelContext: ModelContext) {
-        let bookmarkStore = BookmarkStore(modelContext: modelContext)
-        BookmarkService(store: bookmarkStore).deleteLabel(id: label.id)
+    static func deleteLabel(
+        _ label: BibleCore.Label,
+        deleteOrphanedBookmarks: Bool = false,
+        in modelContext: ModelContext
+    ) throws -> BookmarkLabelDeletionImpact {
+        try WorkspaceLabelConfigurationService(modelContext: modelContext).deleteLabel(
+            id: label.id,
+            deleteOrphanedBookmarks: deleteOrphanedBookmarks
+        )
     }
 }
 
 /**
- Manages user-created bookmark labels and launches label-specific editing flows.
+ Presents Android `ManageLabels.Mode.WORKSPACE` as an app-owned activity.
 
- The screen lists all real user labels, supports creating new labels inline, presents a dedicated
- edit destination for label styling changes, and optionally forwards the selected label into the
- StudyPad flow.
+ This route composes the same shared activity bar, Ab* search strip, Active/Recent/Other list
+ projection, row controls, popup menu, Help content, full label editor, and Study Pad archive
+ workflow used by the other Manage Labels modes. It deliberately contains no iOS `List`, toolbar,
+ navigation link, sheet, context menu, swipe action, or feature-local color approximation.
 
  Data dependencies:
- - `modelContext` persists label creation, deletion, and edit changes
- - `allLabels` streams the current label set from SwiftData and is filtered down to user-visible
-   labels
- - `onOpenStudyPad` is supplied by the parent when StudyPad navigation should be exposed
+ - the complete Android label set and localized reserved-label presentation
+ - the active workspace's auto-assignment, primary, recent-label, and override state
+ - the reader/workspace-owned `ReaderThemeSurfacePalette`
 
  Side effects:
- - creating or deleting a label mutates SwiftData and attempts to save the updated label set
- - selecting a label presents `LabelEditView`, which edits the bound label in place and persists
-   changes on interaction and dismissal, unless the caller explicitly configures StudyPad
-   primary-row selection
- - swipe and context-menu actions can route into the StudyPad flow for a specific label
+ - Back atomically commits favourite and workspace auto-assignment changes
+ - full-editor Save commits complete label and workspace-override values through BibleCore
+ - Reset clears workspace auto-assignment and label favourites after app-owned confirmation
+ - overflow export/import delegates to the one shared Android Study Pad archive workflow
+
+ Failure modes:
+ - stale labels/workspaces, persistence journals, archives, and filesystem failures remain visible
+   in app-owned dialogs; the route closes only after a successful Back or Reset commit
  */
 public struct LabelManagerView: View {
-    /// Stable selection token used to navigate to one label edit screen across SwiftData refreshes.
-    private struct EditingSelection: Identifiable, Hashable {
-        let id: UUID
+    /** User-visible non-archive failure retained on the app-owned route. */
+    private struct Feedback: Equatable {
+        let title: String
+        let message: String
     }
 
-    /// SwiftData context used for label creation, deletion, and persistence.
-    @Environment(\.modelContext) private var modelContext
+    /** Stable overflow anchor shared with the reusable popup presenter. */
+    private enum PopupAnchor {
+        static let overflow = "labelManagerOverflowAnchor"
+    }
 
-    /// All labels ordered by name, including system labels that are filtered from the visible list.
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Complete label collection; Android WORKSPACE mode includes the Unlabelled system row.
     @Query(sort: \BibleCore.Label.name) private var allLabels: [BibleCore.Label]
 
-    /// Whether the inline create-label alert is presented.
-    @State private var showNewLabel = false
+    /// Android's persisted Ab* versus *ab* search behavior for non-Study-Pad modes.
+    @AppStorage("labels_list_filter_searchInsideTextButtonActive")
+    private var searchesAnywhereInName = false
 
-    /// Pending name for the new label being created from the alert.
-    @State private var newLabelName = ""
+    /// Active workspace whose Manage Labels data is edited.
+    private let workspace: Workspace?
 
-    /// Label selected for context-menu-driven edit navigation.
-    @State private var editingSelection: EditingSelection?
+    /// Reader/workspace-owned palette supplied by the route owner.
+    private let surfacePalette: ReaderThemeSurfacePalette
 
-    /// Optional callback used to open the selected label in StudyPad.
-    var onOpenStudyPad: ((UUID) -> Void)?
+    /// Parent route closure; standalone package callers fall back to environment dismissal.
+    private let onDismiss: (() -> Void)?
 
-    /// Title shown for the current label-management mode.
-    private let navigationTitle: String
+    /// Complete unsaved WORKSPACE-mode state.
+    @State private var autoAssignLabelIDs: Set<UUID> = []
+    @State private var autoAssignPrimaryLabelID: UUID?
+    @State private var recentLabelIDs: [UUID] = []
+    @State private var favouriteValues: [UUID: Bool] = [:]
+    @State private var workspaceOverrideModes: [UUID: Int] = [:]
 
-    /// Whether tapping a row opens the StudyPad document instead of the label editor.
-    private let opensStudyPadOnRowTap: Bool
+    /// Android retains this mixed projection until search or explicit Reorder.
+    @State private var visibleItems: [AndroidManageLabelListItem] = []
+    @State private var searchText = ""
+    @State private var hasLoaded = false
+    @State private var isCommitting = false
+
+    /// App-owned popup, dialog, and full-editor state.
+    @State private var showsOverflowMenu = false
+    @State private var showsHelp = false
+    @State private var showsResetConfirmation = false
+    @State private var newLabelDraft: AndroidLabelEditorDraft?
+    @State private var editingLabelID: UUID?
+    @State private var feedback: Feedback?
+
+    /// Shared archive state used by Study Pads, Assignment, and Workspace modes.
+    @State private var archiveWorkflow = AndroidStudyPadArchiveWorkflow()
 
     /**
-     Creates the label manager and optionally enables StudyPad handoff actions.
+     Creates a standalone Workspace Manage Labels route using the application palette.
 
-     - Parameter onOpenStudyPad: Callback invoked with a label identifier when the user chooses to
-       open that label in StudyPad.
-     - Parameter navigationTitle: Optional screen title override. Defaults to the normal label
-       manager title so existing label-editing callers keep their current chrome.
-     - Parameter opensStudyPadOnRowTap: When true and `onOpenStudyPad` is present, primary row taps
-       open the StudyPad document. This matches Android `ManageLabels.Mode.STUDYPAD`; the default
-       false value preserves the label editor behavior used by non-StudyPad label-management routes.
+     - Parameter workspace: Active workspace whose auto-assignment state is edited.
+     - Side effects: none until task loading or user interaction.
+     - Failure modes: none.
      */
-    public init(
-        onOpenStudyPad: ((UUID) -> Void)? = nil,
-        navigationTitle: String? = nil,
-        opensStudyPadOnRowTap: Bool = false
+    public init(workspace: Workspace? = nil) {
+        self.workspace = workspace
+        surfacePalette = .standard
+        onDismiss = nil
+    }
+
+    /** Creates a reader-owned Workspace Manage Labels route with inherited palette and closure. */
+    init(
+        workspace: Workspace?,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: (() -> Void)?
     ) {
-        self.onOpenStudyPad = onOpenStudyPad
-        self.navigationTitle = navigationTitle ?? String(localized: "labels")
-        self.opensStudyPadOnRowTap = opensStudyPadOnRowTap
+        self.workspace = workspace
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
     }
 
-    /// Visible label list after filtering out non-user/system labels.
-    private var userLabels: [BibleCore.Label] {
-        allLabels.filter { $0.isRealLabel }
+    /// Android's complete assignable set, including the Unlabelled system row in this mode.
+    private var workspaceLabels: [BibleCore.Label] {
+        AndroidLabelPresentation.studyPadExportLabels(from: allLabels)
     }
 
-    /// Deterministic Label Manager state exported for UI automation.
+    /// Android's Study Pad export multiselect uses the same complete assignable set.
+    private var exportLabels: [BibleCore.Label] {
+        workspaceLabels
+    }
+
+    /// Query fingerprint used to reconcile full-editor and archive mutations.
+    private var labelFingerprint: String {
+        allLabels.map {
+            "\($0.id.uuidString):\($0.name):\($0.favourite):\($0.customIcon ?? "")"
+        }.joined(separator: "|")
+    }
+
+    /// Deterministic compact state consumed by UI automation without snapshot assumptions.
     private var labelManagerAccessibilityValue: String {
-        let baseState = "count=\(userLabels.count);showNewLabel=\(showNewLabel)"
+        let baseState = "count=\(workspaceLabels.count);showNewLabel=\(newLabelDraft != nil)"
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
-
-        let rowTokens = userLabels
+        let rowTokens = workspaceLabels
             .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(labelManagerAccessibilitySegment($0.name))|" }
+            .map { "|\(accessibilitySegment(AndroidLabelPresentation.displayName(for: $0)))|" }
             .joined(separator: ",")
         return "\(baseState);rows=\(rowTokens)"
     }
 
-    /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    public var body: some View {
+        ZStack(alignment: .topLeading) {
+            AndroidManageLabelsActivityScreen(
+            title: String(localized: "labels", defaultValue: "Labels"),
+            appBarAccessibilityIdentifier: "labelManagerAppBar",
+            surfacePalette: surfacePalette,
+            onBack: commitAndClose,
+            compactModeTitle: searchesAnywhereInName ? "*ab*" : "Ab*",
+            localizedModeTitle: searchesAnywhereInName
+                ? String(localized: "search_mode_name_contains", defaultValue: "Name (contains)")
+                : String(localized: "search_mode_name_start", defaultValue: "Name (from start)"),
+            isModeActive: searchesAnywhereInName,
+            searchText: $searchText,
+            accessibilityPrefix: "labelManager",
+            onSelectSearchMode: {
+                searchesAnywhereInName.toggle()
+                rebuildVisibleItems()
+            }
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityAddCircle"),
+                accessibilityLabel: String(localized: "new_item", defaultValue: "New"),
+                accessibilityIdentifier: "labelManagerAddButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: beginNewLabel
+            )
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("DrawerHelp"),
+                accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                accessibilityIdentifier: "labelManagerHelpButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: {
+                    showsOverflowMenu = false
+                    showsHelp = true
+                }
+            )
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ManageLabelsReorder"),
+                accessibilityLabel: String(localized: "reorder", defaultValue: "Re-order"),
+                accessibilityIdentifier: "labelManagerReorderButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: rebuildVisibleItems
+            )
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ToolbarOverflow"),
+                accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                accessibilityIdentifier: "labelManagerOverflowButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: { showsOverflowMenu.toggle() }
+            )
+            .androidPopupMenuAnchor(id: PopupAnchor.overflow)
+            } results: {
+                labelList
+            }
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "labels", defaultValue: "Labels"),
+                accessibilityIdentifier: "labelManagerScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .overlay(alignment: .topLeading) { labelManagerStateExport }
+        .task(id: workspace?.id) { loadWorkspaceState() }
+        .onChange(of: searchText) { _, _ in rebuildVisibleItems() }
+        .onChange(of: labelFingerprint) { _, _ in reconcileLabelsAfterExternalMutation() }
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.overflow,
+            isPresented: $showsOverflowMenu,
+            menuWidth: 300,
+            estimatedMenuHeight: 132,
+            accessibilityIdentifier: "labelManagerOverflowMenu"
+        ) {
+            overflowMenu
+        }
+        .overlay { presentationLayer }
+        .fileExporter(
+            isPresented: Binding(
+                get: { archiveWorkflow.showsFileExporter },
+                set: { archiveWorkflow.showsFileExporter = $0 }
+            ),
+            document: archiveWorkflow.exportDocument,
+            contentType: .zip,
+            defaultFilename: archiveWorkflow.exportFileName,
+            onCompletion: archiveWorkflow.handleFileExportCompletion
+        )
+        .fileImporter(
+            isPresented: Binding(
+                get: { archiveWorkflow.showsFileImporter },
+                set: { archiveWorkflow.showsFileImporter = $0 }
+            ),
+            allowedContentTypes: [.zip, .data],
+            allowsMultipleSelection: false,
+            onCompletion: archiveWorkflow.handleFileImportSelection
+        )
+    }
+
+    /// Shared Android category rows and compact editable label controls.
+    private var labelList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(visibleItems) { item in
+                    switch item {
+                    case .category(let category):
+                        AndroidManageLabelCategoryRow(category: category, surfacePalette: surfacePalette)
+                    case .label(let id):
+                        if let label = allLabels.first(where: { $0.id == id }) {
+                            workspaceRow(label)
+                                .accessibilityIdentifier(
+                                    "labelManagerRowButton-\(AndroidLabelPresentation.displayName(for: label))"
+                                )
+                        }
+                    }
+                    Divider().overlay(surfacePalette.inactiveBorderColor)
+                }
+            }
+        }
+        .overlay {
+            if !hasLoaded || isCommitting {
+                ProgressView()
+                    .tint(surfacePalette.foregroundColor)
+                    .accessibilityIdentifier("labelManagerProgress")
+            }
+        }
+    }
+
+    /// Binds one label to Android WORKSPACE mode without mutating its live SwiftData object.
+    private func workspaceRow(_ label: BibleCore.Label) -> some View {
+        let isUnlabelled = label.id == BibleCore.Label.unlabeledId
+            || label.name == BibleCore.Label.unlabeledName
+        return AndroidManageLabelRow(
+            label: label,
+            isSelected: autoAssignLabelIDs.contains(label.id),
+            isFavourite: favouriteValue(for: label),
+            isPrimary: autoAssignPrimaryLabelID == label.id,
+            isAutoAssigned: autoAssignLabelIDs.contains(label.id),
+            hasWorkspaceOverride: workspaceOverrideModes[label.id] != nil,
+            showsAssignment: false,
+            showsFavourite: !isUnlabelled,
+            showsPrimary: !isUnlabelled,
+            showsAutoAssign: !isUnlabelled,
+            surfacePalette: surfacePalette,
+            onEdit: { editingLabelID = label.id },
+            onToggleAssignment: {},
+            onToggleFavourite: { favouriteValues[label.id] = !favouriteValue(for: label) },
+            onSelectPrimary: { autoAssignPrimaryLabelID = label.id },
+            onToggleAutoAssign: { toggleAutoAssignment(label.id) }
+        )
+    }
+
+    /// Global app-owned popup matching Android's Reset/Export/Import order.
+    private var overflowMenu: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "labelManagerOverflowSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "reset_generic", defaultValue: "Reset"),
+                    accessibilityIdentifier: "labelManagerResetAction"
+                ) {
+                    showsOverflowMenu = false
+                    showsResetConfirmation = true
+                }
+                AndroidPopupMenuRow(
+                    title: String(
+                        format: String(localized: "export_something", defaultValue: "Export %@"),
+                        String(localized: "studypads", defaultValue: "Study Pads")
+                    ),
+                    accessibilityIdentifier: "labelManagerExportAction"
+                ) {
+                    showsOverflowMenu = false
+                    archiveWorkflow.beginExport()
+                }
+                AndroidPopupMenuRow(
+                    title: String(
+                        format: String(localized: "import_items", defaultValue: "Import %@"),
+                        String(localized: "studypads", defaultValue: "Study Pads")
+                    ),
+                    accessibilityIdentifier: "labelManagerImportAction"
+                ) {
+                    showsOverflowMenu = false
+                    archiveWorkflow.beginImport()
+                }
+            }
+        }
+    }
+
+    /// Full app-owned editors and dialogs, with one interactive presentation at a time.
+    @ViewBuilder
+    private var presentationLayer: some View {
+        if let newLabelDraft {
+            AndroidLabelEditorView(
+                draft: newLabelDraft,
+                workspace: workspace,
+                surfacePalette: surfacePalette,
+                initialWorkspaceConfiguration: WorkspaceLabelConfiguration(
+                    isAutoAssigned: true,
+                    isPrimaryAutoAssigned: true
+                ),
+                onSaved: handleEditorSave,
+                onCancel: { self.newLabelDraft = nil }
+            )
+        } else if let editingLabelID,
+                  let label = allLabels.first(where: { $0.id == editingLabelID }) {
+            AndroidLabelEditorView(
+                label: label,
+                initialValues: editorValues(for: label),
+                workspace: workspace,
+                initialWorkspaceConfiguration: editorWorkspaceConfiguration(for: label),
+                surfacePalette: surfacePalette,
+                onSaved: handleEditorSave,
+                onClose: { self.editingLabelID = nil }
+            )
+        } else if showsHelp {
+            AndroidManageLabelsHelpDialog(mode: .workspace(isWindow: false)) {
+                showsHelp = false
+            }
+        } else if showsResetConfirmation {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    localized: "reset_workspace_labels",
+                    defaultValue: "Do you want to reset auto-assign and favorite settings for this workspace?"
+                ),
+                actions: [
+                    .init(
+                        id: "cancel",
+                        title: String(localized: "cancel", defaultValue: "Cancel"),
+                        style: .normal
+                    ) { showsResetConfirmation = false },
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .normal
+                    ) { resetAndClose() },
+                ],
+                accessibilityIdentifier: "labelManagerResetConfirmationDialog"
+            )
+        } else if archiveWorkflow.showsExportSelection {
+            StudyPadExportSelectionDialog(
+                labels: exportLabels,
+                selectedLabelIDs: Binding(
+                    get: { archiveWorkflow.exportLabelIDs },
+                    set: { archiveWorkflow.exportLabelIDs = $0 }
+                ),
+                isExporting: archiveWorkflow.isExporting,
+                onCancel: archiveWorkflow.dismissExportSelection,
+                onExport: {
+                    archiveWorkflow.exportSelectedStudyPads(
+                        labels: exportLabels,
+                        modelContainer: modelContext.container
+                    )
+                }
+            )
+        } else if let importInspection = archiveWorkflow.importInspection {
+            StudyPadImportConfirmationDialog(
+                summary: importInspection.summary,
+                isImporting: archiveWorkflow.isImporting,
+                onCancel: archiveWorkflow.dismissImportInspection,
+                onImport: {
+                    archiveWorkflow.applyImport(modelContext: modelContext) {
+                        reconcileLabelsAfterExternalMutation()
+                    }
+                }
+            )
+        } else if let feedback {
+            AndroidDecisionDialog(
+                title: feedback.title,
+                message: feedback.message,
+                actions: [
+                    .init(id: "ok", title: String(localized: "okay", defaultValue: "OK"), style: .normal) {
+                        self.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "labelManagerFeedbackDialog"
+            )
+        } else if let archiveFeedback = archiveWorkflow.feedback {
+            AndroidDecisionDialog(
+                title: archiveFeedback.title,
+                message: archiveFeedback.message,
+                actions: [
+                    .init(id: "ok", title: String(localized: "okay", defaultValue: "OK"), style: .normal) {
+                        archiveWorkflow.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "labelManagerArchiveFeedbackDialog"
+            )
+        }
+    }
+
+    /// Compact hidden state probe used by UI tests instead of native-list assumptions.
     @ViewBuilder
     private var labelManagerStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
@@ -177,465 +477,192 @@ public struct LabelManagerView: View {
         }
     }
 
-    /**
-     Builds the label list, create-label alert, and edit-label navigation flow.
-     */
-    public var body: some View {
-        ZStack {
-            if userLabels.isEmpty {
-                ContentUnavailableView(
-                    String(localized: "no_labels"),
-                    systemImage: "tag",
-                    description: Text(String(localized: "no_labels_description"))
+    /// Loads canonical workspace state without changing live SwiftData models.
+    private func loadWorkspaceState() {
+        guard !hasLoaded else { return }
+        do {
+            let snapshot = try WorkspaceLabelConfigurationService(modelContext: modelContext)
+                .bookmarkLabelAssignmentSnapshot(bookmarkIDs: [], workspaceID: workspace?.id)
+            autoAssignLabelIDs = snapshot.autoAssignLabelIDs
+            autoAssignPrimaryLabelID = snapshot.autoAssignPrimaryLabelID
+            recentLabelIDs = snapshot.recentLabelIDs
+            refreshWorkspaceOverrides()
+            hasLoaded = true
+            rebuildVisibleItems()
+        } catch {
+            hasLoaded = true
+            feedback = Feedback(
+                title: String(localized: "error_occurred", defaultValue: "An error has occurred"),
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// Reconciles labels created, edited, deleted, or imported by child app-owned surfaces.
+    private func reconcileLabelsAfterExternalMutation() {
+        guard hasLoaded else { return }
+        let liveIDs = Set(allLabels.map(\.id))
+        autoAssignLabelIDs.formIntersection(liveIDs)
+        favouriteValues = favouriteValues.filter { liveIDs.contains($0.key) }
+        if autoAssignPrimaryLabelID.map({ !autoAssignLabelIDs.contains($0) }) == true {
+            autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+        }
+        refreshWorkspaceOverrides()
+        rebuildVisibleItems()
+    }
+
+    /// Reads workspace override markers from the canonical fidelity owner.
+    private func refreshWorkspaceOverrides() {
+        guard let workspace else {
+            workspaceOverrideModes = [:]
+            return
+        }
+        let service = WorkspaceLabelConfigurationService(modelContext: modelContext)
+        workspaceOverrideModes = Dictionary(uniqueKeysWithValues: workspaceLabels.compactMap { label in
+            service.configuration(for: label.id, in: workspace).overrideMode.map { (label.id, $0) }
+        })
+    }
+
+    /// Rebuilds Android's shared mixed list after load, search, or explicit Reorder only.
+    private func rebuildVisibleItems() {
+        guard hasLoaded else { return }
+        visibleItems = AndroidManageLabelsListProjection.items(
+            labels: workspaceLabels,
+            activeLabelIDs: autoAssignLabelIDs,
+            recentLabelIDs: recentLabelIDs,
+            alwaysVisibleLabelIDs: [],
+            searchText: searchText,
+            searchesAnywhereInName: searchesAnywhereInName
+        )
+    }
+
+    /// Toggles auto-assignment and preserves Android's primary-within-selected invariant.
+    private func toggleAutoAssignment(_ labelID: UUID) {
+        if autoAssignLabelIDs.remove(labelID) != nil {
+            if autoAssignPrimaryLabelID == labelID || autoAssignPrimaryLabelID == nil {
+                autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+            }
+        } else {
+            autoAssignLabelIDs.insert(labelID)
+            if autoAssignPrimaryLabelID == nil { autoAssignPrimaryLabelID = labelID }
+        }
+    }
+
+    /// Returns an unsaved favourite value or the persisted label fallback.
+    private func favouriteValue(for label: BibleCore.Label) -> Bool {
+        favouriteValues[label.id] ?? label.favourite
+    }
+
+    /// Builds editor values without discarding the parent session's favourite draft.
+    private func editorValues(for label: BibleCore.Label) -> LabelEditValues {
+        var values = LabelEditValues(label: label)
+        values.favourite = favouriteValue(for: label)
+        return values
+    }
+
+    /// Builds full editor workspace state from the current unsaved WORKSPACE session.
+    private func editorWorkspaceConfiguration(for label: BibleCore.Label) -> WorkspaceLabelConfiguration {
+        WorkspaceLabelConfiguration(
+            isAutoAssigned: autoAssignLabelIDs.contains(label.id),
+            isPrimaryAutoAssigned: autoAssignPrimaryLabelID == label.id,
+            overrideMode: workspaceOverrideModes[label.id]
+        )
+    }
+
+    /// Merges a complete full-editor Save result back into this retained Manage Labels generation.
+    private func handleEditorSave(
+        labelID: UUID,
+        values: LabelEditValues,
+        configuration: WorkspaceLabelConfiguration
+    ) {
+        favouriteValues[labelID] = values.favourite
+        if configuration.isAutoAssigned || configuration.isPrimaryAutoAssigned {
+            autoAssignLabelIDs.insert(labelID)
+        } else {
+            autoAssignLabelIDs.remove(labelID)
+        }
+        if configuration.isPrimaryAutoAssigned {
+            autoAssignPrimaryLabelID = labelID
+        } else if autoAssignPrimaryLabelID == labelID {
+            autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+        }
+        if let overrideMode = configuration.overrideMode {
+            workspaceOverrideModes[labelID] = overrideMode
+        } else {
+            workspaceOverrideModes.removeValue(forKey: labelID)
+        }
+        if newLabelDraft != nil {
+            autoAssignLabelIDs.insert(labelID)
+            autoAssignPrimaryLabelID = labelID
+        }
+        rebuildVisibleItems()
+    }
+
+    /// Creates Android's unsaved new-label draft with suggested search name and opaque color.
+    private func beginNewLabel() {
+        showsOverflowMenu = false
+        let suggestedName = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let red = UInt32.random(in: 0...254)
+        let green = UInt32.random(in: 0...254)
+        let blue = UInt32.random(in: 0...254)
+        let color = Int(Int32(bitPattern: 0xFF000000 | red << 16 | green << 8 | blue))
+        newLabelDraft = AndroidLabelEditorDraft(newLabelName: suggestedName, color: color)
+    }
+
+    /// Applies Android Reset semantics and closes only if the atomic commit succeeds.
+    private func resetAndClose() {
+        showsResetConfirmation = false
+        autoAssignLabelIDs = []
+        autoAssignPrimaryLabelID = nil
+        favouriteValues = Dictionary(uniqueKeysWithValues: workspaceLabels.compactMap { label in
+            guard label.id != BibleCore.Label.unlabeledId else { return nil }
+            return (label.id, false)
+        })
+        commitAndClose()
+    }
+
+    /// Commits one complete WORKSPACE generation, then returns to the owning route.
+    private func commitAndClose() {
+        guard hasLoaded, !isCommitting else { return }
+        isCommitting = true
+        do {
+            try WorkspaceLabelConfigurationService(modelContext: modelContext)
+                .commitBookmarkLabelAssignment(
+                    bookmarkIDs: [],
+                    orderedSelectedLabelIDs: [],
+                    primaryLabelID: nil,
+                    favouriteValues: favouriteValues,
+                    autoAssignLabelIDs: autoAssignLabelIDs,
+                    autoAssignPrimaryLabelID: autoAssignPrimaryLabelID,
+                    workspaceID: workspace?.id
                 )
-            } else {
-                labelList
-            }
-        }
-        .accessibilityIdentifier("labelManagerScreen")
-        .overlay(alignment: .topLeading) {
-            labelManagerStateExport
-        }
-        .navigationTitle(navigationTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(String(localized: "add"), systemImage: "plus") {
-                    showNewLabel = true
-                }
-                .accessibilityIdentifier("labelManagerAddButton")
-            }
-        }
-        .alert(String(localized: "new_label"), isPresented: $showNewLabel) {
-            TextField(String(localized: "label_name"), text: $newLabelName)
-                .accessibilityIdentifier("labelManagerNewLabelNameField")
-            Button(String(localized: "create")) { createLabel() }
-                .accessibilityIdentifier("labelManagerCreateButton")
-            Button(String(localized: "cancel"), role: .cancel) { newLabelName = "" }
-        }
-        .navigationDestination(item: $editingSelection) { selection in
-            labelEditDestination(for: selection.id)
+            isCommitting = false
+            close()
+        } catch {
+            isCommitting = false
+            feedback = Feedback(
+                title: String(localized: "error_occurred", defaultValue: "An error has occurred"),
+                message: error.localizedDescription
+            )
         }
     }
 
-    /**
-     Builds the list of visible user labels with edit, delete, and optional StudyPad actions.
-     */
-    private var labelList: some View {
-        List {
-            ForEach(userLabels) { label in
-                labelSelectionButton(label)
-            }
-        }
+    /// Stable Android-visible ordering used when repairing auto-assignment primary state.
+    private func orderedIDs(in ids: Set<UUID>) -> [UUID] {
+        workspaceLabels.map(\.id).filter(ids.contains)
     }
 
-    /**
-     Builds the main label-selection row button for one label.
-     *
-     * - Parameter label: Label represented by the selectable row body.
-     * - Returns: A row that opens either the label editor or the StudyPad document, depending on
-     *   the mode supplied by the parent screen.
-     * - Side effects:
-     *   - stores the selected label in local state and navigates to the edit destination, or calls
-     *     `onOpenStudyPad` when StudyPad primary-row selection is enabled
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelSelectionButton(_ label: BibleCore.Label) -> some View {
-        Group {
-            if opensStudyPadOnRowTap, let onOpenStudyPad {
-                Button {
-                    onOpenStudyPad(label.id)
-                } label: {
-                    labelRowContent(label, showsDisclosureIndicator: false)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(labelRowIdentifier(label))
-                .accessibilityLabel(label.name)
-            } else {
-                NavigationLink {
-                    labelEditDestination(for: label.id)
-                } label: {
-                    labelRowContent(label, showsDisclosureIndicator: true)
-                }
-                .accessibilityIdentifier(labelRowIdentifier(label))
-                .accessibilityLabel(label.name)
-            }
-        }
-        .swipeActions(edge: .trailing) {
-            Button(String(localized: "delete"), role: .destructive) {
-                deleteLabel(label)
-            }
-            .accessibilityIdentifier("labelManagerDeleteAction")
-        }
-        .swipeActions(edge: .leading) {
-            if onOpenStudyPad != nil {
-                Button {
-                    onOpenStudyPad?(label.id)
-                } label: {
-                    SwiftUI.Label(String(localized: "studypad"), systemImage: "book")
-                }
-                .tint(Color(argbInt: label.color))
-            }
-        }
-        .contextMenu {
-            Button {
-                editingSelection = EditingSelection(id: label.id)
-            } label: {
-                SwiftUI.Label(String(localized: "edit"), systemImage: "pencil")
-            }
-            if onOpenStudyPad != nil {
-                Button {
-                    onOpenStudyPad?(label.id)
-                } label: {
-                    SwiftUI.Label(String(localized: "open_studypad"), systemImage: "book")
-                }
-            }
-            Button(role: .destructive) {
-                deleteLabel(label)
-            } label: {
-                SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-            }
-        }
+    /// Closes through the route owner or standalone environment dismissal.
+    private func close() {
+        if let onDismiss { onDismiss() } else { dismiss() }
     }
 
-    /**
-     Renders the shared row body for label-management and StudyPad-selection modes.
-
-     - Parameters:
-       - label: Label represented by the visible row.
-       - showsDisclosureIndicator: Whether to show the editor/navigation affordance used by the
-         normal label manager. StudyPad selection suppresses it because the row performs a document
-         open action instead of pushing the label editor.
-     - Returns: The visual row content used inside either a `NavigationLink` or primary `Button`.
-     - Side effects: none.
-     - Failure modes: This helper cannot fail.
-     */
-    private func labelRowContent(
-        _ label: BibleCore.Label,
-        showsDisclosureIndicator: Bool
-    ) -> some View {
-        HStack(spacing: 10) {
-            if let icon = label.customIcon, !icon.isEmpty {
-                Image(systemName: BibleCore.Label.sfSymbol(for: icon) ?? icon)
-                    .font(.body)
-                    .foregroundStyle(Color(argbInt: label.color))
-            } else {
-                Circle()
-                    .fill(Color(argbInt: label.color))
-                    .frame(width: 14, height: 14)
-            }
-
-            Text(label.name)
-                .font(.body)
-                .foregroundStyle(.primary)
-
-            Spacer()
-
-            if label.favourite {
-                Image(systemName: "heart.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            }
-
-            if label.underlineStyle {
-                Image(systemName: "underline")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            }
-
-            if showsDisclosureIndicator {
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.tertiary)
-                    .font(.caption)
-            }
-        }
-    }
-
-    /**
-     Builds the label-edit destination from a stable identifier instead of retaining one live
-     SwiftData object across navigation updates.
-     */
-    @ViewBuilder
-    private func labelEditDestination(for id: UUID) -> some View {
-        if let label = allLabels.first(where: { $0.id == id }) {
-            LabelEditView(label: label)
-        }
-    }
-
-    /**
-     Resolves the deterministic XCUITest accessibility identifier for one label row.
-     *
-     * - Parameter label: Label whose row identifier should be derived.
-     * - Returns: A stable row identifier that incorporates the current label name.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelRowIdentifier(_ label: BibleCore.Label) -> String {
-        "labelManagerRowButton-\(label.name)"
-    }
-
-    /**
-     Normalizes one label name into the compact token format exported for UI tests.
-     *
-     * - Parameter value: Raw label name shown to the user.
-     * - Returns: A token-safe representation that strips punctuation into underscore separators.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelManagerAccessibilitySegment(_ value: String) -> String {
-        let replaced = value.replacingOccurrences(
+    /// Converts one label title to the historical compact UI-test state token format.
+    private func accessibilitySegment(_ value: String) -> String {
+        value.replacingOccurrences(
             of: "[^A-Za-z0-9]+",
             with: "_",
             options: .regularExpression
-        )
-        return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-    }
-
-    /**
-     Creates one new label from the pending alert input and persists it.
-
-     Side effects:
-     - inserts a new `Label` into SwiftData and attempts to save the context
-     - clears the pending label-name field after a successful insert path
-
-     Failure modes:
-     - returns without mutating state when the pending name is empty
-     - context-save failures are swallowed by `try?`, leaving the in-memory change subject to
-       SwiftData's own reconciliation behavior
-     */
-    private func createLabel() {
-        createLabel(named: newLabelName)
-        newLabelName = ""
-    }
-
-    /**
-     Creates one new label with an explicit name and persists it.
-
-     - Parameter name: Name that should be assigned to the newly inserted label.
-     *
-     Side effects:
-     - inserts a new `Label` into SwiftData and attempts to save the context
-     *
-     Failure modes:
-     - returns without mutating state when `name` is empty
-     - context-save failures are swallowed by `try?`, leaving the in-memory change subject to
-       SwiftData's own reconciliation behavior
-     */
-    private func createLabel(named name: String) {
-        _ = try? LabelManagerMutation.createLabel(named: name, in: modelContext)
-    }
-
-    /**
-     Renames one existing label and attempts to persist the change.
-
-     - Parameters:
-     - label: Label whose name should be updated.
-     - name: Replacement label name that should be persisted.
-
-     Side effects:
-     - mutates the label name in place and attempts to save the updated value
-
-     Failure modes:
-     - returns without mutating state when `name` is empty
-     - save failures are swallowed by `try?`, so a failed persistence write will not surface an
-       error to the user from this view
-     */
-    private func renameLabel(_ label: BibleCore.Label, to name: String) {
-        guard !name.isEmpty else { return }
-        label.name = name
-        try? LabelManagerMutation.persistLabelEdits(in: modelContext)
-    }
-
-    /**
-     Deletes one label and attempts to persist the removal.
-
-     - Parameter label: Label to delete from SwiftData.
-
-     Side effects:
-     - removes the label through `BookmarkService`, which also detaches bookmark relations and
-       clears any matching primary-label references before saving
-
-     Failure modes:
-     - save failures are swallowed inside `BookmarkService`, so a failed persistence write will
-       not surface an error to the user from this view
-     */
-    private func deleteLabel(_ label: BibleCore.Label) {
-        LabelManagerMutation.deleteLabel(label, in: modelContext)
-    }
-}
-
-// MARK: - Label Edit View
-
-/**
- Edits the visual style and metadata for one label.
-
- The editor binds directly to a live `Label` model, so changes apply immediately to the underlying
- SwiftData object and are persisted on each interaction as well as again on dismissal.
-
- Data dependencies:
- - `label` is a bindable SwiftData model whose fields are mutated directly by the form controls
- - `modelContext` persists those mutations to storage
- - `dismiss` closes the modal presentation after explicit completion
-
- Side effects:
- - color, icon, and toggle interactions mutate the bound label and immediately attempt to save
- - dismissing the editor triggers one final save attempt through `onDisappear`
- */
-private struct LabelEditView: View {
-    /// Bindable label being edited in place.
-    @Bindable var label: BibleCore.Label
-
-    /// SwiftData context used to persist edits to the bound label.
-    @Environment(\.modelContext) private var modelContext
-
-    /// Dismiss action for the modal edit presentation.
-    @Environment(\.dismiss) private var dismiss
-
-    /**
-     Canonical Android icon names offered for `Label.customIcon`.
-
-     These names are persisted for compatibility with the Vue.js renderer, while the native UI maps
-     them through `Label.sfSymbol(for:)` for SF Symbol display.
-     */
-    private static let iconNames: [String] = [
-        "book", "book-bible", "cross",
-        "church", "star-of-david", "person-praying",
-        "info", "question", "exclamation",
-        "lightbulb", "bell", "flag",
-        "star", "tag", "envelope",
-        "comment", "share-nodes", "link",
-        "handshake", "clock", "map-marker",
-        "globe", "landmark", "calendar",
-        "user", "music", "microphone",
-        "key", "crown", "heart", "heart-crack",
-    ]
-
-    /// Preset highlight colors aligned with Android's label-style palette.
-    private static let presetColors: [(name: String, argb: Int)] = [
-        ("Red", Int(Int32(bitPattern: 0xFFFF0000))),
-        ("Green", Int(Int32(bitPattern: 0xFF00FF00))),
-        ("Blue", Int(Int32(bitPattern: 0xFF0000FF))),
-        ("Yellow", Int(Int32(bitPattern: 0xFFFFFF00))),
-        ("Orange", Int(Int32(bitPattern: 0xFFFFA500))),
-        ("Purple", Int(Int32(bitPattern: 0xFF640096))),
-        ("Magenta", Int(Int32(bitPattern: 0xFFFF00FF))),
-        ("Cyan", Int(Int32(bitPattern: 0xFF00FFFF))),
-        ("Light Blue", Int(Int32(bitPattern: 0xFF91A7FF))),
-        ("Pink", Int(Int32(bitPattern: 0xFFFF69B4))),
-        ("Teal", Int(Int32(bitPattern: 0xFF008080))),
-        ("Brown", Int(Int32(bitPattern: 0xFF8B4513))),
-    ]
-
-    /**
-     Builds the label-edit form, including name, color, icon, and display-style controls.
-     */
-    var body: some View {
-        Form {
-            Section(String(localized: "label_edit_name")) {
-                TextField(String(localized: "label_name"), text: $label.name)
-                    .accessibilityIdentifier("labelEditNameField")
-            }
-
-            Section(String(localized: "label_edit_color")) {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                    ForEach(Self.presetColors, id: \.argb) { preset in
-                        Button {
-                            label.color = preset.argb
-                            save()
-                        } label: {
-                            Circle()
-                                .fill(Color(argbInt: preset.argb))
-                                .frame(width: 36, height: 36)
-                                .overlay {
-                                    if label.color == preset.argb {
-                                        Image(systemName: "checkmark")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(.white)
-                                    }
-                                }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            Section(String(localized: "label_edit_icon")) {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                    // "No Icon" clear button
-                    Button {
-                        label.customIcon = nil
-                        save()
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                            .font(.title2)
-                            .frame(width: 36, height: 36)
-                            .foregroundStyle(label.customIcon == nil ? Color.accentColor : Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    ForEach(Self.iconNames, id: \.self) { canonicalName in
-                        Button {
-                            if label.customIcon == canonicalName {
-                                label.customIcon = nil
-                            } else {
-                                label.customIcon = canonicalName
-                            }
-                            save()
-                        } label: {
-                            Image(systemName: BibleCore.Label.sfSymbol(for: canonicalName) ?? "questionmark")
-                                .font(.title2)
-                                .frame(width: 36, height: 36)
-                                .foregroundStyle(label.customIcon == canonicalName ? Color(argbInt: label.color) : Color.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            Section(String(localized: "label_edit_options")) {
-                Toggle(String(localized: "favourite"), isOn: $label.favourite)
-                    .onChange(of: label.favourite) { _, _ in save() }
-
-                Toggle(String(localized: "underline_style"), isOn: $label.underlineStyle)
-                    .onChange(of: label.underlineStyle) { _, _ in save() }
-
-                if label.underlineStyle {
-                    Toggle(String(localized: "underline_whole_verse"), isOn: $label.underlineStyleWholeVerse)
-                        .onChange(of: label.underlineStyleWholeVerse) { _, _ in save() }
-                }
-            }
-        }
-        .accessibilityIdentifier("labelEditScreen")
-        .navigationTitle(String(localized: "edit_label"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "done")) {
-                    save()
-                    dismiss()
-                }
-                .accessibilityIdentifier("labelEditDoneButton")
-            }
-        }
-        .onDisappear { save() }
-    }
-
-    /**
-     Attempts to persist the current label edits to SwiftData.
-
-     Failure modes:
-     - save failures are swallowed by `try?`, so the editor does not surface persistence errors
-       directly
-     */
-    private func save() {
-        try? LabelManagerMutation.persistLabelEdits(in: modelContext)
+        ).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     }
 }

@@ -623,3 +623,93 @@
 
 /* Android shared translations */
 "doc_type_commentary" = "Sharh";
+
+/* Android shared translations */
+"administration" = "Sozlamalar";
+"main_menu" = "Menyu";
+"options_menu_night_mode" = "Tungi ko'rinish";
+"rdg_plan_title" = "O'qish Rejasi";
+
+/* Android shared translations */
+"backup_and_restore" = "Faylni saqlab qo'yish; Qayta tiklash";
+"compare_description" = "Tarjimalarni taqqosla";
+"prefs_text_size_sample_text" = "Namuna matn";
+"reset_generic" = "Ilk holatga qaytarish";
+"search_bible_section_group_prompt" = "Qaerni qidir";
+
+/* Android shared translations */
+"bug_report_app_id" = "App id:";
+"bug_report_archive_too_large" = "The complete bug report is too large to export.";
+"bug_report_attachment_line_1" = "Having these files attached helps app developers a lot in fixing the reported bug.";
+"bug_report_attachment_too_large" = "Attachment is too large to export: %@";
+"bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
+"bug_report_device" = "Device:";
+"bug_report_email_text" = "Next, please select your preferred email application (Gmail for example) to send the report to the developer team.";
+"bug_report_email_title" = "Send bug report via email";
+"bug_report_export" = "Export report";
+"bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
+"bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
+"bug_report_free_storage" = "Free storage bytes:";
+"bug_report_locale" = "Locale:";
+"bug_report_log_empty" = "Current-process application log contained no exportable entries.";
+"bug_report_log_unavailable" = "Current-process application log could not be captured.";
+"bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
+"bug_report_no_attachments" = "No diagnostic attachments were available.";
+"bug_report_not_sent" = "Bug report not sent";
+"bug_report_operating_system" = "Operating system:";
+"bug_report_physical_memory" = "Physical memory bytes:";
+"bug_report_preparation_notes" = "Preparation notes:";
+"bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
+"bug_report_time_zone" = "Time zone:";
+"bug_report_unavailable" = "Unavailable";
+"bug_report_version" = "Version:";
+"report_bug_big_heading" = "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE";
+"report_bug_email_subject_3" = "[%1$@] Bug report for %2$@ %3$@";
+"report_bug_heading1" = "Instructions:";
+"report_bug_heading_3" = "Attachments:";
+"report_bug_heading_4" = "Device info:";
+"report_bug_line_1" = "Tell us briefly what did you do / what happened when issue took place.";
+"send_bug_report_title" = "Feedback / bug report";
+
+/* Integrated Android app-owned parity translations */
+"help_contextmenus_title" = "Konteks Menyusi";
+"help_nav_title" = "Navigatsiya";
+"help_search_title" = "Qidiruv";
+"label_unlabelled" = "Belgilanmagan";
+"new_item" = "Yangi";
+"assign_labels" = "Belgi qo'ymoq";
+"empty_list" = "Ko'rsatadigan hech narsa yo'q";
+"label_name_prompt" = "Ism";
+"sort_by_bible_book" = "Muqaddas Kitob tartibi";
+"sort_by_date" = "Kun tartibi";
+"next" = "Keyingi";
+"previous" = "Oldingi";
+"rdg_plan_day" = "Kun %@";
+"rdg_plan_selector_title" = "O'qish Rejasini tanlang";
+"selectPassage" = "Parcha";
+"delete_doc" = "O'chir %@";
+"delete_index" = "Qidiruv indeksini o'chir";
+"delete_search_index_doc" = "%@ indeksini o'chir";
+"doc_type_bible" = "Muqaddas Kitob";
+"doc_type_book" = "Kitob";
+"doc_type_dictionary" = "Lug'at";
+"doc_type_map" = "Xarita";
+"free_text_search_documents" = "Qidiruv";
+"colors_night_mode_title" = "Tungi ko'rinish";
+"repeat_passage" = "Matnni Takrorlash";
+"reset_settings" = "Ilk holatga qaytarish";
+"sleep_timer_set" = "Uxlash taymerini qo'yish. Taymer %d daqiqaga qo'yildi";
+"speak_advanced_settings" = "Qo'shimcha Sozlash";
+"speak_bookmarking_settings_title" = "Xatcho'p Sozlamalari";
+"speak_sleep_timer_title" = "Uxlash Taymeri";
+"speak_speed_title" = "Gapirish tezligi";
+"system_speak_settings" = "Sistema TSS sozlamalarini ochish";
+"index_create" = "Yarating";
+"rebuild_index" = "Indeksni qayta yaratish";
+"search_dictionary_hint" = "Lug'atdan qidir";
+"task_kill_warning" = "Agar boshqa aplikatsiyaga o'tsangiz, ko'p vaqt olayotgan bu vazifalar tugashidan oldin to'xtab qo'ladi.";
+
+/* Android shared translations */
+"lang_default" = "Ilk nastroykalar";
+"my_notes_abbreviation" = "Mening Eslatmalarim";
+"sort_by_alphabetical" = "Alifbo tartibida";

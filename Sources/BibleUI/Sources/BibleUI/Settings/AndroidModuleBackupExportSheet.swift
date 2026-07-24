@@ -8,9 +8,9 @@ import SwordKit
  Presents every Android-registerable installed family for module backup export.
 
  Android asks the user which installed documents to include before creating
- `AndBibleModulesBackup.abmd.zip`. This sheet consumes the exporter's canonical all-family catalog,
- defaulting to every listed module selected and allowing the user to switch
- between all and none before exporting.
+ `AndBibleModulesBackup.abmd.zip`. This view consumes the exporter's canonical all-family catalog
+ and mirrors Android `Dialogs.multiselect`: every row starts unchecked, the neutral action toggles
+ all rows without dismissing, and OK returns the selected rows in visible order.
 
  Data dependencies:
  - `modules` is the canonical installed-content catalog gathered from `AndroidModuleBackupService`
@@ -18,10 +18,10 @@ import SwordKit
 
  Side effects:
  - mutates local selection state as the user toggles modules
- - invokes `onCancel` or `onExport` in response to toolbar actions
+ - invokes `onCancel` or `onExport` in response to Android dialog actions
 
  Failure modes:
- - empty selections disable the Export command so the parent never receives an invalid request
+ - confirming an empty selection follows Android's empty-result path and dismisses without export
  - catalog discovery failures are handled by the parent before this sheet is presented
  */
 struct AndroidModuleBackupExportSheet: View {
@@ -37,7 +37,7 @@ struct AndroidModuleBackupExportSheet: View {
     /// Callback receiving selected module initials in display order.
     let onExport: ([String]) -> Void
 
-    /// Current selected Android identities without Swift's canonical Unicode normalization.
+    /// Draft checked identities, intentionally empty when the Android multiselect first appears.
     @State private var selectedModuleIdentities: Set<SQLiteDocumentIdentity>
 
     /**
@@ -48,8 +48,8 @@ struct AndroidModuleBackupExportSheet: View {
        - isExporting: Parent-owned progress state that disables controls while archive writing runs.
        - onCancel: Dismiss callback.
        - onExport: Export callback receiving selected initials.
-     - Side effects: Initializes local selection state with every module selected, matching
-       Android's selected-by-default backup dialog.
+     - Side effects: Initializes an empty draft because Android omits `preSelected` for module
+       backup and `Dialogs.multiselect` therefore starts every row unchecked.
      - Failure modes: This initializer cannot fail.
      */
     init(
@@ -62,7 +62,7 @@ struct AndroidModuleBackupExportSheet: View {
         self.isExporting = isExporting
         self.onCancel = onCancel
         self.onExport = onExport
-        _selectedModuleIdentities = State(initialValue: Set(modules.map(\.id)))
+        _selectedModuleIdentities = State(initialValue: Self.initialSelectedModuleIdentities)
     }
 
     /**
@@ -99,79 +99,71 @@ struct AndroidModuleBackupExportSheet: View {
     }
 
     /**
-     Builds the selectable module list and export/cancel toolbar actions.
+     Builds Android's title, app-owned checkbox list, neutral selection action, and Cancel/OK row.
+
+     Side effects: Row and neutral-action taps mutate only the draft selection; Cancel and OK
+     invoke the parent callbacks.
+
+    Failure modes: While export is active every action is guarded and disabled. OK with no checked
+     rows follows Android's empty-result path by dismissing without calling the export callback.
      */
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button(selectionToggleTitle) {
-                        toggleAllSelections()
-                    }
-                    .disabled(isExporting || modules.isEmpty)
-                    .accessibilityIdentifier("androidModuleBackupExportSelectToggleButton")
-                }
-
-                Section {
-                    ForEach(modules) { module in
-                        Toggle(isOn: binding(for: module.initials)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(module.displayName.isEmpty ? module.initials : module.displayName)
-                                    .font(.body)
-                                Text(moduleDetail(for: module))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .disabled(isExporting)
-                        .accessibilityIdentifier("androidModuleBackupExportRow::\(module.initials)")
-                    }
-                } header: {
-                    Text(String(localized: "android_module_backup_export_modules", defaultValue: "Select modules"))
-                }
-            }
-            .accessibilityIdentifier("androidModuleBackupExportSheet")
-            .navigationTitle(String(localized: "android_module_backup_export_title", defaultValue: "Module Backup"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "cancel")) {
-                        onCancel()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onExport(selectedModuleNamesInDisplayOrder)
-                    } label: {
-                        if isExporting {
-                            ProgressView()
-                        } else {
-                            Text(String(localized: "export"))
-                        }
-                    }
-                    .accessibilityIdentifier("androidModuleBackupExportApplyButton")
-                    .disabled(isExporting || selectedModuleNamesInDisplayOrder.isEmpty)
-                }
-            }
-        }
-        .interactiveDismissDisabled(isExporting)
+        AndroidMultiselectDialogContent(
+            title: String(
+                localized: "backup_modules_title",
+                defaultValue: "Select which modules to backup"
+            ),
+            rows: Self.multiselectRows(for: modules),
+            selectedIDs: $selectedModuleIdentities,
+            isBusy: isExporting,
+            accessibilityIdentifier: "androidModuleBackupExportSheet",
+            accessibilityPrefix: "androidModuleBackupExport",
+            onCancel: cancelIfIdle,
+            onConfirm: confirmIfIdle
+        )
     }
 
     /**
-     Selected module initials in the same order shown to the user.
+     Cancels the Android multiselect only while no archive writer owns the dialog.
 
-     - Returns: Selected initials filtered through `modules` display order.
+     - Side effects: Invokes `onCancel` while idle.
+     - Failure modes: Export-in-progress actions are ignored.
+     */
+    private func cancelIfIdle() {
+        guard !isExporting else { return }
+        onCancel()
+    }
+
+    /**
+     Resolves the shared multiselect result to module initials and starts export while idle.
+
+     - Parameter selectedIdentities: Enabled checked identities in visible order.
+     - Side effects: Invokes `onExport`, or `onCancel` for Android's empty-result path.
+     - Failure modes: Export-in-progress actions are ignored; identities absent from the canonical
+       catalog are ignored by `selectedModuleNames`.
+     */
+    private func confirmIfIdle(_ selectedIdentities: [SQLiteDocumentIdentity]) {
+        guard !isExporting else { return }
+        let selectedModuleNames = Self.selectedModuleNames(
+            inDisplayOrder: modules,
+            selectedIdentities: Set(selectedIdentities)
+        )
+        guard !selectedModuleNames.isEmpty else {
+            onCancel()
+            return
+        }
+        onExport(selectedModuleNames)
+    }
+
+    /**
+     Android's initial module-backup draft.
+
+     - Returns: An empty exact-identity set because `backupModulesViaIntent` does not supply
+       `preSelected` to `Dialogs.multiselect`.
      - Side effects: none.
      - Failure modes: none.
      */
-    private var selectedModuleNamesInDisplayOrder: [String] {
-        Self.selectedModuleNames(
-            inDisplayOrder: modules,
-            selectedIdentities: selectedModuleIdentities
-        )
-    }
+    static var initialSelectedModuleIdentities: Set<SQLiteDocumentIdentity> { [] }
 
     /**
      Resolves exact Android identities through the canonical picker order.
@@ -191,90 +183,95 @@ struct AndroidModuleBackupExportSheet: View {
     }
 
     /**
-     Title for the Android-style select-all/select-none control.
+     Adapts canonical module metadata to the reusable app-owned multiselect contract.
 
-     - Returns: "Select none" when all modules are selected, otherwise "Select all".
-     - Side effects: none.
+     - Parameter modules: Canonical all-family rows in display order.
+     - Returns: Shared checkbox rows retaining exact Android identities and visible labels.
+     - Side effects: Resolves localized row formatting through `moduleRowTitle`.
      - Failure modes: none.
      */
-    private var selectionToggleTitle: String {
-        if selectedModuleIdentities.count == modules.count {
-            return String(localized: "select_none", defaultValue: "Select none")
-        }
-        return String(localized: "select_all", defaultValue: "Select all")
-    }
-
-    /**
-     Produces a mutable selection binding for one module row.
-
-     - Parameter moduleName: Module initials whose selected state should be exposed.
-     - Returns: Binding that adds or removes the module from `selectedModuleIdentities`.
-     - Side effects: Writes local sheet selection state when the user toggles a row.
-     - Failure modes: none.
-     */
-    private func binding(for moduleName: String) -> Binding<Bool> {
-        let identity = SQLiteDocumentIdentity(moduleName)
-        return Binding(
-            get: { selectedModuleIdentities.contains(identity) },
-            set: { isSelected in
-                if isSelected {
-                    selectedModuleIdentities.insert(identity)
-                } else {
-                    selectedModuleIdentities.remove(identity)
-                }
-            }
-        )
-    }
-
-    /**
-     Toggles between all modules selected and no modules selected.
-
-     Side effects:
-     - mutates `selectedModuleIdentities`
-
-     Failure modes:
-     - empty module lists remain empty; the toolbar button is disabled for that state.
-     */
-    private func toggleAllSelections() {
-        if selectedModuleIdentities.count == modules.count {
-            selectedModuleIdentities.removeAll()
-        } else {
-            selectedModuleIdentities = Set(modules.map(\.id))
+    static func multiselectRows(
+        for modules: [AndroidModuleBackupInstalledContent]
+    ) -> [AndroidMultiselectDialogRow<SQLiteDocumentIdentity>] {
+        modules.map { module in
+            AndroidMultiselectDialogRow(
+                id: module.id,
+                title: moduleRowTitle(for: module),
+                accessibilityIdentifier: "androidModuleBackupExportRow::\(module.initials)"
+            )
         }
     }
 
     /**
-     Builds Android-like row detail text from module initials, category, and language.
+     Builds Android's exact visible module label using `something_with_parenthesis`.
 
      - Parameter module: Installed module shown in the export sheet.
-     - Returns: Compact detail text that distinguishes similarly named modules.
+     - Returns: `name (initials, language)` with locale-specific punctuation supplied by Android's
+       shared format string.
      - Side effects: none.
-     - Failure modes: none.
+     - Failure modes: Empty display names fall back to initials; empty language codes remain empty
+       exactly as supplied by the installed-content catalog.
      */
-    private func moduleDetail(for module: AndroidModuleBackupInstalledContent) -> String {
-        let language = module.language.isEmpty ? "?" : module.language
-        return "\(module.initials), \(language), \(familyName(module.family))"
+    static func moduleRowTitle(for module: AndroidModuleBackupInstalledContent) -> String {
+        let displayName = module.displayName.isEmpty ? module.initials : module.displayName
+        return String(
+            format: String(
+                localized: "something_with_parenthesis",
+                defaultValue: "%@ (%@)"
+            ),
+            displayName,
+            "\(module.initials), \(module.language)"
+        )
+    }
+}
+
+/**
+ Renders Android's module multiselect as an app-owned dialog window.
+
+ Inputs and outputs mirror `AndroidModuleBackupExportSheet`; the wrapper owns only the dimmed
+ window surface and prevents accidental dismissal while the parent writes an archive. Taps outside
+ the dialog invoke `onCancel` only when export work is idle.
+ */
+struct AndroidModuleBackupExportDialog<Content: View>: View {
+    /// Active application scheme supplied to the canonical AppCompat dialog surface.
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Whether the parent is currently writing the selected module archive.
+    let isExporting: Bool
+
+    /// Callback used to dismiss the dialog when no export is in progress.
+    let onCancel: () -> Void
+
+    /// Selection content shared by the settings and reader entry points.
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if isExporting {
+            AndroidIndeterminateProgressDialog(
+                accessibilityIdentifier: "androidModuleBackupExportProgressDialog"
+            )
+        } else {
+            AndroidDialogWindow(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "androidModuleBackupExportDialog",
+                allowsOutsideDismissal: true,
+                onOutsideTap: dismissIfIdle
+            ) {
+                content()
+            }
+        }
     }
 
-    /** Returns a compact user-visible family label for one canonical catalog row. */
-    private func familyName(_ family: AndroidModuleBackupContentFamily) -> String {
-        switch family {
-        case .swordConfiguration, .swordPayload:
-            return "SWORD"
-        case .myBible:
-            return "MyBible"
-        case .mySword:
-            return "MySword"
-        case .eSword:
-            return "e-Sword"
-        case .epub:
-            return "EPUB"
-        case .ttf:
-            return "Font"
-        case .background:
-            return "Background"
-        case .prompts:
-            return "Prompt pack"
-        }
+    /**
+     Dismisses on an accepted scrim tap only while no archive write owns the dialog.
+
+     Side effects: Invokes the caller's cancellation callback while idle.
+
+     Failure modes: Export-in-progress taps are ignored so a detached writer cannot outlive owner
+     state cleanup.
+     */
+    private func dismissIfIdle() {
+        guard !isExporting else { return }
+        onCancel()
     }
 }

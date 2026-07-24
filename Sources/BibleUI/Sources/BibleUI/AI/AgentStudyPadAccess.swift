@@ -122,60 +122,27 @@ extension BibleUIAgentDomainAdapter {
         guard !normalizedQuery.isEmpty else {
             throw studyPadDomainError("INVALID_ARGS", "Missing required parameter: query")
         }
-        var matchesByLabel: [UUID: [(id: UUID, type: String, snippet: String)]] = [:]
-        let labels = bookmarkService.allLabels().filter(\.isRealLabel)
-
-        for label in labels {
-            try Task.checkCancellation()
-            for item in orderedStudyPadItems(labelID: label.id) {
-                let candidate: (UUID, String, String?)
-                switch item {
-                case .text(let entry):
-                    candidate = (entry.id, "TEXT_ENTRY", entry.textEntry?.text)
-                case .bible(_, let bookmark):
-                    candidate = (bookmark.id, "BOOKMARK_NOTE", bookmark.notes?.notes)
-                case .generic(_, let bookmark):
-                    candidate = (bookmark.id, "BOOKMARK_NOTE", bookmark.notes?.notes)
-                }
-                guard let text = candidate.2,
-                      text.range(of: normalizedQuery, options: [.caseInsensitive, .diacriticInsensitive]) != nil else {
-                    continue
-                }
-                matchesByLabel[label.id, default: []].append((
-                    candidate.0,
-                    candidate.1,
-                    studyPadSearchSnippet(text, query: normalizedQuery)
-                ))
-                guard matchesByLabel.values.reduce(0, { $0 + $1.count })
-                    <= BibleUIAgentToolRequestParser.maximumArrayItems else {
-                    throw studyPadDomainError(
-                        "LIMIT_EXCEEDED",
-                        "The StudyPad search returned too many matches."
-                    )
-                }
-            }
+        try Task.checkCancellation()
+        let documents = StudyPadContentSearch.documents(from: bookmarkService.allLabels())
+        let results = StudyPadContentSearch.search(documents: documents, query: normalizedQuery)
+        let totalMatchCount = results.reduce(0) { $0 + $1.matchCount }
+        guard totalMatchCount <= BibleUIAgentToolRequestParser.maximumArrayItems else {
+            throw studyPadDomainError(
+                "LIMIT_EXCEEDED",
+                "The StudyPad search returned too many matches."
+            )
         }
 
-        let matchedLabels = labels.compactMap { label -> (Label, [(UUID, String, String)])? in
-            guard let matches = matchesByLabel[label.id], !matches.isEmpty else { return nil }
-            return (label, matches)
-        }.sorted { lhs, rhs in
-            if lhs.1.count != rhs.1.count { return lhs.1.count > rhs.1.count }
-            let comparison = lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name)
-            if comparison != .orderedSame { return comparison == .orderedAscending }
-            return lhs.0.id.uuidString < rhs.0.id.uuidString
-        }
-
-        let values = matchedLabels.map { label, matches in
+        let values = results.map { result in
             BibleUIAgentJSON.object(
-                ("labelId", BibleUIAgentJSON.uuid(label.id)),
-                ("labelName", .string(label.name)),
-                ("matchCount", BibleUIAgentJSON.integer(matches.count)),
-                ("matches", .array(matches.map { match in
+                ("labelId", BibleUIAgentJSON.uuid(result.labelID)),
+                ("labelName", .string(result.labelName)),
+                ("matchCount", BibleUIAgentJSON.integer(result.matchCount)),
+                ("matches", .array(result.matches.map { match in
                     BibleUIAgentJSON.object(
-                        ("entryId", BibleUIAgentJSON.uuid(match.0)),
-                        ("entryType", .string(match.1)),
-                        ("textSnippet", .string(match.2))
+                        ("entryId", BibleUIAgentJSON.uuid(match.entryID)),
+                        ("entryType", .string(match.entryType.rawValue)),
+                        ("textSnippet", .string(match.textSnippet))
                     )
                 }))
             )
@@ -464,24 +431,6 @@ extension BibleUIAgentDomainAdapter {
         let stripped = BibleUIAgentJSON.plainText(text)
         guard stripped.count > 80 else { return stripped }
         return String(stripped.prefix(80)) + "..."
-    }
-
-    private func studyPadSearchSnippet(_ text: String, query: String) -> String {
-        guard let range = text.range(
-            of: query,
-            options: [.caseInsensitive, .diacriticInsensitive]
-        ) else {
-            return String(text.prefix(100))
-        }
-        let matchStart = text.distance(from: text.startIndex, to: range.lowerBound)
-        let matchEnd = text.distance(from: text.startIndex, to: range.upperBound)
-        let lower = max(0, matchStart - 50)
-        let upper = min(text.count, matchEnd + 50)
-        let start = text.index(text.startIndex, offsetBy: lower)
-        let end = text.index(text.startIndex, offsetBy: upper)
-        return (lower > 0 ? "..." : "")
-            + String(text[start..<end])
-            + (upper < text.count ? "..." : "")
     }
 
     private func studyPadItemError(

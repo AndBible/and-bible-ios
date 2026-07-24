@@ -205,6 +205,10 @@ final class GenericSwordChooserContractsTests: XCTestCase {
             named: "handleGenericQuickModuleSwitch",
             from: source
         )
+        let retryDialog = try BibleUITestSourceLocator.extractFunction(
+            named: "genericQuickModuleSwitchRetryDialog",
+            from: source
+        )
 
         XCTAssertTrue(selection.contains("controller.switchDictionaryDocument(to: module.name)"))
         XCTAssertTrue(selection.contains("browser: .dictionaryBrowser"))
@@ -213,31 +217,138 @@ final class GenericSwordChooserContractsTests: XCTestCase {
         XCTAssertEqual(selection.components(separatedBy: "handleGenericQuickModuleSwitch(").count - 1, 2)
         XCTAssertTrue(routing.contains("case .switchedPreservingKey:"))
         XCTAssertTrue(routing.contains("case .switchedRequiringKeySelection:"))
-        XCTAssertTrue(routing.contains("presentReaderModalPreservingPane(browser)"))
+        XCTAssertTrue(routing.contains("presentReaderDestinationPreservingPane(browser)"))
         XCTAssertTrue(routing.contains("case .failed(let message):"))
         XCTAssertTrue(routing.contains("pendingGenericQuickModuleSwitchRetry = GenericQuickModuleSwitchRetry("))
         XCTAssertTrue(routing.contains("targetWindowId: targetWindowId"))
-        XCTAssertTrue(source.contains("Button(String(localized: \"retry\"))"))
+        XCTAssertTrue(retryDialog.contains("AndroidDecisionDialog("))
+        XCTAssertTrue(retryDialog.contains("title: String(localized: \"retry\")"))
+        XCTAssertTrue(retryDialog.contains("selectCommentaryQuickModule("))
     }
 
     /**
-     Guards the dictionary sheet's backend-independent source handoff.
+     Guards the dictionary activity's backend-independent source and owner handoff.
 
-     - Setup: Reads the modal construction branch from `BibleReaderView`.
-     - Expected result: The sheet requests the controller's captured dictionary source and passes it
-       to `DictionaryBrowserView`, without requiring an active native SWORD module.
-     - Failure meaning: Exact SQLite dictionary keys remain selectable in module state but cannot be
-       browsed or displayed in the reader sheet.
+     - Setup: Reads the dictionary destination branch from `BibleReaderView`.
+     - Expected result: The destination passes the controller's captured dictionary source, active
+       reader palette, and explicit Back command to the app-owned browser without requiring a
+       native SWORD module.
+     - Failure meaning: Exact SQLite dictionary keys can become unavailable, or the route can drift
+       back into an independently styled modal instead of inheriting reader-window ownership.
      - Side effects: Reads repository source without mutating app state.
      */
-    func testDictionarySheetUsesActiveBackendIndependentSource() throws {
+    func testDictionaryActivityUsesActiveBackendIndependentSourceAndOwner() throws {
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         )
 
         XCTAssertTrue(source.contains("controller.activeDictionaryBrowserSource()"))
-        XCTAssertTrue(source.contains("DictionaryBrowserView(source: source)"))
+        XCTAssertTrue(source.contains("DictionaryBrowserView("))
+        XCTAssertTrue(source.contains("source: source"))
+        XCTAssertTrue(source.contains("surfacePalette: readerThemeSurfacePalette"))
+        XCTAssertTrue(source.contains("onBack: { activeReaderDestination = nil }"))
         XCTAssertFalse(source.contains("let module = controller.activeDictionaryModule {\n                DictionaryBrowserView"))
+    }
+
+    /**
+     Guards all generic-key browsers against native iOS collection and navigation ownership.
+
+     - Setup: Reads the dictionary, SWORD general-book/map, and EPUB table-of-contents sources.
+     - Expected result: Every route uses the shared Android activity, loading, and list-row
+       structures with the launching reader palette and explicit Back behavior.
+     - Failure meaning: One of the less-visible document types can silently regress to a native
+       sheet, navigation stack, searchable list, or independently drawn row implementation.
+     - Side effects: Reads repository source without mutating app state.
+     */
+    func testGenericKeyBrowsersReuseSharedAndroidActivityStructures() throws {
+        let paths = [
+            "Sources/BibleUI/Sources/BibleUI/Dictionary/DictionaryBrowserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Dictionary/GeneralBookBrowserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Dictionary/EpubBrowserView.swift",
+        ]
+        let sources = try paths.map { try BibleUITestSourceLocator.source(at: $0) }
+
+        for source in sources {
+            XCTAssertTrue(source.contains("AndroidActivityScreen("))
+            XCTAssertTrue(source.contains("AndroidActivityLoadingView("))
+            XCTAssertTrue(source.contains("AndroidActivityListRow("))
+            XCTAssertTrue(source.contains("palette: surfacePalette"))
+            XCTAssertTrue(source.contains("onBack: onBack"))
+
+            for forbidden in [
+                "NavigationStack {",
+                "List {",
+                ".searchable(",
+                ".navigationTitle(",
+                ".sheet(",
+                "Menu {",
+                "Picker(",
+            ] {
+                XCTAssertFalse(source.contains(forbidden), "Unexpected native presentation token: \(forbidden)")
+            }
+        }
+
+        XCTAssertTrue(sources[0].contains("AndroidActivityTextInput("))
+        XCTAssertTrue(sources[0].contains("search_dictionary_hint"))
+        XCTAssertTrue(sources[1].contains("onEmptyKeys(rawKeys.first)"))
+        XCTAssertTrue(sources[2].contains("reader.firstKey()"))
+    }
+
+    /**
+     Guards Android EPUB Search as a complete multi-activity lifecycle, including index rebuilding.
+
+     - Setup: Reads the EPUB Search implementation and its reader-owned destination wiring.
+     - Expected result: Criteria, results, rebuild confirmation, and rebuild progress reuse shared
+       app-owned controls; Help targets SQLite FTS5; and rebuilt immutable generations must be
+       adopted by the active reader owner before use.
+     - Failure meaning: Search can collapse into a native iOS list/modal, omit Android's Rebuild
+       action, or publish an index generation that the visible reader never adopts.
+     - Side effects: Reads repository source without mutating app state.
+     */
+    func testEpubSearchPreservesAndroidLifecycleAndSharedOwnership() throws {
+        let searchSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Dictionary/EpubSearchView.swift"
+        )
+        let readerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        for expected in [
+            "case criteria",
+            "case results",
+            "case rebuildPrompt",
+            "case rebuilding",
+            "AndroidActivityScreen(",
+            "AndroidActivityTextInput(",
+            "AndroidRadioRow(",
+            "AndroidActivityListRow(",
+            "AndroidActivitySingleActionBar(",
+            "AndroidActivityCommitBar(",
+            ".androidAnchoredPopupMenu(",
+            "AndroidSearchHelpDialog(",
+            "documentation: .sqliteFTS5",
+            "EpubReader.rebuildSearchIndex(identifier: identifier)",
+            "guard onAdoptRebuiltReader(rebuiltReader) else",
+        ] {
+            XCTAssertTrue(searchSource.contains(expected), "Missing EPUB Search contract: \(expected)")
+        }
+
+        for forbidden in [
+            "NavigationStack {",
+            "List {",
+            ".searchable(",
+            ".navigationTitle(",
+            ".sheet(",
+            "Menu {",
+            "Picker(",
+        ] {
+            XCTAssertFalse(searchSource.contains(forbidden), "Unexpected native presentation token: \(forbidden)")
+        }
+
+        XCTAssertTrue(readerSource.contains("EpubSearchView("))
+        XCTAssertTrue(readerSource.contains("surfacePalette: readerThemeSurfacePalette"))
+        XCTAssertTrue(readerSource.contains("onBack: { activeReaderDestination = nil }"))
+        XCTAssertTrue(readerSource.contains("panePresentationController?.adoptRebuiltEpubReader(rebuiltReader) ?? false"))
     }
 }
 

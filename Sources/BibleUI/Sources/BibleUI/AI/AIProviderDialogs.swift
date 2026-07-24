@@ -8,6 +8,8 @@ import SwiftUI
 struct AIProviderSettingsDialog: View {
     /// SwiftData context containing non-secret provider rows.
     @Environment(\.modelContext) private var modelContext
+    /// Appearance used by shared app-owned dialog fields and selection surfaces.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Existing provider identity, or `nil` for creation.
     let providerID: UUID?
@@ -34,6 +36,8 @@ struct AIProviderSettingsDialog: View {
     @State private var apiFormat = APIFormat.openAI
     /// Credential-free persistence or Keychain failure text.
     @State private var failureMessage: String?
+    /// Whether the custom provider's app-owned API-format choice dialog is visible.
+    @State private var showsAPIFormatDialog = false
 
     /**
      Creates a provider dialog for an existing row or one selected provider type.
@@ -86,30 +90,36 @@ struct AIProviderSettingsDialog: View {
                 ? String(localized: "ai_add_provider", defaultValue: "Add provider")
                 : String(localized: "ai_provider_edit", defaultValue: "Edit")
         ) {
-            ScrollView {
+            AndroidAdaptiveDialogScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     labeledField(String(localized: "ai_provider_name", defaultValue: "Provider name")) {
-                        TextField(
-                            String(localized: "ai_provider_name", defaultValue: "Provider name"),
-                            text: $displayName
+                        AndroidDialogTextInput(
+                            placeholder: String(localized: "ai_provider_name", defaultValue: "Provider name"),
+                            text: $displayName,
+                            colorScheme: colorScheme,
+                            isMultiline: false,
+                            accessibilityIdentifier: "aiProviderNameField"
                         )
                         .disabled(providerType != .custom)
+                        .opacity(providerType == .custom ? 1 : 0.45)
                     }
 
                     labeledField(String(localized: "ai_provider_api_key", defaultValue: "API key")) {
-                        TextField(
-                            String(localized: "ai_provider_api_key", defaultValue: "API key"),
-                            text: $credentialDraft
+                        AndroidDialogTextInput(
+                            placeholder: String(localized: "ai_provider_api_key", defaultValue: "API key"),
+                            text: $credentialDraft,
+                            colorScheme: colorScheme,
+                            isMultiline: false,
+                            accessibilityIdentifier: "aiProviderAPIKeyField"
                         )
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
                         .autocorrectionDisabled()
-                        .accessibilityIdentifier("aiProviderAPIKeyField")
                     }
 
                     if let apiKeyURL {
-                        Link(
+                        AndroidDialogLink(
                             "\(String(localized: "easy_setup_api_key_instructions", defaultValue: "Get your API key from:")) \(AIProviderPresentation.displayName(for: providerType))",
                             destination: apiKeyURL
                         )
@@ -118,9 +128,12 @@ struct AIProviderSettingsDialog: View {
 
                     if providerType == .custom {
                         labeledField(String(localized: "ai_provider_endpoint", defaultValue: "API endpoint")) {
-                            TextField(
-                                String(localized: "ai_provider_endpoint", defaultValue: "API endpoint"),
-                                text: $endpoint
+                            AndroidDialogTextInput(
+                                placeholder: String(localized: "ai_provider_endpoint", defaultValue: "API endpoint"),
+                                text: $endpoint,
+                                colorScheme: colorScheme,
+                                isMultiline: false,
+                                accessibilityIdentifier: "aiProviderEndpointField"
                             )
                             #if os(iOS)
                             .textInputAutocapitalization(.never)
@@ -139,22 +152,23 @@ struct AIProviderSettingsDialog: View {
                         .foregroundStyle(.secondary)
 
                         labeledField(String(localized: "ai_provider_api_format", defaultValue: "API format")) {
-                            Picker(
-                                String(localized: "ai_provider_api_format", defaultValue: "API format"),
-                                selection: $apiFormat
+                            AndroidSelectionField(
+                                title: "",
+                                value: apiFormat.rawValue,
+                                foregroundColor: AndroidDialogSurfacePalette.primaryText(for: colorScheme),
+                                secondaryColor: AndroidDialogSurfacePalette.secondaryText(for: colorScheme),
+                                backgroundColor: AndroidDialogSurfacePalette.fieldBackground(for: colorScheme),
+                                borderColor: AndroidDialogSurfacePalette.fieldBorder(for: colorScheme),
+                                accessibilityIdentifier: "aiProviderAPIFormatField"
                             ) {
-                                Text(verbatim: "OPENAI").tag(APIFormat.openAI)
-                                Text(verbatim: "ANTHROPIC").tag(APIFormat.anthropic)
+                                showsAPIFormatDialog = true
                             }
-                            .labelsHidden()
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 8)
             }
-            .frame(maxHeight: 520)
         } actions: {
             if let providerID {
                 AIAndroidDialogAction(
@@ -177,19 +191,37 @@ struct AIProviderSettingsDialog: View {
             )
             .accessibilityIdentifier("aiProviderSaveButton")
         }
-        .accessibilityIdentifier("aiProviderEditorScreen")
+        .androidAccessibilityIdentityMarker(
+            label: isNewProvider
+                ? String(localized: "ai_add_provider", defaultValue: "Add provider")
+                : String(localized: "ai_provider_edit", defaultValue: "Edit"),
+            accessibilityIdentifier: "aiProviderEditorScreen",
+            surfaceColor: AndroidDialogSurfacePalette.background(for: colorScheme)
+        )
+        .disabled(showsAPIFormatDialog)
         .task(id: providerID) { loadProvider() }
         .onDisappear { credentialDraft = "" }
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if showsAPIFormatDialog {
+                AndroidSingleChoiceDialog(
+                    title: String(localized: "ai_provider_api_format", defaultValue: "API format"),
+                    selectedValue: apiFormat,
+                    options: [
+                        AndroidSingleChoiceOption(id: "openAI", value: APIFormat.openAI, title: "OPENAI"),
+                        AndroidSingleChoiceOption(id: "anthropic", value: APIFormat.anthropic, title: "ANTHROPIC"),
+                    ],
+                    accessibilityIdentifier: "aiProviderAPIFormatDialog",
+                    onSelect: {
+                        apiFormat = $0
+                        showsAPIFormatDialog = false
+                    },
+                    onCancel: { showsAPIFormatDialog = false }
+                )
+            } else if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -226,11 +258,8 @@ struct AIProviderSettingsDialog: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
             content()
-                .textFieldStyle(.plain)
-                .padding(.vertical, 7)
-                .overlay(alignment: .bottom) { Divider() }
         }
     }
 
@@ -360,16 +389,12 @@ struct AIProviderDeleteConfirmationDialog: View {
                 action: deleteProvider
             )
         }
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 

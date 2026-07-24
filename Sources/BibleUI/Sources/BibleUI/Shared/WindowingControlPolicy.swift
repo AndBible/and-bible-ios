@@ -1,5 +1,6 @@
 #if os(iOS)
 import UIKit
+import MetricKit
 
 public enum AndBibleWindowingControlStyleChoice {
     case automatic
@@ -23,6 +24,7 @@ public struct AndBibleWindowingControlPolicy {
 public final class AndBibleApplicationDelegate: NSObject, UIApplicationDelegate {
     public override init() {
         super.init()
+        RecentCrashDiagnosticStore.shared.start()
     }
 
     public static func sceneConfiguration(sessionRole: UISceneSession.Role) -> UISceneConfiguration {

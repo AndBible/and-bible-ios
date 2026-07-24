@@ -43,12 +43,18 @@ struct BibleReaderOverflowMenuState {
 struct BibleReaderOverflowMenu: View {
     let state: BibleReaderOverflowMenuState
     let colorScheme: ColorScheme
+    /// Reader/workspace palette inherited from the app bar that owns this popup.
+    let surfacePalette: ReaderThemeSurfacePalette
     let onAction: (BibleReaderOverflowMenuAction) -> Void
 
     var body: some View {
         AndroidPopupMenuSurface(
             colorScheme: colorScheme,
-            accessibilityIdentifier: "readerOverflowMenu"
+            accessibilityIdentifier: "readerOverflowMenu",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 toggleRow(

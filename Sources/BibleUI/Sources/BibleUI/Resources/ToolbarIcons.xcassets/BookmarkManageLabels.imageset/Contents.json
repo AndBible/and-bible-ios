@@ -1,0 +1,10 @@
+{
+  "images": [
+    { "filename": "bookmark_manage_labels.svg", "idiom": "universal", "scale": "1x" }
+  ],
+  "info": { "author": "xcode", "version": 1 },
+  "properties": {
+    "preserves-vector-representation": true,
+    "template-rendering-intent": "template"
+  }
+}

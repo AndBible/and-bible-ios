@@ -52,141 +52,135 @@ private enum AIRawLogDeletionChoice: Identifiable {
 
 /** App-owned list dialog matching Android's Delete old logs AlertDialog. */
 private struct AIRawLogDeleteOldDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Applies the selected Android cutoff immediately.
     let onChoose: (AIRawLogDeletionChoice) -> Void
     /// Closes the dialog without mutation.
     let onCancel: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                AIAndroidDialogSurface(
-                    title: String(localized: "raw_log_delete_old", defaultValue: "Delete old logs…")
-                ) {
-                    VStack(spacing: 0) {
-                        ForEach([
-                            AIRawLogDeletionChoice.oneWeek,
-                            .oneMonth,
-                            .threeMonths,
-                            .all,
-                        ]) { choice in
-                            Button {
-                                onChoose(choice)
-                            } label: {
-                                Text(choice.title)
-                                    .foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 14)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiRawLogDeleteOldDialog",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            AIAndroidDialogSurface(
+                title: String(localized: "raw_log_delete_old", defaultValue: "Delete old logs…")
+            ) {
+                VStack(spacing: 0) {
+                    ForEach([
+                        AIRawLogDeletionChoice.oneWeek,
+                        .oneMonth,
+                        .threeMonths,
+                        .all,
+                    ]) { choice in
+                        Button {
+                            onChoose(choice)
+                        } label: {
+                            Text(choice.title)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 14)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
-                } actions: {
-                    Spacer()
-                    AIAndroidDialogAction(
-                        title: String(localized: "cancel", defaultValue: "Cancel"),
-                        action: onCancel
-                    )
                 }
-                .padding(.horizontal, 24)
-                .frame(maxHeight: geometry.size.height * 0.8)
+            } actions: {
+                Spacer()
+                AIAndroidDialogAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onCancel
+                )
             }
         }
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("aiRawLogDeleteOldDialog")
     }
 }
 
 /** App-owned confirmation matching Android's persisted-log Delete action. */
 private struct AIRawLogDeleteConfirmationDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Deletes the selected persisted log.
     let onDelete: () -> Void
     /// Returns to the raw log without deleting it.
     let onCancel: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                AIAndroidDialogSurface(title: "") {
-                    Text(String(localized: "are_you_sure", defaultValue: "Are you sure?"))
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                } actions: {
-                    Spacer()
-                    AIAndroidDialogAction(
-                        title: String(localized: "cancel", defaultValue: "Cancel"),
-                        action: onCancel
-                    )
-                    AIAndroidDialogAction(
-                        title: String(localized: "yes", defaultValue: "Yes"),
-                        isDestructive: true,
-                        action: onDelete
-                    )
-                }
-                .padding(.horizontal, 24)
-                .frame(maxHeight: geometry.size.height * 0.8)
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiRawLogDeleteConfirmationDialog",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            AIAndroidDialogSurface(title: "") {
+                Text(String(localized: "are_you_sure", defaultValue: "Are you sure?"))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+            } actions: {
+                Spacer()
+                AIAndroidDialogAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onCancel
+                )
+                AIAndroidDialogAction(
+                    title: String(localized: "yes", defaultValue: "Yes"),
+                    isDestructive: true,
+                    action: onDelete
+                )
             }
         }
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("aiRawLogDeleteConfirmationDialog")
     }
 }
 
 /** App-owned confirmation matching Android's supported-model AI bug-report action. */
 private struct AIRawLogBugReportConfirmationDialog: View {
+    /// Current appearance used by the globally managed Android dialog palette.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Builds the report and opens the platform share chooser.
     let onConfirm: () -> Void
     /// Returns to the raw log without creating an attachment.
     let onCancel: () -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                AIAndroidDialogSurface(
-                    title: String(localized: "send_ai_bug_report_title", defaultValue: "Report AI bug")
-                ) {
-                    Text(
-                        String(
-                            localized: "bug_report_email_text",
-                            defaultValue: "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
-                        )
+        AndroidDialogWindow(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiRawLogBugReportConfirmationDialog",
+            allowsOutsideDismissal: false,
+            onOutsideTap: {}
+        ) {
+            AIAndroidDialogSurface(
+                title: String(localized: "send_ai_bug_report_title", defaultValue: "Report AI bug")
+            ) {
+                Text(
+                    String(
+                        localized: "bug_report_email_text",
+                        defaultValue: "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
                     )
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                } actions: {
-                    Spacer()
-                    AIAndroidDialogAction(
-                        title: String(localized: "cancel", defaultValue: "Cancel"),
-                        action: onCancel
-                    )
-                    AIAndroidDialogAction(
-                        title: String(localized: "okay", defaultValue: "OK"),
-                        action: onConfirm
-                    )
-                }
-                .padding(.horizontal, 24)
-                .frame(maxHeight: geometry.size.height * 0.8)
+                )
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            } actions: {
+                Spacer()
+                AIAndroidDialogAction(
+                    title: String(localized: "cancel", defaultValue: "Cancel"),
+                    action: onCancel
+                )
+                AIAndroidDialogAction(
+                    title: String(localized: "okay", defaultValue: "OK"),
+                    action: onConfirm
+                )
             }
         }
         .zIndex(20)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityIdentifier("aiRawLogBugReportConfirmationDialog")
     }
 }
 
@@ -198,6 +192,10 @@ private struct AIRawLogBugReportConfirmationDialog: View {
  age through the same four choices as RawLogHistoryActivity.
  */
 struct AIRawLogHistoryView: View {
+    /// Pops the log history activity for standalone callers.
+    @Environment(\.dismiss) private var dismiss
+    /// Current appearance used by the shared overflow surface.
+    @Environment(\.colorScheme) private var colorScheme
     /// SwiftData context containing device-local raw logs.
     @Environment(\.modelContext) private var modelContext
 
@@ -213,39 +211,115 @@ struct AIRawLogHistoryView: View {
     @State private var showsDeleteOldDialog = false
     /// Credential-free persistence failure.
     @State private var failureMessage: String?
+    /// Whether Android's normal-mode overflow popup is visible.
+    @State private var showsOverflowMenu = false
+
+    /// Reader/workspace palette inherited from Connection settings.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command returning to Connection settings.
+    let onBack: (() -> Void)?
+
+    /** Creates the app-owned raw-log activity without reading local log payloads. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+    }
 
     /// Whether contextual multi-selection controls replace normal row navigation.
     private var isSelecting: Bool { !selectedIDs.isEmpty }
 
     var body: some View {
-        ZStack {
-            Group {
-                if logs.isEmpty {
-                    ContentUnavailableView(
-                        String(localized: "raw_log_history_empty", defaultValue: "No saved logs"),
-                        systemImage: "doc.text.magnifyingglass"
-                    )
-                } else {
-                    List(logs, id: \.id) { log in
-                        Button {
-                            activate(log)
-                        } label: {
-                            AIRawLogHistoryRow(
-                                log: log,
-                                showsSelection: isSelecting,
-                                isSelected: selectedIDs.contains(log.id)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .onLongPressGesture {
-                            suppressedTapID = log.id
-                            selectedIDs.insert(log.id)
-                        }
+        Group {
+            if let openedLog {
+                AIRawLogDetailView(
+                    log: openedLog,
+                    surfacePalette: surfacePalette,
+                    onBack: { self.openedLog = nil },
+                    onDelete: {
+                        self.openedLog = nil
+                        loadLogs()
                     }
-                    .listStyle(.plain)
-                }
+                )
+            } else {
+                rawLogHistoryRoot
             }
+        }
+    }
+
+    /** Android raw-log list and contextual selection action bar. */
+    private var rawLogHistoryRoot: some View {
+        ZStack {
+            AndroidActivityScreen(
+                title: navigationTitle,
+                accessibilityIdentifier: "aiRawLogHistoryTopAppBar",
+                palette: surfacePalette,
+                onBack: handleBack,
+                actions: {
+                    if isSelecting {
+                        AndroidActivityTopAppBarActionButton(
+                            icon: .asset("ActivityDelete"),
+                            accessibilityLabel: String(
+                                localized: "raw_log_delete_selected",
+                                defaultValue: "Delete selected"
+                            ),
+                            accessibilityIdentifier: "aiRawLogDeleteSelectedButton",
+                            foregroundColor: surfacePalette.toolbarForegroundColor,
+                            action: deleteSelected
+                        )
+                    } else {
+                        AndroidActivityTopAppBarActionButton(
+                            icon: .asset("ToolbarOverflow"),
+                            accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                            accessibilityIdentifier: "aiRawLogOverflowButton",
+                            foregroundColor: surfacePalette.toolbarForegroundColor
+                        ) {
+                            showsOverflowMenu.toggle()
+                        }
+                        .androidPopupMenuAnchor(id: "aiRawLogOverflowAnchor")
+                    }
+                },
+                content: {
+                    if logs.isEmpty {
+                        Text(String(localized: "raw_log_history_empty", defaultValue: "No saved logs"))
+                            .font(.system(size: 17))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityIdentifier("aiRawLogHistoryEmpty")
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(logs.enumerated()), id: \.element.id) { index, log in
+                                    if index > 0 {
+                                        AndroidPreferenceDivider(palette: surfacePalette)
+                                    }
+                                    Button {
+                                        activate(log)
+                                    } label: {
+                                        AIRawLogHistoryRow(
+                                            log: log,
+                                            showsSelection: isSelecting,
+                                            isSelected: selectedIDs.contains(log.id),
+                                            surfacePalette: surfacePalette
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .onLongPressGesture {
+                                        suppressedTapID = log.id
+                                        selectedIDs.insert(log.id)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .accessibilityIdentifier("aiRawLogHistoryList")
+                    }
+                }
+            )
             .accessibilityHidden(showsDeleteOldDialog)
+            .disabled(showsDeleteOldDialog || showsOverflowMenu)
 
             if showsDeleteOldDialog {
                 AIRawLogDeleteOldDialog(
@@ -254,70 +328,51 @@ struct AIRawLogHistoryView: View {
                 )
             }
         }
-        .navigationTitle(navigationTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            if isSelecting {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        selectedIDs = []
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel(String(localized: "cancel", defaultValue: "Cancel"))
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button(role: .destructive, action: deleteSelected) {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel(
-                        String(localized: "raw_log_delete_selected", defaultValue: "Delete selected")
-                    )
-                }
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            showsDeleteOldDialog = true
-                        } label: {
-                            Label(
-                                String(localized: "raw_log_delete_old", defaultValue: "Delete old logs…"),
-                                systemImage: "trash"
-                            )
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                }
-            }
-        }
-        .navigationDestination(
-            isPresented: Binding(
-                get: { openedLog != nil },
-                set: { if !$0 { openedLog = nil } }
-            )
+        .androidAnchoredPopupMenu(
+            anchorID: "aiRawLogOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 260,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiRawLogOverflowMenu"
         ) {
-            if let openedLog {
-                AIRawLogDetailView(log: openedLog) {
-                    self.openedLog = nil
-                    loadLogs()
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiRawLogOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "raw_log_delete_old",
+                        defaultValue: "Delete old logs…"
+                    ),
+                    accessibilityIdentifier: "aiRawLogDeleteOldMenuItem"
+                ) {
+                    showsOverflowMenu = false
+                    showsDeleteOldDialog = true
                 }
             }
         }
         .task { loadLogs() }
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
+        }
+    }
+
+    /** Exits contextual selection first, otherwise returns to Connection settings. */
+    private func handleBack() {
+        if isSelecting {
+            selectedIDs = []
+        } else if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 
@@ -397,17 +452,23 @@ private struct AIRawLogHistoryRow: View {
     let showsSelection: Bool
     /// Whether this row is currently selected.
     let isSelected: Bool
+    /// Reader/workspace palette inherited from the history activity.
+    let surfacePalette: ReaderThemeSurfacePalette
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             if showsSelection {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                AndroidCheckboxIndicator(
+                    isOn: isSelected,
+                    uncheckedColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor
+                )
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(log.promptName.isEmpty ? "-" : log.promptName)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(surfacePalette.foregroundColor)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if log.wasError {
@@ -418,7 +479,7 @@ private struct AIRawLogHistoryRow: View {
                 }
                 Text(modelSummary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     .lineLimit(1)
                 HStack {
                     Text(tokenSummary)
@@ -428,13 +489,14 @@ private struct AIRawLogHistoryRow: View {
                     }
                 }
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 Text(Self.timestamp(log.timestampMilliseconds))
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
@@ -482,9 +544,15 @@ private struct AIRawLogDetailView: View {
     @Environment(\.dismiss) private var dismiss
     /// SwiftData context containing this local log.
     @Environment(\.modelContext) private var modelContext
+    /// Current appearance used by the app-owned overflow menu.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Persisted metadata and compressed payload.
     let log: LLMRawLogRecord
+    /// Reader/workspace palette inherited from raw-log history.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up action returning to history.
+    let onBack: (() -> Void)?
     /// Refresh callback for the history screen after deletion.
     let onDelete: () -> Void
 
@@ -500,29 +568,71 @@ private struct AIRawLogDetailView: View {
     @State private var toastMessage: String?
     /// Credential-free decoding or persistence failure.
     @State private var failureMessage: String?
+    /// Whether Android's Delete/Report overflow popup is visible.
+    @State private var showsOverflowMenu = false
 
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                if log.estimatedCostUSD > 0 || log.totalInputTokens > 0 {
-                    Text(totalSummary)
-                        .font(.caption)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
-                    Divider()
+            AndroidActivityScreen(
+                title: "\(log.modelName) — \(AIRawLogHistoryRow.timestamp(log.timestampMilliseconds))",
+                accessibilityIdentifier: "aiRawLogDetailTopAppBar",
+                palette: surfacePalette,
+                onBack: performBack
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityCopy"),
+                    accessibilityLabel: String(localized: "copy", defaultValue: "Copy"),
+                    accessibilityIdentifier: "aiRawLogCopyButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: copyLog
+                )
+                .disabled(text.isEmpty)
+
+                ShareLink(item: text) {
+                    AndBibleIconView(name: "ActivityShare", size: 24)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
                 }
-                ScrollView {
-                    Text(text.isEmpty
-                        ? String(localized: "raw_llm_log_empty", defaultValue: "No raw log data available")
-                        : text)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
+                .buttonStyle(.plain)
+                .foregroundStyle(surfacePalette.toolbarForegroundColor)
+                .disabled(text.isEmpty)
+                .accessibilityLabel(String(localized: "share", defaultValue: "Share"))
+                .accessibilityIdentifier("aiRawLogShareButton")
+
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "aiRawLogDetailOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showsOverflowMenu.toggle()
                 }
+                .androidPopupMenuAnchor(id: "aiRawLogDetailOverflowAnchor")
+            } content: {
+                VStack(spacing: 0) {
+                    if log.estimatedCostUSD > 0 || log.totalInputTokens > 0 {
+                        Text(totalSummary)
+                            .font(.caption)
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.vertical, 10)
+                        Divider()
+                    }
+                    ScrollView {
+                        Text(text.isEmpty
+                            ? String(localized: "raw_llm_log_empty", defaultValue: "No raw log data available")
+                            : text)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(surfacePalette.foregroundColor)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                }
+                .accessibilityHidden(showsDeleteConfirmation || showsBugReportConfirmation)
+                .disabled(showsDeleteConfirmation || showsBugReportConfirmation || showsOverflowMenu)
             }
-            .accessibilityHidden(showsDeleteConfirmation || showsBugReportConfirmation)
 
             if showsDeleteConfirmation {
                 AIRawLogDeleteConfirmationDialog(
@@ -538,41 +648,39 @@ private struct AIRawLogDetailView: View {
                 )
             }
         }
-        .navigationTitle("\(log.modelName) — \(AIRawLogHistoryRow.timestamp(log.timestampMilliseconds))")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: copyLog) {
-                    Image(systemName: "doc.on.doc")
-                }
-                .disabled(text.isEmpty)
-                .accessibilityLabel(String(localized: "copy", defaultValue: "Copy"))
-                ShareLink(item: text) {
-                    Image(systemName: "square.and.arrow.up")
-                }
-                .disabled(text.isEmpty)
-                .accessibilityLabel(String(localized: "share", defaultValue: "Share"))
-                Menu {
-                    Button(role: .destructive) {
+        .androidAnchoredPopupMenu(
+            anchorID: "aiRawLogDetailOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 260,
+            estimatedMenuHeight: 104,
+            accessibilityIdentifier: "aiRawLogDetailOverflowMenu"
+        ) {
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiRawLogDetailOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                VStack(spacing: 0) {
+                    AndroidPopupMenuRow(
+                        title: String(localized: "delete", defaultValue: "Delete"),
+                        accessibilityIdentifier: "aiRawLogDeleteMenuItem"
+                    ) {
+                        showsOverflowMenu = false
                         showsDeleteConfirmation = true
-                    } label: {
-                        Label(String(localized: "delete", defaultValue: "Delete"), systemImage: "trash")
                     }
-                    Button {
+                    Divider()
+                    AndroidPopupMenuRow(
+                        title: String(localized: "ai_bug_report_menu", defaultValue: "Report AI bug"),
+                        accessibilityIdentifier: "aiRawLogReportBugMenuItem",
+                        isEnabled: AIModelCatalog.isSupported(log.modelName)
+                    ) {
+                        showsOverflowMenu = false
                         showsBugReportConfirmation = true
-                    } label: {
-                        Label(
-                            String(localized: "ai_bug_report_menu", defaultValue: "Report AI bug"),
-                            systemImage: "exclamationmark.bubble"
-                        )
                     }
-                    .disabled(!AIModelCatalog.isSupported(log.modelName))
-                } label: {
-                    Image(systemName: "ellipsis")
                 }
-                .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
             }
         }
         .sheet(item: $bugReportMail) { payload in
@@ -582,16 +690,12 @@ private struct AIRawLogDetailView: View {
         }
         .task { decodeLog() }
         .androidToastFeedback(toastMessage)
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 
@@ -639,19 +743,24 @@ private struct AIRawLogDetailView: View {
     private func prepareBugReport() {
         showsBugReportConfirmation = false
         guard AIModelCatalog.isSupported(log.modelName) else { return }
-        guard AIBugReportMailComposer.canSendMail else {
+        guard AddressedMailComposer.capability == .available else {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
             return
         }
 
         do {
             let attachment = try LLMRawLogPayloadDecoder.gzipAttachmentData(log.logData)
-            bugReportMail = AIBugReportMailPayload(
+            bugReportMail = AddressedMailPayload(
                 recipient: "errors.andbible@gmail.com",
                 subject: bugReportSubject,
                 body: bugReportBody,
-                attachmentData: attachment,
-                attachmentFilename: "ai_raw_log.txt.gz"
+                attachments: [
+                    AddressedMailAttachment(
+                        data: attachment,
+                        filename: "ai_raw_log.txt.gz",
+                        mimeType: "application/gzip"
+                    )
+                ]
             )
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
@@ -709,11 +818,19 @@ private struct AIRawLogDetailView: View {
         do {
             try AISettingsStore(modelContext: modelContext).deleteRawLogs(ids: Set([log.id]))
             showsDeleteConfirmation = false
-            dismiss()
             onDelete()
         } catch {
             showsDeleteConfirmation = false
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
+        }
+    }
+
+    /** Returns through the explicit history owner or environment fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 }

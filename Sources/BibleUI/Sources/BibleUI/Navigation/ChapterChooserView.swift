@@ -116,7 +116,6 @@ public struct ChapterChooserView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .navigationTitle(bookName)
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 

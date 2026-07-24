@@ -84,6 +84,9 @@ struct BibleWindowPane: View {
     /// Shared TTS service used by controllers when speaking selections or chapters.
     let speakService: SpeakService
 
+    /// Reader-session owner for Android's typed Copy/Open reference contract.
+    let windowMenuReferenceStore: BibleWindowMenuReferenceStore
+
     /// Native/web bridge for this pane's WKWebView instance.
     @State private var bridge = BibleBridge()
 
@@ -92,6 +95,9 @@ struct BibleWindowPane: View {
 
     /// Whether the custom Android-style pane hamburger menu is visible.
     @State private var isWindowMenuPresented = false
+
+    /// Whether Android's two-step bookmark popup is visible above the selection action bar.
+    @State private var isSelectionBookmarkMenuPresented = false
 
   /// Native help content requested by this pane's bundled BibleView bridge.
   @State private var readerHelpPresentation: AIReaderHelpPresentation?
@@ -137,17 +143,14 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present this pane's window-scoped text-display settings.
     var onShowWindowTextOptions: (() -> Void)?
 
-    /// Requests the parent reader to present this pane's window-scoped color settings.
-    var onShowWindowColorSettings: (() -> Void)?
+    /// Requests the parent reader to execute one Android recent text-setting action for this pane.
+    var onEditWindowTextSetting: ((AndroidTextDisplaySettingType) -> Void)?
 
-    /// Requests the parent reader to toggle this pane's section-title visibility.
-    var onToggleWindowSectionTitles: (() -> Void)?
+    /// Requests the canonical single-label Study Pad archive workflow.
+    var onExportStudyPadArchive: ((UUID) -> Void)?
 
-    /// Requests the parent reader to present this pane's Strong's-number mode chooser.
-    var onShowWindowStrongsMode: (() -> Void)?
-
-    /// Requests the parent reader to toggle this pane's chapter-and-verse number visibility.
-    var onToggleWindowVerseNumbers: (() -> Void)?
+    /// Requests the canonical bookmark CSV workflow filtered to one Study Pad label.
+    var onExportStudyPadCSV: ((UUID) -> Void)?
 
     /// Requests the parent reader to copy this pane's text settings to another visible window.
     var onCopyWindowSettingsToWindow: ((UUID) -> Void)?
@@ -182,14 +185,14 @@ struct BibleWindowPane: View {
     /// Requests the parent reader to present speak controls.
     var onShowSpeakControls: (() -> Void)?
 
+    /// Requests reader navigation for Android's full PromptEditActivity-equivalent screen.
+    var onShowAIPromptEditor: ((UUID) -> Void)?
+
     /// Forwards shareable plain-text content to the parent share presenter.
     var onShareText: ((String) -> Void)?
 
     /// Forwards My Documents content with Android's separate native subject and body values.
     var onShareMyDocument: ((MyDocumentSharePayload) -> Void)?
-
-    /// Forwards cross-reference payloads for parent-managed presentation.
-    var onShowCrossReferences: (([CrossReference]) -> Void)?
 
     /// Requests the parent reader to open the module picker for a document category.
     var onShowModulePicker: ((DocumentCategory) -> Void)?
@@ -228,6 +231,8 @@ struct BibleWindowPane: View {
         ReaderThemeSurfacePalette(
             settings: displaySettings,
             nightMode: nightMode,
+            workspaceColor: window.workspace?.workspaceColor
+                ?? windowManager.activeWorkspace?.workspaceColor,
             monochromeMode: monochromeMode
         )
     }
@@ -255,17 +260,32 @@ struct BibleWindowPane: View {
                 windowMenuOverlay
             }
         }
-    .sheet(item: $readerHelpPresentation) { presentation in
-      AIReaderHelpDialog(presentation: presentation)
+    .overlay {
+      if let readerHelpPresentation {
+        AIReaderHelpDialog(
+          presentation: readerHelpPresentation,
+          onDismiss: { self.readerHelpPresentation = nil }
+        )
+      }
     }
     .overlay {
       if let aiRunCoordinator {
         AIReaderCoordinatorHost(
           coordinator: aiRunCoordinator,
-          swordManager: controller?.swordManager
+          surfacePalette: surfacePalette,
+          onPresentPromptEditor: { promptID in onShowAIPromptEditor?(promptID) }
         )
       }
     }
+        .androidAnchoredPopupMenu(
+            anchorID: "selectionBookmarkMenuAnchor",
+            isPresented: $isSelectionBookmarkMenuPresented,
+            menuWidth: 220,
+            estimatedMenuHeight: 92,
+            accessibilityIdentifier: "selectionBookmarkMenu"
+        ) {
+            selectionBookmarkPopup
+        }
         .onAppear {
             if controller == nil {
                 initializeController()
@@ -283,6 +303,11 @@ struct BibleWindowPane: View {
         }
         .onChange(of: displaySettings) { _, newValue in
             controller?.updateDisplaySettings(newValue, nightMode: nightMode)
+        }
+        .onChange(of: controller?.hasActiveSelection == true) { _, hasSelection in
+            if !hasSelection {
+                isSelectionBookmarkMenuPresented = false
+            }
         }
     }
 
@@ -432,6 +457,7 @@ struct BibleWindowPane: View {
                 BibleWindowPaneMenuPopup(
                     items: BibleWindowPaneMenuModel(snapshot: windowMenuSnapshot).items,
                     colorScheme: colorScheme,
+                    surfacePalette: surfacePalette,
                     maximumHeight: maximumHeight
                 ) { action in
                     withAnimation(.easeOut(duration: 0.12)) {
@@ -440,12 +466,6 @@ struct BibleWindowPane: View {
                     performWindowMenuAction(action)
                 }
                 .frame(width: width, alignment: .topLeading)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
                 .padding(.top, 42)
                 .padding(.trailing, 6)
                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
@@ -454,196 +474,96 @@ struct BibleWindowPane: View {
     }
 
     private var windowMenuSnapshot: BibleWindowPaneMenuSnapshot {
-        let capabilities = BibleWindowPaneMenuCapabilities(window: window, controller: controller)
-        let resolvedSettings = displaySettings
-        return BibleWindowPaneMenuSnapshot(
-            windowID: window.id,
-            isLinksWindow: window.isLinksWindow,
-            isPinned: windowManager.isEffectivelyPinned(window),
-            isSynchronized: window.isSynchronized,
-            syncGroup: window.syncGroup,
-            isVisible: window.layoutState != "minimized",
-            isMaximized: windowManager.isMaximized,
-            canMinimize: window.layoutState != "minimized" && windowManager.visibleWindows.count > 1,
-            canClose: windowManager.allWindows.count > 1,
-            canSync: capabilities.canSyncWindow,
-            canCopyLink: currentCopyLinkURL != nil,
-            autoPinEnabled: windowManager.activeWorkspace?.workspaceSettings?.autoPin
-                ?? WorkspaceSettings.defaultAutoPin,
-            moduleHasStrongs: controller?.hasStrongs ?? false,
-            sectionTitlesEnabled: resolvedSettings.showSectionTitles ?? true,
-            verseNumbersEnabled: resolvedSettings.showVerseNumbers ?? true,
-      isAIConfigured: isAIConfigured,
-            allWindowsInPersistedOrder: windowSummaries(windowManager.windowsInPersistedOrder),
-            visibleWindows: windowSummaries(windowManager.visibleWindows)
-        )
-    }
-
-  private func windowSummaries(_ windows: [BibleCore.Window]) -> [BibleWindowPaneMenuWindowSummary]
-  {
-        windows.enumerated().map { index, candidate in
-            let candidateController = windowManager.controllers[candidate.id] as? BibleReaderController
-            return BibleWindowPaneMenuWindowSummary(
-                id: candidate.id,
-                position: index,
-                documentAbbreviation: documentAbbreviation(for: candidate, controller: candidateController),
-                referenceName: referenceName(for: candidate, controller: candidateController),
-                isPinned: windowManager.isEffectivelyPinned(candidate)
+        BibleWindowPaneMenuSnapshotFactory.snapshot(
+            for: window,
+            windowManager: windowManager,
+            displaySettings: displaySettings,
+            isAIConfigured: isAIConfigured,
+            referenceStore: windowMenuReferenceStore,
+            recentTextSettings: AndroidTextDisplayRecentSettings.displayedTypes(
+                settingsStore: SettingsStore(modelContext: modelContext)
             )
-        }
-    }
-
-    private func documentAbbreviation(
-        for window: BibleCore.Window,
-        controller: BibleReaderController?
-    ) -> String? {
-        if let controller {
-            return controller.activeModuleName(for: controller.currentCategory)
-        }
-        guard let pageManager = window.pageManager else { return nil }
-        switch pageManager.currentCategoryName {
-        case DocumentCategory.bible.pageManagerKey:
-            return pageManager.bibleDocument
-        case DocumentCategory.commentary.pageManagerKey:
-            return pageManager.commentaryDocument
-        case DocumentCategory.dictionary.pageManagerKey:
-            return pageManager.dictionaryDocument
-        case DocumentCategory.generalBook.pageManagerKey:
-            return pageManager.generalBookDocument
-        case DocumentCategory.map.pageManagerKey:
-            return pageManager.mapDocument
-        case DocumentCategory.epub.pageManagerKey:
-            return pageManager.epubIdentifier
-        default:
-            return pageManager.bibleDocument
-        }
-    }
-
-    private func referenceName(
-        for window: BibleCore.Window,
-        controller: BibleReaderController?
-    ) -> String? {
-        if let controller {
-            switch controller.currentCategory {
-            case .bible, .commentary:
-                return "\(controller.currentBook) \(controller.currentChapter)"
-            case .dictionary:
-                return controller.currentDictionaryKey
-            case .generalBook:
-                return controller.currentGeneralBookKey
-            case .map:
-                return controller.currentMapKey
-            case .epub:
-                return controller.currentEpubTitle ?? controller.currentEpubHref
-            case .dailyDevotion:
-                return nil
-            }
-        }
-        guard let pageManager = window.pageManager else { return nil }
-        switch pageManager.currentCategoryName {
-        case DocumentCategory.bible.pageManagerKey, DocumentCategory.commentary.pageManagerKey:
-            if let book = pageManager.bibleBibleBook, let chapter = pageManager.bibleChapterNo {
-                return "\(book):\(chapter)"
-            }
-            return nil
-        case DocumentCategory.dictionary.pageManagerKey:
-            return pageManager.dictionaryKey
-        case DocumentCategory.generalBook.pageManagerKey:
-            return pageManager.generalBookKey
-        case DocumentCategory.map.pageManagerKey:
-            return pageManager.mapKey
-        case DocumentCategory.epub.pageManagerKey:
-            return pageManager.epubHref
-        default:
-            return nil
-        }
+        )
     }
 
     private func performWindowMenuAction(_ action: BibleWindowPaneMenuAction) {
-        windowManager.activateWindow(window)
-        switch action {
-        case .newWindow:
-            windowManager.addWindow(from: window)
-        case .maximize:
-            windowManager.maximizeWindow(window)
-        case .minimize:
-            windowManager.minimizeWindow(window)
-        case .changeToNormalWindow:
-            windowManager.changeLinksWindowToNormal(window)
-        case .moveToPosition(let position):
-            windowManager.moveWindow(window, toPosition: position)
-        case .togglePin:
-            windowManager.setPinMode(window, value: !window.isPinMode)
-        case .disableSync:
-            windowManager.setSynchronized(window, value: false)
-        case .selectSyncGroup(let group):
-            windowManager.changeSyncGroup(window, groupNumber: group)
-        case .openColorSettings:
-            onShowWindowColorSettings?()
-        case .toggleSectionTitles:
-            onToggleWindowSectionTitles?()
-        case .openStrongsMode:
-            onShowWindowStrongsMode?()
-        case .toggleVerseNumbers:
-            onToggleWindowVerseNumbers?()
-        case .openAllTextOptions:
-            onShowWindowTextOptions?()
-        case .copySettingsToWindow(let targetWindowID):
-            onCopyWindowSettingsToWindow?(targetWindowID)
-        case .copySettingsToWorkspace:
-            onCopyWindowSettingsToWorkspace?()
-        case .copySettingsToGlobal:
-            onCopyWindowSettingsToGlobal?()
-    case .openAIActions:
-      presentWindowAIActions()
-        case .copyLink:
-            copyReference()
-        case .close:
-            windowManager.removeWindow(window)
-        }
+        BibleWindowPaneMenuActionHandler(
+            windowManager: windowManager,
+            window: window,
+            onEditTextSetting: onEditWindowTextSetting,
+            onShowWindowTextOptions: onShowWindowTextOptions,
+            onCopyWindowSettingsToWindow: onCopyWindowSettingsToWindow,
+            onCopyWindowSettingsToWorkspace: onCopyWindowSettingsToWorkspace,
+            onCopyWindowSettingsToGlobal: onCopyWindowSettingsToGlobal,
+            onAddWholePageBookmark: {
+                _ = resolvedWindowMenuController?.createWindowMenuWholePageBookmark()
+            },
+            onExportHTML: {
+                resolvedWindowMenuController?.requestWindowMenuHTMLExport()
+            },
+            onExportStudyPad: {
+                guard let labelID = resolvedWindowMenuController?.windowMenuStudyPadLabelID else {
+                    return
+                }
+                onExportStudyPadArchive?(labelID)
+            },
+            onExportStudyPadCSV: {
+                guard let labelID = resolvedWindowMenuController?.windowMenuStudyPadLabelID else {
+                    return
+                }
+                onExportStudyPadCSV?(labelID)
+            },
+            onOpenAIActions: presentWindowAIActions,
+            onCopyLink: copyReference,
+            onOpenCopiedReference: openCopiedReference,
+            onOpenSpeakReference: openSpeakReference
+        ).perform(action)
     }
 
-    /// Copies the pane's Android-compatible reference URL and triggers toast feedback.
+    /// Controller currently registered for this immutable pane target.
+    private var resolvedWindowMenuController: BibleReaderController? {
+        controller ?? windowManager.controllers[window.id] as? BibleReaderController
+    }
+
+    /// Copies the pane's typed Android-compatible reference and URL.
     private func copyReference() {
-        guard let url = currentCopyLinkURL else { return }
-
-        #if os(iOS)
-        UIPasteboard.general.string = url
-        #elseif os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url, forType: .string)
-        #endif
-    onShowToast?(
-      localizedDrawerString(
-        "reference_copied_to_clipboard", default: "Reference copied to clipboard"))
+        guard let reference = resolvedWindowMenuController?.windowMenuReference() else { return }
+        windowMenuReferenceStore.copy(reference, onShowToast: onShowToast)
     }
 
-    private var currentCopyLinkURL: String? {
-        guard let ctrl = controller else { return nil }
-        guard !ctrl.isShowingAndroidMultiDocument else { return nil }
-        guard ctrl.currentCategory == .bible || ctrl.currentCategory == .commentary else { return nil }
+    /// Opens Android's last typed Copy-reference destination in this exact pane.
+    private func openCopiedReference() {
+        guard let reference = windowMenuReferenceStore.reference else { return }
+        navigateToWindowMenuReference(reference)
+    }
 
-        let documentInitials: String
-    if ctrl.currentCategory == .commentary, let commentaryInitials = ctrl.activeCommentaryModuleName
-    {
-            documentInitials = commentaryInitials
-        } else {
-            documentInitials = ctrl.activeModuleName
+    /// Opens the current source-owned speech position in this exact pane.
+    private func openSpeakReference() {
+        guard speakService.isSpeaking,
+              let position = speakService.currentPosition,
+              let reference = BibleWindowMenuReference.speechPosition(position) else {
+            return
         }
+        navigateToWindowMenuReference(reference)
+    }
 
-        let osisBookId = ctrl.osisBookId(for: ctrl.currentBook)
-        guard !osisBookId.isEmpty else { return nil }
-        let osisRef = "\(osisBookId).\(ctrl.currentChapter).\(ctrl.currentVerse)"
-        let ordinal = ctrl.activeModule?.verseOrdinal(
-            osisBookId: osisBookId,
-            chapter: ctrl.currentChapter,
-            verse: ctrl.currentVerse
-        )
-        return AndBibleReferenceURLBuilder.urlString(
-            osisRef: osisRef,
-            documentInitials: documentInitials,
-            ordinal: ordinal
-        )
+    /** Applies one typed popup reference and keeps failures visible instead of silently retargeting. */
+    private func navigateToWindowMenuReference(_ reference: BibleWindowMenuReference) {
+        guard let controller = resolvedWindowMenuController else {
+            onShowToast?(
+                String(localized: "error_occurred", defaultValue: "An error has occurred")
+            )
+            return
+        }
+        do {
+            try controller.navigateToWindowMenuReference(reference)
+        } catch {
+            onShowToast?(
+                error.localizedDescription.isEmpty
+                    ? String(localized: "error_occurred", defaultValue: "An error has occurred")
+                    : error.localizedDescription
+            )
+        }
     }
 
     /**
@@ -725,7 +645,6 @@ struct BibleWindowPane: View {
     }
         ctrl.onRequestOpenDownloads = { initialSearchText in onShowDownloads?(initialSearchText) }
         ctrl.onShowStrongsSearch = { strongsNum in onSearchForStrongs?(strongsNum) }
-        ctrl.onShowCrossReferences = { refs in onShowCrossReferences?(refs) }
         ctrl.onShowReadingProgress = { tab in onShowReadingProgress?(tab) }
         ctrl.onShowReadingProgressSettings = { onShowReadingProgressSettings?() }
         ctrl.onShowChapterReadHistory = { target in onShowChapterReadHistory?(target) }
@@ -738,19 +657,9 @@ struct BibleWindowPane: View {
     ctrl.onShowReaderHelp = { presentation in
       readerHelpPresentation = presentation
     }
-        ctrl.onShareHtml = { html in
-            #if os(iOS)
-        guard
-          let windowScene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene }).first,
-          let rootVC = windowScene.windows.first?.rootViewController
-        else { return }
-            var topVC = rootVC
-            while let presented = topVC.presentedViewController { topVC = presented }
-            let activityVC = UIActivityViewController(activityItems: [html], applicationActivities: nil)
-            topVC.present(activityVC, animated: true)
-            #endif
-        }
+        // The reader owns all system-share presentation so the handoff stays bound to the
+        // active reader scene rather than whichever UIWindowScene happens to be first.
+        ctrl.onShareHtml = { html in onShareText?(html) }
 
         ctrl.onToggleFullScreen = { onToggleFullScreen?() }
 
@@ -1039,6 +948,7 @@ struct BibleWindowPane: View {
       sqliteLibrary: sqliteLibrary,
       searchIndexService: searchIndexService,
       bookmarkService: bookmarkService,
+      labelConfigurationService: WorkspaceLabelConfigurationService(modelContext: modelContext),
       myDocumentLibraryStore: MyDocumentLibraryStore(modelContext: modelContext),
       myDocumentStore: myDocumentStore,
       windowManager: windowManager,
@@ -1179,6 +1089,14 @@ struct BibleWindowPane: View {
     ctrl.onRequestWorkspaceAIAction = { [weak coordinator] in
       guard let coordinator else { return }
       coordinator.presentActions(for: workspaceAIActionRequest())
+    }
+    ctrl.onRequestWindowAIAction = { [weak ctrl, weak coordinator] in
+      guard let ctrl, let coordinator, let sourceContext = ctrl.aiSourceContext() else {
+        return
+      }
+      let pane = aiPaneSnapshot(controller: ctrl, sourceContext: sourceContext)
+      guard let action = AIReaderBridgeActionResolver.window(pane) else { return }
+      coordinator.presentActions(for: action)
     }
   }
 
@@ -1323,14 +1241,20 @@ struct BibleWindowPane: View {
       for candidate in candidates {
         let candidateController = windowManager.controllers[candidate.id] as? BibleReaderController
         let initials =
-          documentAbbreviation(for: candidate, controller: candidateController) ?? "unknown"
+          BibleWindowPaneMenuSnapshotFactory.documentAbbreviation(
+            for: candidate,
+            controller: candidateController
+          ) ?? "unknown"
         let name =
           candidateController.flatMap {
             $0.installedModules(for: $0.currentCategory)
               .first(where: { $0.name == initials })?.description
           } ?? "unknown"
         summary += "- \(initials) (\(name))"
-        if let key = referenceName(for: candidate, controller: candidateController) {
+        if let key = BibleWindowPaneMenuSnapshotFactory.referenceName(
+          for: candidate,
+          controller: candidateController
+        ) {
           summary += " at \(key)"
         }
         if candidate.id == windowManager.activeWindow?.id {
@@ -1385,7 +1309,15 @@ struct BibleWindowPane: View {
 
     /// Floating action bar shown while the pane has an active text selection.
     private var selectionActionBar: some View {
-        HStack(spacing: 20) {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "readerSelectionActionBar",
+            backgroundColor: surfacePalette.toolbarBackgroundColor,
+            primaryTextColor: surfacePalette.toolbarForegroundColor,
+            secondaryTextColor: surfacePalette.toolbarSecondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            HStack(spacing: 20) {
             if controller?.canUseBibleReferenceActions == true {
                 if disableTwoStepBookmarking {
           Button {
@@ -1417,29 +1349,17 @@ struct BibleWindowPane: View {
                         }
                     }
                 } else {
-                    Menu {
-            Button(
-              String(
-                            localized: "add_bookmark3",
-                            defaultValue: "Selection"
-              )
-            ) {
-                            controller?.bookmarkSelection(wholeVerse: false)
-                        }
-            Button(
-              String(
-                            localized: "add_bookmark_whole_verse1",
-                            defaultValue: "Verses"
-              )
-            ) {
-                            controller?.bookmarkSelection(wholeVerse: true)
-                        }
+                    Button {
+                        isSelectionBookmarkMenuPresented.toggle()
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: "bookmark")
                             Text(String(localized: "bookmark")).font(.caption2)
                         }
                     }
+                    .buttonStyle(.plain)
+                    .androidPopupMenuAnchor(id: "selectionBookmarkMenuAnchor")
+                    .accessibilityIdentifier("selectionBookmarkMenuButton")
                 }
             } else {
         Button {
@@ -1503,13 +1423,54 @@ struct BibleWindowPane: View {
                     }
                 }
             }
+            }
+            .font(.body)
+            .foregroundStyle(surfacePalette.toolbarForegroundColor)
+            .tint(surfacePalette.toolbarForegroundColor)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .font(.body)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(radius: 4)
         .padding(.bottom, 8)
+    }
+
+    /**
+     Builds Android's two-row bookmark popup using the shared application menu surface.
+
+     Android exposes Selection and Verses from one contextual action when two-step bookmarking is
+     enabled. Each row dismisses the popup before forwarding the exact whole-verse flag to the pane
+     controller; an absent controller leaves the menu safely dismissed without persistence.
+
+     - Returns: A reader-palette-owned popup containing Android's two bookmark commands.
+     - Side effects: Dismisses popup state and may create a bookmark through the pane controller.
+     - Failure modes: Missing controller makes the selected command a no-op.
+     */
+    private var selectionBookmarkPopup: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "selectionBookmarkMenuSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            AndroidPopupMenuRow(
+                title: String(localized: "add_bookmark3", defaultValue: "Selection"),
+                accessibilityIdentifier: "selectionBookmarkSelectionAction"
+            ) {
+                isSelectionBookmarkMenuPresented = false
+                controller?.bookmarkSelection(wholeVerse: false)
+            }
+            Divider().overlay(surfacePalette.inactiveBorderColor)
+            AndroidPopupMenuRow(
+                title: String(
+                    localized: "add_bookmark_whole_verse1",
+                    defaultValue: "Verses"
+                ),
+                accessibilityIdentifier: "selectionBookmarkWholeVerseAction"
+            ) {
+                isSelectionBookmarkMenuPresented = false
+                controller?.bookmarkSelection(wholeVerse: true)
+            }
+        }
     }
 }

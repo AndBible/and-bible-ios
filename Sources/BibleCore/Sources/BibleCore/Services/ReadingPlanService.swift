@@ -173,39 +173,81 @@ public final class ReadingPlanService {
 
     private static let bundledPlanDefinitions: [BundledPlanDefinition] = [
         .init(
-            code: "y1ot1nt1_OTthenNT",
-            name: "1-Year through Bible",
-            description: "Read through the Bible in 1 year, starting in Genesis and finishing in Revelation."
-        ),
-        .init(
-            code: "y1ot1nt1_OTandNT",
-            name: "1-Year OT+NT Simultaneously",
-            description: "Read through the Bible in 1 year, with chapters in the OT and NT every day."
+            code: "y1ntpspr",
+            name: String(
+                localized: "plan_name_y1ntpspr",
+                defaultValue: "NT, Psalms & Proverbs in a Year"
+            ),
+            description: String(
+                localized: "plan_description_y1ntpspr",
+                defaultValue: "Courtesy of HEARTLIGHT Internet Magazine, http://www.heartlight.org, permission granted"
+            )
         ),
         .init(
             code: "y1ot1nt1_chronological",
-            name: "Chronological 1-Year through Bible",
-            description: "Plan based on chronological events in the Bible. The chronological time-line is approximate."
+            name: String(
+                localized: "plan_name_y1ot1nt1_chronological",
+                defaultValue: "Chronological 1-Year through Bible"
+            ),
+            description: String(
+                localized: "plan_description_y1ot1nt1_chronological",
+                defaultValue: "Plan based on chronological events in the Bible. The chronological time-line is approximate."
+            )
+        ),
+        .init(
+            code: "y1ot1nt1_OTandNT",
+            name: String(
+                localized: "plan_name_y1ot1nt1_OTandNT",
+                defaultValue: "1-Year OT+NT Simultaneously"
+            ),
+            description: String(
+                localized: "plan_description_y1ot1nt1_OTandNT",
+                defaultValue: "Read through the Bible in 1 year, with chapters in the OT and NT every day."
+            )
+        ),
+        .init(
+            code: "y1ot1nt1_OTthenNT",
+            name: String(
+                localized: "plan_name_y1ot1nt1_OTthenNT",
+                defaultValue: "1-Year through Bible"
+            ),
+            description: String(
+                localized: "plan_description_y1ot1nt1_OTthenNT",
+                defaultValue: "Read through the Bible in 1 year, starting in Genesis and finishing in Revelation. The OT is first, then the NT."
+            )
         ),
         .init(
             code: "y1ot1nt2_mcheyne",
-            name: "M'Cheyne 1-Year 4-chapter/day",
-            description: "Based on the M'Cheyne reading system with four different readings for family and personal devotions. OT once, NT and Psalms twice per year."
+            name: String(
+                localized: "plan_name_y1ot1nt2_mcheyne",
+                defaultValue: "M'Cheyne 1-Year 4-chapter/day"
+            ),
+            description: String(
+                localized: "plan_description_y1ot1nt2_mcheyne",
+                defaultValue: "This plan is based on the M’Cheyne reading system, featuring four different readings for use in both family and personal devotions. Each day has two passages from the Old Testament, one from the New Testament, and one from either the Psalms or the Gospels. In one year, you read the Old Testament once and the New Testament and Psalms twice."
+            )
         ),
         .init(
             code: "y1ot6nt4_profHorner",
-            name: "Prof. Horner 10-chapter/day",
-            description: "Read 10 chapters per day from 10 different lists that cycle at different rates."
-        ),
-        .init(
-            code: "y1ntpspr",
-            name: "NT, Psalms & Proverbs in a Year",
-            description: "Read through the New Testament, Psalms, and Proverbs in one year."
+            name: String(
+                localized: "plan_name_y1ot6nt4_profHorner",
+                defaultValue: "Prof. Horner 10-chapter/day Reading Plan"
+            ),
+            description: String(
+                localized: "plan_description_y1ot6nt4_profHorner",
+                defaultValue: "Courtesy of Prof. Horner, permission granted"
+            )
         ),
         .init(
             code: "y2ot1ntps2",
-            name: "2-Year Through Bible, NT+PS twice",
-            description: "Read through the Bible in 2 years, reading the NT and Psalms twice."
+            name: String(
+                localized: "plan_name_y2ot1ntps2",
+                defaultValue: "2-Year Through Bible, NT+PS twice"
+            ),
+            description: String(
+                localized: "plan_description_y2ot1ntps2",
+                defaultValue: "Read through the Bible in 2 years, reading the NT and Psalms twice. Courtesy of Wholesome Words, http://www.wholesomewords.org/, permission granted"
+            )
         ),
     ]
 

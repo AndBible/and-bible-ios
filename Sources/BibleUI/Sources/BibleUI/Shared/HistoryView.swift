@@ -1,177 +1,136 @@
-// HistoryView.swift — Navigation history
+// HistoryView.swift — Android-parity navigation history content
 
-import SwiftUI
-import SwiftData
 import BibleCore
+import SwiftData
+import SwiftUI
 
 /**
- Displays navigation history for the active reader window and lets the user jump back to prior locations.
+ Renders Android's window-scoped History rows inside an application-owned dialog.
 
- The view filters persisted history to the active window when possible, formats stored OSIS-style keys
- into user-visible references, and offers row deletion plus full-history clearing.
+ This view has one presentation contract. It does not retain the former native iOS `List`,
+ navigation toolbar, swipe deletion, or clear-history branch because none of those behaviors exist
+ in Android's History activity and no production caller used that branch. The reader captures the
+ source window and owns dismissal/navigation after a row tap.
 
- Data dependencies:
- - `modelContext` is used to delete persisted history rows
- - `windowManager` determines which window's history should be shown
- - `bookNameResolver` can translate OSIS book IDs using the active module's dynamic canon
+ Inputs:
+ - optional module-aware OSIS book-name resolver
+ - row-selection callback
+ - captured reader-window identity
 
- Side effects:
- - selecting a row dismisses the sheet and forwards the stored history key through `onNavigate`
- - swipe deletion and clear-all actions remove persisted history items from SwiftData
+ Output: a wrap-content row list that scrolls only after the dialog viewport is exhausted
+
+ Side effects: selecting a row invokes `onNavigate` with its stored navigation key
+
+ Failure modes: malformed keys and unresolved book names preserve their stored fallback text
  */
 public struct HistoryView: View {
-    /// SwiftData context used for deleting history rows.
-    @Environment(\.modelContext) private var modelContext
-
-    /// Shared window manager used to scope history to the active window.
+    /// Legacy scope fallback used only when the owner cannot capture a window identity.
     @Environment(WindowManager.self) private var windowManager
 
-    /// Dismiss action for closing the history screen.
-    @Environment(\.dismiss) private var dismiss
-
-    /// All persisted history items ordered newest-first.
+    /// All persisted checkpoints ordered newest-first.
     @Query(sort: \HistoryItem.createdAt, order: .reverse) private var allHistory: [HistoryItem]
 
-    /// Callback invoked when the user chooses a history item to navigate back to.
-    var onNavigate: ((String) -> Void)?
+    /// Callback that applies one stored key to the captured reader pane.
+    private let onNavigate: ((String) -> Void)?
 
-    /// Resolves an OSIS book ID to a human-readable name using the active controller's dynamic book list.
-    var bookNameResolver: ((String) -> String?)?
+    /// Optional module-aware OSIS book-name resolver.
+    private let bookNameResolver: ((String) -> String?)?
+
+    /// Immutable source-window identity captured when the dialog opens.
+    private let activeWindowID: UUID?
 
     /**
-     Creates the history screen.
+     Creates Android's History row content.
 
      - Parameters:
-       - bookNameResolver: Optional resolver that maps OSIS IDs to dynamic, module-aware book names.
-       - onNavigate: Optional callback invoked with the stored history key when a row is selected.
+       - bookNameResolver: Maps OSIS book IDs to source-module display names when available.
+       - onNavigate: Receives the selected persisted key.
+       - activeWindowID: Captured source reader window; nil falls back to the active window.
+     - Side effects: none until a row is selected.
+     - Failure modes: none.
      */
     public init(
         bookNameResolver: ((String) -> String?)? = nil,
-        onNavigate: ((String) -> Void)? = nil
+        onNavigate: ((String) -> Void)? = nil,
+        activeWindowID: UUID? = nil
     ) {
         self.bookNameResolver = bookNameResolver
         self.onNavigate = onNavigate
+        self.activeWindowID = activeWindowID
     }
 
-    /// Filter history to the active window only.
+    /// Newest-first checkpoints belonging to the captured source window.
     private var history: [HistoryItem] {
-        HistoryListPresentation.visibleItems(allHistory, activeWindowID: windowManager.activeWindow?.id)
+        HistoryListPresentation.visibleItems(allHistory, activeWindowID: resolvedWindowID)
     }
 
-    /**
-     Builds the empty state or filtered history list with destructive toolbar actions.
-     */
+    /// Captured scope wins; active-window lookup remains only for source-compatible callers.
+    private var resolvedWindowID: UUID? {
+        activeWindowID ?? windowManager.activeWindow?.id
+    }
+
     public var body: some View {
         let historySnapshot = history
-        Group {
-            if historySnapshot.isEmpty {
-                VStack {
-                    ContentUnavailableView(
-                        String(localized: "history_no_history"),
-                        systemImage: "clock",
-                        description: Text(String(localized: "history_no_history_description"))
-                    )
-                    .accessibilityIdentifier("historyEmptyState")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(historySnapshot, id: \.id) { item in
-                        Button {
-                            navigateTo(item)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(formatKey(item.key))
-                                        .font(.headline)
-                                    Text(item.document)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(item.createdAt, style: .time)
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier(historyRowIdentifier(for: item))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                deleteItem(item)
-                            } label: {
-                                SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-                            }
-                            .accessibilityIdentifier(historyDeleteButtonIdentifier(for: item))
-                        }
+        ZStack(alignment: .topLeading) {
+            Group {
+                if historySnapshot.isEmpty {
+                    Color.clear
+                        .frame(height: 1)
+                        .accessibilityIdentifier("historyEmptyState")
+                } else {
+                    AndroidAdaptiveDialogScrollView {
+                        historyRows(historySnapshot)
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "history", defaultValue: "History"),
+                accessibilityIdentifier: "historyScreen",
+                accessibilityValue: historyAccessibilityValue,
+                surfaceColor: .clear
+            )
         }
-        .accessibilityIdentifier("historyScreen")
-        .accessibilityValue(historyAccessibilityValue)
-        .navigationTitle(String(localized: "history"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "done")) { dismiss() }
-                    .accessibilityIdentifier("historyDoneButton")
-            }
-            if !historySnapshot.isEmpty {
-                ToolbarItem(placement: .destructiveAction) {
-                    Button(String(localized: "clear"), role: .destructive) {
-                        clearHistory()
+    }
+
+    /** Builds Android's content-sized History rows without native list chrome. */
+    private func historyRows(_ items: [HistoryItem]) -> some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(items, id: \.id) { item in
+                Button {
+                    onNavigate?(item.key)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(formatDescription(for: item))
+                            .font(.title3)
+                            .foregroundStyle(.primary)
+                        Text(HistoryListPresentation.androidDateTime(item.createdAt))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .accessibilityIdentifier("historyClearButton")
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 4)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(HistoryListPresentation.rowIdentifier(for: item))
             }
         }
+        .padding(.bottom, 8)
     }
 
-    /**
-     Formats a stored OSIS-like history key such as `Gen.1.1` into a user-visible `Book Chapter` label.
-     */
-    private func formatKey(_ key: String) -> String {
-        HistoryListPresentation.formattedKey(key, bookNameResolver: bookNameResolver)
+    /** Restores Android's reference-plus-module row title from persisted fields. */
+    private func formatDescription(for item: HistoryItem) -> String {
+        HistoryListPresentation.formattedDescription(
+            key: item.key,
+            document: item.document,
+            bookNameResolver: bookNameResolver
+        )
     }
 
-    /**
-     Dismisses the history view and forwards the selected stored key to the navigation callback.
-     */
-    private func navigateTo(_ item: HistoryItem) {
-        onNavigate?(item.key)
-        dismiss()
-    }
-
-    /**
-     * Resolves the deterministic accessibility identifier for one persisted history row.
-     *
-     * - Parameter item: History row whose durable key should back the identifier.
-     * - Returns: Accessibility identifier stable across row reordering for the same history key.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func historyRowIdentifier(for item: HistoryItem) -> String {
-        HistoryListPresentation.rowIdentifier(for: item)
-    }
-
-    /**
-     Resolves the deterministic accessibility identifier for one history row's delete action.
-     *
-     * - Parameter item: History row whose durable key should back the delete-action identifier.
-     * - Returns: Accessibility identifier stable across row reordering for the same history key.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func historyDeleteButtonIdentifier(for item: HistoryItem) -> String {
-        HistoryListPresentation.deleteButtonIdentifier(for: item)
-    }
-
-    /// Stable History screen state exported for UI automation.
+    /// Stable bounded History state exported for UI automation.
     private var historyAccessibilityValue: String {
         HistoryListPresentation.accessibilityValue(
             for: history,
@@ -179,52 +138,4 @@ public struct HistoryView: View {
             rowTokenLimit: UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
         )
     }
-
-    /**
-     Deletes one visible history row by model identity from the rendered history snapshot.
-     *
-     * - Parameter item: Persisted history row captured by the rendered swipe action.
-     * - Side effects:
-     *   - deletes the referenced `HistoryItem` from SwiftData
-     *   - saves the mutated history state back to persistence
-     * - Failure modes:
-     *   - silently discards save failures because row deletion is a user-driven destructive action
-     *     with no dedicated retry surface in this view
-     */
-    private func deleteItem(_ item: HistoryItem) {
-        modelContext.delete(item)
-        try? modelContext.save()
-    }
-
-    /**
-     Deletes every visible history row whose key matches the requested deterministic test key.
-     *
-     * - Parameter key: Persisted history key to remove from the current history scope.
-     * - Side effects:
-     *   - deletes all matching `HistoryItem` rows from SwiftData
-     *   - saves the mutated history state back to persistence
-     * - Failure modes:
-     *   - silently discards save failures because this helper only backs deterministic XCUITest
-     *     built-in actions
-     */
-    private func deleteItems(matchingKey key: String) {
-        try? HistoryListPresentation.deleteVisibleItems(
-            matchingKey: key,
-            from: allHistory,
-            activeWindowID: windowManager.activeWindow?.id,
-            in: modelContext
-        )
-    }
-
-    /**
-     Deletes every currently visible history row for the active window scope.
-     */
-    private func clearHistory() {
-        try? HistoryListPresentation.clearVisibleItems(
-            from: allHistory,
-            activeWindowID: windowManager.activeWindow?.id,
-            in: modelContext
-        )
-    }
-
 }

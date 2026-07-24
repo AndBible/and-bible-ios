@@ -1,12 +1,6 @@
 import Foundation
 import SwiftUI
 
-#if os(iOS)
-import UIKit
-#elseif os(macOS)
-import AppKit
-#endif
-
 /**
  Android-style startup document setup screen.
 
@@ -17,16 +11,26 @@ import AppKit
  - Inputs:
    - presentation: Ordered setup action contract resolved from startup state.
    - versionText: Optional application version detail shown at the bottom of the setup page.
+   - surfacePalette: Reader/workspace palette inherited by the full-screen startup destination.
    - action closures: Reader-owned routing hooks for each startup action.
  - Side effects: Invokes the supplied action closure when a button is tapped.
  - Failure modes: Missing optional version text is simply omitted.
  */
 struct StartupDocumentSetupView: View {
+    /// Current appearance used by Android's globally managed link accent.
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Host-platform URL handoff used by Android's two startup auto-link rows.
+    @Environment(\.openURL) private var openURL
+
     /// Presentation policy and action ordering for the current startup state.
     let presentation: StartupDocumentSetupPresentation
 
     /// Optional version text shown in the footer.
     let versionText: String?
+
+    /// Reader/workspace-owned palette used by the complete startup activity.
+    let surfacePalette: ReaderThemeSurfacePalette
 
     /// Starts Android Easy Start default downloads.
     let onEasyStart: () -> Void
@@ -41,68 +45,109 @@ struct StartupDocumentSetupView: View {
     let onRestoreDatabase: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                welcomeText
+        ZStack(alignment: .topLeading) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    header
+                    welcomeText
 
-                if presentation.isEasyStartAvailable {
-                    Text(
-                        String(
-                            localized: "easy_start_message",
-                            defaultValue: "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on."
+                    if presentation.actions.contains(.easyStart) {
+                        Text(
+                            String(
+                                localized: "easy_start_message",
+                                defaultValue: "To easily get started, click below to automatically download recommended default documents. Recommended for first time users! You can change these settings later on."
+                            )
                         )
-                    )
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                }
+                        .font(.system(size: 16))
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(5)
 
-                VStack(spacing: 10) {
-                    ForEach(presentation.actions, id: \.self) { action in
-                        startupActionButton(for: action)
+                        startupActionButton(for: .easyStart)
+                    }
+
+                    if presentation.actions.contains(.downloadDocuments) {
+                        startupActionButton(for: .downloadDocuments)
+                    }
+
+                    if presentation.actions.contains(.restoreDatabase) {
+                        startupActionButton(for: .restoreDatabase)
+                    }
+
+                    if presentation.actions.contains(.loadDocumentsFromFiles) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(title(for: .loadDocumentsFromFiles))
+                                .font(.system(size: 16, weight: .bold))
+
+                            Text(supportedFormatsText)
+                                .font(.system(size: 16))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("startupDocumentSetupSupportedFormats")
+                        }
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .padding(.top, 10)
+                        .padding(5)
+
+                        startupActionButton(for: .loadDocumentsFromFiles)
+                    }
+
+                    VStack(spacing: 4) {
+                        startupLink(
+                            title: "https://andbible.org",
+                            urlString: "https://andbible.org",
+                            accessibilityIdentifier: "startupDocumentSetupHomepageLink"
+                        )
+                        startupLink(
+                            title: "https://github.com/AndBible/and-bible",
+                            urlString: "https://github.com/AndBible/and-bible",
+                            accessibilityIdentifier: "startupDocumentSetupGitHubLink"
+                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+
+                    Spacer(minLength: 14)
+
+                    if let versionText {
+                        Text(versionText)
+                            .font(.system(size: 12))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(5)
+                            .accessibilityIdentifier("startupDocumentSetupVersionText")
                     }
                 }
-
-                Text(supportedFormatsText)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("startupDocumentSetupSupportedFormats")
-
-                Spacer(minLength: 24)
-
-                if let versionText {
-                    Text(versionText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .accessibilityIdentifier("startupDocumentSetupVersionText")
-                }
+                .padding(15)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(15)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(surfacePalette.foregroundColor)
+            .background(surfacePalette.backgroundColor.ignoresSafeArea())
+
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "app_name_long", defaultValue: "AndBible: Bible Study"),
+                accessibilityIdentifier: "startupDocumentSetupScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
         }
-        #if os(iOS)
-        .background(Color(uiColor: .systemBackground))
-        #elseif os(macOS)
-        .background(Color(nsColor: .windowBackgroundColor))
-        #endif
         .navigationBarBackButtonHidden(true)
-        .accessibilityIdentifier("startupDocumentSetupScreen")
+        #if os(iOS)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
     }
 
     /// Logo and app title matching Android's first-download header composition.
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "book.closed.fill")
+            Image("DrawerLogo", bundle: .module)
+                .interpolation(.high)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 64, height: 64)
-                .foregroundStyle(.secondary)
+                .frame(width: 72, height: 72)
                 .accessibilityHidden(true)
 
             Text(String(localized: "app_name_long", defaultValue: "AndBible: Bible Study"))
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 20))
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
@@ -114,9 +159,10 @@ struct StartupDocumentSetupView: View {
     /// Welcome message for the current startup reason.
     private var welcomeText: some View {
         Text(welcomeMessage)
-            .font(.body)
-            .foregroundStyle(.primary)
+            .font(.system(size: 16))
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(5)
             .accessibilityIdentifier("startupDocumentSetupWelcomeText")
     }
 
@@ -164,15 +210,46 @@ struct StartupDocumentSetupView: View {
      */
     @ViewBuilder
     private func startupActionButton(for action: StartupDocumentSetupPresentation.Action) -> some View {
-        Button(action: handler(for: action)) {
-            Text(title(for: action))
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .padding(.vertical, 6)
+        AndroidRaisedTextButton(
+            title: title(for: action),
+            foregroundColor: surfacePalette.foregroundColor,
+            backgroundColor: surfacePalette.controlFillColor,
+            accessibilityIdentifier: accessibilityIdentifier(for: action),
+            action: handler(for: action)
+        )
+    }
+
+    /**
+     Builds one Android startup auto-link row using the application-managed accent color.
+
+     Inputs:
+     - visible link text copied from Android's untranslated startup resource
+     - absolute URL string and stable accessibility identity supplied by the startup activity
+
+     Output: one centered, underlined app-owned link row
+
+     Side effects: a successful tap hands the validated URL to the host operating system
+
+     Failure modes: an invalid URL string is ignored without changing startup navigation state
+     */
+    private func startupLink(
+        title: String,
+        urlString: String,
+        accessibilityIdentifier: String
+    ) -> some View {
+        Button {
+            guard let url = URL(string: urlString) else { return }
+            openURL(url)
+        } label: {
+            Text(title)
+                .font(.system(size: 16))
+                .foregroundStyle(AndroidDialogSurfacePalette.accent(for: colorScheme))
+                .underline()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(5)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .accessibilityIdentifier(accessibilityIdentifier(for: action))
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     /// Human-readable title for a startup action.

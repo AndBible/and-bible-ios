@@ -9,7 +9,7 @@ import SwiftUI
  menu actions, and dismissal.
  */
 struct ReaderPassageChooserOverlay<ChooserContent: View>: View {
-    /// Chooser content, normally a `NavigationStack` hosting `BookChooserView`.
+    /// Chooser content hosting `BookChooserView` inside the reader-owned full-screen route.
     let chooserContent: () -> ChooserContent
 
     /**

@@ -99,6 +99,35 @@ public struct ColorSettingsView: View {
     /// Callback invoked after any theme-color mutation.
     var onChange: (() -> Void)?
 
+    /// Palette inherited from the reader/workspace that owns this activity.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Android activity title resolved by the launching scope.
+    private let activityTitle: String
+
+    /// Android Up action supplied by the destination host.
+    private let onBack: (() -> Void)?
+
+    /// Hosting dismissal fallback for standalone settings navigation.
+    @Environment(\.dismiss) private var dismiss
+
+    /// Active app-owned Android color picker row.
+    @State private var activeColorPreference: ColorPreference?
+
+    /// Whether Android's reset confirmation is visible.
+    @State private var showsResetConfirmation = false
+
+    /// Android color preference rows whose values are supported by `TextDisplaySettings`.
+    private enum ColorPreference: String, Identifiable {
+        case workspace
+        case dayText
+        case dayBackground
+        case nightText
+        case nightBackground
+
+        var id: String { rawValue }
+    }
+
     /**
      Creates a color settings editor bound to a shared display-settings model.
 
@@ -117,6 +146,26 @@ public struct ColorSettingsView: View {
         self._settings = settings
         self.workspaceColor = workspaceColor
         self.onChange = onChange
+        surfacePalette = .standard
+        activityTitle = String(localized: "colors")
+        onBack = nil
+    }
+
+    /** Creates the app-owned reader variant with scope title, owner palette, and explicit Up. */
+    init(
+        settings: Binding<TextDisplaySettings>,
+        workspaceColor: Binding<Int?>? = nil,
+        surfacePalette: ReaderThemeSurfacePalette,
+        activityTitle: String,
+        onBack: (() -> Void)?,
+        onChange: (() -> Void)? = nil
+    ) {
+        self._settings = settings
+        self.workspaceColor = workspaceColor
+        self.onChange = onChange
+        self.surfacePalette = surfacePalette
+        self.activityTitle = activityTitle
+        self.onBack = onBack
     }
 
     /**
@@ -304,68 +353,211 @@ public struct ColorSettingsView: View {
         value: Binding<Double>,
         accessibilityIdentifier: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(String(localized: "prefs_noise_title", defaultValue: "Background noise"))
-                Spacer()
-                Text("\(Int(value.wrappedValue.rounded()))")
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: value, in: 0...100, step: 1)
-                .accessibilityIdentifier(accessibilityIdentifier)
-                .accessibilityValue("\(Int(value.wrappedValue.rounded()))")
-            Text(
-                String(
-                    localized: "prefs_noise_summary",
-                    defaultValue: "Adding some noise to background might make it more comfortable to eyes."
-                )
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
+        AndroidSeekBarPreferenceRow(
+            title: String(localized: "prefs_noise_title", defaultValue: "Background noise"),
+            summary: String(
+                localized: "prefs_noise_summary",
+                defaultValue: "Adding some noise to background might make it more comfortable to eyes."
+            ),
+            value: value,
+            range: 0...100,
+            step: 1,
+            palette: surfacePalette,
+            accessibilityIdentifier: accessibilityIdentifier
+        )
     }
 
     /**
      Builds the day-theme, night-theme, and reset-to-defaults color settings form.
      */
     public var body: some View {
-        Form {
-            if let workspaceColor {
-                Section {
-                    ColorPicker(
-                        String(localized: "color_workspace", defaultValue: "Workspace color"),
-                        selection: colorBinding(for: workspaceColor, default: Workspace.defaultWorkspaceColor)
-                    )
-                    .accessibilityIdentifier("colorSettingsWorkspaceColorPicker")
+        AndroidActivityScreen(
+            title: activityTitle,
+            accessibilityIdentifier: "colorSettingsTopAppBar",
+            palette: surfacePalette,
+            onBack: close
+        ) {
+            AndroidActivityTopAppBarActionButton(
+                icon: .asset("ActivityReset"),
+                accessibilityLabel: String(localized: "reset_settings", defaultValue: "Reset"),
+                accessibilityIdentifier: "colorSettingsResetButton",
+                foregroundColor: surfacePalette.toolbarForegroundColor,
+                action: { showsResetConfirmation = true }
+            )
+        } content: {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if workspaceColor != nil {
+                        AndroidColorPreferenceRow(
+                            title: String(localized: "color_workspace", defaultValue: "Workspace color"),
+                            colorARGB: currentColor(for: .workspace),
+                            palette: surfacePalette,
+                            accessibilityIdentifier: "colorSettingsWorkspaceColorPicker",
+                            action: { activeColorPreference = .workspace }
+                        )
+                        AndroidPreferenceDivider(palette: surfacePalette)
+                    }
+
+                    AndroidPreferenceSection(
+                        title: String(localized: "colors_day_mode_title", defaultValue: "Day mode"),
+                        palette: surfacePalette
+                    ) {
+                        colorPreferenceRow(
+                            .dayText,
+                            title: String(localized: "color_text", defaultValue: "Text color"),
+                            accessibilityIdentifier: "colorSettingsDayTextColorPicker"
+                        )
+                        AndroidPreferenceDivider(palette: surfacePalette)
+                        colorPreferenceRow(
+                            .dayBackground,
+                            title: String(localized: "color_background", defaultValue: "Background color"),
+                            accessibilityIdentifier: "colorSettingsDayBackgroundColorPicker"
+                        )
+                        AndroidPreferenceDivider(palette: surfacePalette)
+                        noiseSlider(
+                            value: noiseBinding(for: \.dayNoise),
+                            accessibilityIdentifier: "colorSettingsDayNoiseSlider"
+                        )
+                    }
+
+                    AndroidPreferenceSection(
+                        title: String(localized: "colors_night_mode_title", defaultValue: "Night mode"),
+                        palette: surfacePalette
+                    ) {
+                        colorPreferenceRow(
+                            .nightText,
+                            title: String(localized: "color_text", defaultValue: "Text color"),
+                            accessibilityIdentifier: "colorSettingsNightTextColorPicker"
+                        )
+                        AndroidPreferenceDivider(palette: surfacePalette)
+                        colorPreferenceRow(
+                            .nightBackground,
+                            title: String(localized: "color_background", defaultValue: "Background color"),
+                            accessibilityIdentifier: "colorSettingsNightBackgroundColorPicker"
+                        )
+                        AndroidPreferenceDivider(palette: surfacePalette)
+                        noiseSlider(
+                            value: noiseBinding(for: \.nightNoise),
+                            accessibilityIdentifier: "colorSettingsNightNoiseSlider"
+                        )
+                    }
                 }
+                .padding(.vertical, 8)
             }
-
-            Section(String(localized: "day_theme")) {
-                ColorPicker(String(localized: "text_color"), selection: colorBinding(for: \.dayTextColor, default: -16777216))
-                ColorPicker(String(localized: "background"), selection: colorBinding(for: \.dayBackground, default: -1))
-                noiseSlider(
-                    value: noiseBinding(for: \.dayNoise),
-                    accessibilityIdentifier: "colorSettingsDayNoiseSlider"
-                )
-            }
-
-            Section(String(localized: "night_theme")) {
-                ColorPicker(String(localized: "text_color"), selection: colorBinding(for: \.nightTextColor, default: -1))
-                ColorPicker(String(localized: "background"), selection: colorBinding(for: \.nightBackground, default: -16777216))
-                noiseSlider(
-                    value: noiseBinding(for: \.nightNoise),
-                    accessibilityIdentifier: "colorSettingsNightNoiseSlider"
-                )
-            }
-
-            Section {
-                Button(String(localized: "reset_to_defaults"), action: resetThemeColorsToDefaults)
-                    .accessibilityIdentifier("colorSettingsResetButton")
-            }
-
         }
-        .accessibilityIdentifier("colorSettingsScreen")
-        .accessibilityValue(colorStateLabel)
-        .navigationTitle(String(localized: "colors"))
+        .overlay(alignment: .topLeading) {
+            AndroidActivityAccessibilityMarker(
+                label: activityTitle,
+                accessibilityIdentifier: "colorSettingsScreen",
+                accessibilityValue: colorStateLabel,
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .overlay { colorPickerOverlay }
+        .overlay { resetConfirmationOverlay }
+    }
+
+    /** Builds one app-owned Android color preference row. */
+    private func colorPreferenceRow(
+        _ preference: ColorPreference,
+        title: String,
+        accessibilityIdentifier: String
+    ) -> some View {
+        AndroidColorPreferenceRow(
+            title: title,
+            colorARGB: currentColor(for: preference),
+            palette: surfacePalette,
+            accessibilityIdentifier: accessibilityIdentifier,
+            action: { activeColorPreference = preference }
+        )
+    }
+
+    /// Shared app-owned color picker for the active Android preference.
+    @ViewBuilder
+    private var colorPickerOverlay: some View {
+        if let activeColorPreference {
+            AndroidColorPickerDialog(
+                initialColor: currentColor(for: activeColorPreference),
+                onCancel: { self.activeColorPreference = nil },
+                onSelect: { color in
+                    applyColor(color, to: activeColorPreference)
+                    self.activeColorPreference = nil
+                }
+            )
+        }
+    }
+
+    /// Android's explicit reset confirmation launched from the action-bar reset command.
+    @ViewBuilder
+    private var resetConfirmationOverlay: some View {
+        if showsResetConfirmation {
+            AndroidDecisionDialog(
+                title: "",
+                message: String(
+                    localized: "reset_are_you_sure",
+                    defaultValue: "Are you sure that you want to reset all of these values?"
+                ),
+                actions: [
+                    .init(
+                        id: "yes",
+                        title: String(localized: "yes", defaultValue: "Yes"),
+                        style: .destructive
+                    ) {
+                        resetThemeColorsToDefaults()
+                        showsResetConfirmation = false
+                    },
+                    .init(
+                        id: "no",
+                        title: String(localized: "no", defaultValue: "No"),
+                        style: .normal
+                    ) {
+                        showsResetConfirmation = false
+                    },
+                ],
+                accessibilityIdentifier: "colorSettingsResetDialog"
+            )
+        }
+    }
+
+    /// Resolves the signed ARGB value for one supported Android color row.
+    private func currentColor(for preference: ColorPreference) -> Int {
+        switch preference {
+        case .workspace:
+            return workspaceColor?.wrappedValue ?? Workspace.defaultWorkspaceColor
+        case .dayText:
+            return settings.dayTextColor ?? -16777216
+        case .dayBackground:
+            return settings.dayBackground ?? -1
+        case .nightText:
+            return settings.nightTextColor ?? -1
+        case .nightBackground:
+            return settings.nightBackground ?? -16777216
+        }
+    }
+
+    /** Writes one opaque Android color and notifies the owning reader exactly once. */
+    private func applyColor(_ color: Int, to preference: ColorPreference) {
+        switch preference {
+        case .workspace:
+            workspaceColor?.wrappedValue = color
+        case .dayText:
+            settings.dayTextColor = color
+        case .dayBackground:
+            settings.dayBackground = color
+        case .nightText:
+            settings.nightTextColor = color
+        case .nightBackground:
+            settings.nightBackground = color
+        }
+        onChange?()
+    }
+
+    /// Returns through the owning activity route without exposing native navigation chrome.
+    private func close() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
+        }
     }
 }

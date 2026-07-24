@@ -105,6 +105,34 @@ final class AIReaderBridgeRouteTests: BibleUISwordFixtureTestCase {
   }
 
   /**
+   Verifies Prompt Edit clears its transient sheet route before reader-owned navigation begins.
+
+   - Setup: Starts a coordinator with the exact resolved prompt-editor presentation route.
+   - Expected result: The route is cleared before the callback receives the same prompt identity.
+   - Failure meaning: The reader can race a still-presented sheet, leaving Prompt Edit hidden or
+     presenting it from the wrong owner after PR #363 changed AI presentation architecture.
+   - Side effects: Mutates only the in-memory coordinator route and a local callback capture.
+   */
+  @MainActor
+  func testPromptEditorHandoffClearsCoordinatorRouteBeforeReaderNavigation() throws {
+    let fixture = try makeRouteFixture()
+    let promptID = UUID()
+    fixture.coordinator.presentation = .promptEditor(UUID(), promptID: promptID)
+    var receivedPromptID: UUID?
+    var routeWasClearedBeforeCallback = false
+
+    AIReaderPromptEditorHandoff.perform(
+      coordinator: fixture.coordinator,
+      promptID: promptID,
+      onPresent: { receivedPromptID = $0; routeWasClearedBeforeCallback = fixture.coordinator.presentation == nil }
+    )
+
+    XCTAssertNil(fixture.coordinator.presentation)
+    XCTAssertEqual(receivedPromptID, promptID)
+    XCTAssertTrue(routeWasClearedBeforeCallback)
+  }
+
+  /**
    Creates one coordinator fixture with every persistence and app-domain dependency isolated.
 
    - Returns: Coordinator, context, and recording presentation boundaries retained by one fixture.

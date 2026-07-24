@@ -67,6 +67,22 @@ extension AndBibleUITests {
             || identifier.hasPrefix("aiModelRow_")
     }
 
+    /**
+     Builds type-specific accessibility queries for identifiers without a dedicated route resolver.
+
+     Dynamic Android rows conventionally use `family::stable-key` identifiers because their final
+     segment is data, not a control-type suffix. SwiftUI exports most of those rows as buttons, with
+     switches, sliders, fields, cells, labels, and generic elements used by the remaining shared
+     controls. Probe that family in semantic order so tests resolve the actual control instead of
+     incorrectly assuming every dynamically keyed element is an `Other`.
+
+     - Parameters:
+       - identifier: Stable accessibility identifier requested by a UI test.
+       - app: Running application whose typed accessibility queries should be constructed.
+     - Returns: Ordered, identifier-scoped candidates; no broad descendant query is created.
+     - Side effects: none; candidate existence is evaluated by the caller.
+     - Failure modes: unknown identifiers fall back to a single generic-element query.
+     */
     func heuristicElementCandidates(
         for identifier: String,
         in app: XCUIApplication
@@ -105,6 +121,18 @@ extension AndBibleUITests {
             ]
         }
 
+        if identifier.contains("::") {
+            return [
+                app.buttons[identifier].firstMatch,
+                app.switches[identifier].firstMatch,
+                app.sliders[identifier].firstMatch,
+                app.textFields[identifier].firstMatch,
+                app.cells[identifier].firstMatch,
+                app.staticTexts[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
         if identifier.hasSuffix("Screen") {
             return [
                 app.alerts[identifier].firstMatch,
@@ -129,6 +157,7 @@ extension AndBibleUITests {
         if identifier.hasSuffix("Button")
             || identifier.contains("Button::")
             || identifier.hasSuffix("Action")
+            || identifier.contains("Action::")
         {
             return [
                 app.buttons[identifier].firstMatch,
@@ -166,6 +195,13 @@ extension AndBibleUITests {
             ]
         }
 
+        if identifier.hasSuffix("Filter") {
+            return [
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
+        }
+
         if identifier.hasSuffix("Menu") || identifier.contains("Menu::") {
             return [
                 app.buttons[identifier].firstMatch,
@@ -184,7 +220,7 @@ extension AndBibleUITests {
             ]
         }
 
-        if identifier.contains("Row::") {
+        if identifier.hasSuffix("Row") || identifier.contains("Row::") {
             return [
                 app.collectionViews.cells[identifier].firstMatch,
                 app.cells[identifier].firstMatch,
@@ -652,7 +688,9 @@ extension AndBibleUITests {
      * This helper is intentionally explicit for recurring screen/container roots. The earlier
      * generic "try every XCUI type" approach was the main source of CI flakiness because it could
      * resolve the wrong class for a screen root and force XCTest into very expensive cross-type
-     * snapshot evaluation.
+     * snapshot evaluation. App-owned Android dialog roots are the bounded exception: SwiftUI can
+     * flatten their identifiers onto different XCUI element types, so they use one exact full-tree
+     * identifier query rather than a broad type heuristic.
      *
      * - Parameters:
      *   - identifier: Accessibility identifier to resolve.
@@ -665,22 +703,18 @@ extension AndBibleUITests {
         for identifier: String,
         in app: XCUIApplication
     ) -> [XCUIElement] {
-        if identifier.hasPrefix("labelAssignmentRow::") {
-            return screenScopedRowCandidates(identifier, within: "labelAssignmentScreen", in: app)
+        if identifier.hasPrefix("android"), identifier.hasSuffix("Dialog") {
+            return [
+                app.descendants(matching: .any).matching(identifier: identifier).firstMatch,
+            ]
         }
 
-        if identifier.hasPrefix("labelAssignmentToggleButton::")
-            || identifier.hasPrefix("labelAssignmentFavouriteButton::")
-        {
-            return screenScopedButtonCandidates(identifier, within: "labelAssignmentScreen", in: app)
-        }
-
-        if identifier.hasPrefix("bookmarkListFilterChip::") {
-            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
-        }
-
-        if identifier.hasPrefix("bookmarkListOpenStudyPadButton::") {
-            return screenScopedButtonCandidates(identifier, within: "bookmarkListScreen", in: app)
+        if identifier.hasPrefix("bookmarkListFilterOption::") {
+            return [
+                app.scrollViews["bookmarkListLabelFilterMenu"].buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
+                app.otherElements[identifier].firstMatch,
+            ]
         }
 
         if identifier.hasPrefix("bookmarkListEditLabelsButton::")
@@ -690,8 +724,6 @@ extension AndBibleUITests {
         }
 
         if identifier.hasPrefix("bookmarkListDeleteButton::")
-            || identifier.hasPrefix("readingPlanDeleteButton::")
-            || identifier.hasPrefix("historyDeleteButton::")
             || identifier.hasPrefix("bookmarkListSortOption::")
         {
             return [
@@ -840,7 +872,7 @@ extension AndBibleUITests {
                 app.staticTexts[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
-        case "aboutDoneButton", "labelAssignmentDoneButton", "bookmarkListDoneButton":
+        case "aboutDoneButton":
             return [
                 app.navigationBars.buttons[identifier].firstMatch,
                 app.toolbars.buttons[identifier].firstMatch,
@@ -954,7 +986,6 @@ extension AndBibleUITests {
             "readingProgressSettingsScreen",
             "colorSettingsScreen",
             "importExportScreen",
-            "modulePickerScreen",
             "moduleBrowserScreen":
             return [
                 app.collectionViews[identifier].firstMatch,
@@ -980,10 +1011,6 @@ extension AndBibleUITests {
             ]
         case "readingPlanTemplateButton":
             return screenScopedButtonCandidates(identifier, within: "availablePlansScreen", in: app)
-        case "readingPlanImportButton":
-            return screenScopedButtonCandidates(identifier, within: "availablePlansScreen", in: app)
-        case "readingPlanStartButton", "readingPlanActivePlanLink":
-            return screenScopedButtonCandidates(identifier, within: "readingPlanListScreen", in: app)
         default:
             return heuristicElementCandidates(for: identifier, in: app)
         }
@@ -1045,6 +1072,7 @@ extension AndBibleUITests {
      * - Returns: The first matching UI element for the requested accessibility identifier.
      * - Side effects:
      *   - queries the live XCUI hierarchy repeatedly until the timeout expires
+     *   - attaches the final hierarchy and screenshot when resolution fails
      *   - records an XCTest assertion failure when no matching element appears in time
      * - Failure modes:
      *   - returns the unresolved query result after recording a failure when the identifier never appears
@@ -1072,6 +1100,16 @@ extension AndBibleUITests {
         }
 
         let element = unresolvedElement(identifier, in: app)
+        let hierarchyAttachment = XCTAttachment(string: app.debugDescription)
+        hierarchyAttachment.name = "Missing element hierarchy - \(identifier)"
+        hierarchyAttachment.lifetime = .keepAlways
+        add(hierarchyAttachment)
+
+        let screenshotAttachment = XCTAttachment(screenshot: app.screenshot())
+        screenshotAttachment.name = "Missing element screenshot - \(identifier)"
+        screenshotAttachment.lifetime = .keepAlways
+        add(screenshotAttachment)
+
         XCTAssertTrue(
             element.exists,
             "Expected element '\(identifier)' to exist within \(timeout) seconds.",

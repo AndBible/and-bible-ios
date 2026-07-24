@@ -439,16 +439,31 @@ struct AIReaderLiveRawLogPresentation: Equatable {
   }
 }
 
-/** Android's full-screen structured reader for one active-session raw transcript. */
-struct AIReaderLiveRawLogView: View {
-  /// Dismisses the full-screen destination like Android's action-bar up button.
-  @Environment(\.dismiss) private var dismiss
+/**
+ Renders Android's full RawLlmLogActivity with shared app-owned activity and popup structures.
 
+ Inputs: immutable terminal transcript, active reader/window palette, and explicit Up callback
+
+ Output: one full-viewport structured log activity with copy, system share, and report overflow
+
+ Side effects: copies text, invokes the operating-system share/mail boundaries, and opens the
+ app-owned report confirmation after an explicit overflow action
+
+ Failure modes: attachment/mail failures appear in the shared Android decision dialog
+ */
+struct AIReaderLiveRawLogView: View {
   /// Immutable terminal snapshot supplied by the live AI panel.
   let snapshot: AIReaderLiveRawLogSnapshot
+  /// Reader/window palette inherited by Android's activity shell and popup.
+  let surfacePalette: ReaderThemeSurfacePalette
+  /// Explicit Android Up command owned by the embedding agent-log widget.
+  let onBack: () -> Void
 
+  @Environment(\.colorScheme) private var colorScheme
   /// Whether Android's app-owned report confirmation is blocking the log.
   @State private var showsBugReportConfirmation = false
+  /// Whether the shared anchored overflow popup is visible.
+  @State private var showsOverflowMenu = false
   /// Addressed payload presented only through the system mail composer.
   @State private var bugReportMail: AIBugReportMailPayload?
   /// Android-style copy acknowledgement.
@@ -458,98 +473,198 @@ struct AIReaderLiveRawLogView: View {
 
   var body: some View {
     let presentation = AIReaderLiveRawLogPresentation(snapshot: snapshot)
-    NavigationStack {
-      ZStack {
-        VStack(spacing: 0) {
-          if presentation.showsTotalSummary {
-            Text(presentation.totalSummary)
-              .font(.caption)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
-            Divider()
-          }
-          if presentation.entries.isEmpty {
-            ContentUnavailableView(
-              String(
-                localized: "raw_llm_log_empty",
-                defaultValue: "No raw log data available"
-              ),
-              systemImage: "doc.text"
-            )
-          } else {
-            List(presentation.entries) { entry in
-              AIReaderLiveRawLogEntryView(entry: entry)
+    ZStack(alignment: .topLeading) {
+      activity(presentation)
+        .accessibilityHidden(showsBugReportConfirmation || failureMessage != nil)
+
+      AndroidActivityAccessibilityMarker(
+        label: String(localized: "raw_llm_log_title", defaultValue: "Raw LLM Log"),
+        accessibilityIdentifier: "aiReaderLiveRawLogActivity",
+        surfaceColor: surfacePalette.backgroundColor
+      )
+      .accessibilityHidden(showsBugReportConfirmation || failureMessage != nil)
+
+      if showsBugReportConfirmation {
+        bugReportConfirmation(presentation)
+      }
+
+      if let message = failureMessage {
+        AndroidDecisionDialog(
+          title: String(localized: "error", defaultValue: "Error"),
+          message: message,
+          actions: [
+            .init(
+              id: "okay",
+              title: String(localized: "okay", defaultValue: "OK"),
+              style: .normal
+            ) {
+              failureMessage = nil
             }
-            .listStyle(.plain)
-          }
-        }
-        .accessibilityHidden(showsBugReportConfirmation)
-
-        if showsBugReportConfirmation {
-          AIReaderLiveRawLogBugReportConfirmationDialog(
-            onConfirm: { prepareBugReport(presentation) },
-            onCancel: { showsBugReportConfirmation = false }
-          )
-        }
-      }
-      .navigationTitle(String(localized: "raw_llm_log_title", defaultValue: "Raw LLM Log"))
-      #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button(action: dismiss.callAsFunction) {
-            Image(systemName: "chevron.backward")
-          }
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-          Button { copy(presentation.formattedText) } label: {
-            Image(systemName: "doc.on.doc")
-          }
-          .accessibilityLabel(String(localized: "copy", defaultValue: "Copy"))
-
-          ShareLink(item: presentation.formattedText) {
-            Image(systemName: "square.and.arrow.up")
-          }
-          .accessibilityLabel(String(localized: "share", defaultValue: "Share"))
-
-          if !snapshot.transcript.iterationUsage.isEmpty {
-            Menu {
-              Button {
-                showsBugReportConfirmation = true
-              } label: {
-                Label(
-                  String(localized: "ai_bug_report_menu", defaultValue: "Report AI bug"),
-                  systemImage: "exclamationmark.bubble"
-                )
-              }
-              .disabled(!AIModelCatalog.isSupported(snapshot.modelName))
-            } label: {
-              Image(systemName: "ellipsis")
-            }
-            .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-          }
-        }
-      }
-      .sheet(item: $bugReportMail) { payload in
-        AIBugReportMailComposer(payload: payload) {
-          bugReportMail = nil
-        }
-      }
-      .androidToastFeedback(toastMessage)
-      .alert(
-        String(localized: "error", defaultValue: "Error"),
-        isPresented: Binding(
-          get: { failureMessage != nil },
-          set: { if !$0 { failureMessage = nil } }
+          ],
+          accessibilityIdentifier: "aiReaderRawLogFailureDialog"
         )
-      ) {
-        Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-      } message: {
-        Text(failureMessage ?? "")
       }
     }
+    // The mail composer is an explicit operating-system boundary, not application presentation.
+    .sheet(item: $bugReportMail) { payload in
+      AIBugReportMailComposer(payload: payload) {
+        bugReportMail = nil
+      }
+    }
+    .androidToastFeedback(toastMessage)
+  }
+
+  /** Builds the full app-owned Android activity and attaches its shared anchored overflow. */
+  private func activity(_ presentation: AIReaderLiveRawLogPresentation) -> some View {
+    AndroidActivityScreen(
+      title: String(localized: "raw_llm_log_title", defaultValue: "Raw LLM Log"),
+      accessibilityIdentifier: "aiReaderRawLogAppBar",
+      palette: surfacePalette,
+      onBack: onBack
+    ) {
+      AndroidActivityTopAppBarActionButton(
+        icon: .asset("ActivityCopy"),
+        accessibilityLabel: String(localized: "copy", defaultValue: "Copy"),
+        accessibilityIdentifier: "aiReaderRawLogCopyButton",
+        foregroundColor: surfacePalette.toolbarForegroundColor
+      ) {
+        copy(presentation.formattedText)
+      }
+
+      ShareLink(item: presentation.formattedText) {
+        AndBibleIconView(name: "ActivityShare", size: 24)
+          .frame(width: 48, height: 48)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(surfacePalette.toolbarForegroundColor)
+      .accessibilityLabel(String(localized: "share", defaultValue: "Share"))
+      .accessibilityIdentifier("aiReaderRawLogShareButton")
+
+      if !snapshot.transcript.iterationUsage.isEmpty {
+        AndroidActivityTopAppBarActionButton(
+          icon: .asset("ToolbarOverflow"),
+          accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+          accessibilityIdentifier: "aiReaderRawLogOverflowButton",
+          foregroundColor: surfacePalette.toolbarForegroundColor
+        ) {
+          showsOverflowMenu.toggle()
+        }
+        .androidPopupMenuAnchor(id: "aiReaderRawLogOverflowAnchor")
+      }
+    } content: {
+      logContent(presentation)
+    }
+    .androidAnchoredPopupMenu(
+      anchorID: "aiReaderRawLogOverflowAnchor",
+      isPresented: $showsOverflowMenu,
+      menuWidth: 260,
+      estimatedMenuHeight: 56,
+      accessibilityIdentifier: "aiReaderRawLogOverflowMenu"
+    ) {
+      AndroidPopupMenuSurface(
+        colorScheme: colorScheme,
+        accessibilityIdentifier: "aiReaderRawLogOverflowMenuSurface",
+        backgroundColor: surfacePalette.backgroundColor,
+        primaryTextColor: surfacePalette.foregroundColor,
+        secondaryTextColor: surfacePalette.secondaryForegroundColor,
+        accentColor: surfacePalette.controlAccentColor
+      ) {
+        AndroidPopupMenuRow(
+          title: String(localized: "ai_bug_report_menu", defaultValue: "Report AI bug"),
+          icon: .asset("SettingsIconBugReport"),
+          accessibilityIdentifier: "aiReaderRawLogReportBugAction",
+          isEnabled: AIModelCatalog.isSupported(snapshot.modelName)
+        ) {
+          showsOverflowMenu = false
+          showsBugReportConfirmation = true
+        }
+      }
+    }
+  }
+
+  /** Renders Android's total header and expandable RecyclerView rows without native `List`. */
+  @ViewBuilder
+  private func logContent(_ presentation: AIReaderLiveRawLogPresentation) -> some View {
+    VStack(spacing: 0) {
+      if presentation.showsTotalSummary {
+        Text(presentation.totalSummary)
+          .font(.system(size: 13))
+          .foregroundStyle(surfacePalette.secondaryForegroundColor)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+        Divider()
+          .overlay(surfacePalette.inactiveBorderColor)
+      }
+
+      if presentation.entries.isEmpty {
+        VStack(spacing: 12) {
+          AndBibleIconView(name: "AgentLogInfo", size: 40)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+          Text(
+            String(
+              localized: "raw_llm_log_empty",
+              defaultValue: "No raw log data available"
+            )
+          )
+          .font(.system(size: 16))
+          .foregroundStyle(surfacePalette.secondaryForegroundColor)
+          .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+      } else {
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            ForEach(presentation.entries) { entry in
+              AIReaderLiveRawLogEntryView(
+                entry: entry,
+                surfacePalette: surfacePalette
+              )
+              Divider()
+                .overlay(surfacePalette.inactiveBorderColor)
+            }
+          }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(surfacePalette.backgroundColor)
+  }
+
+  /// Shared app-owned confirmation before invoking the addressed operating-system mail composer.
+  private func bugReportConfirmation(
+    _ presentation: AIReaderLiveRawLogPresentation
+  ) -> some View {
+    AndroidDecisionDialog(
+      title: String(
+        localized: "send_ai_bug_report_title",
+        defaultValue: "Report AI bug"
+      ),
+      message: String(
+        localized: "bug_report_email_text",
+        defaultValue:
+          "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
+      ),
+      actions: [
+        .init(
+          id: "cancel",
+          title: String(localized: "cancel", defaultValue: "Cancel"),
+          style: .normal
+        ) {
+          showsBugReportConfirmation = false
+        },
+        .init(
+          id: "okay",
+          title: String(localized: "okay", defaultValue: "OK"),
+          style: .normal
+        ) {
+          prepareBugReport(presentation)
+        },
+      ],
+      accessibilityIdentifier: "aiReaderLiveRawLogBugReportConfirmationDialog"
+    )
   }
 
   /** Copies the complete Android-formatted log and emits Android's short toast. */
@@ -574,7 +689,7 @@ struct AIReaderLiveRawLogView: View {
   private func prepareBugReport(_ presentation: AIReaderLiveRawLogPresentation) {
     showsBugReportConfirmation = false
     guard AIModelCatalog.isSupported(snapshot.modelName) else { return }
-    guard AIBugReportMailComposer.canSendMail else {
+    guard AddressedMailComposer.capability == .available else {
       failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
       return
     }
@@ -583,7 +698,7 @@ struct AIReaderLiveRawLogView: View {
         Data(presentation.formattedText.utf8)
       )
       let version = AndBibleAppVersionMetadata.current().marketingVersion
-      bugReportMail = AIBugReportMailPayload(
+      bugReportMail = AddressedMailPayload(
         recipient: "errors.andbible@gmail.com",
         subject: presentation.bugReportSubject(appVersion: version),
         body: presentation.bugReportBody(
@@ -592,8 +707,13 @@ struct AIReaderLiveRawLogView: View {
           platformLine: Self.platformLine,
           deviceLine: Self.deviceLine
         ),
-        attachmentData: attachment,
-        attachmentFilename: "ai_raw_log.txt.gz"
+        attachments: [
+          AddressedMailAttachment(
+            data: attachment,
+            filename: "ai_raw_log.txt.gz",
+            mimeType: "application/gzip"
+          )
+        ]
       )
     } catch {
       failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
@@ -619,10 +739,12 @@ struct AIReaderLiveRawLogView: View {
   }
 }
 
-/** One independently expandable raw-log row with a stable Android-sized header. */
+/** One independently expandable raw-log row with exact app assets and reader-owned colors. */
 private struct AIReaderLiveRawLogEntryView: View {
   /// Android-formatted row content.
   let entry: AIReaderLiveRawLogDisplayEntry
+  /// Active reader/window palette inherited from the full activity.
+  let surfacePalette: ReaderThemeSurfacePalette
   /// Local expansion state; rows start collapsed like Android.
   @State private var isExpanded = false
 
@@ -634,13 +756,16 @@ private struct AIReaderLiveRawLogEntryView: View {
         HStack(spacing: 8) {
           Text(entry.title)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
+            .foregroundStyle(surfacePalette.foregroundColor)
             .frame(maxWidth: .infinity, alignment: .leading)
           Text(entry.tokenSummary)
             .font(.caption2)
-            .foregroundStyle(.secondary)
-          Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+          AndBibleIconView(
+            name: isExpanded ? "PromptCollapseIndicator" : "PromptExpandIndicator",
+            size: 20
+          )
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
             .frame(width: 20, height: 20)
         }
         .contentShape(Rectangle())
@@ -650,57 +775,12 @@ private struct AIReaderLiveRawLogEntryView: View {
       if isExpanded {
         Text(entry.content)
           .font(.system(size: 11, design: .monospaced))
+          .foregroundStyle(surfacePalette.foregroundColor)
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .padding(.vertical, 2)
-  }
-}
-
-/** App-owned confirmation shown before the addressed system mail composer. */
-private struct AIReaderLiveRawLogBugReportConfirmationDialog: View {
-  /// Builds the report and opens the system composer.
-  let onConfirm: () -> Void
-  /// Returns to the raw log without creating an attachment.
-  let onCancel: () -> Void
-
-  var body: some View {
-    GeometryReader { geometry in
-      ZStack {
-        Color.black.opacity(0.4)
-          .ignoresSafeArea()
-          .accessibilityHidden(true)
-        AIAndroidDialogSurface(
-          title: String(localized: "send_ai_bug_report_title", defaultValue: "Report AI bug")
-        ) {
-          Text(
-            String(
-              localized: "bug_report_email_text",
-              defaultValue:
-                "Next, please select your preferred email application (Gmail for example) to send the report to the developer team."
-            )
-          )
-          .padding(.horizontal, 20)
-          .padding(.vertical, 8)
-        } actions: {
-          Spacer()
-          AIAndroidDialogAction(
-            title: String(localized: "cancel", defaultValue: "Cancel"),
-            action: onCancel
-          )
-          AIAndroidDialogAction(
-            title: String(localized: "okay", defaultValue: "OK"),
-            action: onConfirm
-          )
-        }
-        .padding(.horizontal, 24)
-        .frame(maxHeight: geometry.size.height * 0.8)
-      }
-    }
-    .zIndex(20)
-    .accessibilityElement(children: .contain)
-    .accessibilityAddTraits(.isModal)
-    .accessibilityIdentifier("aiReaderLiveRawLogBugReportConfirmationDialog")
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
   }
 }

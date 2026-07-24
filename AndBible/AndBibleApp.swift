@@ -257,6 +257,14 @@ private struct ICloudRuntimeModeChange {
     /// Effective iCloud mode after startup recovery and fallback handling.
     let effectiveICloudEnabled: Bool
 
+    /**
+     CloudKit-backed container that `SyncService` may monitor after the runtime swap.
+
+     Local-only runtimes intentionally leave this nil. That includes disabled production mode
+     and the explicit UI-automation container boundary used on unprovisioned simulators.
+     */
+    let cloudKitMonitoringContainer: ModelContainer?
+
     /// Whether CloudKit startup failed and local fallback recovered the app.
     let didRecoverFromCloudKitFailure: Bool
 }
@@ -340,6 +348,33 @@ struct AndBibleApp: App {
      Read from UserDefaults (not SwiftData) because we need it before the container is created.
      */
     static let iCloudSyncEnabledKey = "icloud_sync_enabled"
+
+    #if DEBUG
+    /// Explicit UI-automation opt-in for replacing unavailable simulator CloudKit construction.
+    private static let uiTestLocalICloudRuntimeContainerKey =
+        "UITEST_LOCAL_ICLOUD_RUNTIME_CONTAINER"
+
+    /**
+     Reports whether this launch explicitly substitutes a local container at the CloudKit boundary.
+
+     Unprovisioned simulator apps cannot launch with CloudKit entitlements, while constructing a
+     SwiftData CloudKit container without them traps asynchronously inside Core Data. Requiring
+     both XCTest's session marker and a per-test opt-in keeps normal Debug launches on the exact
+     production path and makes the unavailable integration boundary visible in the test itself.
+
+     - Returns: `true` only for an explicitly opted-in UI-automation process.
+     - Side effects: none.
+     - Failure modes: none; missing or malformed environment values resolve to `false`.
+     */
+    private static var usesUITestLocalICloudRuntimeContainer: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        guard let sessionIdentifier = environment["UITEST_SESSION_ID"],
+              !sessionIdentifier.isEmpty else {
+            return false
+        }
+        return environment[uiTestLocalICloudRuntimeContainerKey] == "1"
+    }
+    #endif
 
     #if DEBUG
     /**
@@ -701,18 +736,8 @@ struct AndBibleApp: App {
 
     /// App-owned Sync Settings route content that survives live SwiftData container replacement.
     private var syncSettingsRouteContent: some View {
-        NavigationStack {
-            SyncSettingsView()
-                .environment(syncService)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(String(localized: "done")) {
-                            dismissSyncSettingsRoute()
-                        }
-                        .accessibilityIdentifier("syncSettingsDoneButton")
-                    }
-                }
-        }
+        SyncSettingsView(onBack: dismissSyncSettingsRoute)
+            .environment(syncService)
     }
 
     /**
@@ -788,181 +813,82 @@ struct AndBibleApp: App {
     /// Scene content plus lifecycle remote-sync prompts.
     private var sceneContentWithRemoteSyncAlerts: some View {
         sceneContent
-            .alert(
-                String(localized: "cloud_sync_title"),
-                isPresented: Binding(
-                    get: { pendingRemoteAdoption != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingRemoteAdoption = nil
-                            showNextPendingRemoteAdoptionIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingRemoteAdoption
-            ) { candidate in
-                Button(String(localized: "cloud_fetch_and_restore_initial")) {
-                    pendingRemoteConfirmation = .resetLocal(candidate)
-                    pendingRemoteAdoption = nil
+            .overlay {
+                if let candidate = pendingRemoteAdoption {
+                    AndroidDecisionDialog(title: String(localized: "cloud_sync_title"), message: String(format: String(localized: "overrideBackup"), remoteCategoryContentDescription(for: candidate.category)), actions: [
+                        .init(id: "restore", title: String(localized: "cloud_fetch_and_restore_initial"), style: .normal) { pendingRemoteConfirmation = .resetLocal(candidate); pendingRemoteAdoption = nil },
+                        .init(id: "create", title: String(localized: "cloud_create_new"), style: .normal) { pendingRemoteConfirmation = .resetCloud(candidate); pendingRemoteAdoption = nil },
+                        .init(id: "disable", title: String(localized: "cloud_disable_sync"), style: .normal) { disableRemoteSync(for: candidate.category); pendingRemoteAdoption = nil; showNextPendingRemoteAdoptionIfNeeded() }
+                    ], accessibilityIdentifier: "appDecisionDialog")
+                } else if let confirmation = pendingRemoteConfirmation {
+                    AndroidDecisionDialog(title: String(localized: "are_you_sure"), message: remoteConfirmationMessage(for: confirmation), actions: [
+                        .init(id: "confirm", title: String(localized: "ok"), style: .destructive) { let captured = confirmation; pendingRemoteConfirmation = nil; Task { await continueRemoteSynchronization(after: captured) } },
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { disableRemoteSync(for: confirmation.category); pendingRemoteConfirmation = nil; showNextPendingRemoteAdoptionIfNeeded() }
+                    ], accessibilityIdentifier: "appDecisionDialog")
+                } else if let message = remoteSyncErrorMessage {
+                    AndroidDecisionDialog(title: String(localized: "cloud_sync_title"), message: message, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { remoteSyncErrorMessage = nil }
+                    ], accessibilityIdentifier: "appDecisionDialog")
                 }
-                Button(String(localized: "cloud_create_new")) {
-                    pendingRemoteConfirmation = .resetCloud(candidate)
-                    pendingRemoteAdoption = nil
-                }
-                Button(String(localized: "cloud_disable_sync"), role: .cancel) {
-                    disableRemoteSync(for: candidate.category)
-                    pendingRemoteAdoption = nil
-                    showNextPendingRemoteAdoptionIfNeeded()
-                }
-            } message: { candidate in
-                Text(
-                    String(
-                        format: String(localized: "overrideBackup"),
-                        remoteCategoryContentDescription(for: candidate.category)
-                    )
-                )
-            }
-            .alert(
-                String(localized: "are_you_sure"),
-                isPresented: Binding(
-                    get: { pendingRemoteConfirmation != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingRemoteConfirmation = nil
-                            showNextPendingRemoteAdoptionIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingRemoteConfirmation
-            ) { confirmation in
-                Button(String(localized: "ok"), role: .destructive) {
-                    let capturedConfirmation = confirmation
-                    pendingRemoteConfirmation = nil
-                    Task {
-                        await continueRemoteSynchronization(after: capturedConfirmation)
-                    }
-                }
-                Button(String(localized: "cancel"), role: .cancel) {
-                    disableRemoteSync(for: confirmation.category)
-                    pendingRemoteConfirmation = nil
-                    showNextPendingRemoteAdoptionIfNeeded()
-                }
-            } message: { confirmation in
-                Text(remoteConfirmationMessage(for: confirmation))
-            }
-            .alert(
-                String(localized: "cloud_sync_title"),
-                isPresented: Binding(
-                    get: { remoteSyncErrorMessage != nil },
-                    set: { newValue in
-                        if !newValue {
-                            remoteSyncErrorMessage = nil
-                        }
-                    }
-                )
-            ) {
-                Button(String(localized: "ok")) {
-                    remoteSyncErrorMessage = nil
-                }
-            } message: {
-                Text(remoteSyncErrorMessage ?? String(localized: "sync_error"))
             }
     }
 
     /// Scene content plus external document import prompts.
     private var sceneContentWithAlerts: some View {
         sceneContentWithRemoteSyncAlerts
-            .alert(
-                String(localized: "import_from_file", defaultValue: "Import from File"),
-                isPresented: Binding(
-                    get: { pendingExternalDocumentImport != nil },
-                    set: { newValue in
-                        if !newValue {
-                            pendingExternalDocumentImport = nil
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingExternalDocumentImport
-            ) { request in
-                Button(String(localized: "ok")) {
-                    pendingExternalDocumentImport = nil
-                    preflightExternalDocumentImport(request)
+            .overlay {
+                if let request = pendingExternalDocumentImport {
+                    AndroidDecisionDialog(title: String(localized: "import_from_file", defaultValue: "Import from File"), message: externalDocumentImportConfirmationMessage(for: request), actions: [
+                        .init(id: "confirm", title: String(localized: "ok"), style: .normal) { pendingExternalDocumentImport = nil; preflightExternalDocumentImport(request) },
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingExternalDocumentImport = nil; showNextPendingExternalDocumentImportIfNeeded() }
+                    ], accessibilityIdentifier: "appDecisionDialog")
+                } else if let confirmation = pendingExternalModuleOverwrite {
+                    AndroidDecisionDialog(title: String(localized: "android_module_backup_overwrite_title", defaultValue: "Overwrite existing module files?"), message: externalDocumentOverwriteMessage(for: confirmation.inspection), actions: [
+                        .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { pendingExternalModuleOverwrite = nil; isImportingExternalDocument = false; showNextPendingExternalDocumentImportIfNeeded() },
+                        .init(id: "overwrite", title: String(localized: "yes", defaultValue: "Yes"), style: .destructive) { pendingExternalModuleOverwrite = nil; performExternalDocumentImport(confirmation.request, overwritePolicy: .replaceExisting(confirmation.inspection.overwriteAuthorization)) }
+                    ], accessibilityIdentifier: "appDecisionDialog")
+                } else if let message = externalDocumentImportMessage {
+                    AndroidDecisionDialog(title: String(localized: "import_from_file", defaultValue: "Import from File"), message: message, actions: [
+                        .init(id: "okay", title: String(localized: "ok"), style: .normal) { externalDocumentImportMessage = nil; showNextPendingExternalDocumentImportIfNeeded() }
+                    ], accessibilityIdentifier: "appDecisionDialog")
                 }
-                Button(String(localized: "cancel"), role: .cancel) {
-                    // The dismissal binding owns cancel queue advancement.
-                }
-            } message: { request in
-                Text(externalDocumentImportConfirmationMessage(for: request))
-            }
-            .alert(
-                String(
-                    localized: "android_module_backup_overwrite_title",
-                    defaultValue: "Overwrite existing module files?"
-                ),
-                isPresented: Binding(
-                    get: { pendingExternalModuleOverwrite != nil },
-                    set: { isPresented in
-                        if !isPresented, pendingExternalModuleOverwrite != nil {
-                            pendingExternalModuleOverwrite = nil
-                            isImportingExternalDocument = false
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                ),
-                presenting: pendingExternalModuleOverwrite
-            ) { confirmation in
-                Button(String(localized: "cancel"), role: .cancel) {
-                    pendingExternalModuleOverwrite = nil
-                    isImportingExternalDocument = false
-                    showNextPendingExternalDocumentImportIfNeeded()
-                }
-                Button(String(localized: "yes", defaultValue: "Yes"), role: .destructive) {
-                    pendingExternalModuleOverwrite = nil
-                    performExternalDocumentImport(
-                        confirmation.request,
-                        overwritePolicy: .replaceExisting(
-                            confirmation.inspection.overwriteAuthorization
-                        )
-                    )
-                }
-            } message: { confirmation in
-                Text(externalDocumentOverwriteMessage(for: confirmation.inspection))
-            }
-            .alert(
-                String(localized: "import_from_file", defaultValue: "Import from File"),
-                isPresented: Binding(
-                    get: { externalDocumentImportMessage != nil },
-                    set: { newValue in
-                        if !newValue {
-                            externalDocumentImportMessage = nil
-                            showNextPendingExternalDocumentImportIfNeeded()
-                        }
-                    }
-                )
-            ) {
-                Button(String(localized: "ok")) {
-                    externalDocumentImportMessage = nil
-                    showNextPendingExternalDocumentImportIfNeeded()
-                }
-            } message: {
-                Text(externalDocumentImportMessage ?? "")
             }
     }
 
-    /// Stable scene presentation host that keeps app-owned routes above data-stack replacement.
+    /**
+     Builds the stable scene presentation host above data-stack replacement.
+
+     The Sync Settings route identity is exported by a sibling marker. Applying that identifier to
+     the visible activity container causes SwiftUI to replace the identifiers of its backend picker,
+     state export, toggles, and dialog controls.
+
+     Inputs: current scene content, app-owned Sync Settings route state, and captured model container
+
+     Output: one scene-level stack with Sync Settings above the reader when presented
+
+     Side effects: none; child controls own presentation and persistence commands
+
+     Failure modes: none; an absent captured container falls back to the current app container
+     */
     private var scenePresentationHost: some View {
         ZStack {
             sceneContentWithAlerts
                 .modelContainer(modelContainer)
 
             if syncSettingsRouteState.isPresented {
-                syncSettingsRouteContent
-                    .modelContainer(syncSettingsRouteState.modelContainer ?? modelContainer)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemBackground))
-                    .accessibilityIdentifier("appOwnedSyncSettingsRoute")
-                    .zIndex(1)
+                ZStack(alignment: .topLeading) {
+                    syncSettingsRouteContent
+                        .modelContainer(syncSettingsRouteState.modelContainer ?? modelContainer)
+
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "sync_adapter"),
+                        accessibilityIdentifier: "appOwnedSyncSettingsRoute",
+                        surfaceColor: Color(.systemBackground)
+                    )
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+                .zIndex(1)
             }
         }
     }
@@ -1003,11 +929,19 @@ struct AndBibleApp: App {
      */
     @MainActor
     private func makeICloudRuntimeModeChange(_ requestedEnabled: Bool) throws -> ICloudRuntimeModeChange {
+        #if DEBUG
+        let usesLocalUITestContainer = Self.usesUITestLocalICloudRuntimeContainer
+        #else
+        let usesLocalUITestContainer = false
+        #endif
         let startupResult = try Self.loadModelContainer(
-            requestedICloudEnabled: requestedEnabled,
+            requestedICloudEnabled: usesLocalUITestContainer ? false : requestedEnabled,
             cloudKitContainerIdentifier: productCloudKitContainerIdentifier
         )
         let container = startupResult.container
+        let effectiveICloudEnabled = usesLocalUITestContainer
+            ? requestedEnabled
+            : startupResult.effectiveICloudEnabled
         let context = ModelContext(container)
         try Self.migratePersistedOrdinalTrust(in: context)
         let workspaceStore = WorkspaceStore(modelContext: context)
@@ -1023,8 +957,13 @@ struct AndBibleApp: App {
             modelContainer: container,
             windowManager: windowMgr,
             remoteSyncLifecycleService: lifecycleService,
-            effectiveICloudEnabled: startupResult.effectiveICloudEnabled,
-            didRecoverFromCloudKitFailure: startupResult.didRecoverFromCloudKitFailure
+            effectiveICloudEnabled: effectiveICloudEnabled,
+            cloudKitMonitoringContainer: effectiveICloudEnabled && !usesLocalUITestContainer
+                ? container
+                : nil,
+            didRecoverFromCloudKitFailure: usesLocalUITestContainer
+                ? false
+                : startupResult.didRecoverFromCloudKitFailure
         )
     }
 
@@ -1100,7 +1039,7 @@ struct AndBibleApp: App {
         }
         return SyncModeChangeResult(
             effectiveEnabled: change.effectiveICloudEnabled,
-            modelContainer: change.modelContainer
+            modelContainer: change.cloudKitMonitoringContainer
         )
     }
 
@@ -1545,7 +1484,15 @@ struct AndBibleApp: App {
             return
         }
 
-        let newWorkspace = resolvedWorkspaceStore.createWorkspace(name: "Default")
+        let newWorkspace = resolvedWorkspaceStore.createWorkspace(
+            name: String(
+                format: String(
+                    localized: "workspace_number",
+                    defaultValue: "Workspace %d"
+                ),
+                1
+            )
+        )
         windowManager.setActiveWorkspace(newWorkspace)
         resolvedSettingsStore.activeWorkspaceId = newWorkspace.id
     }

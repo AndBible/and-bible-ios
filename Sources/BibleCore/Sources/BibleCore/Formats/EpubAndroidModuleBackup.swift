@@ -33,58 +33,10 @@ extension EpubReader {
             throw EpubError.invalidEpub("Android EPUB directory has no display name")
         }
         let package = try EpubPackageDocumentParser.parse(packageRootURL: sourceRootURL)
-        let opfURL = sourceRootURL.appendingPathComponent(package.opfPath)
-        let opfRoot = try EpubXMLTreeParser.parse(Data(contentsOf: opfURL))
-        guard opfRoot.descendants(includeSelf: true).contains(where: {
-            $0.localName == "metadata"
-        }) else {
-            throw EpubError.invalidEpub("Package document is missing metadata")
-        }
-
-        let dublinCoreNamespace = "http://purl.org/dc/elements/1.1/"
-        func metadataValue(
-            named targetName: String,
-            in element: EpubXMLElement,
-            inheritedNamespaces: [String: String]
-        ) -> String? {
-            var namespaces = inheritedNamespaces
-            for (name, value) in element.attributes {
-                if name == "xmlns" {
-                    namespaces[""] = value
-                } else if name.hasPrefix("xmlns:") {
-                    namespaces[String(name.dropFirst("xmlns:".count))] = value
-                }
-            }
-            let qualifiedComponents = element.name.split(separator: ":", maxSplits: 1).map(String.init)
-            let prefix = qualifiedComponents.count == 2 ? qualifiedComponents[0] : ""
-            if element.localName == targetName, namespaces[prefix] == dublinCoreNamespace {
-                return element.textContent()
-            }
-            for child in element.children {
-                guard case .element(let childElement) = child,
-                      let value = metadataValue(
-                          named: targetName,
-                          in: childElement,
-                          inheritedNamespaces: namespaces
-                      ) else {
-                    continue
-                }
-                return value
-            }
-            return nil
-        }
         return EpubAndroidModuleMetadata(
-            title: metadataValue(named: "title", in: opfRoot, inheritedNamespaces: [:]) ?? displayName,
-            description: metadataValue(
-                named: "description",
-                in: opfRoot,
-                inheritedNamespaces: [:]
-            ) ?? displayName,
-            language: metadataValue(
-                named: "language",
-                in: opfRoot,
-                inheritedNamespaces: [:]
-            ) ?? "en"
+            title: package.title ?? displayName,
+            description: package.description ?? displayName,
+            language: package.language
         )
     }
 

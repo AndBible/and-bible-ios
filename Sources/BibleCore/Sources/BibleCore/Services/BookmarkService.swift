@@ -37,6 +37,32 @@ public struct BookmarkInitialLabelAssignmentResult {
     }
 }
 
+/**
+ Immutable preview of bookmarks that would become unlabeled after deleting one label.
+
+ Android presents this count before it asks whether to delete only the label or both the label and
+ its orphaned bookmarks. Keeping stable identifiers instead of model objects lets the same contract
+ serve app UI, AI tools, and persistence tests without leaking SwiftData graph ownership.
+ */
+public struct BookmarkLabelDeletionImpact: Sendable, Equatable {
+    /// Bible bookmarks whose only live label is the deletion target.
+    public let bibleBookmarkIDs: [UUID]
+
+    /// Generic bookmarks whose only live label is the deletion target.
+    public let genericBookmarkIDs: [UUID]
+
+    /// Combined Android confirmation count.
+    public var orphanedBookmarkCount: Int {
+        bibleBookmarkIDs.count + genericBookmarkIDs.count
+    }
+
+    /** Creates a deterministic deletion preview. */
+    public init(bibleBookmarkIDs: [UUID], genericBookmarkIDs: [UUID]) {
+        self.bibleBookmarkIDs = bibleBookmarkIDs
+        self.genericBookmarkIDs = genericBookmarkIDs
+    }
+}
+
 // MARK: - Speak Bookmark Lifecycle
 
 extension BookmarkService: SpeakBookmarkManaging {
@@ -1267,7 +1293,7 @@ public final class BookmarkService {
         // Color.argb(255, 100, 0, 150) = 0xFF640096 = -10223466
 
         let red = Label(
-            name: "Red",
+            name: String(localized: "label_red", defaultValue: "Red"),
             color: Int(Int32(bitPattern: 0xFFFF0000)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1275,7 +1301,7 @@ public final class BookmarkService {
         red.type = LabelType.highlight.rawValue
 
         let green = Label(
-            name: "Green",
+            name: String(localized: "label_green", defaultValue: "Green"),
             color: Int(Int32(bitPattern: 0xFF00FF00)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1283,7 +1309,7 @@ public final class BookmarkService {
         green.type = LabelType.highlight.rawValue
 
         let blue = Label(
-            name: "Blue",
+            name: String(localized: "label_blue", defaultValue: "Blue"),
             color: Int(Int32(bitPattern: 0xFF0000FF)),
             underlineStyleWholeVerse: false,
             favourite: true
@@ -1291,7 +1317,7 @@ public final class BookmarkService {
         blue.type = LabelType.highlight.rawValue
 
         let underline = Label(
-            name: "Underline",
+            name: String(localized: "label_underline", defaultValue: "Underline"),
             color: Int(Int32(bitPattern: 0xFFFF00FF)),
             underlineStyle: true,
             underlineStyleWholeVerse: true,
@@ -1300,7 +1326,7 @@ public final class BookmarkService {
         underline.type = LabelType.highlight.rawValue
 
         let salvation = Label(
-            name: "Salvation",
+            name: String(localized: "label_salvation", defaultValue: "Salvation"),
             color: Int(Int32(bitPattern: 0xFF640096))
         )
         salvation.type = LabelType.example.rawValue
@@ -1323,11 +1349,89 @@ public final class BookmarkService {
         return label
     }
 
-    /// Delete a label.
+    /**
+     Previews the bookmarks that would be orphaned by deleting one label.
+
+     - Parameter id: Target label identifier.
+     - Returns: Deterministically ordered orphan identifiers, or `nil` when the label is missing.
+     - Side effects: none.
+     - Failure modes: Store fetch failures follow the store's empty-result contract.
+     */
+    public func labelDeletionImpact(id: UUID) -> BookmarkLabelDeletionImpact? {
+        guard store.label(id: id) != nil else { return nil }
+
+        let bibleBookmarkIDs = store.bibleBookmarks(withLabel: id)
+            .filter { bookmark in
+                liveLabelIDs(bookmark.bookmarkToLabels).subtracting([id]).isEmpty
+            }
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+        let genericBookmarkIDs = store.genericBookmarks(withLabel: id)
+            .filter { bookmark in
+                liveLabelIDs(bookmark.bookmarkToLabels).subtracting([id]).isEmpty
+            }
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+
+        return BookmarkLabelDeletionImpact(
+            bibleBookmarkIDs: bibleBookmarkIDs,
+            genericBookmarkIDs: genericBookmarkIDs
+        )
+    }
+
+    /**
+     Deletes one label while retaining every bookmark, preserving the historical public API.
+
+     Callers that expose Android's orphan choice use the overload accepting
+     `deleteOrphanedBookmarks`.
+     */
     public func deleteLabel(id: UUID) {
-        if let label = store.label(id: id) {
-            store.delete(label)
+        _ = deleteLabel(id: id, deleteOrphanedBookmarks: false)
+    }
+
+    /**
+     Applies Android's label deletion choice through one bookmark graph transaction.
+
+     - Parameters:
+       - id: Target non-system label identifier.
+       - deleteOrphanedBookmarks: Whether bookmarks identified by the deletion preview should also
+         be removed.
+     - Returns: The preview used for deletion, or `nil` when the label no longer exists.
+     - Side effects: Deletes the label and optionally its orphaned bookmark graphs.
+     - Failure modes: Missing labels return `nil`; store persistence retains its logged
+       best-effort failure contract.
+     */
+    @discardableResult
+    public func deleteLabel(
+        id: UUID,
+        deleteOrphanedBookmarks: Bool
+    ) -> BookmarkLabelDeletionImpact? {
+        guard let label = store.label(id: id),
+              let impact = labelDeletionImpact(id: id) else {
+            return nil
         }
+        store.delete(
+            label,
+            deletingBibleBookmarkIDs: deleteOrphanedBookmarks ? Set(impact.bibleBookmarkIDs) : [],
+            deletingGenericBookmarkIDs: deleteOrphanedBookmarks ? Set(impact.genericBookmarkIDs) : []
+        )
+        return impact
+    }
+
+    /** Returns the live label identifiers from one optional Bible bookmark junction collection. */
+    private func liveLabelIDs(_ links: [BibleBookmarkToLabel]?) -> Set<UUID> {
+        Set((links ?? []).compactMap { link in
+            guard let label = link.label, !label.isDeleted else { return nil }
+            return label.id
+        })
+    }
+
+    /** Returns the live label identifiers from one optional generic bookmark junction collection. */
+    private func liveLabelIDs(_ links: [GenericBookmarkToLabel]?) -> Set<UUID> {
+        Set((links ?? []).compactMap { link in
+            guard let label = link.label, !label.isDeleted else { return nil }
+            return label.id
+        })
     }
 
     // MARK: - StudyPad Operations

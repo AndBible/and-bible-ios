@@ -121,7 +121,6 @@ public struct VerseChooserView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .navigationTitle("\(bookName) \(chapter)")
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 

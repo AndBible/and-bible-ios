@@ -51,6 +51,7 @@ final class ReaderHelpBridgeRoutingTests: XCTestCase {
         controller.bridge(bridge, showHelp: .memorize)
 
         let presentation = try XCTUnwrap(captured)
+        XCTAssertEqual(presentation.featureTopic, .memorize)
         XCTAssertEqual(presentation.title, .localized("help"))
         XCTAssertEqual(presentation.body, .localized("help_memorize_text"))
         XCTAssertEqual(presentation.documentationLink?.labelKey, "help_read_more_link")

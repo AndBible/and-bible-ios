@@ -95,18 +95,24 @@ extension AndBibleUITests {
      * - Parameter app: Running application under test.
      * - Returns: The root accessibility-identified Label Assignment screen element.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the bookmark list
-     *   - taps the seeded bookmark row's real edit-label affordance
+     *   - opens the reader overflow menu and pushes the bookmark list when it is not already open
+     *   - long-presses the seeded bookmark row to enter Android contextual action mode
+     *   - taps the app-owned contextual Assign labels action
      * - Failure modes:
-     *   - fails when the bookmark list or seeded bookmark edit-labels action never appears
+     *   - fails when the bookmark list, seeded bookmark row, contextual action, or assignment
+     *     destination never appears
      */
     func openLabelAssignmentFromBookmarkList(
         in app: XCUIApplication,
         referenceSegment: String = "Genesis_1_1"
     ) -> XCUIElement {
-        _ = openBookmarkList(in: app)
+        if resolvedElement("bookmarkListScreen", in: app) == nil {
+            _ = openBookmarkList(in: app)
+        }
+        let bookmarkRow = requireBookmarkRow(referenceSegment, in: app, timeout: 10)
+        bookmarkRow.press(forDuration: 0.7)
         tapElementReliably(
-            requireElement("bookmarkListEditLabelsButton::\(referenceSegment)", in: app, timeout: 10),
+            requireElement("bookmarkListAssignLabelsButton", in: app, timeout: 10),
             timeout: 10
         )
         return requireElement("labelAssignmentScreen", in: app, timeout: 10)
@@ -130,103 +136,21 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenBookmarksAction",
             destinationIdentifier: "bookmarkListScreen",
-            readinessIdentifiers: ["bookmarkListDoneButton", "bookmarkListSortMenu"],
+            readinessIdentifiers: [
+                "bookmarkListAppBarBackButton",
+                "bookmarkListLabelFilterButton",
+                "bookmarkListSortButton",
+            ],
             in: app,
             timeout: timeout
         )
     }
 
     /**
-     Dismisses the bookmark list and reopens it from the reader shell.
-     *
-     * - Parameter app: Running application whose bookmark surface should be reopened.
-     * - Side effects:
-     *   - dismisses the bookmark surface through the real Done button, navigation-stack back
-     *     affordance, or legacy sheet drag fallback when available
-     *   - opens the bookmark list again through the standard reader navigation path
-     * - Failure modes:
-     *   - fails when the bookmark list cannot be dismissed or reopened
-     */
-    func reopenBookmarkList(in app: XCUIApplication) {
-        XCTAssertTrue(
-            dismissBookmarkList(in: app, timeout: 20),
-            "Expected bookmark list dismissal to return to the reader shell."
-        )
-        _ = openBookmarkList(in: app, timeout: 20)
-    }
-
-    /**
-     Dismisses the bookmark-list surface from either the legacy sheet host or reader destination.
-
-     - Parameters:
-       - app: Running application whose bookmark list should close.
-       - timeout: Maximum number of seconds to spend on close attempts.
-       - file: Source file used for XCTest failure attribution.
-       - line: Source line used for XCTest failure attribution.
-     - Returns: `true` once the reader state export reports the shell is visible again.
-     - Side effects:
-       - taps the sheet `Done` button when present
-       - taps the reader-destination back affordance when the bookmark list is hosted as an
-         Android-parity app route
-       - taps the navigation-stack back button for drawer-owned destination hosting
-       - falls back to a top-edge drag for the older sheet route
-     - Failure modes:
-       - returns `false` when no close path dismisses the list before the timeout
-     */
-    func dismissBookmarkList(
-        in app: XCUIApplication,
-        timeout: TimeInterval,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if waitForBookmarkListDismissal(in: app, timeout: min(0.5, max(0, deadline.timeIntervalSinceNow))) {
-                return true
-            }
-
-            let remaining = max(0.1, deadline.timeIntervalSinceNow)
-            let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-            if tapElementIfPossible(doneButton, timeout: min(1, remaining)) {
-                continue
-            }
-
-            let destinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
-            if tapElementIfPossible(destinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
-                continue
-            }
-
-            dismissKeyboardIfPresent(in: app)
-            let refreshedDoneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-            if tapElementIfPossible(refreshedDoneButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
-                continue
-            }
-            let refreshedDestinationBackButton = app.buttons["readerDestinationBackButton"].firstMatch
-            if tapElementIfPossible(refreshedDestinationBackButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
-                continue
-            }
-
-            let backButton = app.navigationBars.buttons.element(boundBy: 0)
-            if tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow))) {
-                continue
-            }
-
-            let sheet = unresolvedElement("bookmarkListScreen", in: app)
-            if elementHasUsableFrame(sheet) {
-                dismissSheetByDraggingDown(sheet, file: file, line: line)
-            } else {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            }
-        } while Date() < deadline
-
-        return waitForBookmarkListDismissal(in: app, timeout: 0.5)
-    }
-
-    /**
      Waits until bookmark-list dismissal leaves the reader chrome available again.
      *
-     * Reader-destination dismissal is proven by the compact reader state export reporting that
-     * reader-owned sheets and destinations are closed. SwiftUI can leave stale bookmark-list
+     * Reader-destination dismissal is proven by the compact reader state export reporting that the
+     * app-owned destination is closed. SwiftUI can leave stale bookmark-list
      * accessibility nodes queryable briefly after a navigation pop, so this helper treats the reader
      * state export as authoritative and uses bookmark-list sentinels only as a fallback when compact
      * reader state is unavailable.
@@ -266,35 +190,54 @@ extension AndBibleUITests {
         return readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden
     }
 
-    /// Returns whether the bookmark-list surface still exposes one of its lightweight sentinels.
+    /**
+     Returns whether the bookmark list is still the active reader destination.
+
+     The reader state export is authoritative because SwiftUI can leave the bookmark-list state
+     export queryable after the destination has already navigated to a document. The app-owned
+     activity root and compact state export remain the fallback for hosts without reader state.
+
+     - Parameter app: Running application whose bookmark-list presentation is being inspected.
+     - Returns: `true` when the current reader state or fallback sentinels show the bookmark list.
+     - Side effects: Reads accessibility state without activating controls.
+     - Failure modes: Falls back to sentinel existence when reader state is unavailable.
+     */
     func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        if doneButton.exists {
-            return true
+        if let readerState = readerRenderedContentStateValue(in: app),
+           readerState.contains("readerDestination=")
+        {
+            return readerState.contains("readerDestination=bookmarks")
         }
-        return app.staticTexts["bookmarkListStateExport"].firstMatch.exists
+
+        return resolvedElement("bookmarkListScreen", in: app) != nil
+            || app.staticTexts["bookmarkListStateExport"].firstMatch.exists
     }
 
     /**
-     Activates one bookmark-list filter chip and waits for the exported bookmark-list state to
-     report the matching selected label.
+     Selects one label through Android's bookmark spinner and shared app-owned popup menu.
      *
      * - Parameters:
-     *   - labelToken: Sanitized label token exported in the chip identifier and screen state.
+     *   - labelToken: Sanitized label segment exported in the popup-row identifier and screen state.
      *   - app: Running application whose bookmark list should change filters.
      *   - timeout: Maximum number of seconds to wait for the selected-label state update.
      * - Side effects:
-     *   - taps the production filter chip and waits for the bookmark-list screen state to settle
+     *   - opens the production spinner-style selector
+     *   - chooses the matching shared `AndroidPopupMenuRow`
+     *   - waits for the bookmark-list screen state to settle
      * - Failure modes:
-     *   - fails if the chip is unavailable or the bookmark-list state never reflects the selection
+     *   - fails if the selector, popup option, or matching state transition is unavailable
      */
-    func selectBookmarkListFilterChip(
+    func selectBookmarkListLabelFilter(
         _ labelToken: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
         tapElementReliably(
-            requireElement("bookmarkListFilterChip::\(labelToken)", in: app, timeout: timeout),
+            requireElement("bookmarkListLabelFilterButton", in: app, timeout: timeout),
+            timeout: timeout
+        )
+        tapElementReliably(
+            requireElement("bookmarkListFilterOption::\(labelToken)", in: app, timeout: timeout),
             timeout: timeout
         )
         waitForBookmarkListState(containing: "selectedLabel=\(labelToken)", in: app, timeout: timeout)
@@ -386,96 +329,9 @@ extension AndBibleUITests {
         )
     }
 
-    /// Waits for the Reading Plans list accessibility state to stop containing one token.
-    func waitForReadingPlanListState(
-        notContaining token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        waitForResolvedSemanticState(
-            named: "readingPlanListStateExport",
-            timeout: timeout,
-            valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
-            success: { !$0.contains(token) },
-            missingCountsAsSuccess: true,
-            failureDescription: { _ in
-                "Expected element 'readingPlanListStateExport' to stop containing '\(token)' within \(timeout) seconds."
-            }
-        )
-    }
-
-    /// Waits for the available-plan picker accessibility state to contain one token.
-    func waitForAvailablePlansState(
-        containing token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        waitForResolvedSemanticState(
-            named: "availablePlansStateExport",
-            timeout: timeout,
-            valueProvider: { self.resolvedAvailablePlansStateValue(in: app) },
-            success: { $0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected element 'availablePlansStateExport' to contain token '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            }
-        )
-    }
-
     /// Returns one reading-plan token as serialized by the list accessibility state.
     func readingPlanStateToken(_ planCode: String) -> String {
         "|\(sanitizedReadingPlanStateToken(planCode))|"
-    }
-
-    /// Returns one reading-plan delete button identifier for the visible row swipe action.
-    func readingPlanDeleteButtonIdentifier(for planCode: String) -> String {
-        "readingPlanDeleteButton::\(sanitizedReadingPlanStateToken(planCode))"
-    }
-
-    /// Performs one Reading Plan row deletion through SwiftUI's swipe affordance.
-    func deleteReadingPlan(
-        _ row: XCUIElement,
-        planCode: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let rowToken = readingPlanStateToken(planCode)
-        let deleteIdentifier = readingPlanDeleteButtonIdentifier(for: planCode)
-
-        row.swipeLeft()
-        if waitForReadingPlanListStateToExclude(rowToken, in: app, timeout: 1) {
-            return
-        }
-
-        if !waitForResolvedElementAppearance(deleteIdentifier, in: app, timeout: 2) {
-            row.swipeLeft()
-        }
-        tapElementReliably(requireElement(deleteIdentifier, in: app, timeout: timeout), timeout: timeout)
-
-        if !waitForReadingPlanListStateToExclude(rowToken, in: app, timeout: 3),
-           let refreshedRow = resolvedElement("readingPlanActivePlanLink", in: app) {
-            refreshedRow.swipeLeft()
-            if waitForResolvedElementAppearance(deleteIdentifier, in: app, timeout: 2) {
-                tapElementReliably(requireElement(deleteIdentifier, in: app, timeout: timeout), timeout: timeout)
-            }
-        }
-    }
-
-    /// Returns true when the Reading Plans state drops one token before the timeout.
-    func waitForReadingPlanListStateToExclude(
-        _ token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> Bool {
-        return waitForResolvedSemanticState(
-            named: "readingPlanListStateExport",
-            timeout: timeout,
-            valueProvider: { self.resolvedReadingPlanListStateValue(in: app) },
-            success: { !$0.contains(token) },
-            recordsFailure: false,
-            failureDescription: {
-                "Expected Reading Plans state to stop containing '\(token)' within \(timeout) seconds. Last state: '\($0)'."
-            }
-        )
     }
 
     /// Sanitizes one reading-plan code to match the production accessibility export.
@@ -658,21 +514,36 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens History from the reader shell.
+     Opens History from the reader shell's app-owned Android dialog.
      *
      * - Parameter app: Running application whose reader shell should present History.
-     * - Returns: The root accessibility-identified History screen element.
+     * - Returns: The root accessibility-identified Android History dialog.
      * - Side effects:
-     *   - opens the reader overflow menu and pushes the History sheet
+     *   - opens the reader navigation drawer and presents History's app-owned dialog
      * - Failure modes:
-     *   - fails if the reader menu button, History action, or History screen root never appears
+     *   - fails if the reader action or Android History dialog never appears
      */
     @discardableResult
     func openHistory(in app: XCUIApplication) -> XCUIElement {
+        tapReaderAction("readerOpenHistoryAction", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "historyDialog=presented", in: app, timeout: 10)
+        return requireElement("androidHistoryDialog", in: app, timeout: 10)
+    }
+
+    /**
+     Opens Android's Read/Memory Progress activity equivalent from the reader drawer.
+
+     - Parameter app: Running application whose reader shell owns the navigation destination.
+     - Returns: The root accessibility-identified Reading Progress destination.
+     - Side effects: Opens the reader navigation drawer and pushes Reading Progress onto the reader stack.
+     - Failure modes: Fails if the drawer action, destination root, or destination presentation never appears.
+     */
+    @discardableResult
+    func openReadingProgress(in app: XCUIApplication) -> XCUIElement {
         openReaderActionDestination(
-            actionIdentifier: "readerOpenHistoryAction",
-            destinationIdentifier: "historyScreen",
-            readinessIdentifiers: ["historyDoneButton", "historyClearButton", "historyEmptyState"],
+            actionIdentifier: "readerOpenReadingProgressAction",
+            destinationIdentifier: "readingProgressScreen",
+            readinessIdentifiers: [],
             in: app
         )
     }
@@ -697,29 +568,32 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenReadingPlansAction",
             destinationIdentifier: "readingPlanListScreen",
-            readinessIdentifiers: ["readingPlanStartButton", "readingPlanActivePlanLink"],
+            readinessIdentifiers: ["availablePlansScreen", "dailyReadingScreen"],
             in: app,
             timeout: timeout
         )
     }
 
     /**
-     Opens the Available Plans picker from the Reading Plans list.
+     Opens Android's Reading Plan selector from its current activity route.
      *
-     * The Start toolbar item flips `showAvailablePlans` on the list before SwiftUI exports the
-     * picker root. Polling both the list state and the picker root keeps the smoke synchronized on
-     * the route contract instead of treating a toolbar tap as sufficient presentation evidence.
+     * Android enters the selector directly when no plan is selected. With a selected plan it opens
+     * Daily Reading first, and tapping the plan title launches `ReadingPlanSelectorList`.
      *
      * - Parameters:
      *   - app: Running application currently showing the Reading Plans list.
      *   - timeout: Maximum time to activate the Start action and resolve the picker root.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved Available Plans root once it exposes a usable frame.
+     * - Returns: The first usable selector root or concrete selector control. SwiftUI may merge a
+     *   noninteractive scroll-view identifier into its activity container, so route readiness is
+     *   established from the app bar or a real template row when no standalone root is exposed.
      * - Side effects:
-     *   - taps the production Start toolbar item while the list still reports the picker as hidden
+     *   - taps the production Daily Reading plan-title target only when the selector is not already
+     *     visible
      * - Failure modes:
-     *   - records an XCTest failure when the picker route never becomes visible
+     *   - records an XCTest failure when neither the picker root nor a concrete app-owned selector
+     *     control becomes visible
      */
     @discardableResult
     func openAvailableReadingPlans(
@@ -731,26 +605,29 @@ extension AndBibleUITests {
         let deadline = Date().addingTimeInterval(timeout)
         var lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
 
-        func resolvedAvailablePlansScreen() -> XCUIElement? {
-            guard let picker = resolvedElement("availablePlansScreen", in: app),
-                  elementHasUsableFrame(picker)
-            else {
-                return nil
+        func resolvedAvailablePlansSurface() -> XCUIElement? {
+            for identifier in [
+                "availablePlansScreen",
+                "readingPlanSelectorAppBarBackButton",
+                "readingPlanTemplateButton",
+            ] {
+                if let element = resolvedElement(identifier, in: app),
+                   elementHasUsableFrame(element) {
+                    return element
+                }
             }
-            return picker
+            return nil
         }
 
         repeat {
-            if let picker = resolvedAvailablePlansScreen() {
-                return picker
+            if let selector = resolvedAvailablePlansSurface() {
+                return selector
             }
 
             lastListState = resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
-            if !lastListState.contains("showAvailablePlans=true") {
+            if let planTitle = resolvedElement("dailyReadingPlanTitleButton", in: app) {
                 let remaining = max(0.1, deadline.timeIntervalSinceNow)
-                if let startButton = resolvedElement("readingPlanStartButton", in: app) {
-                    _ = tapElementIfPossible(startButton, timeout: min(1, remaining))
-                }
+                _ = tapElementIfPossible(planTitle, timeout: min(1, remaining))
             }
 
             var resolvedPicker: XCUIElement?
@@ -758,8 +635,8 @@ extension AndBibleUITests {
                 "Wait for Available Plans picker",
                 timeout: min(1, max(0, deadline.timeIntervalSinceNow))
             ) {
-                if let picker = resolvedAvailablePlansScreen() {
-                    resolvedPicker = picker
+                if let selector = resolvedAvailablePlansSurface() {
+                    resolvedPicker = selector
                     return true
                 }
                 lastListState = self.resolvedReadingPlanListStateValue(in: app) ?? "<missing>"
@@ -770,73 +647,14 @@ extension AndBibleUITests {
             }
         } while Date() < deadline
 
-        let fallback = unresolvedElement("availablePlansScreen", in: app)
+        let fallback = unresolvedElement("readingPlanTemplateButton", in: app)
         XCTAssertTrue(
             fallback.exists,
-            "Expected Available Plans picker to appear within \(timeout) seconds. Final Reading Plans state: '\(lastListState)'.",
+            "Expected an app-owned Available Plans control to appear within \(timeout) seconds. Final Reading Plans state: '\(lastListState)'.",
             file: file,
             line: line
         )
         return fallback
-    }
-
-    /**
-     Reveals and returns the custom reading-plan import button in the available-plan picker.
-     *
-     * - Parameters:
-     *   - app: Running application whose available-plan picker should be visible.
-     *   - timeout: Maximum time to scroll before recording a failure.
-     * - Returns: The resolved import button.
-     * - Side effects:
-     *   - scrolls the picker list downward until the custom-plan section is visible
-     * - Failure modes:
-     *   - fails if the import button cannot be reached within the timeout
-     */
-    func revealAvailablePlansImportButton(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) -> XCUIElement {
-        let scrollSurface = resolvedElement("availablePlansScreen", in: app)
-            ?? unresolvedElement("availablePlansScreen", in: app)
-        func resolvedImportButton(waitTimeout: TimeInterval = 0) -> XCUIElement? {
-            let directCandidates = [
-                app.buttons["readingPlanImportButton"].firstMatch,
-                app.collectionViews.buttons["readingPlanImportButton"].firstMatch,
-                app.cells.buttons["readingPlanImportButton"].firstMatch,
-                app.otherElements["readingPlanImportButton"].firstMatch,
-            ]
-            return directCandidates.first(where: {
-                $0.exists && waitForElementToBecomeHittable($0, timeout: waitTimeout)
-            })
-        }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let button = resolvedImportButton(waitTimeout: 0.2) {
-                return button
-            }
-            if elementHasUsableFrame(scrollSurface) {
-                scrollSurface.swipeUp()
-            } else {
-                app.swipeUp()
-            }
-            var revealedButton: XCUIElement?
-            let didRevealButton = waitForUITestCondition(
-                "Wait for reading-plan import button reveal",
-                timeout: min(0.5, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                if let button = resolvedImportButton(waitTimeout: 0) {
-                    revealedButton = button
-                    return true
-                }
-                return false
-            }
-            if didRevealButton, let revealedButton {
-                return revealedButton
-            }
-        } while Date() < deadline
-
-        return requireElement("readingPlanImportButton", in: app, timeout: 1)
     }
 
     /**
@@ -987,21 +805,16 @@ extension AndBibleUITests {
     /**
      Dismisses Sync Settings back to the reader shell.
      *
-     * - Parameter app: Running application whose Sync sheet should be dismissed.
+     * - Parameter app: Running application whose app-owned Sync activity should be dismissed.
      * - Side effects:
-     *   - taps the real Done button when the sheet exposes it
-     *   - falls back to a top-edge drag gesture when the toolbar button is not present
+     *   - activates the shared Android Up action in the Sync Settings top app bar
      * - Failure modes:
-     *   - fails when Sync Settings cannot be dismissed back to the reader shell
+     *   - fails when the app-owned Up action is missing or cannot return to the reader shell
      */
     func dismissSyncSettings(in app: XCUIApplication) {
         let syncScreen = requireElement("syncSettingsScreen", in: app, timeout: 10)
-        let doneButton = app.buttons["syncSettingsDoneButton"].firstMatch
-        if doneButton.exists || doneButton.waitForExistence(timeout: 2) {
-            tapElementReliably(doneButton, timeout: 10)
-        } else {
-            dismissSheetByDraggingDown(syncScreen)
-        }
+        let backButton = requireElement("syncSettingsTopAppBarBackButton", in: app, timeout: 10)
+        tapElementReliably(backButton, timeout: 10)
         waitForElementToDisappear(syncScreen, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -1223,9 +1036,11 @@ extension AndBibleUITests {
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      *
-     * Broad `otherElements.containing(staticText:)` fallbacks are intentionally avoided here:
-     * after the Android-style flat settings conversion they resolve to the full scroll surface
-     * instead of the target row and produce false-positive container taps.
+     * Exact production identifiers stay ahead of localized-title fallbacks. Title-matched text
+     * fields are intentionally excluded: while Settings search is focused, its value can equal a
+     * row title and XCTest would otherwise return the search editor instead of the navigation row.
+     * Broad `otherElements.containing(staticText:)` fallbacks are also avoided because the
+     * Android-style flat settings conversion makes them resolve to the full scroll surface.
      */
     func requireSettingsNavigationControl(
         _ identifier: String,
@@ -1254,22 +1069,20 @@ extension AndBibleUITests {
             ]
 
             if let visibleTitle {
-                candidates.insert(contentsOf: [
+                candidates.append(contentsOf: [
                     settingsForm.switches[visibleTitle].firstMatch,
-                    settingsForm.textFields[visibleTitle].firstMatch,
                     settingsForm.links[visibleTitle].firstMatch,
                     settingsForm.buttons[visibleTitle].firstMatch,
                     settingsForm.cells[visibleTitle].firstMatch,
                     settingsForm.otherElements[visibleTitle].firstMatch,
                     settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
                     app.switches[visibleTitle].firstMatch,
-                    app.textFields[visibleTitle].firstMatch,
                     app.links[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,
                     app.cells[visibleTitle].firstMatch,
                     app.otherElements[visibleTitle].firstMatch,
                     app.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                ], at: 0)
+                ])
             }
 
             return candidates
@@ -1429,11 +1242,11 @@ extension AndBibleUITests {
     }
 
     /**
-     Reveals one Settings navigation row by narrowing the production Settings search field.
+     Reveals one Settings navigation row through the production app-owned Settings search field.
 
-     This is a fallback for hosted simulator runs where repeated `Form` swipes do not expose a
-     lower Settings row before the XCTest timeout. It does not bypass production navigation; after
-     search narrows the form, callers still tap the same native row element.
+     This is a fallback for hosted simulator runs where repeated form swipes do not expose a lower
+     Settings row before the XCTest timeout. It activates Android's real search action when needed,
+     then narrows the app-owned activity; callers still tap the same production preference row.
      *
      * - Parameters:
      *   - title: Visible English title used as the search query.
@@ -1443,8 +1256,8 @@ extension AndBibleUITests {
      *   - resolveControl: Existing row resolver scoped to the live Settings hierarchy.
      * - Returns: The resolved native row element, or `nil` when Settings search cannot reveal it.
      * - Side effects:
-     *   - scrolls toward the top of the Settings form to reveal SwiftUI's searchable field
-     *   - types the visible row title into Settings search
+     *   - expands the app-owned Android Settings search row when it is collapsed
+     *   - types the visible row title into that production search field
      * - Failure modes: This helper does not fail directly; the caller reports a single row-missing
      *   assertion if both direct scanning and search reveal fail.
      */
@@ -1461,6 +1274,17 @@ extension AndBibleUITests {
 
         let searchDeadline = Date().addingTimeInterval(timeout)
         var searchField: XCUIElement?
+        if settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).allSatisfy({ !$0.exists }) {
+            let searchButtonCandidates = [
+                settingsForm.buttons["settingsSearchButton"].firstMatch,
+                settingsForm.otherElements["settingsSearchButton"].firstMatch,
+                app.buttons["settingsSearchButton"].firstMatch,
+                app.otherElements["settingsSearchButton"].firstMatch,
+            ]
+            if let searchButton = searchButtonCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
+                tapElementReliably(searchButton, timeout: min(3, timeout))
+            }
+        }
         repeat {
             if let field = settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).first(
                 where: { $0.exists && !$0.frame.isEmpty }
@@ -1494,11 +1318,11 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns Settings search-field candidates exposed by SwiftUI's `searchable` modifier.
+     Returns Settings search-field candidates exposed by the app-owned Android search row.
 
-     Type-only search-field candidates come first because the localized Android-parity prompt is
-     not guaranteed to be the English word "Search". Ordinary text fields remain prompt-qualified
-     so preference editors cannot be mistaken for the Settings search control.
+     Stable production identifiers come first. Type-only fallbacks remain for accessibility
+     flattening, and localized prompt fallbacks preserve coverage across translated builds without
+     mistaking unrelated preference editors for the Settings search control.
 
      * - Parameters:
      *   - app: Running application under test.
@@ -1509,6 +1333,10 @@ extension AndBibleUITests {
      */
     func settingsSearchFieldCandidates(in app: XCUIApplication, settingsForm: XCUIElement) -> [XCUIElement] {
         [
+            settingsForm.textFields["settingsSearchField"].firstMatch,
+            settingsForm.searchFields["settingsSearchField"].firstMatch,
+            app.textFields["settingsSearchField"].firstMatch,
+            app.searchFields["settingsSearchField"].firstMatch,
             settingsForm.searchFields.firstMatch,
             app.navigationBars.searchFields.firstMatch,
             app.searchFields.firstMatch,

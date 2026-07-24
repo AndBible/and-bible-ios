@@ -137,7 +137,7 @@ struct ShareSheet: View {
      */
     var body: some View {
         VStack(spacing: 12) {
-            Text("Share")
+            Text(String(localized: "share", defaultValue: "Share"))
                 .font(.headline)
             if let text = items.first as? String {
                 Text(text)
@@ -145,7 +145,7 @@ struct ShareSheet: View {
                     .padding()
                     .textSelection(.enabled)
             }
-            Button("Copy to Clipboard") {
+            Button(String(localized: "copy", defaultValue: "Copy")) {
                 if let text = items.first as? String {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)

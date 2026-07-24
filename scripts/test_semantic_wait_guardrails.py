@@ -322,17 +322,21 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("RunLoop.current.run", body)
 
     def test_available_plan_helpers_use_predicate_waiters_after_ui_actions(self) -> None:
-        """Keep reading-plan picker reveal waits off fixed run-loop sleeps."""
+        """Keep reading-plan picker and overflow reveal waits on bounded predicates."""
         list_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
+        flow_source = (
+            REPO_ROOT
+            / "Tests/UI/AndBibleUITests/AndBibleUITests+PlansDownloadsWorkspace.swift"
+        ).read_text(encoding="utf-8")
         open_body = swift_function_body(list_source, "openAvailableReadingPlans")
-        reveal_body = swift_function_body(list_source, "revealAvailablePlansImportButton")
+        overflow_body = swift_function_body(flow_source, "openDailyReadingOverflowItem")
 
         self.assertIn("waitForUITestCondition", open_body)
         self.assertNotIn("RunLoop.current.run", open_body)
-        self.assertIn("waitForUITestCondition", reveal_body)
-        self.assertNotIn("RunLoop.current.run", reveal_body)
+        self.assertIn("waitForUITestCondition", overflow_body)
+        self.assertNotIn("RunLoop.current.run", overflow_body)
 
     def test_search_translation_row_mutation_uses_predicate_waiter(self) -> None:
         """Keep Search picker row-settle waits state-driven after row taps."""
@@ -381,7 +385,7 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertNotIn("RunLoop.current.run", body, helper_name)
 
     def test_settings_navigation_reveal_uses_existing_row_frame(self) -> None:
-        """Keep Settings row navigation from timing out on offscreen-but-existing rows."""
+        """Keep Settings navigation identity-safe while revealing offscreen rows."""
         list_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
@@ -396,6 +400,8 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotIn("settingsForm.swipeUp()", body)
         self.assertNotIn("settingsForm.swipeDown()", body)
         self.assertNotIn("settings-control-diagnostics", body)
+        self.assertIn("candidates.append(contentsOf:", body)
+        self.assertNotIn("textFields[visibleTitle]", body)
 
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
@@ -780,19 +786,19 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
         ).read_text(encoding="utf-8")
 
-        reading_plan_exclusion_body = swift_function_body(
+        reading_plan_state_body = swift_function_body(
             list_source,
-            "waitForReadingPlanListStateToExclude",
+            "waitForReadingPlanListState",
         )
         migrated_waits = [
             swift_function_body(interaction_source, "waitForSettingsState"),
-            reading_plan_exclusion_body,
+            reading_plan_state_body,
         ]
 
         for body in migrated_waits:
             self.assertIn("waitForResolvedSemanticState", body)
             self.assertNotIn("RunLoop.current.run", body)
-        self.assertNotIn("missingCountsAsSuccess: true", reading_plan_exclusion_body)
+        self.assertNotIn("missingCountsAsSuccess: true", reading_plan_state_body)
 
         candidates_body = swift_function_body(element_source, "semanticStateValueCandidates")
         self.assertIn('case "settingsForm":', candidates_body)

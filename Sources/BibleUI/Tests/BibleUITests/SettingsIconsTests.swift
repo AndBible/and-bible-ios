@@ -34,9 +34,10 @@ final class SettingsIconsTests: XCTestCase {
     /**
      Pins the high-risk global color route wiring and unsupported volume-setting removal.
 
-     Both Application Preferences and the reader's direct Global Text Options destination must
-     supply workspace metadata to the shared color editor. The settings source must not retain a
-     volume-key row or search entry after the capability policy classifies it as unsupported.
+     Application Preferences must route its Global Text Options shortcut into the reader-owned
+     activity, and that destination must supply workspace metadata to the shared color editor. The
+     settings source must not retain a volume-key row or search entry after the capability policy
+     classifies it as unsupported.
 
      Failure meaning:
      - one global route can silently hide `workspace_color`
@@ -50,7 +51,8 @@ final class SettingsIconsTests: XCTestCase {
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         )
 
-        XCTAssertTrue(settingsSource.contains("workspaceColor: activeWorkspaceColorBinding"))
+        XCTAssertTrue(settingsSource.contains("destination: .globalTextOptions"))
+        XCTAssertTrue(readerSource.contains("case .globalTextOptions:"))
         XCTAssertTrue(readerSource.contains("workspaceColor: workspaceColorBinding"))
         XCTAssertFalse(settingsSource.contains(".volumeKeysScroll"))
     }
@@ -159,12 +161,11 @@ final class SettingsIconsTests: XCTestCase {
     }
 
     /**
-     Guards against reintroducing SwiftUI inline `Picker` rows for Android `ListPreference`
-     settings.
+     Guards Android `ListPreference` rows against native iOS chooser presentation.
 
      Failure meaning:
-     - Settings root rows may again expose selected values as large inline labels instead of
-       Android-style compact title/summary rows.
+     - Settings may again use native `Menu`/`Picker` controls or bypass the shared app-owned row and
+       single-choice dialog contract.
      */
     func testApplicationPreferenceListPreferenceRendererAvoidsInlinePickerRows() throws {
         let source = try BibleUITestSourceLocator.source(
@@ -173,9 +174,60 @@ final class SettingsIconsTests: XCTestCase {
         let menuRowSource = try BibleUITestSourceLocator.extractFunction(named: "settingsMenuRow", from: source)
 
         XCTAssertFalse(menuRowSource.contains("Picker("))
-        XCTAssertFalse(menuRowSource.contains("detail:"))
-        XCTAssertTrue(menuRowSource.contains("settingsRowLabel("))
+        XCTAssertFalse(menuRowSource.contains("Menu {"))
+        XCTAssertTrue(menuRowSource.contains("AndroidCatalogActionPreferenceRow("))
+        XCTAssertTrue(menuRowSource.contains("SettingsListPreferenceDialogPresentation("))
+        XCTAssertTrue(source.contains("AndroidSingleChoiceDialog("))
         XCTAssertTrue(menuRowSource.contains("preference.accessibilityIdentifier"))
+    }
+
+    /**
+     Guards the complete Application Preferences surface against native iOS presentation drift.
+
+     Failure meaning: a preference control, chooser, search field, or activity shortcut may have
+     bypassed the shared Android component/reader-route ownership contract.
+     */
+    func testApplicationPreferencesUseOnlyAppOwnedPresentationAndReaderRoutes() throws {
+        let settingsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
+        )
+        let readerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        for forbidden in [
+            "NavigationLink(destination:",
+            "NavigationLink(value:",
+            "NavigationLink {",
+            "Menu {",
+            "Toggle(",
+            "Slider(",
+            "List(",
+            ".searchable(",
+            ".sheet(",
+            ".navigationTitle(",
+        ] {
+            XCTAssertFalse(settingsSource.contains(forbidden), "Unexpected native Settings primitive: \(forbidden)")
+        }
+
+        for sharedContract in [
+            "AndroidActivityTopAppBar(",
+            "AndroidActivityTextInput(",
+            "AndroidCatalogSwitchPreferenceRow(",
+            "AndroidCatalogActionPreferenceRow(",
+            "AndroidSeekBarPreferenceRow(",
+            "AndroidSingleChoiceDialog(",
+            "AndroidMultiselectDialogContent(",
+            "AndroidEditTextPreferenceDialog(",
+        ] {
+            XCTAssertTrue(settingsSource.contains(sharedContract), "Missing shared Settings contract: \(sharedContract)")
+        }
+
+        XCTAssertTrue(readerSource.contains("onOpenActivity: { destination in"))
+        XCTAssertTrue(readerSource.contains("case .globalTextOptions:"))
+        XCTAssertTrue(readerSource.contains("case .syncSettings:"))
+        XCTAssertTrue(readerSource.contains("case .aiSettings:"))
+        XCTAssertTrue(readerSource.contains("case .readingProgressSettings:"))
     }
 
     func testApplicationPreferenceFeatureShortcutsExposeAndroidRows() {

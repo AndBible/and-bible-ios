@@ -1,284 +1,218 @@
-// ReadingPlanListView.swift — Reading plan list
+// ReadingPlanListView.swift -- Android Reading Plan activity coordinator
 
-import SwiftUI
-import SwiftData
 import BibleCore
+import SwordKit
+import SwiftData
+import SwiftUI
 import UniformTypeIdentifiers
 
-/**
- Lists active and completed reading plans and starts new plans from built-in or imported templates.
+/** Retains one preflighted Android Install ZIP overwrite decision. */
+private struct ReadingPlanExternalImportOverwriteConfirmation {
+    /// Security-scoped document request selected from the Reading Plan overflow.
+    let request: ExternalDocumentImportRequest
 
- The screen separates active plans from completed plans, presents the available-plan picker, and
- creates new `ReadingPlan` rows through `ReadingPlanService`.
+    /// Validated archive metadata and exact conflicting destinations.
+    let inspection: LocalSwordZipInspection
+}
+
+/**
+ Owns Android's Reading Plan activity flow without native iOS list or navigation presentation.
+
+ Android opens the selected plan's Daily Reading activity directly. When no plan is selected, or
+ when the plan title is tapped, it presents the flat `ReadingPlanSelectorList` activity. This owner
+ preserves that route contract while keeping all persistence and file-import mutations centralized.
 
  Data dependencies:
- - `modelContext` persists started or deleted plans
- - `plans` is a live SwiftData query ordered by most recent start date
- - action callbacks supply exact plan versification and parent-owned active-module behavior
+ - SwiftData plans and Android's single selected-plan setting
+ - `ReadingPlanService` for definition recovery, selection, start, reset, and custom import
+ - the active reader/window palette supplied by the parent reader route
 
  Side effects:
- - starting a template creates a new persisted reading plan
- - deleting rows removes plans from SwiftData
- - presenting the available-plan sheet can also import a custom plan file
+ - starts, selects, resets, and imports reading plans through durable BibleCore services
+ - hands only explicit file selection to the platform
+ - invokes `onDismiss` when Android Up leaves the Reading Plan activity
+
+ Failure modes:
+ - definition, persistence, and import failures remain visible in an app-owned Android dialog
+ - a missing selected plan falls back to the selector instead of rendering an empty iOS screen
  */
 public struct ReadingPlanListView: View {
-    /// Destinations owned by the reading-plan list while it remains inside the reader stack.
-    private enum ReadingPlanListRoute: Identifiable, Hashable {
-        /// Daily-reading view for a plan that was just started from the selector.
-        case dailyReading(UUID)
-
-        /// Stable route identity used by SwiftUI's item-based navigation destination.
-        var id: String {
-            switch self {
-            case .dailyReading(let planID):
-                return "dailyReading::\(planID.uuidString)"
-            }
-        }
-    }
-
-    /// SwiftData context used to create and delete plans.
     @Environment(\.modelContext) private var modelContext
-
-    /// All persisted plans ordered by most recent start date.
     @Query(sort: \ReadingPlan.startDate, order: .reverse) private var plans: [ReadingPlan]
 
-    /// Whether the available-plan picker sheet is presented.
-    @State private var showAvailablePlans = false
+    private let surfacePalette: ReaderThemeSurfacePalette
+    private let onDismiss: (() -> Void)?
+    private let planVersificationResolver: ReadingPlanVersificationResolver?
+    private let onPerformDailyReadingAction: DailyReadingActionHandler?
+    private let onReadCompleted: (@MainActor () -> Void)?
+    private let dailyReadingToolbarState: AndroidDailyReadingToolbarState
+    private let onOpenDailyReadingBible: (() -> Void)?
+    private let onOpenDailyReadingCommentary: (() -> Void)?
+    private let onOpenDailyReadingDictionary: (() -> Void)?
+    private let onToggleDailyReadingSpeechPause: (() -> Void)?
+    private let onStopDailyReadingSpeech: (() -> Void)?
 
-    /// Route pushed after a new plan is created from the available-plan selector.
-    @State private var activeReadingPlanRoute: ReadingPlanListRoute?
-
-    /// New plan identifier waiting for the selector sheet to dismiss before navigation.
-    @State private var pendingStartedPlanID: UUID?
-
-    /// Exact Android plan code selected through the `reading_plan` preference.
-    @State private var selectedPlanCode: String?
-
-    /// Fail-visible durable definition recovery error encountered before catalog use.
+    @State private var activePlanID: UUID?
+    @State private var selectorReturnPlanID: UUID?
+    @State private var showsSelector = true
+    @State private var showsImportPicker = false
+    @State private var catalog = ReadingPlanService.catalog()
     @State private var definitionRecoveryError: String?
-
-    /// Loads an optional raw versification, throwing when the plan definition is unavailable.
-    let planVersificationResolver: ReadingPlanVersificationResolver?
-
-    /// Performs Android-compatible active-module mapping and the requested Read/Speak operation.
-    let onPerformDailyReadingAction: DailyReadingActionHandler?
-
-    /// Closes the reading-plan stack after a successful, durably recorded Read action.
-    let onReadCompleted: (@MainActor () -> Void)?
+    @State private var showsDuplicateUserPlanWarning = false
+    @State private var pendingExternalImportRequest: ExternalDocumentImportRequest?
+    @State private var pendingExternalImportOverwrite: ReadingPlanExternalImportOverwriteConfirmation?
+    @State private var externalImportProgress: ModuleInstallProgress?
+    @State private var transientImportMessage: String?
 
     /**
-     Creates the reading-plan list screen.
+     Creates the public compatibility route with the standard application palette.
 
      - Parameters:
-       - planVersificationResolver: Loads one plan code's optional raw JSword versification value,
-         throwing when the definition itself is unavailable.
-       - onPerformDailyReadingAction: Maps, validates, and performs typed Daily Reading requests.
-       - onReadCompleted: Returns from Daily Reading to the owning Bible reader after progress saves.
-     - Note: Initialization performs no side effects.
+       - planVersificationResolver: Loads one plan definition's optional versification.
+       - onPerformDailyReadingAction: Executes exact Read or Speak requests in the active reader.
+       - onReadCompleted: Closes the reader route after a successful Read action.
+     - Side effects: None until the view appears or the user invokes a command.
+     - Failure modes: Missing action dependencies are reported by `DailyReadingView`.
      */
     public init(
         planVersificationResolver: ReadingPlanVersificationResolver? = nil,
         onPerformDailyReadingAction: DailyReadingActionHandler? = nil,
         onReadCompleted: (@MainActor () -> Void)? = nil
     ) {
+        surfacePalette = .standard
+        onDismiss = nil
+        self.planVersificationResolver = planVersificationResolver
+        self.onPerformDailyReadingAction = onPerformDailyReadingAction
+        self.onReadCompleted = onReadCompleted
+        dailyReadingToolbarState = .unavailable
+        onOpenDailyReadingBible = nil
+        onOpenDailyReadingCommentary = nil
+        onOpenDailyReadingDictionary = nil
+        onToggleDailyReadingSpeechPause = nil
+        onStopDailyReadingSpeech = nil
+    }
+
+    /**
+     Creates the reader-owned route with the exact active workspace/window palette and Up action.
+
+     - Parameters:
+       - surfacePalette: Resolved reader palette shared with all app-owned activity surfaces.
+       - onDismiss: Clears the parent reader destination.
+       - dailyReadingToolbarState: Active document labels and speech state for Daily Reading.
+       - onOpenDailyReadingBible: Opens the active Bible and leaves Reading Plans.
+       - onOpenDailyReadingCommentary: Opens the active commentary and leaves Reading Plans.
+       - onOpenDailyReadingDictionary: Opens the active dictionary and leaves Reading Plans.
+       - onToggleDailyReadingSpeechPause: Pauses or resumes the shared speech session.
+       - onStopDailyReadingSpeech: Stops the shared speech session.
+       - planVersificationResolver: Loads one plan definition's optional versification.
+       - onPerformDailyReadingAction: Executes exact Read or Speak requests in the active reader.
+       - onReadCompleted: Closes the reader route after a successful Read action.
+     - Side effects: None during initialization.
+     - Failure modes: None during initialization.
+     */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: @escaping () -> Void,
+        dailyReadingToolbarState: AndroidDailyReadingToolbarState,
+        onOpenDailyReadingBible: @escaping () -> Void,
+        onOpenDailyReadingCommentary: @escaping () -> Void,
+        onOpenDailyReadingDictionary: @escaping () -> Void,
+        onToggleDailyReadingSpeechPause: @escaping () -> Void,
+        onStopDailyReadingSpeech: @escaping () -> Void,
+        planVersificationResolver: ReadingPlanVersificationResolver? = nil,
+        onPerformDailyReadingAction: DailyReadingActionHandler? = nil,
+        onReadCompleted: (@MainActor () -> Void)? = nil
+    ) {
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
+        self.dailyReadingToolbarState = dailyReadingToolbarState
+        self.onOpenDailyReadingBible = onOpenDailyReadingBible
+        self.onOpenDailyReadingCommentary = onOpenDailyReadingCommentary
+        self.onOpenDailyReadingDictionary = onOpenDailyReadingDictionary
+        self.onToggleDailyReadingSpeechPause = onToggleDailyReadingSpeechPause
+        self.onStopDailyReadingSpeech = onStopDailyReadingSpeech
         self.planVersificationResolver = planVersificationResolver
         self.onPerformDailyReadingAction = onPerformDailyReadingAction
         self.onReadCompleted = onReadCompleted
     }
 
-    /// Active plans still in progress.
-    private var activePlans: [ReadingPlan] {
-        plans.filter { $0.planCode == selectedPlanCode }
-    }
-
-    /// Completed plans no longer marked active.
-    private var completedPlans: [ReadingPlan] {
-        plans.filter { $0.planCode != selectedPlanCode }
-    }
-
-    /**
-     Builds the empty state or reading-plan list with the available-plan sheet.
-     */
+    /** Builds Android's selector-or-current-plan activity without a native navigation stack. */
     public var body: some View {
-        Group {
-            if plans.isEmpty {
-                emptyState
-                .accessibilityIdentifier("readingPlanListScreen")
-                .accessibilityValue(readingPlanListAccessibilityValue)
-            } else {
-                planList
-                    .accessibilityIdentifier("readingPlanListScreen")
-                    .accessibilityValue(readingPlanListAccessibilityValue)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            readingPlanListStateExport
-        }
-        .navigationTitle(String(localized: "reading_plans"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(String(localized: "reading_plan_start"), systemImage: "plus") {
-                    presentAvailablePlans()
-                }
-                .accessibilityIdentifier("readingPlanStartButton")
-            }
-        }
-        .navigationDestination(item: $activeReadingPlanRoute) { route in
-            readingPlanListDestination(route)
-        }
-        .sheet(isPresented: $showAvailablePlans) {
-            NavigationStack {
-                AvailablePlansView(
+        ZStack {
+            surfacePalette.backgroundColor.ignoresSafeArea()
+
+            if showsSelector || activePlanID == nil {
+                AndroidReadingPlanSelectorView(
+                    templates: catalog.templates,
+                    startedPlanCodes: Set(plans.map(\.planCode)),
+                    surfacePalette: surfacePalette,
+                    onBack: closeSelector,
                     onSelect: startSelectedTemplate,
-                    onImport: importAndStartCustomPlan
+                    onReset: resetPlan(code:)
+                )
+            } else if let activePlanID {
+                DailyReadingView(
+                    planId: activePlanID,
+                    surfacePalette: surfacePalette,
+                    onDismiss: closeActivity,
+                    onChoosePlan: presentSelector,
+                    onPlanEnded: closeActivity,
+                    onImportPlan: { showsImportPicker = true },
+                    toolbarState: dailyReadingToolbarState,
+                    onOpenBible: { onOpenDailyReadingBible?() },
+                    onOpenCommentary: { onOpenDailyReadingCommentary?() },
+                    onOpenDictionary: { onOpenDailyReadingDictionary?() },
+                    onToggleSpeechPause: { onToggleDailyReadingSpeechPause?() },
+                    onStopSpeech: { onStopDailyReadingSpeech?() },
+                    planVersificationResolver: planVersificationResolver,
+                    onPerformAction: onPerformDailyReadingAction,
+                    onReadCompleted: onReadCompleted
                 )
             }
-            .presentationDetents([.large])
         }
-        .onChange(of: showAvailablePlans) { _, isPresented in
-            guard !isPresented else { return }
-            navigateToPendingStartedPlan()
-        }
-        .onAppear(perform: recoverDefinitionsAndReconcileSelection)
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { definitionRecoveryError != nil },
-                set: { if !$0 { definitionRecoveryError = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(definitionRecoveryError ?? "")
-        }
-    }
-
-    /// Empty reading-plan state with the same start affordance Android exposes from the selector path.
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            ContentUnavailableView(
-                String(localized: "reading_plan_no_plans"),
-                systemImage: "calendar",
-                description: Text(String(localized: "reading_plan_no_plans_description"))
-            )
-
-            Button {
-                presentAvailablePlans()
-            } label: {
-                SwiftUI.Label(String(localized: "reading_plan_start"), systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("readingPlanStartButton")
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// Opens the available-plan selector through one shared state mutation path.
-    private func presentAvailablePlans() {
-        showAvailablePlans = true
-    }
-
-    /**
-     Pushes the just-created plan into Daily Reading after the selector sheet has dismissed.
-
-     Side effects:
-     - clears `pendingStartedPlanID`
-     - sets `activeReadingPlanRoute`, which drives SwiftUI navigation in the parent stack
-     */
-    private func navigateToPendingStartedPlan() {
-        guard let pendingStartedPlanID else { return }
-        self.pendingStartedPlanID = nil
-        activeReadingPlanRoute = .dailyReading(pendingStartedPlanID)
-    }
-
-    /// Builds reading-plan list destinations without adding another modal presentation layer.
-    @ViewBuilder
-    private func readingPlanListDestination(_ route: ReadingPlanListRoute) -> some View {
-        switch route {
-        case .dailyReading(let planID):
-            DailyReadingView(
-                planId: planID,
-                planVersificationResolver: planVersificationResolver,
-                onPerformAction: onPerformDailyReadingAction,
-                onReadCompleted: onReadCompleted
+        .foregroundStyle(surfacePalette.foregroundColor)
+        .overlay(alignment: .topLeading) {
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "rdg_plan_title", defaultValue: "Reading Plan"),
+                accessibilityIdentifier: "readingPlanListScreen",
+                accessibilityValue: readingPlanListAccessibilityValue,
+                surfaceColor: surfacePalette.backgroundColor
             )
         }
+        .overlay(alignment: .topLeading) { readingPlanListStateExport }
+        .fileImporter(
+            isPresented: $showsImportPicker,
+            allowedContentTypes: [.zip],
+            allowsMultipleSelection: false,
+            onCompletion: handleCustomPlanImport
+        )
+        .overlay { errorDialogs }
+        .androidToastFeedback(transientImportMessage, bottomPadding: 48)
+        .onAppear(perform: recoverDefinitionsAndActivateRoute)
+        #if os(iOS)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        #endif
     }
 
-    /// List grouped into active and completed plan sections.
-    private var planList: some View {
-        List {
-            if !activePlans.isEmpty {
-                Section(String(localized: "reading_plan_active")) {
-                    ForEach(activePlans) { plan in
-                        NavigationLink {
-                            DailyReadingView(
-                                planId: plan.id,
-                                planVersificationResolver: planVersificationResolver,
-                                onPerformAction: onPerformDailyReadingAction,
-                                onReadCompleted: onReadCompleted
-                            )
-                        } label: {
-                            ActivePlanRow(plan: plan)
-                        }
-                        .accessibilityIdentifier("readingPlanActivePlanLink")
-                        .accessibilityLabel(plan.planName)
-                        .accessibilityValue(plan.planCode)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                deletePlan(plan)
-                            } label: {
-                                SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-                            }
-                            .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
-                        }
-                    }
-                }
-            }
-
-            if !completedPlans.isEmpty {
-                Section(String(localized: "reading_plans")) {
-                    ForEach(completedPlans) { plan in
-                        Button {
-                            selectAndOpen(plan)
-                        } label: {
-                            ActivePlanRow(plan: plan)
-                        }
-                        .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    deletePlan(plan)
-                                } label: {
-                                    SwiftUI.Label(String(localized: "delete"), systemImage: "trash")
-                                }
-                                .accessibilityIdentifier(readingPlanDeleteButtonIdentifier(for: plan))
-                            }
-                    }
-                }
-            }
-        }
+    /// Android's single-selected-plan setting store bound to the active model context.
+    private var selectionStore: ReadingPlanSelectionStore {
+        ReadingPlanSelectionStore(settingsStore: SettingsStore(modelContext: modelContext))
     }
 
-    /// Stable reading-plan list state exported for UI automation.
+    /// Stable semantic route state exported for UI automation without inspecting row layout.
     private var readingPlanListAccessibilityValue: String {
-        let baseState = "total=\(plans.count);active=\(activePlans.count);completed=\(completedPlans.count);showAvailablePlans=\(showAvailablePlans)"
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
-
-        let activeTokens = activePlans.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(readingPlanAccessibilitySegment($0.planCode))|" }
+        let selectedCode = plans.first(where: { $0.id == activePlanID })?.planCode ?? ""
+        let base = "total=\(plans.count);selected=\(readingPlanAccessibilitySegment(selectedCode));templates=\(catalog.templates.count);showAvailablePlans=\(showsSelector);importPickerPresented=\(showsImportPicker)"
+        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return base }
+        let tokens = catalog.templates
+            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
+            .map { "|\(readingPlanAccessibilitySegment($0.code))|" }
             .joined(separator: ",")
-        let completedTokens = completedPlans.prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(readingPlanAccessibilitySegment($0.planCode))|" }
-            .joined(separator: ",")
-        return "\(baseState);activeRows=\(activeTokens);completedRows=\(completedTokens)"
+        return "\(base);templateRows=\(tokens)"
     }
 
-    /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
+    /// Hidden semantic-state probe retained for deterministic UI tests.
     @ViewBuilder
     private var readingPlanListStateExport: some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
@@ -292,13 +226,189 @@ public struct ReadingPlanListView: View {
         }
     }
 
-    /// Stable row-level delete button identifier for UI tests.
-    private func readingPlanDeleteButtonIdentifier(for plan: ReadingPlan) -> String {
-        "readingPlanDeleteButton::\(readingPlanAccessibilitySegment(plan.planCode))"
+    /// App-owned duplicate-definition or operation-failure dialogs in Android precedence order.
+    @ViewBuilder
+    private var errorDialogs: some View {
+        if let request = pendingExternalImportRequest {
+            AndroidDecisionDialog(
+                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+                message: String(
+                    format: String(
+                        localized: "install_do_you_want",
+                        defaultValue: "Do you want to install module (%@)?"
+                    ),
+                    request.displayFileName ?? "?"
+                ),
+                actions: [
+                    .init(
+                        id: "cancel",
+                        title: String(localized: "cancel"),
+                        style: .normal
+                    ) { pendingExternalImportRequest = nil },
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) {
+                        pendingExternalImportRequest = nil
+                        preflightExternalDocumentImport(request)
+                    }
+                ],
+                accessibilityIdentifier: "readingPlanImportConfirmationDialog"
+            )
+        } else if let confirmation = pendingExternalImportOverwrite {
+            AndroidDecisionDialog(
+                title: String(
+                    localized: "android_module_backup_overwrite_title",
+                    defaultValue: "Overwrite existing module files?"
+                ),
+                message: ModuleBrowserView.localModuleOverwriteMessage(confirmation.inspection),
+                actions: [
+                    .init(
+                        id: "cancel",
+                        title: String(localized: "cancel"),
+                        style: .normal
+                    ) { pendingExternalImportOverwrite = nil },
+                    .init(
+                        id: "overwrite",
+                        title: String(localized: "overwrite", defaultValue: "Overwrite"),
+                        style: .destructive
+                    ) {
+                        pendingExternalImportOverwrite = nil
+                        importExternalDocument(
+                            confirmation.request,
+                            overwritePolicy: .replaceExisting(
+                                confirmation.inspection.overwriteAuthorization
+                            )
+                        )
+                    }
+                ],
+                accessibilityIdentifier: "readingPlanImportOverwriteDialog"
+            )
+        } else if let progress = externalImportProgress {
+            AndroidDecisionDialog(
+                title: String(localized: "install_zip", defaultValue: "Load Documents From Files"),
+                message: ModuleBrowserView.installPhaseText(
+                    progress.phase,
+                    progressPercent: progress.percent
+                ),
+                actions: [],
+                accessibilityIdentifier: "readingPlanImportProgressDialog"
+            )
+        } else if showsDuplicateUserPlanWarning {
+            AndroidDecisionDialog(
+                title: String(localized: "error", defaultValue: "Error"),
+                message: duplicateUserPlanWarningMessage,
+                actions: [
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) { showsDuplicateUserPlanWarning = false }
+                ]
+            )
+        } else if let definitionRecoveryError {
+            AndroidDecisionDialog(
+                title: String(localized: "error_occurred", defaultValue: "Error"),
+                message: definitionRecoveryError,
+                actions: [
+                    .init(
+                        id: "okay",
+                        title: String(localized: "okay", defaultValue: "OK"),
+                        style: .normal
+                    ) { self.definitionRecoveryError = nil }
+                ]
+            )
+        }
     }
 
-    /// Deletes one persisted plan and lets the live query refresh the list sections.
-    private func deletePlan(_ plan: ReadingPlan) {
+    /// Android duplicate user-plan warning copied from the source resource contract.
+    private var duplicateUserPlanWarningMessage: String {
+        String(
+            localized: "plan_duplicate_user_plan",
+            defaultValue: "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties"
+        )
+    }
+
+    /**
+     Recovers definition publication and chooses Android's current-plan or selector entry route.
+
+     Side effects: may recover interrupted definition publication and reconcile legacy selection.
+     Failure modes: failures show an app-owned error and leave the selector accessible.
+     */
+    private func recoverDefinitionsAndActivateRoute() {
+        do {
+            try ReadingPlanService.recoverCustomPlanDefinitionPublication(
+                settingsStore: SettingsStore(modelContext: modelContext)
+            )
+            let selectedPlan = try selectionStore.reconcile(plans, modelContext: modelContext)
+            reloadCatalog()
+            activePlanID = selectedPlan?.id
+            selectorReturnPlanID = selectedPlan?.id
+            showsSelector = selectedPlan == nil
+            definitionRecoveryError = nil
+        } catch {
+            reloadCatalog()
+            activePlanID = nil
+            selectorReturnPlanID = nil
+            showsSelector = true
+            definitionRecoveryError = error.localizedDescription
+        }
+    }
+
+    /// Refreshes Android's bundled/user catalog and duplicate-code warning state.
+    private func reloadCatalog() {
+        catalog = ReadingPlanService.catalog()
+        showsDuplicateUserPlanWarning = catalog.hasDuplicateUserPlans
+    }
+
+    /// Opens Android's plan-title selector while retaining the current plan as the Up destination.
+    private func presentSelector() {
+        reloadCatalog()
+        selectorReturnPlanID = activePlanID
+        showsSelector = true
+    }
+
+    /// Android Up from the selector returns to Daily Reading or leaves the activity when none exists.
+    private func closeSelector() {
+        if let selectorReturnPlanID,
+           plans.contains(where: { $0.id == selectorReturnPlanID }) {
+            activePlanID = selectorReturnPlanID
+            showsSelector = false
+        } else {
+            closeActivity()
+        }
+    }
+
+    /// Clears the reader-owned route without relying on SwiftUI environment dismissal.
+    private func closeActivity() {
+        onDismiss?()
+    }
+
+    /** Starts or selects one Android catalog entry and returns directly to its Daily Reading. */
+    private func startSelectedTemplate(_ template: ReadingPlanTemplate) {
+        do {
+            let plan = try ReadingPlanService.startPlan(
+                template: template,
+                modelContext: modelContext,
+                selectionStore: selectionStore
+            )
+            activePlanID = plan.id
+            selectorReturnPlanID = plan.id
+            showsSelector = false
+            definitionRecoveryError = nil
+        } catch {
+            definitionRecoveryError = error.localizedDescription
+        }
+    }
+
+    /**
+     Applies Android's selector context-menu Reset command for the matching started plan.
+
+     Unstarted catalog entries are a no-op, matching a reset of absent Android progress.
+     */
+    private func resetPlan(code: String) {
+        guard let plan = plans.first(where: { $0.planCode == code }) else { return }
         do {
             try ReadingPlanService.resetPlan(
                 plan,
@@ -309,370 +419,143 @@ public struct ReadingPlanListView: View {
                 ),
                 selectionStore: selectionStore
             )
-            withAnimation {
-                selectedPlanCode = selectionStore.selectedPlanCode
-            }
-        } catch {
-            definitionRecoveryError = error.localizedDescription
-        }
-    }
-
-    /// Android selected-plan preference store for this view's persistence context.
-    private var selectionStore: ReadingPlanSelectionStore {
-        ReadingPlanSelectionStore(settingsStore: SettingsStore(modelContext: modelContext))
-    }
-
-    /// Migrates legacy flags and refreshes the exact Android selected-plan code.
-    private func reconcileSelection() throws {
-        selectedPlanCode = try selectionStore.reconcile(
-            plans,
-            modelContext: modelContext
-        )?.planCode
-    }
-
-    /** Recovers definition publication before any reading-plan catalog or selection lookup. */
-    private func recoverDefinitionsAndReconcileSelection() {
-        do {
-            try ReadingPlanService.recoverCustomPlanDefinitionPublication(
-                settingsStore: SettingsStore(modelContext: modelContext)
-            )
+            if activePlanID == plan.id { activePlanID = nil }
+            if selectorReturnPlanID == plan.id { selectorReturnPlanID = nil }
             definitionRecoveryError = nil
-            try reconcileSelection()
         } catch {
             definitionRecoveryError = error.localizedDescription
-        }
-    }
-
-    /** Starts one bundled or already-installed template through the existing selection path. */
-    private func startSelectedTemplate(_ template: ReadingPlanTemplate) {
-        do {
-            let plan = try ReadingPlanService.startPlan(
-                template: template,
-                modelContext: modelContext,
-                selectionStore: selectionStore
-            )
-            finishStartingPlan(plan)
-        } catch {
-            definitionRecoveryError = error.localizedDescription
-        }
-    }
-
-    /** Imports exact bytes and starts or rebuilds their plan through one durable mutation path. */
-    private func importAndStartCustomPlan(fileName: String, propertiesData: Data) throws {
-        let plan = try ReadingPlanService.importAndStartCustomPlan(
-            fileName: fileName,
-            propertiesData: propertiesData,
-            modelContext: modelContext,
-            settingsStore: SettingsStore(modelContext: modelContext)
-        )
-        finishStartingPlan(plan)
-    }
-
-    /** Updates sheet and navigation state after either start path returns a persisted plan. */
-    private func finishStartingPlan(_ plan: ReadingPlan) {
-        selectedPlanCode = plan.planCode
-        pendingStartedPlanID = plan.id
-        showAvailablePlans = false
-    }
-
-    /// Selects an already-started plan without deleting another plan's state, then opens it.
-    private func selectAndOpen(_ plan: ReadingPlan) {
-        do {
-            try selectionStore.select(plan, among: plans, modelContext: modelContext)
-            selectedPlanCode = plan.planCode
-            activeReadingPlanRoute = .dailyReading(plan.id)
-        } catch {
-            definitionRecoveryError = error.localizedDescription
-        }
-    }
-}
-
-// MARK: - Active Plan Row
-
-/**
- Row showing progress for one active reading plan.
- */
-private struct ActivePlanRow: View {
-    /// Persisted reading plan summarized by the row.
-    let plan: ReadingPlan
-
-    /// Completion percentage for the plan in the range `0...1`.
-    private var progress: Double {
-        ReadingPlanService.completionPercentage(for: plan)
-    }
-
-    /// One-based day the user is expected to read today.
-    private var expectedDay: Int {
-        ReadingPlanService.expectedDay(for: plan)
-    }
-
-    /// Number of completed days in the plan.
-    private var daysCompleted: Int {
-        plan.days?.filter(\.isCompleted).count ?? 0
-    }
-
-    /// Builds the active-plan summary row with progress bar and completion metrics.
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(plan.planName)
-                    .font(.headline)
-                Spacer()
-                Text("Day \(expectedDay)/\(plan.totalDays)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            ProgressView(value: progress)
-                .tint(progress >= 1.0 ? .green : .blue)
-
-            HStack {
-                Text("\(daysCompleted) days completed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(Int(progress * 100))%")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(progress >= 1.0 ? .green : .blue)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Completed Plan Row
-
-/**
- Row summarizing one completed reading plan.
- */
-private struct CompletedPlanRow: View {
-    /// Persisted completed plan summarized by the row.
-    let plan: ReadingPlan
-
-    /// Builds the completed-plan summary row.
-    var body: some View {
-        HStack {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            VStack(alignment: .leading) {
-                Text(plan.planName)
-                    .font(.body)
-                Text("Started \(plan.startDate, style: .date)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-// MARK: - Available Plans View
-
-/**
- Sheet listing built-in reading plan templates and the custom-plan file importer.
-
- Side effects:
- - selecting a template invokes `onSelect`, allowing the parent to create a persisted plan
- - importing a custom plan reads a user-selected file through a security-scoped URL and parses it
- */
-private struct AvailablePlansView: View {
-    /// Callback invoked when the user chooses a plan template to start.
-    let onSelect: (ReadingPlanTemplate) -> Void
-
-    /// Byte-preserving custom import owned by the parent model/settings transaction.
-    let onImport: (_ fileName: String, _ propertiesData: Data) throws -> Void
-
-    /// Dismiss action for the sheet.
-    @Environment(\.dismiss) private var dismiss
-
-    /// Whether the custom-plan file importer is currently presented.
-    @State private var showImportPicker = false
-
-    /// Latest user-visible custom-plan import error.
-    @State private var importError: String?
-
-    /// Current Android-parity catalog snapshot used by the selector.
-    @State private var catalog = ReadingPlanService.catalog()
-
-    /// Whether Android's duplicate user-plan warning is currently visible.
-    @State private var showDuplicateUserPlanWarning = false
-
-    /// Stable available-plan picker state exported for UI automation.
-    private var availablePlansAccessibilityValue: String {
-        let baseState = "templates=\(catalog.templates.count);importPickerPresented=\(showImportPicker);duplicateUserPlans=\(catalog.duplicateUserPlanCodes.count)"
-        guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
-            return baseState
-        }
-
-        let templateTokens = catalog.templates
-            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .map { "|\(readingPlanAccessibilitySegment($0.code))|" }
-            .joined(separator: ",")
-        return "\(baseState);templateRows=\(templateTokens)"
-    }
-
-    /// Builds the built-in template list, custom import action, and error section.
-    var body: some View {
-        List {
-            Section {
-                ForEach(catalog.templates) { template in
-                    Button {
-                        onSelect(template)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(template.name)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            Text(template.description)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            HStack {
-                                Image(systemName: "calendar")
-                                    .font(.caption)
-                                Text("\(template.totalDays) days")
-                                    .font(.caption)
-                            }
-                            .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .accessibilityIdentifier("readingPlanTemplateButton")
-                    .accessibilityLabel(template.name)
-                    .accessibilityValue(template.code)
-                }
-            } header: {
-                Text(String(localized: "reading_plan_choose"))
-            }
-
-            Section {
-                Button {
-                    showImportPicker = true
-                } label: {
-                    SwiftUI.Label(String(localized: "reading_plan_import_custom"), systemImage: "arrow.down.doc")
-                }
-                .accessibilityIdentifier("readingPlanImportButton")
-            } header: {
-                Text(String(localized: "reading_plan_custom"))
-            } footer: {
-                Text(String(localized: "reading_plan_import_footer"))
-            }
-
-            if let importError {
-                Section {
-                    Text(importError)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
-        .accessibilityIdentifier("availablePlansScreen")
-        .accessibilityValue(availablePlansAccessibilityValue)
-        .overlay(alignment: .topLeading) {
-            availablePlansStateExport
-        }
-        .onAppear(perform: reloadCatalog)
-        .navigationTitle(String(localized: "reading_plan_available"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(String(localized: "cancel")) { dismiss() }
-            }
-        }
-        .fileImporter(
-            isPresented: $showImportPicker,
-            allowedContentTypes: [.data, .plainText],
-            allowsMultipleSelection: false
-        ) { result in
-            handleCustomPlanImport(result)
-        }
-        .alert(String(localized: "error", defaultValue: "Error"), isPresented: $showDuplicateUserPlanWarning) {
-            Button(String(localized: "okay", defaultValue: "OK"), role: .cancel) {}
-        } message: {
-            Text(duplicateUserPlanWarningMessage)
-        }
-    }
-
-    /// Android duplicate user-plan warning text.
-    private var duplicateUserPlanWarningMessage: String {
-        String(
-            localized: "plan_duplicate_user_plan",
-            defaultValue: "There is a user reading plan in sdcard jsword/readingplan with the same name as an internal plan. It can not be listed here. Please rename the file to something else, leaving it's file extension as .properties"
-        )
-    }
-
-    /**
-     Refreshes discovered reading plans whenever the selector is shown.
-
-     Side effects:
-     - reads the Android-parity reading-plan catalog
-     - presents Android's duplicate user-plan warning when applicable
-     */
-    private func reloadCatalog() {
-        catalog = ReadingPlanService.catalog()
-        showDuplicateUserPlanWarning = catalog.hasDuplicateUserPlans
-    }
-
-    /// Compact hidden state probe for the available-plan picker.
-    @ViewBuilder
-    private var availablePlansStateExport: some View {
-        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Text(availablePlansAccessibilityValue)
-                .font(.system(size: 1))
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("availablePlansStateExport")
-                .accessibilityValue(availablePlansAccessibilityValue)
         }
     }
 
     /**
-     Handles custom reading-plan import results from the file importer.
+     Converts Android's ZIP-only Reading Plan picker result into its shared Install ZIP request.
 
-     Side effects:
-     - starts and stops security-scoped resource access for the selected file
-     - forwards original custom `.properties` bytes without transcoding
-     - updates `importError` or invokes the parent's coordinated import transaction
+     Android's `DailyReading.importPlanLauncher` accepts `application/zip`, then opens the same
+     `InstallZip` activity used by the rest of the application. Keeping that boundary here avoids
+     misreading ZIP bytes as a raw `.properties` plan definition.
+
+     - Parameter result: The platform file-selection result.
+     - Side effects: Retains a normalized request for Android's install confirmation dialog.
+     - Failure modes: Picker failures become app-owned error feedback; cancellation is ignored.
      */
     private func handleCustomPlanImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-            guard let data = try? ReadingPlanService.readCustomPlanDefinitionData(from: url) else {
-                importError = String(localized: "reading_plan_import_error_read")
-                return
-            }
-
-            do {
-                try onImport(
-                    url.lastPathComponent,
-                    data
-                )
-            } catch {
-                importError = String(localized: "reading_plan_import_error_format")
-                return
-            }
-
-            importError = nil
-
+            pendingExternalImportRequest = ExternalDocumentImportRequest(
+                url: url,
+                contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey])
+                    .contentType?.identifier,
+                suggestedFileName: url.lastPathComponent
+            )
         case .failure(let error):
-            importError = error.localizedDescription
+            if Self.isFileImporterCancellation(error) { return }
+            definitionRecoveryError = error.localizedDescription
         }
+    }
+
+    /**
+     Runs the shared read-only ZIP validation before any installer writes begin.
+
+     - Parameter request: Confirmed external document request.
+     - Side effects: Publishes app-owned progress or overwrite-decision state on the main actor.
+     - Failure modes: Validation failures become the existing Reading Plan error dialog.
+     */
+    private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
+        externalImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let preflight = await Task.detached(priority: .userInitiated) {
+                service.preflightDocument(request)
+            }.value
+            switch preflight {
+            case .ready:
+                importExternalDocument(request, overwritePolicy: .reject)
+            case .moduleOverwriteRequired(let inspection):
+                externalImportProgress = nil
+                pendingExternalImportOverwrite = .init(
+                    request: request,
+                    inspection: inspection
+                )
+            case .failed(let message):
+                externalImportProgress = nil
+                definitionRecoveryError = ExternalDocumentImportResult.failed(
+                    message: message
+                ).feedbackMessage
+            }
+        }
+    }
+
+    /**
+     Installs a preflighted ZIP through the same durable service as Downloads and Backup & Restore.
+
+     - Parameters:
+       - request: Validated ZIP request.
+       - overwritePolicy: Reject-by-default policy or exact replacement authorization granted by
+         the user after preflight.
+     - Side effects: Performs installer I/O off the main actor, streams phase progress, and reports
+       Android's success toast or persistent failure feedback.
+     - Failure modes: Installer failures are represented by `ExternalDocumentImportResult` and do
+       not alter Reading Plan selection state.
+     */
+    private func importExternalDocument(
+        _ request: ExternalDocumentImportRequest,
+        overwritePolicy: LocalSwordZipOverwritePolicy
+    ) {
+        externalImportProgress = ModuleInstallProgress(phase: .queued)
+        let service = ExternalDocumentImportService()
+        Task { @MainActor in
+            let importResult = await Task.detached(priority: .userInitiated) {
+                service.importDocument(
+                    request,
+                    moduleOverwritePolicy: overwritePolicy,
+                    progressState: { progress in
+                        Task { @MainActor in externalImportProgress = progress }
+                    }
+                )
+            }.value
+            externalImportProgress = nil
+            if importResult.usesAndroidInstallToastFeedback {
+                showTransientImportMessage(importResult.feedbackMessage)
+            } else {
+                definitionRecoveryError = importResult.feedbackMessage
+            }
+        }
+    }
+
+    /**
+     Shows Android's short install-result toast and clears only the matching message later.
+
+     - Parameter message: Localized success text.
+     - Side effects: Mutates transient overlay state and schedules its dismissal.
+     - Failure modes: A newer message is not cleared by an older dismissal task.
+     */
+    private func showTransientImportMessage(_ message: String) {
+        withAnimation { transientImportMessage = message }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(AndroidToastFeedback.shortDuration))
+            guard transientImportMessage == message else { return }
+            withAnimation { transientImportMessage = nil }
+        }
+    }
+
+    /** Returns whether a platform picker error represents user cancellation. */
+    private static func isFileImporterCancellation(_ error: Error) -> Bool {
+        let cocoaError = error as NSError
+        return cocoaError.domain == NSCocoaErrorDomain
+            && cocoaError.code == CocoaError.userCancelled.rawValue
     }
 }
 
-/// Sanitizes one reading-plan code for stable accessibility identifiers and state tokens.
-private func readingPlanAccessibilitySegment(_ value: String) -> String {
+/// Sanitizes one reading-plan code for stable accessibility identifiers and semantic state tokens.
+func readingPlanAccessibilitySegment(_ value: String) -> String {
     let mapped = value.unicodeScalars.map { scalar -> String in
-        if CharacterSet.alphanumerics.contains(scalar) {
-            return String(scalar)
-        }
-        return "_"
+        CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : "_"
     }
-    let collapsed = mapped.joined().replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
+    let collapsed = mapped.joined().replacingOccurrences(
+        of: "_+",
+        with: "_",
+        options: .regularExpression
+    )
     return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
 }

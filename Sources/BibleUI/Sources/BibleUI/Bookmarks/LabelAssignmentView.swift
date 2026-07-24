@@ -1,578 +1,611 @@
-// LabelAssignmentView.swift — Toggle labels on a bookmark
+// LabelAssignmentView.swift -- Android Manage Labels ASSIGN mode
 
-import SwiftUI
-import SwiftData
 import BibleCore
-import os.log
-
-private let logger = Logger(subsystem: "org.andbible", category: "LabelAssignment")
-
-/**
- Applies label-assignment mutations for Bible and generic bookmarks without depending on SwiftUI.
-
- The SwiftUI view owns presentation state, while this helper owns the persistence contract that
- Android exposes through `ManageLabels.Mode.ASSIGN`: load current assignments, toggle a label,
- toggle favourite state, and create a new label before assigning it to the active bookmark.
-
- Side effects:
- - fetches and mutates SwiftData bookmark, label, and junction records
- - saves the supplied `ModelContext` after successful mutations
-
- Failure modes:
- - throws `LabelAssignmentMutationError.missingBookmark` when the target bookmark no longer exists
- - propagates SwiftData save/fetch errors so callers and package tests can distinguish persistence
-   failures from presentation failures
- */
-enum LabelAssignmentMutation {
-    /// Bookmark storage table represented by the active label-assignment screen.
-    enum BookmarkKind: Equatable {
-        /// A normal Bible verse bookmark backed by `BibleBookmarkToLabel`.
-        case bible
-
-        /// A generic document bookmark backed by `GenericBookmarkToLabel`.
-        case generic
-
-        /// Bookmark-service table identifier used by shared label mutations.
-        var serviceIdentifier: String {
-            switch self {
-            case .bible: "bible"
-            case .generic: "generic"
-            }
-        }
-    }
-
-    /**
-     Current persisted assignment state for one bookmark.
-
-     `assignedLabelIds` is derived from relationship rows rather than view state so callers can
-     refresh immediately after any mutation and expose the same row accessibility value that the
-     app UI renders.
-     */
-    struct State: Equatable {
-        /// Bookmark storage table containing the target bookmark.
-        let kind: BookmarkKind
-
-        /// Label identifiers currently assigned to the target bookmark.
-        let assignedLabelIds: Set<UUID>
-    }
-
-    /**
-     Loads the current assignment state for a bookmark.
-
-     - Parameters:
-       - bookmarkId: Identifier for either a Bible or generic bookmark.
-       - modelContext: SwiftData context containing bookmark and label records.
-     - Returns: The bookmark type and assigned label identifiers.
-     - Side effects: Fetches SwiftData records.
-     - Throws: `LabelAssignmentMutationError.missingBookmark` when no matching bookmark exists, or
-       a SwiftData fetch error.
-     */
-    static func state(for bookmarkId: UUID, in modelContext: ModelContext) throws -> State {
-        if let bookmark = try fetchBibleBookmark(bookmarkId, in: modelContext) {
-            return State(
-                kind: .bible,
-                assignedLabelIds: Set(bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? [])
-            )
-        }
-        if let bookmark = try fetchGenericBookmark(bookmarkId, in: modelContext) {
-            return State(
-                kind: .generic,
-                assignedLabelIds: Set(bookmark.bookmarkToLabels?.compactMap { $0.label?.id } ?? [])
-            )
-        }
-        throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-    }
-
-    /**
-     Toggles one label assignment for the specified bookmark type.
-
-     - Parameters:
-       - label: Label whose relationship row should be added or removed.
-       - bookmarkId: Bookmark receiving the assignment change.
-       - kind: Persisted bookmark table already resolved by the visible label-assignment view.
-       - modelContext: SwiftData context used for the mutation.
-     - Returns: Refreshed assignment state after saving.
-     - Side effects: Inserts or deletes a bookmark-to-label junction, updates the bookmark
-       timestamp, and saves the context.
-     - Throws: `LabelAssignmentMutationError.missingBookmark` for stale routes, or a SwiftData
-       save/fetch error.
-     */
-    @discardableResult
-    static func toggleLabel(
-        _ label: BibleCore.Label,
-        bookmarkId: UUID,
-        kind: BookmarkKind,
-        in modelContext: ModelContext
-    ) throws -> State {
-        let service = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-        guard service.toggleLabel(bookmarkId: bookmarkId, labelId: label.id) == kind.serviceIdentifier else {
-            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-        }
-        try modelContext.save()
-        return try state(for: bookmarkId, in: modelContext)
-    }
-
-    /**
-     Toggles whether a label should be shown as a favourite.
-
-     - Parameters:
-       - label: Label whose favourite flag should change.
-       - modelContext: SwiftData context used for persistence.
-     - Returns: The updated favourite value.
-     - Side effects: Mutates `Label.favourite` and saves the context.
-     - Throws: A SwiftData save error.
-     */
-    @discardableResult
-    static func toggleFavourite(
-        _ label: BibleCore.Label,
-        in modelContext: ModelContext
-    ) throws -> Bool {
-        label.favourite.toggle()
-        try modelContext.save()
-        return label.favourite
-    }
-
-    /**
-     Creates or reuses a user label by name and assigns it to the active bookmark.
-
-     - Parameters:
-       - name: User-visible label name. Empty names leave assignments unchanged.
-       - bookmarkId: Bookmark receiving the assignment.
-       - kind: Persisted bookmark table already resolved by the visible label-assignment view.
-       - modelContext: SwiftData context used for fetches, insertion, and save.
-     - Returns: Refreshed assignment state after the create/assign operation.
-     - Side effects:
-       - inserts a new `Label` when no real label with the exact name exists
-       - inserts one bookmark-to-label junction when the bookmark is not already assigned
-       - updates the bookmark timestamp and saves the context
-     - Throws: `LabelAssignmentMutationError.missingBookmark` for stale routes, or a SwiftData
-       fetch/save error.
-     */
-    @discardableResult
-    static func createAndAssignLabel(
-        named name: String,
-        bookmarkId: UUID,
-        kind: BookmarkKind,
-        in modelContext: ModelContext
-    ) throws -> State {
-        guard !name.isEmpty else {
-            return try state(for: bookmarkId, in: modelContext)
-        }
-
-        let currentState = try state(for: bookmarkId, in: modelContext)
-        guard currentState.kind == kind else {
-            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-        }
-
-        let label: BibleCore.Label
-        if let existingLabel = try existingUserLabel(named: name, in: modelContext) {
-            label = existingLabel
-        } else {
-            let createdLabel = BibleCore.Label(name: name)
-            modelContext.insert(createdLabel)
-            try modelContext.save()
-            label = createdLabel
-        }
-
-        let service = BookmarkService(store: BookmarkStore(modelContext: modelContext))
-        guard service.assignLabel(bookmarkId: bookmarkId, labelId: label.id) == kind.serviceIdentifier else {
-            throw LabelAssignmentMutationError.missingBookmark(bookmarkId)
-        }
-        try modelContext.save()
-        return try state(for: bookmarkId, in: modelContext)
-    }
-
-    /**
-     Fetches one Bible bookmark by identifier.
-
-     - Parameters:
-       - bookmarkId: Bookmark identifier to resolve.
-       - modelContext: SwiftData context containing bookmark records.
-     - Returns: Matching Bible bookmark, or `nil`.
-     - Side effects: Fetches SwiftData records.
-     - Throws: A SwiftData fetch error.
-     */
-    private static func fetchBibleBookmark(
-        _ bookmarkId: UUID,
-        in modelContext: ModelContext
-    ) throws -> BibleBookmark? {
-        let target = bookmarkId
-        var descriptor = FetchDescriptor<BibleBookmark>(
-            predicate: #Predicate { $0.id == target }
-        )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
-    }
-
-    /**
-     Fetches one generic bookmark by identifier.
-
-     - Parameters:
-       - bookmarkId: Bookmark identifier to resolve.
-       - modelContext: SwiftData context containing generic bookmark records.
-     - Returns: Matching generic bookmark, or `nil`.
-     - Side effects: Fetches SwiftData records.
-     - Throws: A SwiftData fetch error.
-     */
-    private static func fetchGenericBookmark(
-        _ bookmarkId: UUID,
-        in modelContext: ModelContext
-    ) throws -> GenericBookmark? {
-        let target = bookmarkId
-        var descriptor = FetchDescriptor<GenericBookmark>(
-            predicate: #Predicate { $0.id == target }
-        )
-        descriptor.fetchLimit = 1
-        return try modelContext.fetch(descriptor).first
-    }
-
-    /**
-     Resolves an existing user-created label by exact display name.
-
-     - Parameters:
-       - name: Exact label name to find.
-       - modelContext: SwiftData context containing labels.
-     - Returns: The first real user label with the supplied name, or `nil`.
-     - Side effects: Fetches SwiftData records.
-     - Throws: A SwiftData fetch error.
-     */
-    private static func existingUserLabel(
-        named name: String,
-        in modelContext: ModelContext
-    ) throws -> BibleCore.Label? {
-        let target = name
-        let descriptor = FetchDescriptor<BibleCore.Label>(
-            predicate: #Predicate { $0.name == target }
-        )
-        return try modelContext.fetch(descriptor).first { $0.isRealLabel }
-    }
-
-}
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 /**
- Errors surfaced when label-assignment persistence cannot resolve the active bookmark route.
+ Presents Android `ManageLabels.Mode.ASSIGN` as an app-owned activity.
 
- The visible UI treats these as non-fatal stale-route failures, while package tests assert them
- directly so persistence regressions are not hidden behind XCUITest waits.
- */
-enum LabelAssignmentMutationError: Error, Equatable {
-    /// The requested bookmark identifier no longer exists in either bookmark table.
-    case missingBookmark(UUID)
-}
-
-/**
- Assigns and removes labels for a single bookmark.
-
- `LabelAssignmentView` supports both `BibleBookmark` and `GenericBookmark` records. It loads the
- target bookmark by `bookmarkId`, displays all user labels, lets the user toggle assignment and
- favourite state, and can create a new label inline before assigning it immediately.
+ The route uses the shared Manage Labels app bar, search strip, category rows, label rows, popup,
+ help dialog, full label editor, and Study Pad archive services. It initializes selection from the
+ union of every requested Bible/generic bookmark and commits the complete draft only when Android's
+ Up/Back action is used. No iOS List, toolbar, sheet, context menu, or immediate per-row database
+ mutation participates in presentation.
 
  Data dependencies:
- - `modelContext` is used to fetch bookmarks, create relationship rows, toggle favourites, and
-   persist label creation
- - `allLabels` is the source list for assignment rows and excludes system labels via `userLabels`
+ - queried Android label models and localized presentation names
+ - `WorkspaceLabelConfigurationService` for atomic bookmark/workspace persistence
+ - owner-provided reader/workspace palette
 
  Side effects:
- - `onAppear` fetches the target bookmark type and assigned labels
- - tapping assignment controls creates or removes bookmark-to-label relationship rows
- - tapping the heart toggles `Label.favourite`
- - creating a new label inserts it, saves it, and immediately assigns it to the active bookmark
+ - Back commits one exact label set to every selected bookmark plus favourite/workspace edits
+ - label editor Save commits complete label values through the shared service
+ - overflow export/import uses the canonical Android Study Pad archive service
+
+ Failure modes:
+ - stale bookmark, label, workspace, archive, and journal failures remain visible in an app-owned
+   dialog without dismissing or partially applying this assignment draft
  */
 struct LabelAssignmentView: View {
-    /// Bookmark identifier for either a Bible or generic bookmark.
-    let bookmarkId: UUID
+    /// Feedback payload rendered by the shared decision dialog.
+    private struct Feedback: Equatable {
+        let title: String
+        let message: String
+    }
 
-    /**
-     Caller-owned dismissal action for parent-managed navigation routes.
+    /// Shared Android overflow anchor identity.
+    private enum PopupAnchor {
+        static let overflow = "labelAssignmentOverflowAnchor"
+    }
 
-     When this callback is provided, the parent owns the navigation state and the view must not
-     also call SwiftUI's environment dismiss. Doing both can pop past the parent list after route
-     state has already been cleared.
-     */
-    var onDismiss: (() -> Void)?
+    /// Bible and generic bookmark identities receiving the exact selected-label set.
+    private let bookmarkIDs: [UUID]
 
-    /// SwiftData context used for bookmark fetches, relationship creation, and persistence.
+    /// Active workspace whose auto-assignment state is edited with this route.
+    private let workspace: Workspace?
+
+    /// Reader/workspace-owned palette; feature-local screenshot colors are forbidden.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Parent-owned close action.
+    private let onDismiss: (() -> Void)?
+
     @Environment(\.modelContext) private var modelContext
-
-    /// Dismiss action for standalone presentations that do not provide `onDismiss`.
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
-    /// All labels queried from SwiftData, including system labels.
+    /// Complete persisted label collection, including Android system labels.
     @Query(sort: \BibleCore.Label.name) private var allLabels: [BibleCore.Label]
 
-    /// Presents the inline create-label alert.
-    @State private var showNewLabel = false
+    /// Android's non-Study-Pad search-mode preference.
+    @AppStorage("labels_list_filter_searchInsideTextButtonActive")
+    private var searchesAnywhereInName = false
 
-    /// Draft name for the create-label alert text field.
-    @State private var newLabelName = ""
+    /// Draft state loaded from the canonical cross-category service.
+    @State private var selectedLabelIDs: Set<UUID> = []
+    @State private var primaryLabelID: UUID?
+    @State private var autoAssignLabelIDs: Set<UUID> = []
+    @State private var autoAssignPrimaryLabelID: UUID?
+    @State private var recentLabelIDs: [UUID] = []
+    @State private var favouriteValues: [UUID: Bool] = [:]
+    @State private var workspaceOverrideModes: [UUID: Int] = [:]
 
-    /// Label IDs currently assigned to the target bookmark.
-    @State private var assignedLabelIds: Set<UUID> = []
+    /// Android list population is retained until search/reorder, matching `updateLabelList()`.
+    @State private var visibleItems: [AndroidManageLabelListItem] = []
+    @State private var searchText = ""
+    @State private var hasLoaded = false
+    @State private var isCommitting = false
 
-    /// Whether the target bookmark is a `GenericBookmark` instead of a `BibleBookmark`.
-    @State private var isGenericBookmark = false
+    /// App-owned popup/dialog/editor presentation state.
+    @State private var showsOverflowMenu = false
+    @State private var showsHelp = false
+    @State private var newLabelDraft: AndroidLabelEditorDraft?
+    @State private var editingLabelID: UUID?
+    @State private var feedback: Feedback?
 
-    /// User-created labels that may be assigned in this UI.
-    private var userLabels: [BibleCore.Label] {
-        allLabels.filter { $0.isRealLabel }
+    /// Shared Study Pad archive state machine used by every Android Manage Labels mode.
+    @State private var archiveWorkflow = AndroidStudyPadArchiveWorkflow()
+
+    /** Creates Android assignment for one bookmark while preserving the historical call shape. */
+    init(
+        bookmarkId: UUID,
+        workspace: Workspace? = nil,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        bookmarkIDs = [bookmarkId]
+        self.workspace = workspace
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
     }
 
-    /// Builds the label-assignment list, toolbar, and create-label alert.
+    /**
+     Creates Android assignment for a multi-bookmark contextual selection.
+
+     - Parameters:
+       - bookmarkIDs: Bible and generic identities whose label union seeds the route.
+       - workspace: Active workspace carrying recent/auto-assignment state.
+       - surfacePalette: Active reader/workspace palette.
+       - onDismiss: Parent route close action after a successful commit.
+     - Side effects: none until task loading or user interaction.
+     - Failure modes: stale identities are surfaced after task loading.
+     */
+    init(
+        bookmarkIDs: [UUID],
+        workspace: Workspace? = nil,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.bookmarkIDs = bookmarkIDs
+        self.workspace = workspace
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
+    }
+
+    /// Android assignment rows include every assignable label except synthetic Unlabelled.
+    private var assignableLabels: [BibleCore.Label] {
+        AndroidLabelPresentation.studyPadSelectorLabels(from: allLabels)
+    }
+
+    /// Android Study Pad export retains Unlabelled as an explicit export choice.
+    private var exportLabels: [BibleCore.Label] {
+        AndroidLabelPresentation.studyPadExportLabels(from: allLabels)
+    }
+
+    /// Stable label identity fingerprint used to reconcile editor/import changes.
+    private var labelFingerprint: String {
+        allLabels.map {
+            "\($0.id.uuidString):\($0.name):\($0.favourite):\($0.customIcon ?? "")"
+        }.joined(separator: "|")
+    }
+
+    /**
+     Renders the complete assignment activity while exporting route identity beside its controls.
+
+     The sibling marker keeps XCTest and assistive technology able to identify the destination
+     without replacing the shared Manage Labels identifiers on search, assignment, edit, and
+     app-bar controls.
+
+     - Returns: One app-owned Android assignment activity and its noninteractive route marker.
+     - Side effects: Loads the current assignment draft and responds to search/import mutations.
+     - Failure modes: Loading and archive failures remain visible through app-owned dialogs.
+     */
     var body: some View {
-        let _ = logger.info("LabelAssignmentView body: bookmarkId=\(bookmarkId), allLabels=\(allLabels.count), userLabels=\(userLabels.count), assignedLabelIds=\(assignedLabelIds.count), isGeneric=\(isGenericBookmark)")
-        List {
-            Section {
-                ForEach(userLabels) { label in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Color(argbInt: label.color))
-                            .frame(width: 14, height: 14)
-
-                        Text(label.name)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-
-                        Spacer()
-
-                        Button {
-                            toggleFavourite(label)
-                        } label: {
-                            Image(systemName: label.favourite ? "heart.fill" : "heart")
-                                .foregroundStyle(label.favourite ? Color.red : Color.secondary)
-                                .font(.body)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentFavouriteButton", for: label))
-                        .accessibilityValue(label.favourite ? "favourite" : "notFavourite")
-
-                        Button {
-                            toggleLabel(label)
-                        } label: {
-                            Image(systemName: assignedLabelIds.contains(label.id) ? "checkmark.square.fill" : "square")
-                                .foregroundStyle(assignedLabelIds.contains(label.id) ? Color.accentColor : Color.secondary)
-                                .font(.body)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityIdentifier(labelInlineActionIdentifier("labelAssignmentToggleButton", for: label))
-                        .accessibilityValue(assignedLabelIds.contains(label.id) ? "assigned" : "unassigned")
+        ZStack(alignment: .topLeading) {
+            AndroidManageLabelsActivityScreen(
+                title: String(localized: "assign_labels", defaultValue: "Assign labels"),
+                appBarAccessibilityIdentifier: "labelAssignmentAppBar",
+                surfacePalette: surfacePalette,
+                onBack: commitAndClose,
+                compactModeTitle: searchesAnywhereInName ? "*ab*" : "Ab*",
+                localizedModeTitle: searchesAnywhereInName
+                    ? String(localized: "search_mode_name_contains", defaultValue: "Name (contains)")
+                    : String(localized: "search_mode_name_start", defaultValue: "Name (from start)"),
+                isModeActive: searchesAnywhereInName,
+                searchText: $searchText,
+                accessibilityPrefix: "labelAssignment",
+                onSelectSearchMode: {
+                    searchesAnywhereInName.toggle()
+                    rebuildVisibleItems()
+                }
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityAddCircle"),
+                    accessibilityLabel: String(localized: "new_item", defaultValue: "New"),
+                    accessibilityIdentifier: "labelAssignmentAddButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: beginNewLabel
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("DrawerHelp"),
+                    accessibilityLabel: String(localized: "help", defaultValue: "Help"),
+                    accessibilityIdentifier: "labelAssignmentHelpButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: {
+                        showsOverflowMenu = false
+                        showsHelp = true
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier(labelRowIdentifier(label))
-                    .accessibilityValue(labelRowAccessibilityValue(for: label))
-                }
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ManageLabelsReorder"),
+                    accessibilityLabel: String(localized: "reorder", defaultValue: "Re-order"),
+                    accessibilityIdentifier: "labelAssignmentReorderButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: rebuildVisibleItems
+                )
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "labelAssignmentOverflowButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor,
+                    action: { showsOverflowMenu.toggle() }
+                )
+                .androidPopupMenuAnchor(id: PopupAnchor.overflow)
+            } results: {
+                labelList
             }
 
-            Section {
-                Button {
-                    showNewLabel = true
-                } label: {
-                    SwiftUI.Label("Create New Label", systemImage: "plus.circle")
+            AndroidActivityAccessibilityMarker(
+                label: String(localized: "assign_labels", defaultValue: "Assign labels"),
+                accessibilityIdentifier: "labelAssignmentScreen",
+                surfaceColor: surfacePalette.backgroundColor
+            )
+        }
+        .task(id: routeIdentity) {
+            loadAssignmentState()
+        }
+        .onChange(of: searchText) { _, _ in
+            rebuildVisibleItems()
+        }
+        .onChange(of: labelFingerprint) { _, _ in
+            reconcileLabelsAfterExternalMutation()
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: PopupAnchor.overflow,
+            isPresented: $showsOverflowMenu,
+            menuWidth: 300,
+            estimatedMenuHeight: 88,
+            accessibilityIdentifier: "labelAssignmentOverflowMenu"
+        ) {
+            overflowMenu
+        }
+        .overlay { presentationLayer }
+        .fileExporter(
+            isPresented: Binding(
+                get: { archiveWorkflow.showsFileExporter },
+                set: { archiveWorkflow.showsFileExporter = $0 }
+            ),
+            document: archiveWorkflow.exportDocument,
+            contentType: .zip,
+            defaultFilename: archiveWorkflow.exportFileName,
+            onCompletion: archiveWorkflow.handleFileExportCompletion
+        )
+        .fileImporter(
+            isPresented: Binding(
+                get: { archiveWorkflow.showsFileImporter },
+                set: { archiveWorkflow.showsFileImporter = $0 }
+            ),
+            allowedContentTypes: [.zip, .data],
+            allowsMultipleSelection: false,
+            onCompletion: archiveWorkflow.handleFileImportSelection
+        )
+    }
+
+    /// Route identity reloads only when the parent selects a different bookmark set/workspace.
+    private var routeIdentity: String {
+        bookmarkIDs.map(\.uuidString).sorted().joined(separator: ",")
+            + "#" + (workspace?.id.uuidString ?? "none")
+    }
+
+    /// Android's retained mixed category-and-label list.
+    private var labelList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(visibleItems) { item in
+                    switch item {
+                    case .category(let category):
+                        AndroidManageLabelCategoryRow(category: category, surfacePalette: surfacePalette)
+                    case .label(let id):
+                        if let label = allLabels.first(where: { $0.id == id }) {
+                            assignmentRow(label)
+                        }
+                    }
+                    Divider().overlay(surfacePalette.inactiveBorderColor)
                 }
-                .accessibilityIdentifier("labelAssignmentCreateNewLabelButton")
             }
         }
-        .navigationTitle("Assign Labels")
-        .accessibilityIdentifier("labelAssignmentScreen")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") {
-                    logger.info("Done button tapped, onDismiss=\(onDismiss != nil)")
-                    if let onDismiss {
-                        onDismiss()
-                    } else {
-                        dismiss()
+        .overlay {
+            if !hasLoaded || isCommitting {
+                ProgressView()
+                    .tint(surfacePalette.foregroundColor)
+                    .accessibilityIdentifier("labelAssignmentProgress")
+            }
+        }
+    }
+
+    /// Binds one persisted label into the shared Manage Labels row using draft state only.
+    private func assignmentRow(_ label: BibleCore.Label) -> some View {
+        AndroidManageLabelRow(
+            label: label,
+            isSelected: selectedLabelIDs.contains(label.id),
+            isFavourite: favouriteValue(for: label),
+            isPrimary: primaryLabelID == label.id,
+            isAutoAssigned: autoAssignLabelIDs.contains(label.id),
+            hasWorkspaceOverride: workspaceOverrideModes[label.id] != nil,
+            showsAssignment: true,
+            showsFavourite: workspace != nil && label.id != Label.unlabeledId,
+            showsPrimary: true,
+            showsAutoAssign: workspace != nil && label.id != Label.unlabeledId,
+            surfacePalette: surfacePalette,
+            onEdit: { editingLabelID = label.id },
+            onToggleAssignment: { toggleAssignment(label.id) },
+            onToggleFavourite: { favouriteValues[label.id] = !favouriteValue(for: label) },
+            onSelectPrimary: { primaryLabelID = label.id },
+            onToggleAutoAssign: { toggleAutoAssignment(label.id) }
+        )
+    }
+
+    /// Global app-owned popup using the same archive commands as Android Manage Labels.
+    private var overflowMenu: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "labelAssignmentOverflowSurface",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(
+                        format: String(localized: "export_something", defaultValue: "Export %@"),
+                        String(localized: "studypads", defaultValue: "Study Pads")
+                    ),
+                    accessibilityIdentifier: "labelAssignmentExportAction"
+                ) {
+                    showsOverflowMenu = false
+                    archiveWorkflow.beginExport()
+                }
+                AndroidPopupMenuRow(
+                    title: String(
+                        format: String(localized: "import_items", defaultValue: "Import %@"),
+                        String(localized: "studypads", defaultValue: "Study Pads")
+                    ),
+                    accessibilityIdentifier: "labelAssignmentImportAction"
+                ) {
+                    showsOverflowMenu = false
+                    archiveWorkflow.beginImport()
+                }
+            }
+        }
+    }
+
+    /// Full app-owned editors and dialogs, ordered so only one modal surface can receive input.
+    @ViewBuilder
+    private var presentationLayer: some View {
+        if let newLabelDraft {
+            AndroidLabelEditorView(
+                draft: newLabelDraft,
+                workspace: workspace,
+                surfacePalette: surfacePalette,
+                onSaved: handleEditorSave,
+                onCancel: { self.newLabelDraft = nil }
+            )
+        } else if let editingLabelID,
+                  let label = allLabels.first(where: { $0.id == editingLabelID }) {
+            AndroidLabelEditorView(
+                label: label,
+                initialValues: editorValues(for: label),
+                workspace: workspace,
+                initialWorkspaceConfiguration: editorWorkspaceConfiguration(for: label),
+                surfacePalette: surfacePalette,
+                onSaved: handleEditorSave,
+                onClose: { self.editingLabelID = nil }
+            )
+        } else if showsHelp {
+            AndroidManageLabelsHelpDialog(mode: .assign) {
+                showsHelp = false
+            }
+        } else if archiveWorkflow.showsExportSelection {
+            StudyPadExportSelectionDialog(
+                labels: exportLabels,
+                selectedLabelIDs: Binding(
+                    get: { archiveWorkflow.exportLabelIDs },
+                    set: { archiveWorkflow.exportLabelIDs = $0 }
+                ),
+                isExporting: archiveWorkflow.isExporting,
+                onCancel: archiveWorkflow.dismissExportSelection,
+                onExport: {
+                    archiveWorkflow.exportSelectedStudyPads(
+                        labels: exportLabels,
+                        modelContainer: modelContext.container
+                    )
+                }
+            )
+        } else if let importInspection = archiveWorkflow.importInspection {
+            StudyPadImportConfirmationDialog(
+                summary: importInspection.summary,
+                isImporting: archiveWorkflow.isImporting,
+                onCancel: archiveWorkflow.dismissImportInspection,
+                onImport: {
+                    archiveWorkflow.applyImport(modelContext: modelContext) {
+                        reconcileLabelsAfterExternalMutation()
                     }
                 }
-                .accessibilityIdentifier("labelAssignmentDoneButton")
-            }
-        }
-        .alert("New Label", isPresented: $showNewLabel) {
-            TextField("Label name", text: $newLabelName)
-                .accessibilityIdentifier("labelManagerNewLabelNameField")
-            Button("Create") { createAndAssignLabel() }
-                .accessibilityIdentifier("labelManagerCreateButton")
-            Button("Cancel", role: .cancel) { newLabelName = "" }
-        }
-        .onAppear { loadAssignedLabels() }
-    }
-
-    /**
-     Resolves the deterministic XCUITest accessibility identifier for one label row.
-     *
-     * - Parameter label: Label represented by the row.
-     * - Returns: Stable identifier derived from the label name.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelRowIdentifier(_ label: BibleCore.Label) -> String {
-        "labelAssignmentRow::\(sanitizedAccessibilitySegment(label.name))"
-    }
-
-    /**
-     Resolves the deterministic XCUITest accessibility identifier for one inline row action.
-     *
-     * - Parameters:
-     *   - prefix: Fixed action prefix naming the control role.
-     *   - label: Label represented by the enclosing row.
-     * - Returns: Stable identifier derived from the action prefix and label name.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelInlineActionIdentifier(_ prefix: String, for label: BibleCore.Label) -> String {
-        "\(prefix)::\(sanitizedAccessibilitySegment(label.name))"
-    }
-
-    /**
-     Builds the row-level accessibility summary for one label-assignment row.
-     *
-     * - Parameter label: Label represented by the row.
-     * - Returns: Comma-delimited assignment and favourite state summary.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func labelRowAccessibilityValue(for label: BibleCore.Label) -> String {
-        let assignmentState = assignedLabelIds.contains(label.id) ? "assigned" : "unassigned"
-        let favouriteState = label.favourite ? "favourite" : "notFavourite"
-        return "\(assignmentState),\(favouriteState)"
-    }
-
-    /**
-     Sanitizes one free-form label name for deterministic accessibility identifiers.
-     *
-     * - Parameter value: Raw user-visible label name.
-     * - Returns: Identifier-safe string containing only ASCII letters, digits, and underscores.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    private func sanitizedAccessibilitySegment(_ value: String) -> String {
-        let mapped = value.unicodeScalars.map { scalar -> String in
-            if CharacterSet.alphanumerics.contains(scalar) {
-                return String(scalar)
-            }
-            return "_"
-        }
-        let collapsed = mapped.joined().replacingOccurrences(of: "_+", with: "_", options: .regularExpression)
-        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-    }
-
-    /**
-     Loads the target bookmark type and currently assigned labels into SwiftUI state.
-
-     - Side effects:
-       - fetches SwiftData bookmark relationship rows through `LabelAssignmentMutation`
-       - mutates `isGenericBookmark` and `assignedLabelIds` for row rendering
-       - logs stale-route or persistence failures without dismissing the view
-     - Failure modes: Missing bookmarks and SwiftData fetch errors are logged and leave the
-       previous in-memory row state unchanged.
-     */
-    private func loadAssignedLabels() {
-        logger.info("loadAssignedLabels: looking for bookmarkId=\(bookmarkId)")
-        do {
-            let state = try LabelAssignmentMutation.state(for: bookmarkId, in: modelContext)
-            isGenericBookmark = state.kind == .generic
-            assignedLabelIds = state.assignedLabelIds
-            logger.info("loadAssignedLabels: found \(isGenericBookmark ? "GenericBookmark" : "BibleBookmark"), \(assignedLabelIds.count) labels assigned")
-        } catch {
-            logger.error("loadAssignedLabels: failed for id=\(bookmarkId), error=\(String(describing: error))")
-        }
-    }
-
-    /**
-     Routes label toggling to the correct bookmark type handler.
-
-     - Parameter label: Label whose assignment should be toggled.
-     - Side effects:
-       - inserts or deletes the persisted bookmark-to-label relationship through
-         `LabelAssignmentMutation`
-       - refreshes local bookmark type and assignment state after save
-       - logs stale-route or persistence failures without dismissing the view
-     - Failure modes: Missing bookmarks and SwiftData save/fetch errors are logged and leave the
-       current visible assignment state unchanged.
-     */
-    private func toggleLabel(_ label: BibleCore.Label) {
-        do {
-            let kind: LabelAssignmentMutation.BookmarkKind = isGenericBookmark ? .generic : .bible
-            let state = try LabelAssignmentMutation.toggleLabel(
-                label,
-                bookmarkId: bookmarkId,
-                kind: kind,
-                in: modelContext
             )
-            isGenericBookmark = state.kind == .generic
-            assignedLabelIds = state.assignedLabelIds
-        } catch {
-            logger.error("toggleLabel failed for bookmarkId=\(bookmarkId), label=\(label.name), error=\(String(describing: error))")
-        }
-    }
-
-    /**
-     Toggles whether a label is marked as a favourite.
-
-     - Parameter label: Label whose favourite state should change.
-     - Side effects:
-       - mutates `Label.favourite`
-       - saves the supplied SwiftData context through `LabelAssignmentMutation`
-       - logs persistence failures without dismissing the view
-     - Failure modes: SwiftData save errors are logged after the attempted in-memory toggle.
-     */
-    private func toggleFavourite(_ label: BibleCore.Label) {
-        logger.info("toggleFavourite: label=\(label.name), was=\(label.favourite), now=\(!label.favourite)")
-        do {
-            _ = try LabelAssignmentMutation.toggleFavourite(label, in: modelContext)
-        } catch {
-            logger.error("toggleFavourite failed for label=\(label.name), error=\(String(describing: error))")
-        }
-    }
-
-    /**
-     Handles the create-label alert confirmation.
-
-     - Side effects:
-       - delegates non-empty names to `createAndAssignLabel(named:)`
-       - clears the alert text field after attempting the create/assign mutation
-     - Failure modes: Empty names are ignored; persistence failures are handled by
-       `createAndAssignLabel(named:)`.
-     */
-    private func createAndAssignLabel() {
-        guard !newLabelName.isEmpty else { return }
-        createAndAssignLabel(named: newLabelName)
-        newLabelName = ""
-    }
-
-    /**
-     Creates or reuses one label by name and immediately assigns it to the active bookmark.
-     *
-     * - Parameter name: User-visible label name that should exist and be assigned after the helper runs.
-     * - Side effects:
-     *   - inserts and saves one label when no existing label matches `name`
-     *   - creates one bookmark-to-label relationship for the active bookmark when needed
-     *   - updates local assigned-label state immediately after persistence
-     *
-     * - Failure modes:
-     *   - returns without mutation when `name` is empty or the target bookmark cannot be fetched
-     */
-    private func createAndAssignLabel(named name: String) {
-        guard !name.isEmpty else { return }
-        logger.info("createAndAssignLabel: name=\(name)")
-        do {
-            let kind: LabelAssignmentMutation.BookmarkKind = isGenericBookmark ? .generic : .bible
-            let state = try LabelAssignmentMutation.createAndAssignLabel(
-                named: name,
-                bookmarkId: bookmarkId,
-                kind: kind,
-                in: modelContext
+        } else if let feedback {
+            AndroidDecisionDialog(
+                title: feedback.title,
+                message: feedback.message,
+                actions: [
+                    .init(id: "ok", title: String(localized: "okay", defaultValue: "OK"), style: .normal) {
+                        self.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "labelAssignmentFeedbackDialog"
             )
-            isGenericBookmark = state.kind == .generic
-            assignedLabelIds = state.assignedLabelIds
-        } catch {
-            logger.error("createAndAssignLabel failed for bookmarkId=\(bookmarkId), name=\(name), error=\(String(describing: error))")
+        } else if let archiveFeedback = archiveWorkflow.feedback {
+            AndroidDecisionDialog(
+                title: archiveFeedback.title,
+                message: archiveFeedback.message,
+                actions: [
+                    .init(id: "ok", title: String(localized: "okay", defaultValue: "OK"), style: .normal) {
+                        archiveWorkflow.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "labelAssignmentArchiveFeedbackDialog"
+            )
         }
     }
+
+    /// Loads union selection and workspace state without mutating the live route context.
+    private func loadAssignmentState() {
+        guard !hasLoaded else { return }
+        do {
+            let service = WorkspaceLabelConfigurationService(modelContext: modelContext)
+            let snapshot = try service.bookmarkLabelAssignmentSnapshot(
+                bookmarkIDs: bookmarkIDs,
+                workspaceID: workspace?.id
+            )
+            selectedLabelIDs = snapshot.selectedLabelIDs
+            primaryLabelID = snapshot.primaryLabelID
+            autoAssignLabelIDs = snapshot.autoAssignLabelIDs
+            autoAssignPrimaryLabelID = snapshot.autoAssignPrimaryLabelID
+            recentLabelIDs = snapshot.recentLabelIDs
+            refreshWorkspaceOverrides()
+            hasLoaded = true
+            rebuildVisibleItems()
+        } catch {
+            feedback = Feedback(
+                title: String(localized: "error_occurred", defaultValue: "An error has occurred"),
+                message: error.localizedDescription
+            )
+            hasLoaded = true
+        }
+    }
+
+    /// Reconciles query changes from the full editor or archive import without resetting drafts.
+    private func reconcileLabelsAfterExternalMutation() {
+        guard hasLoaded else { return }
+        let liveIDs = Set(allLabels.map(\.id))
+        selectedLabelIDs.formIntersection(liveIDs)
+        autoAssignLabelIDs.formIntersection(liveIDs)
+        favouriteValues = favouriteValues.filter { liveIDs.contains($0.key) }
+        if primaryLabelID.map({ !selectedLabelIDs.contains($0) }) == true {
+            primaryLabelID = orderedIDs(in: selectedLabelIDs).first
+        }
+        if autoAssignPrimaryLabelID.map({ !autoAssignLabelIDs.contains($0) }) == true {
+            autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+        }
+        refreshWorkspaceOverrides()
+        rebuildVisibleItems()
+    }
+
+    /// Reads workspace override markers from their canonical fidelity owner.
+    private func refreshWorkspaceOverrides() {
+        guard let workspace else {
+            workspaceOverrideModes = [:]
+            return
+        }
+        let service = WorkspaceLabelConfigurationService(modelContext: modelContext)
+        workspaceOverrideModes = Dictionary(uniqueKeysWithValues: assignableLabels.compactMap { label in
+            service.configuration(for: label.id, in: workspace).overrideMode.map { (label.id, $0) }
+        })
+    }
+
+    /// Rebuilds Android's category/header ordering after load, search, or explicit Reorder only.
+    private func rebuildVisibleItems() {
+        guard hasLoaded else { return }
+        visibleItems = AndroidManageLabelsListProjection.items(
+            labels: assignableLabels,
+            activeLabelIDs: selectedLabelIDs,
+            recentLabelIDs: recentLabelIDs,
+            alwaysVisibleLabelIDs: selectedLabelIDs,
+            searchText: searchText,
+            searchesAnywhereInName: searchesAnywhereInName
+        )
+    }
+
+    /// Toggles assignment without reordering until Android's refresh action is used.
+    private func toggleAssignment(_ labelID: UUID) {
+        if selectedLabelIDs.remove(labelID) != nil {
+            if primaryLabelID == labelID || primaryLabelID == nil {
+                primaryLabelID = orderedIDs(in: selectedLabelIDs).first
+            }
+        } else {
+            selectedLabelIDs.insert(labelID)
+            if primaryLabelID == nil { primaryLabelID = labelID }
+        }
+    }
+
+    /// Toggles workspace auto-assignment and maintains Android's primary invariant.
+    private func toggleAutoAssignment(_ labelID: UUID) {
+        if autoAssignLabelIDs.remove(labelID) != nil {
+            if autoAssignPrimaryLabelID == labelID || autoAssignPrimaryLabelID == nil {
+                autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+            }
+        } else {
+            autoAssignLabelIDs.insert(labelID)
+            if autoAssignPrimaryLabelID == nil { autoAssignPrimaryLabelID = labelID }
+        }
+    }
+
+    /// Current favourite value from the unsaved session or persisted label fallback.
+    private func favouriteValue(for label: BibleCore.Label) -> Bool {
+        favouriteValues[label.id] ?? label.favourite
+    }
+
+    /// Creates complete editor values without dropping the parent session's favourite change.
+    private func editorValues(for label: BibleCore.Label) -> LabelEditValues {
+        var values = LabelEditValues(label: label)
+        values.favourite = favouriteValue(for: label)
+        return values
+    }
+
+    /// Creates complete editor workspace values from the parent assignment session.
+    private func editorWorkspaceConfiguration(for label: BibleCore.Label) -> WorkspaceLabelConfiguration {
+        WorkspaceLabelConfiguration(
+            isAutoAssigned: autoAssignLabelIDs.contains(label.id),
+            isPrimaryAutoAssigned: autoAssignPrimaryLabelID == label.id,
+            overrideMode: workspaceOverrideModes[label.id]
+        )
+    }
+
+    /// Merges full-editor Save results back into the current Manage Labels session.
+    private func handleEditorSave(
+        labelID: UUID,
+        values: LabelEditValues,
+        configuration: WorkspaceLabelConfiguration
+    ) {
+        favouriteValues[labelID] = values.favourite
+        if configuration.isAutoAssigned || configuration.isPrimaryAutoAssigned {
+            autoAssignLabelIDs.insert(labelID)
+        } else {
+            autoAssignLabelIDs.remove(labelID)
+        }
+        if configuration.isPrimaryAutoAssigned {
+            autoAssignPrimaryLabelID = labelID
+        } else if autoAssignPrimaryLabelID == labelID {
+            autoAssignPrimaryLabelID = orderedIDs(in: autoAssignLabelIDs).first
+        }
+        if let overrideMode = configuration.overrideMode {
+            workspaceOverrideModes[labelID] = overrideMode
+        } else {
+            workspaceOverrideModes.removeValue(forKey: labelID)
+        }
+        if newLabelDraft != nil {
+            selectedLabelIDs.insert(labelID)
+            primaryLabelID = labelID
+        }
+    }
+
+    /// Creates Android's unsaved full-editor draft with suggested search name and opaque color.
+    private func beginNewLabel() {
+        showsOverflowMenu = false
+        let suggestedName = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let red = UInt32.random(in: 0...254)
+        let green = UInt32.random(in: 0...254)
+        let blue = UInt32.random(in: 0...254)
+        let color = Int(Int32(bitPattern: 0xFF000000 | red << 16 | green << 8 | blue))
+        newLabelDraft = AndroidLabelEditorDraft(newLabelName: suggestedName, color: color)
+    }
+
+    /// Commits one complete generation, then closes only after persistence succeeds.
+    private func commitAndClose() {
+        guard hasLoaded, !isCommitting else { return }
+        isCommitting = true
+        do {
+            try WorkspaceLabelConfigurationService(modelContext: modelContext)
+                .commitBookmarkLabelAssignment(
+                    bookmarkIDs: bookmarkIDs,
+                    orderedSelectedLabelIDs: orderedIDs(in: selectedLabelIDs),
+                    primaryLabelID: primaryLabelID,
+                    favouriteValues: favouriteValues,
+                    autoAssignLabelIDs: autoAssignLabelIDs,
+                    autoAssignPrimaryLabelID: autoAssignPrimaryLabelID,
+                    workspaceID: workspace?.id
+                )
+            isCommitting = false
+            close()
+        } catch {
+            isCommitting = false
+            feedback = Feedback(
+                title: String(localized: "error_occurred", defaultValue: "An error has occurred"),
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    /// Stable Android-visible ordering for exact-set persistence and primary repair.
+    private func orderedIDs(in ids: Set<UUID>) -> [UUID] {
+        assignableLabels.map(\.id).filter(ids.contains)
+    }
+
+    /// Closes through the parent route owner or standalone SwiftUI destination.
+    private func close() {
+        if let onDismiss { onDismiss() } else { dismiss() }
+    }
+
 }

@@ -10,6 +10,7 @@ import SwordKit
 /// One configured model displayed before an Android-compatible AI run.
 struct AIReaderModelChoice: Identifiable, Equatable {
   let id: UUID
+  let modelName: String
   let title: String
   let isDefault: Bool
 }
@@ -357,7 +358,10 @@ final class AIReaderRunCoordinator {
 
   var presentation: AIReaderPresentationRoute?
   private(set) var promptGroups: [AIReaderPromptGroup] = []
+  private(set) var promptContext: PromptContext?
+  private(set) var favoritePromptIDs: Set<UUID> = []
   private(set) var modelChoices: [AIReaderModelChoice] = []
+  private(set) var defaultModelID: UUID?
   private(set) var selectedPrompt: ResolvedAgentPrompt?
   private(set) var promptRequiresSpecification = false
   private(set) var promptRequiresModel = false
@@ -489,22 +493,63 @@ final class AIReaderRunCoordinator {
   /** Loads and presents every action valid for the captured reader context. */
   func presentActions(for request: AIReaderActionRequest) {
     do {
-      let entries = try promptRepository.allPrompts()
-      let categories = try promptRepository.allCategories()
       let settings = try settingsStore.globalSettings()
-      let groups = AIReaderPromptCatalog.groups(
-        entries: entries,
-        categories: categories,
-        favoriteIDs: settings.favoritePrompts,
-        hiddenCategoryIDs: settings.hiddenBuiltInCategories,
-        context: request.promptContext,
-        documentCategory: request.documentCategory
-      )
+      let groups = try resolvedPromptGroups(for: request, settings: settings)
       guard !groups.isEmpty else { throw AIReaderRunError.noPromptActions }
       actionRequest = request
       promptGroups = groups
+      promptContext = request.promptContext
+      favoritePromptIDs = settings.favoritePrompts
+      defaultModelID = settings.defaultModelId
       failureMessage = nil
       presentation = .promptChooser(UUID())
+    } catch {
+      presentFailure(error)
+    }
+  }
+
+  /**
+   Toggles one prompt favorite and rebuilds the open chooser from source-aware repository state.
+
+   - Parameter promptID: Effective built-in, add-on, or user prompt identity selected in the dialog.
+   - Side effects: Persists the synced favorite set and refreshes Favorites/category membership.
+   - Failure modes: Missing prompts, prompt-pack reads, or SwiftData saves surface through the
+     existing credential-free reader failure channel while retaining the current chooser.
+   */
+  func togglePromptFavorite(_ promptID: UUID) {
+    guard let request = actionRequest else {
+      presentFailure(AIReaderRunError.sourceUnavailable)
+      return
+    }
+    do {
+      try promptRepository.setFavorite(
+        !favoritePromptIDs.contains(promptID),
+        promptID: promptID
+      )
+      let settings = try settingsStore.globalSettings()
+      promptGroups = try resolvedPromptGroups(for: request, settings: settings)
+      favoritePromptIDs = settings.favoritePrompts
+    } catch {
+      presentFailure(error)
+    }
+  }
+
+  /**
+   Persists Android's agent-log default-model selection for future runs.
+
+   - Parameter modelID: Configured model identity selected from the agent-log dialog.
+   - Side effects: Mutates and saves global AI settings, then refreshes default-first row labels.
+   - Failure modes: Unknown model identities are ignored; SwiftData failures use the reader's safe
+     failure channel and leave the prior default intact.
+   */
+  func selectDefaultModel(_ modelID: UUID) {
+    guard modelChoices.contains(where: { $0.id == modelID }) else { return }
+    do {
+      let settings = try settingsStore.globalSettings()
+      settings.defaultModelId = modelID
+      try settingsStore.save()
+      defaultModelID = modelID
+      modelChoices = try configuredModelChoices(defaultID: modelID)
     } catch {
       presentFailure(error)
     }
@@ -518,6 +563,7 @@ final class AIReaderRunCoordinator {
     }
     do {
       let settings = try settingsStore.globalSettings()
+      defaultModelID = settings.defaultModelId
       selectedPrompt = entry
       promptRequiresSpecification = entry.prompt.specifyBeforeRun
       promptRequiresModel = settings.askModelBeforeRun && entry.prompt.configuredModelId == nil
@@ -590,6 +636,7 @@ final class AIReaderRunCoordinator {
         throw AIReaderRunError.promptUnavailable
       }
       let settings = try settingsStore.globalSettings()
+      defaultModelID = settings.defaultModelId
       let prompt = try promptRepository.promptById(context.sourcePromptId)
       modelChoices = try configuredModelChoices(defaultID: settings.defaultModelId)
       regenerationContext = context
@@ -1402,7 +1449,22 @@ final class AIReaderRunCoordinator {
     }
   }
 
-  /** Returns configured models with Android's default-first display ordering. */
+  /** Rebuilds Android's context-filtered chooser groups from current repository/settings state. */
+  private func resolvedPromptGroups(
+    for request: AIReaderActionRequest,
+    settings: GlobalAISettings
+  ) throws -> [AIReaderPromptGroup] {
+    AIReaderPromptCatalog.groups(
+      entries: try promptRepository.allPrompts(),
+      categories: try promptRepository.allCategories(),
+      favoriteIDs: settings.favoritePrompts,
+      hiddenCategoryIDs: settings.hiddenBuiltInCategories,
+      context: request.promptContext,
+      documentCategory: request.documentCategory
+    )
+  }
+
+  /** Returns configured models with Android's default-first display ordering and labels. */
   private func configuredModelChoices(defaultID: UUID?) throws -> [AIReaderModelChoice] {
     let providers = Dictionary(
       uniqueKeysWithValues: try settingsStore.providers().map {
@@ -1415,9 +1477,12 @@ final class AIReaderRunCoordinator {
       }
       .map {
         let provider = providers[$0.providerConfigId] ?? "?"
+        let supportedPrefix = AIModelCatalog.isSupported($0.modelId) ? "✓ " : ""
+        let defaultSuffix = $0.id == defaultID ? " ★" : ""
         return AIReaderModelChoice(
           id: $0.id,
-          title: "\($0.modelId) - \(provider)\($0.id == defaultID ? " *" : "")",
+          modelName: $0.modelId,
+          title: "\(supportedPrefix)\($0.modelId) — \(provider)\(defaultSuffix)",
           isDefault: $0.id == defaultID
         )
       }

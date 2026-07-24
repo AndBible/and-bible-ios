@@ -81,8 +81,9 @@ struct ReaderWindowControlsAvoidanceMetrics {
  - `colorScheme` from the environment participates in effective night-mode resolution
 
  Side effects:
- - `onAppear` loads persisted preferences, wires TTS callbacks, restores speech settings, and
-   registers synchronized-scrolling callbacks on `WindowManager`
+ - `onAppear` reloads persisted reader preferences and performs lightweight service reactivation;
+   the first appearance alone restores speech settings and wires TTS callbacks
+ - reader appearances register synchronized-scrolling callbacks on `WindowManager`
  - iOS `onAppear` and `onDisappear` start and stop tilt-to-scroll based on workspace settings
  - sheet dismissals reload behavior preferences or refresh installed-module lists where needed
  - toolbar toggles and helper actions mutate SwiftData-backed workspace/settings state and push
@@ -92,17 +93,11 @@ public struct BibleReaderView: View {
     /// Identity used to recreate data-bound reader panes after the app swaps persistence runtimes.
     private let readerContentIdentity: UUID?
 
-    /// Top-level sheets launched from the reader shell or its global shortcuts.
-    enum ReaderSheet: String, Identifiable {
-        case history
-        case readingProgress
-        case readingProgressSettings
-        case chapterReadHistory
-        case workspaces
-        case about
+    /// Legacy reader-sheet boundary retained only for source guards; it intentionally has no cases.
+    enum ReaderSheet {}
 
-        var id: String { rawValue }
-    }
+    /// Legacy reader-modal boundary retained only for source guards; it intentionally has no cases.
+    private enum ReaderModal {}
 
     /// Reader-stack destinations opened from global reader actions.
     enum ReaderDestination: String, Identifiable, Hashable {
@@ -113,8 +108,34 @@ public struct BibleReaderView: View {
         case studyPads
         /// Drawer-owned My Documents selector that opens the selected document page.
         case myDocuments
+        /// Android WorkspaceSelectorActivity-equivalent reader destination.
+        case workspaces
         /// Drawer-owned reading-plan list destination that avoids legacy sheet chrome.
         case readingPlans
+        /// Android ReadingProgressActivity-equivalent route with captured reader-pane ownership.
+        case readingProgress
+        /// Android ReadingProgressSettingsActivity-equivalent reader route.
+        case readingProgressSettings
+        /// Android GridChoosePassageBook-equivalent full reader-stack route.
+        case passageChooser
+        /// Android ChooseDocument activity for a category-scoped toolbar request.
+        case modulePicker
+        /// Android ChooseDocument activity opened from the navigation drawer with all types.
+        case chooseDocument
+        /// Android BibleSpeakActivity-equivalent full reader-stack route.
+        case speakControls
+        /// Android SyncSettingsActivity-equivalent reader route.
+        case syncSettings
+        /// Android ChooseDictionaryWord-equivalent reader route.
+        case dictionaryBrowser
+        /// Android ChooseGeneralBookKey-equivalent reader route.
+        case generalBookBrowser
+        /// Android ChooseMapKey-equivalent reader route.
+        case mapBrowser
+        /// Android EpubSearch-equivalent reader route.
+        case epubSearch
+        /// Android ManageLabels-equivalent reader route.
+        case labelManager
         case settings
         /// Drawer-owned AI Settings destination matching Android's Administration shortcut.
         case aiSettings
@@ -127,6 +148,7 @@ public struct BibleReaderView: View {
         case workspaceTextOptions = "textOptions"
         case windowTextOptions
         case windowColorSettings
+        case windowHiddenLabels
 
         var id: String { rawValue }
     }
@@ -156,7 +178,43 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Label-assignment route requested by a specific WebView-backed reader pane.
+    /// Target captured while Android's recent-setting popup opens a staged quick editor.
+    private struct WindowTextSettingEditorRequest: Identifiable, Equatable {
+        let windowID: UUID
+        let type: AndroidTextDisplaySettingType
+
+        var id: String { "\(windowID.uuidString)::\(type.rawValue)" }
+    }
+
+    /**
+     Captures the Android History dialog's source window and title.
+
+     The request is value-based so visibility is independent of SwiftUI focus changes. Selecting a
+     row must still resolve through `panePresentationController`, which is pinned by the same ID.
+     */
+    private struct HistoryDialogRequest: Identifiable {
+        let windowID: UUID
+        let title: String
+
+        var id: UUID { windowID }
+    }
+
+    /** Captures the pane and chapter scope for Android's staged Read History dialog. */
+    private struct ChapterReadHistoryDialogRequest: Identifiable {
+        let windowID: UUID
+        let target: ChapterReadHistoryTarget
+
+        var id: UUID { windowID }
+    }
+
+    /** Captures Android PromptEditActivity's prompt identity for reader-stack navigation. */
+    private struct AIPromptEditorDestination: Identifiable, Hashable {
+        let promptID: UUID
+
+        var id: UUID { promptID }
+    }
+
+    /// Label-assignment activity requested by a specific WebView-backed reader pane.
     private struct ReaderLabelAssignmentRoute: Identifiable, Hashable {
         /// Bookmark whose labels should be edited.
         let bookmarkId: UUID
@@ -164,7 +222,7 @@ public struct BibleReaderView: View {
         /// Window whose WebView should be refreshed after label assignment closes.
         let windowId: UUID?
 
-        /// Stable presentation identity for SwiftUI's item-based full-screen cover.
+        /// Stable presentation identity for the app-owned reader destination.
         var id: String {
             "labelAssignment::\(windowId?.uuidString ?? "active")::\(bookmarkId.uuidString)"
         }
@@ -194,43 +252,6 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Coordinator-owned modal flows that do not require payload-backed sheet state.
-    private enum ReaderModal: String, Identifiable {
-        case syncSettings
-        case importExport
-        case speakControls
-        case modulePicker
-        case dictionaryBrowser
-        case generalBookBrowser
-        case mapBrowser
-        case epubLibrary
-        case epubBrowser
-        case epubSearch
-        case labelManager
-        case chooseDocument
-        case help
-
-        var id: String { rawValue }
-
-        var shouldCapturePanePresentationTarget: Bool {
-            switch self {
-            case .syncSettings, .importExport, .help:
-                return false
-            default:
-                return true
-            }
-        }
-
-        var isDocumentChooserRoute: Bool {
-            switch self {
-            case .modulePicker, .chooseDocument:
-                return true
-            default:
-                return false
-            }
-        }
-    }
-
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
     private enum ReaderOverflowPresentation {
         case labelManager
@@ -241,11 +262,9 @@ public struct BibleReaderView: View {
         case textOptions
         case workspaces
         case downloads
-        case epubLibrary
         case epubBrowser
         case epubSearch
         case help
-        case about
     }
 
     /// Shared workspace/window coordinator that owns panes, focus, and controller registration.
@@ -266,17 +285,41 @@ public struct BibleReaderView: View {
     /// Horizontal size class used to collapse toolbar actions on narrow iPhone layouts.
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    /// Presents the book/chapter/verse chooser flow for the focused controller.
-    @State private var showBookChooser = false
-
     /// Snapshot-backed chooser progress context captured when the chooser is presented.
     @State private var passageChooserProgressContext = PassageChooserProgressContext.empty
 
-    /// Presents the current top-level reader sheet driven by the overflow menu and shortcuts.
-    @State private var activeReaderSheet: ReaderSheet?
-
     /// Presents the current reader-stack destination driven by drawer and overflow actions.
     @State private var activeReaderDestination: ReaderDestination?
+
+    /// Android PromptEditActivity-equivalent destination requested by a pane-scoped AI coordinator.
+    @State private var activeAIPromptEditorDestination: AIPromptEditorDestination?
+
+    /// Reader-owned Android History dialog, kept outside generic adaptive sheet ownership.
+    @State private var historyDialogRequest: HistoryDialogRequest?
+
+    /// Reader-owned Android Read History dialog, including its originating chapter and pane.
+    @State private var chapterReadHistoryDialogRequest: ChapterReadHistoryDialogRequest?
+
+    /// Reader-owned Android Help & Tips dialog, separate from generic sheet presentation.
+    @State private var isHelpDialogPresented = false
+
+    /// Reader-owned Android Open Source License dialog, separate from browser handoff.
+    @State private var isLicenseDialogPresented = false
+
+    /// Reader-owned Android Rate & Review dialog, shown before the system review controller.
+    @State private var isRateReviewDialogPresented = false
+
+    /// Reader-owned state for manual evidence collection, consent, and addressed mail handoff.
+    @State private var manualBugReportCoordinator = ManualBugReportCoordinator()
+
+    /// Locally prepared evidence retained for consent or explicit export without presenting Mail.
+    @State private var manualBugReportPreparedPayload: AddressedMailPayload?
+
+    /// Prepared report assigned only after consent and a successful system-Mail capability check.
+    @State private var manualBugReportMailPayload: AddressedMailPayload?
+
+    /// Complete ZIP retained only while the user chooses an export destination after unavailable mail.
+    @State private var manualBugReportExport: ProductFeedbackReportExport?
 
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
@@ -296,20 +339,32 @@ public struct BibleReaderView: View {
     /// Guards startup prompt evaluation so it does not reappear repeatedly in one session.
     @State private var didEvaluateStartupDownloadPrompt = false
 
-    /// Initial tab requested by the Android-compatible reading-progress bridge.
-    @State private var readingProgressInitialTab: ReadingProgressTab = .reading
+    /// Optional explicit tab requested by the Android-compatible reading-progress bridge.
+    @State private var readingProgressInitialTab: ReadingProgressTab?
 
-    /// Chapter history target requested by the embedded reader bridge.
-    @State private var chapterReadHistoryTarget: ChapterReadHistoryTarget?
+    /// Parent activities retained while one app-owned reader destination opens another.
+    @State private var readerDestinationBackStack: [ReaderDestination] = []
 
-    /// Presents the current coordinator-owned modal flow.
-    @State private var activeReaderModal: ReaderModal?
-
-    /// Presents WebView-originated bookmark label assignment as a reader-owned app surface.
+    /// Pushes WebView-originated bookmark label assignment onto the reader-owned activity stack.
     @State private var activeReaderLabelAssignmentRoute: ReaderLabelAssignmentRoute?
 
     /// Presents the reader's overflow action sheet.
     @State private var showReaderOverflowMenu = false
+
+    /// Exact restore-strip window whose shared Android popup is currently owned by the reader.
+    @State private var windowTabMenuWindowID: UUID?
+
+    /// Whether the reader-wide anchored popup for a restore-strip window is visible.
+    @State private var showWindowTabMenu = false
+
+    /// Reader-session owner matching Android's shared typed `clipboardKey` state.
+    @State private var windowMenuReferenceStore = BibleWindowMenuReferenceStore()
+
+    /// Canonical single-label Study Pad archive owner used by window-popup export.
+    @State private var windowMenuStudyPadArchiveWorkflow = AndroidStudyPadArchiveWorkflow()
+
+    /// Shared Bookmark-list CSV workflow used by Study Pad window-popup export.
+    @State private var windowMenuCSVExportWorkflow = AndroidBookmarkCSVExportWorkflow()
 
     /// Presents Android's compact Bible-module quick selector anchored to the toolbar button.
     @State private var showBibleQuickModuleSelector = false
@@ -338,8 +393,14 @@ public struct BibleReaderView: View {
     /// Identifies the only drawer action still allowed to run after its dismissal animation.
     @State private var pendingReaderNavigationDrawerActionID: UUID?
 
-    /// Presents the Android-style Strong's mode chooser launched from the overflow menu.
-    @State private var showReaderStrongsModeDialog = false
+    /// Active shared Android preference dialog opened from a window's recent-setting popup.
+    @State private var windowTextSettingEditorRequest: WindowTextSettingEditorRequest?
+
+    /// Staged effective settings mutated by the shared quick preference editor.
+    @State private var windowTextSettingEditorSettings: TextDisplaySettings = .appDefaults
+
+    /// Effective target settings captured before a quick editor commit/reset.
+    @State private var windowTextSettingEditorPreviousSettings: TextDisplaySettings = .appDefaults
 
     /// Queues one follow-up presentation until the reader overflow sheet finishes dismissing.
     @State private var pendingReaderOverflowPresentation: ReaderOverflowPresentation?
@@ -380,14 +441,14 @@ public struct BibleReaderView: View {
     /// Shared text-to-speech service used by all panes and speak-related overlays.
     @StateObject private var speakService = SpeakService()
 
+    /// Guards heavyweight speech restoration and callback binding to the first reader appearance.
+    @State private var speechLifecycleState = BibleReaderSpeechLifecycleState()
+
     /// Pending plain-text payload for the native share sheet.
     @State private var shareText: String?
 
     /// Pending My Documents payload whose title and body must remain separate for native sharing.
     @State private var myDocumentSharePayload: MyDocumentSharePayload?
-
-    /// Pending cross-reference payload for modal presentation.
-    @State private var crossReferences: [CrossReference]?
 
     /// Active module category that the picker should display.
     @State private var pickerCategory: DocumentCategory = .bible
@@ -460,7 +521,7 @@ public struct BibleReaderView: View {
     /// One-shot completion state for the bridge-driven reference chooser flow.
     @State private var refChooserRequest = BibleReaderReferenceChooserRequest()
 
-    /// Generation whose bridge-driven chooser sheet is currently presented.
+    /// Generation whose bridge-driven full-screen chooser is currently presented.
     @State private var refChooserPresentation: BibleReaderReferenceChooserRequest.Generation?
     #if os(iOS)
     /// Motion-driven scroll helper used when tilt-to-scroll is enabled for the workspace.
@@ -530,7 +591,8 @@ public struct BibleReaderView: View {
     private var readerPanePreparationContent: some View {
         ReaderPanePreparationView(
             isPending: isPanePresentationControllerPending,
-            onDismiss: dismissReaderModal
+            surfacePalette: readerThemeSurfacePalette,
+            onDismiss: { activeReaderDestination = nil }
         )
     }
 
@@ -656,11 +718,12 @@ public struct BibleReaderView: View {
             ?? 0
         let drawerToken = "drawerVisible=\(showReaderNavigationDrawer ? "true" : "false")"
         let overflowToken = "overflowVisible=\(showReaderOverflowMenu ? "true" : "false")"
-        let sheetToken = "readerSheet=\(activeReaderSheet?.rawValue ?? "none")"
         let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
-        let modalToken = "readerModal=\(activeReaderModal?.rawValue ?? "none")"
+        let modalToken = "readerModal=none"
+        let historyDialogToken = "historyDialog=\(historyDialogRequest == nil ? "none" : "presented")"
         let searchToken = "searchVisible=\(activeReaderDestination == .search ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(sheetToken);\(destinationToken);\(modalToken);\(searchToken)"
+        let nightModeToken = "nightMode=\(nightMode ? "true" : "false")"
+        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(destinationToken);\(modalToken);\(historyDialogToken);\(searchToken);\(nightModeToken)"
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
@@ -780,24 +843,6 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Binding that presents the cross-reference sheet while cross-reference payload exists.
-
-     - Returns: A Boolean binding derived from `crossReferences`.
-     - Side effects: Setting the binding to `false` clears the pending cross-reference payload.
-     - Failure modes: none.
-     */
-    private var crossReferenceSheetBinding: Binding<Bool> {
-        Binding(
-            get: { crossReferences != nil },
-            set: { isPresented in
-                if !isPresented {
-                    crossReferences = nil
-                }
-            }
-        )
-    }
-
-    /**
      Creates the reader coordinator view.
 
      - Note: This initializer performs no work directly. The view resolves its dependencies from
@@ -829,10 +874,14 @@ public struct BibleReaderView: View {
                 if showReaderNavigationDrawer {
                     readerNavigationDrawerOverlay
                 }
-                if showBookChooser {
-                    bookChooserDrawerOverlay
-                }
                 textSettingsCopyDialogOverlay
+                historyDialogOverlay
+                chapterReadHistoryDialogOverlay
+                windowMenuTransferDialogOverlay
+                helpDialogOverlay
+                licenseDialogOverlay
+                rateReviewDialogOverlay
+                bugReportDialogOverlay
             }
             .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
                 if showReaderOverflowMenu {
@@ -849,6 +898,22 @@ public struct BibleReaderView: View {
                     commentaryQuickModuleSelectorOverlay(anchor: anchor)
                 }
             }
+            .sheet(item: $manualBugReportMailPayload) { payload in
+                AddressedMailComposer(payload: payload, onFinish: {
+                    manualBugReportMailPayload = nil
+                }, onResult: { result in
+                    manualBugReportCoordinator.finishMail(result)
+                    manualBugReportPreparedPayload = nil
+                })
+            }
+            .sheet(item: $manualBugReportExport) { export in
+                ShareSheet(items: [export.fileURL]) { _ in
+                    ProductFeedbackReportExportBuilder.remove(export)
+                    manualBugReportExport = nil
+                    manualBugReportCoordinator.completeExport(success: true)
+                    manualBugReportPreparedPayload = nil
+                }
+            }
     }
 
     /**
@@ -859,10 +924,14 @@ public struct BibleReaderView: View {
      `WindowManager` state.
      */
     public var body: some View {
+        readerScreenWithLifecycleModifiers
+    }
+
+    /// Attaches reader presentation surfaces while keeping SwiftUI's inferred view types bounded.
+    private var readerScreenWithPresentationModifiers: some View {
         readerScreenWithReaderOverlays
         .animation(.easeInOut(duration: 0.25), value: toastMessage)
         .animation(.easeInOut(duration: 0.2), value: showReaderNavigationDrawer)
-        .animation(.easeInOut(duration: 0.2), value: showBookChooser)
         .animation(.easeInOut(duration: 0.16), value: showReaderOverflowMenu)
         .animation(.easeInOut(duration: 0.16), value: showBibleQuickModuleSelector)
         .animation(.easeInOut(duration: 0.16), value: showCommentaryQuickModuleSelector)
@@ -898,69 +967,85 @@ public struct BibleReaderView: View {
         }
         #endif
         .preferredColorScheme(preferredColorSchemeOverride)
-        .sheet(item: $activeReaderSheet) { presentedSheet in
-            activeReaderSheetContent(presentedSheet)
-        }
         .navigationDestination(item: $activeReaderDestination) { destination in
             readerDestinationContent(destination)
         }
-        .sheet(item: readerSheetModalBinding) { modal in
-            readerModalContent(modal)
+        .navigationDestination(item: $activeAIPromptEditorDestination) { destination in
+            aiPromptEditorDestinationContent(destination)
         }
-        #if os(iOS)
-        .fullScreenCover(item: readerDocumentChooserModalBinding) { modal in
-            readerModalContent(modal)
-        }
-        .fullScreenCover(item: $activeReaderLabelAssignmentRoute) { route in
+        .navigationDestination(item: $activeReaderLabelAssignmentRoute) { route in
             readerLabelAssignmentContent(route)
         }
-        #else
-        .sheet(item: readerDocumentChooserModalBinding) { modal in
-            readerModalContent(modal)
-        }
-        .sheet(item: $activeReaderLabelAssignmentRoute) { route in
-            readerLabelAssignmentContent(route)
-        }
-        #endif
-        .confirmationDialog(
-            localizedAndroidOverflowString(
-                androidKey: "strongs_mode_title",
-                fallbackKey: nil,
-                default: "Choose Strong's mode"
-            ),
-            isPresented: $showReaderStrongsModeDialog,
-            titleVisibility: .visible
-        ) {
-            strongsModeDialogActions
-        }
-        .alert(
-            String(localized: "error_occurred"),
-            isPresented: Binding(
-                get: { pendingGenericQuickModuleSwitchRetry != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingGenericQuickModuleSwitchRetry = nil
-                    }
-                }
-            ),
-            presenting: pendingGenericQuickModuleSwitchRetry
-        ) { retry in
-            Button(String(localized: "retry")) {
-                pendingGenericQuickModuleSwitchRetry = nil
-                selectCommentaryQuickModule(
-                    retry.module,
-                    targetWindowId: retry.targetWindowId
+        .overlay {
+            if let request = windowTextSettingEditorRequest,
+               let editor = request.type.editorKind {
+                AndroidTextDisplayPreferenceEditorDialog(
+                    editor: editor,
+                    settings: $windowTextSettingEditorSettings,
+                    scope: .window,
+                    surfacePalette: readerThemeSurfacePalette,
+                    onCommit: {
+                        finishWindowTextSettingEditor(request, recordsRecentType: true)
+                    },
+                    onReset: {
+                        finishWindowTextSettingEditor(request, recordsRecentType: false)
+                    },
+                    onCancel: { windowTextSettingEditorRequest = nil }
                 )
+                .zIndex(40)
             }
-            Button(String(localized: "cancel"), role: .cancel) {
-                pendingGenericQuickModuleSwitchRetry = nil
+        }
+        .overlay {
+            if let retry = pendingGenericQuickModuleSwitchRetry {
+                genericQuickModuleSwitchRetryDialog(retry)
             }
-        } message: { retry in
-            Text(retry.message)
         }
-        .onChange(of: activeReaderSheet) { oldValue, newValue in
-            handleActiveReaderSheetChange(from: oldValue, to: newValue)
-        }
+    }
+
+    /**
+     Builds the shared Android decision dialog for one failed generic quick-module switch.
+
+     - Parameter retry: Captured module, pane identity, and actionable validation message.
+     - Returns: A retry/cancel dialog using the application-owned dialog window and palette.
+     - Side effects: Cancel clears the pending request; Retry clears it and repeats the exact
+       pane-scoped selection once.
+     - Failure modes: If the target pane disappeared, the existing selection path applies its
+       documented active-pane fallback and reports any subsequent failure normally.
+     */
+    private func genericQuickModuleSwitchRetryDialog(
+        _ retry: GenericQuickModuleSwitchRetry
+    ) -> some View {
+        AndroidDecisionDialog(
+            title: String(localized: "error_occurred"),
+            message: retry.message,
+            actions: [
+                .init(
+                    id: "cancel",
+                    title: String(localized: "cancel"),
+                    style: .normal,
+                    perform: { pendingGenericQuickModuleSwitchRetry = nil }
+                ),
+                .init(
+                    id: "retry",
+                    title: String(localized: "retry"),
+                    style: .normal,
+                    perform: {
+                        pendingGenericQuickModuleSwitchRetry = nil
+                        selectCommentaryQuickModule(
+                            retry.module,
+                            targetWindowId: retry.targetWindowId
+                        )
+                    }
+                ),
+            ],
+            accessibilityIdentifier: "genericQuickModuleSwitchRetryDialog"
+        )
+        .zIndex(40)
+    }
+
+    /// Attaches reader lifecycle observation and system handoffs after presentation ownership.
+    private var readerScreenWithLifecycleModifiers: some View {
+        readerScreenWithPresentationModifiers
         .onChange(of: activeReaderDestination) { oldValue, newValue in
             handleActiveReaderDestinationChange(from: oldValue, to: newValue)
         }
@@ -969,39 +1054,47 @@ public struct BibleReaderView: View {
                 handleModuleStoreDidChange()
             }
         }
-        .onChange(of: showReaderOverflowMenu) { oldValue, newValue in
-            guard oldValue, !newValue else {
-                return
-            }
-            DispatchQueue.main.async {
-                presentPendingReaderOverflowPresentation()
-            }
+        .onChange(of: showReaderOverflowMenu) { _, isPresented in
+            handleReaderOverflowMenuChange(isPresented)
         }
         .onChange(of: colorScheme) { _, _ in
-            let store = SettingsStore(modelContext: modelContext)
-            let manualNightMode = store.getBool("night_mode")
-            nightMode = NightModeSettingsResolver.isNightMode(
-                rawValue: nightModeMode,
-                manualNightMode: manualNightMode,
-                systemIsDark: colorScheme == .dark
-            )
+            updateNightModeForCurrentColorScheme()
         }
         .onChange(of: isFullScreen) { _, fullScreen in
-            if !fullScreen {
-                lastFullScreenByDoubleTap = false
-            }
+            handleFullScreenChange(fullScreen)
         }
         .sheet(isPresented: shareSheetBinding) {
             shareSheetContent
         }
-        .sheet(isPresented: crossReferenceSheetBinding) {
-            crossReferenceSheetContent
-        }
-        .sheet(item: $refChooserPresentation) { generation in
-            refChooserSheetContent(for: generation)
-                .onDisappear {
-                    handleReferenceChooserDismissal(for: generation)
+        .fileExporter(
+            isPresented: Binding(
+                get: { windowMenuStudyPadArchiveWorkflow.showsFileExporter },
+                set: { windowMenuStudyPadArchiveWorkflow.showsFileExporter = $0 }
+            ),
+            document: windowMenuStudyPadArchiveWorkflow.exportDocument,
+            contentType: .zip,
+            defaultFilename: windowMenuStudyPadArchiveWorkflow.exportFileName,
+            onCompletion: windowMenuStudyPadArchiveWorkflow.handleFileExportCompletion
+        )
+        .fileExporter(
+            isPresented: Binding(
+                get: { windowMenuCSVExportWorkflow.showsFileExporter },
+                set: { windowMenuCSVExportWorkflow.showsFileExporter = $0 }
+            ),
+            document: windowMenuCSVExportWorkflow.exportDocument,
+            contentType: .commaSeparatedText,
+            defaultFilename: windowMenuCSVExportWorkflow.exportFileName,
+            onCompletion: windowMenuCSVExportWorkflow.handleFileExportCompletion
+        )
+        .overlay {
+            if let generation = refChooserPresentation {
+                ReaderPassageChooserOverlay {
+                    refChooserSheetContent(for: generation)
+                        .onDisappear {
+                            handleReferenceChooserDismissal(for: generation)
+                        }
                 }
+            }
         }
         // MARK: - Keyboard Shortcuts (iPad/Mac)
         .background {
@@ -1028,7 +1121,8 @@ public struct BibleReaderView: View {
                 BibleReaderSpeakMiniPlayer(
                     speakService: speakService,
                     currentReference: currentReference,
-                    onShowControls: { presentReaderModal(.speakControls) }
+                    onShowControls: { presentReaderDestination(.speakControls) },
+                    surfacePalette: surfacePalette
                 )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -1038,32 +1132,31 @@ public struct BibleReaderView: View {
                 WindowTabBar(
                     surfacePalette: surfacePalette,
                     monochromeMode: monochromeModePref,
-                    onShowToast: showWindowTabToast,
-                    onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-                    onGoToTypedRef: navigateWindowTabReference
+                    onPresentWindowMenu: { presentWindowTabMenu(for: $0) }
                 )
             }
         }
         .foregroundStyle(surfacePalette.foregroundColor)
         .background(surfacePalette.backgroundColor.ignoresSafeArea())
+        .androidAnchoredPopupMenu(
+            anchorID: windowTabMenuWindowID.map { WindowTabMenuAnchor.id(for: $0) }
+                ?? "windowTabMenu::none",
+            isPresented: $showWindowTabMenu,
+            menuWidth: 320,
+            estimatedMenuHeight: 440,
+            accessibilityIdentifier: "windowTabMenu"
+        ) {
+            windowTabMenuPopup
+        }
     }
 
     /// Floating current-reference capsule shown during fullscreen reading.
     @ViewBuilder
     private var bibleReferenceOverlay: some View {
         if shouldShowBibleReferenceOverlay {
-            Text(currentReference)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule().strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
-                )
+            AndroidBibleReferenceOverlay(reference: currentReference)
                 .padding(.bottom, bibleReferenceOverlayBottomPadding)
                 .transition(.opacity)
-                .allowsHitTesting(false)
         }
     }
 
@@ -1071,15 +1164,7 @@ public struct BibleReaderView: View {
     @ViewBuilder
     private var toastOverlay: some View {
         if let message = toastMessage {
-            Text(message)
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                .shadow(radius: 4)
-                .padding(.bottom, 80)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .allowsHitTesting(false)
+            AndroidToastOverlay(message: message, bottomPadding: 80)
         }
     }
 
@@ -1087,25 +1172,179 @@ public struct BibleReaderView: View {
     @ViewBuilder
     private var textSettingsCopyDialogOverlay: some View {
         if let request = textSettingsCopyRequest {
-            ZStack {
-                Color.black.opacity(0.36)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        textSettingsCopyRequest = nil
-                    }
-
-                TextDisplaySettingsCopyDialog(
-                    targetTitle: request.targetTitle,
-                    onCancel: { textSettingsCopyRequest = nil },
-                    onConfirm: { fields in
-                        applyTextSettingsCopy(request, fields: fields)
-                        textSettingsCopyRequest = nil
-                    }
-                )
-                .padding(.horizontal, 24)
-            }
+            TextDisplaySettingsCopyDialog(
+                targetTitle: request.targetTitle,
+                onCancel: { textSettingsCopyRequest = nil },
+                onConfirm: { fields in
+                    applyTextSettingsCopy(request, fields: fields)
+                    textSettingsCopyRequest = nil
+                }
+            )
             .transition(.opacity)
             .zIndex(20)
+        }
+    }
+
+    /**
+     Presents the app-owned portions of Android's Study Pad window export workflows.
+
+     CSV reuses the Bookmark-list column selector and archive/CSV outcomes reuse shared Android
+     decision surfaces. Only the final file destination is a platform handoff.
+     */
+    @ViewBuilder
+    private var windowMenuTransferDialogOverlay: some View {
+        if windowMenuCSVExportWorkflow.showsColumnSelector {
+            BookmarkCSVColumnSelectionView(
+                selectedColumns: windowMenuCSVExportWorkflow.selectedColumns,
+                onExport: { columns in
+                    windowMenuCSVExportWorkflow.prepareExport(
+                        columns: columns,
+                        modelContext: modelContext
+                    )
+                },
+                onCancel: windowMenuCSVExportWorkflow.cancelColumnSelection
+            )
+        } else if let feedback = windowMenuCSVExportWorkflow.feedback {
+            AndroidDecisionDialog(
+                title: feedback.title,
+                message: feedback.message,
+                actions: [
+                    .init(
+                        id: "ok",
+                        title: String(localized: "ok", defaultValue: "OK"),
+                        style: .normal
+                    ) {
+                        windowMenuCSVExportWorkflow.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "windowMenuCSVExportFeedbackDialog"
+            )
+        } else if let feedback = windowMenuStudyPadArchiveWorkflow.feedback {
+            AndroidDecisionDialog(
+                title: feedback.title,
+                message: feedback.message,
+                actions: [
+                    .init(
+                        id: "ok",
+                        title: String(localized: "ok", defaultValue: "OK"),
+                        style: .normal
+                    ) {
+                        windowMenuStudyPadArchiveWorkflow.feedback = nil
+                    },
+                ],
+                accessibilityIdentifier: "windowMenuStudyPadExportFeedbackDialog"
+            )
+        }
+    }
+
+    /**
+     Renders Android's dialog-themed History activity as a reader-owned app window.
+
+     The overlay is present only while a request exists. It deliberately captures the originating
+     pane through `panePresentationTargetWindowId`, so a user can change focus behind the dialog
+     without selecting or navigating the wrong window.
+     */
+    @ViewBuilder
+    private var historyDialogOverlay: some View {
+        if let request = historyDialogRequest {
+            AndroidHistoryDialog(
+                activeWindowID: request.windowID,
+                title: request.title,
+                bookNameResolver: { osisID in
+                    panePresentationController?.bookName(forOsisId: osisID)
+                },
+                onDismiss: dismissHistoryDialog,
+                onNavigate: { key in
+                    let controller = panePresentationController
+                    dismissHistoryDialog()
+                    _ = controller?.navigateToRef(key)
+                }
+            )
+            .transition(.opacity)
+            .zIndex(20)
+        }
+    }
+
+    /** Renders Android's staged-delete Read History surface as a captured app-owned dialog. */
+    @ViewBuilder
+    private var chapterReadHistoryDialogOverlay: some View {
+        if let request = chapterReadHistoryDialogRequest {
+            AndroidChapterReadHistoryDialog(
+                store: panePresentationController?.readingProgressStore,
+                target: request.target,
+                onDismiss: dismissChapterReadHistoryDialog
+            )
+            .transition(.opacity)
+            .zIndex(20)
+        }
+    }
+
+    /** Renders Android Help & Tips as an app-owned dialog rather than an adaptive sheet. */
+    @ViewBuilder
+    private var helpDialogOverlay: some View {
+        if isHelpDialogPresented {
+            AndroidHelpDialog(onDismiss: dismissHelpDialog)
+                .transition(.opacity)
+                .zIndex(20)
+        }
+    }
+
+    /** Renders Android's bundled Open Source License dialog without a browser handoff. */
+    @ViewBuilder
+    private var licenseDialogOverlay: some View {
+        if isLicenseDialogPresented {
+            AndroidLicenseDialog(onDismiss: dismissLicenseDialog)
+                .transition(.opacity)
+                .zIndex(20)
+        }
+    }
+
+    /** Renders Android's explanatory Rate & Review dialog before the system store handoff. */
+    @ViewBuilder
+    private var rateReviewDialogOverlay: some View {
+        if isRateReviewDialogPresented {
+            AndroidRateReviewDialog(
+                onDismiss: dismissRateReviewDialog,
+                onProceed: proceedToSystemReview,
+                onContactSupport: { openExternalLink("mailto:help.andbible@gmail.com") },
+                onReportBug: { openExternalLink("https://github.com/AndBible/and-bible/issues") },
+                onContactMaintainers: { openExternalLink("https://github.com/AndBible/and-bible/issues") },
+                onLearnToContribute: { openExternalLink("https://github.com/AndBible/and-bible/wiki/How-to-contribute") }
+            )
+            .transition(.opacity)
+            .zIndex(20)
+        }
+    }
+
+    /** Renders collection progress, consent, and explicit unavailable-mail state. */
+    @ViewBuilder
+    private var bugReportDialogOverlay: some View {
+        switch manualBugReportCoordinator.phase {
+        case .idle, .presentingMail:
+            EmptyView()
+        case .collecting, .exporting:
+            AndroidBugReportPreparationDialog(isExportRetry: manualBugReportCoordinator.phase == .exporting)
+                .transition(.opacity)
+                .zIndex(20)
+        case .awaitingConsent:
+            if let payload = manualBugReportPreparedPayload {
+                AndroidBugReportDialog(
+                    onDismiss: dismissBugReportDialog,
+                    onSendReport: { presentPreparedBugReport(payload) }
+                )
+                .transition(.opacity)
+                .zIndex(20)
+            }
+        case .mailUnavailable, .exportFailed:
+            if let payload = manualBugReportPreparedPayload {
+                AndroidBugReportUnsentDialog(
+                    onDismiss: dismissBugReportDialog,
+                    onExport: { exportPreparedBugReport(payload) },
+                    exportFailed: manualBugReportCoordinator.phase == .exportFailed
+                )
+                    .transition(.opacity)
+                    .zIndex(20)
+            }
         }
     }
 
@@ -1154,41 +1393,39 @@ public struct BibleReaderView: View {
         )
     }
 
-    /// Book chooser content used by toolbar and tab-bar navigation commands.
-    private var bookChooserDrawerContent: some View {
+    /// Android GridChoosePassageBook-equivalent content used by reader navigation commands.
+    private var bookChooserDestinationContent: some View {
         let progressContext = passageChooserProgressContext
 
-        return NavigationStack {
-            BookChooserView(
-                books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
-                navigateToVerse: navigateToVersePref,
-                currentBook: panePresentationController?.currentBook,
-                currentChapter: panePresentationController?.currentChapter,
-                currentVerse: panePresentationController?.currentVerse,
-                workspaceName: activePassageChooserWorkspaceName,
-                verseCountProvider: { book, chapter in
-                    guard let panePresentationController else {
-                        return BibleReaderController.verseCount(for: book.name, chapter: chapter)
-                    }
-                    return panePresentationController.verseCountForActiveModule(
-                        book: book.name,
-                        chapter: chapter
-                    )
-                },
-                bookProgressProvider: { book in
-                    progressContext.bookProgress(for: book)
-                },
-                chapterProgressProvider: { book, chapter in
-                    progressContext.chapterProgress(for: book, chapter: chapter)
-                },
-                verseProgressProvider: { book, chapter, verse in
-                    progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
-                },
-                onCancel: dismissBookChooser
-            ) { book, chapter, verse in
-                dismissBookChooser()
-                panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
-            }
+        return BookChooserView(
+            books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+            navigateToVerse: navigateToVersePref,
+            currentBook: panePresentationController?.currentBook,
+            currentChapter: panePresentationController?.currentChapter,
+            currentVerse: panePresentationController?.currentVerse,
+            workspaceName: activePassageChooserWorkspaceName,
+            verseCountProvider: { book, chapter in
+                guard let panePresentationController else {
+                    return BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                }
+                return panePresentationController.verseCountForActiveModule(
+                    book: book.name,
+                    chapter: chapter
+                )
+            },
+            bookProgressProvider: { book in
+                progressContext.bookProgress(for: book)
+            },
+            chapterProgressProvider: { book, chapter in
+                progressContext.chapterProgress(for: book, chapter: chapter)
+            },
+            verseProgressProvider: { book, chapter, verse in
+                progressContext.verseProgress(for: book, chapter: chapter, verse: verse)
+            },
+            onCancel: dismissBookChooser
+        ) { book, chapter, verse in
+            dismissBookChooser()
+            panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
         }
         .preferredColorScheme(.dark)
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
@@ -1209,13 +1446,18 @@ public struct BibleReaderView: View {
                 settingsStore: SettingsStore(modelContext: modelContext)
             ),
             isStrongsFindAll: searchIsStrongsFindAll,
+            surfacePalette: readerThemeSurfacePalette,
             initialQuery: searchInitialQuery,
             onOpenReference: openReferenceFromSearch,
-            onNavigate: navigateFromSearch
+            onNavigate: navigateFromSearch,
+            onOpenResultsInWindow: { results in
+                controller?.openSearchResultsInLinksWindow(results) ?? false
+            },
+            onDismiss: {
+                activeReaderDestination = nil
+                searchInitialQuery = ""
+            }
         )
-        #if os(iOS)
-        .toolbar(.visible, for: .navigationBar)
-        #endif
         .overlay(alignment: .topLeading) {
             readerRenderedContentStateExport
         }
@@ -1228,26 +1470,14 @@ public struct BibleReaderView: View {
             ?? BibleReaderController.osisBookId(for: currentBook)
     }
 
-    /// Builds content for the active top-level reader sheet.
-    private func activeReaderSheetContent(_ presentedSheet: ReaderSheet) -> some View {
-        BibleReaderActiveSheetContent(
-            sheet: presentedSheet,
-            controller: panePresentationController,
-            speakService: speakService,
-            readingProgressInitialTab: readingProgressInitialTab,
-            chapterReadHistoryTarget: chapterReadHistoryTarget,
-            onDismiss: dismissReaderSheet
-        )
-    }
-
-    /// Builds reader-owned label assignment for WebView bookmark action events.
+    /// Builds the reader-owned Manage Labels activity for WebView bookmark action events.
     private func readerLabelAssignmentContent(_ route: ReaderLabelAssignmentRoute) -> some View {
-        NavigationStack {
-            LabelAssignmentView(
-                bookmarkId: route.bookmarkId,
-                onDismiss: { activeReaderLabelAssignmentRoute = nil }
-            )
-        }
+        LabelAssignmentView(
+            bookmarkId: route.bookmarkId,
+            workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace,
+            surfacePalette: readerThemeSurfacePalette,
+            onDismiss: { activeReaderLabelAssignmentRoute = nil }
+        )
         .onDisappear {
             refreshReaderLabelAssignment(route)
         }
@@ -1259,7 +1489,7 @@ public struct BibleReaderView: View {
      - Parameters:
        - bookmarkId: Bookmark whose labels should be edited.
        - windowId: Originating pane identifier, used to refresh the correct Vue document afterward.
-     - Side effects: Captures pane presentation target state and presents a full-screen route.
+     - Side effects: Captures pane presentation target state and pushes an app-owned reader destination.
      - Failure modes: Missing window identifiers fall back to the currently active pane.
      */
     private func presentReaderLabelAssignment(bookmarkId: UUID, from windowId: UUID?) {
@@ -1319,6 +1549,56 @@ public struct BibleReaderView: View {
         }
     }
 
+    /// Builds the prompt editor destination separately to keep the reader's modifier chain type-checkable.
+    @ViewBuilder
+    private func aiPromptEditorDestinationContent(_ destination: AIPromptEditorDestination) -> some View {
+        AIPromptEditorView(
+            promptID: destination.promptID,
+            swordManager: panePresentationController?.swordManager,
+            surfacePalette: readerThemeSurfacePalette,
+            onBack: { activeAIPromptEditorDestination = nil },
+            onChanged: {}
+        )
+        .androidAccessibilityIdentityMarker(
+            label: String(localized: "edit_prompt", defaultValue: "Edit prompt"),
+            accessibilityIdentifier: "aiPromptEditorScreen",
+            surfaceColor: readerThemeSurfacePalette.backgroundColor
+        )
+    }
+
+    /// Applies the configured night-mode policy after a system color-scheme change.
+    private func updateNightModeForCurrentColorScheme() {
+        let store = SettingsStore(modelContext: modelContext)
+        let manualNightMode = store.getBool("night_mode")
+        nightMode = NightModeSettingsResolver.isNightMode(
+            rawValue: nightModeMode,
+            manualNightMode: manualNightMode,
+            systemIsDark: colorScheme == .dark
+        )
+    }
+
+    /// Defers a queued overflow route until the menu's dismissal transaction completes.
+    private func presentPendingReaderOverflowPresentationAfterDismissal() {
+        DispatchQueue.main.async {
+            presentPendingReaderOverflowPresentation()
+        }
+    }
+
+    /// Presents a queued overflow route only after the menu changes from visible to dismissed.
+    private func handleReaderOverflowMenuChange(_ isPresented: Bool) {
+        guard !isPresented else {
+            return
+        }
+        presentPendingReaderOverflowPresentationAfterDismissal()
+    }
+
+    /// Clears the double-tap fullscreen marker after the reader exits fullscreen mode.
+    private func handleFullScreenChange(_ fullScreen: Bool) {
+        if !fullScreen {
+            lastFullScreenByDoubleTap = false
+        }
+    }
+
     /// Builds reader-stack destinations opened from the drawer, overflow, or keyboard shortcuts.
     @ViewBuilder
     private func readerDestinationContent(_ destination: ReaderDestination) -> some View {
@@ -1327,47 +1607,62 @@ public struct BibleReaderView: View {
             searchSheetContent
         case .bookmarks:
             BookmarkListView(
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil },
+                bibleTextResolver: { bookmark in
+                    panePresentationController?.bookmarkListTextProjection(for: bookmark) ?? .empty
+                },
+                genericTextResolver: { bookmark in
+                    panePresentationController?.bookmarkListTextProjection(for: bookmark) ?? .empty
+                },
                 onNavigateTarget: { target in
                     guard let controller = panePresentationController else {
                         throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
                     }
                     try controller.navigate(toBookmarkTarget: target)
                 },
-                onOpenStudyPad: { labelId in
-                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
-                    activeReaderDestination = nil
-                },
+                workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace,
                 bibleOrdinalResolver: { book, ordinal in
                     panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
                 },
-                activeReferenceResolver: panePresentationController?.bookmarkListActiveReferenceResolver() ?? nil,
-                showsDismissButton: false
+                activeReferenceResolver: panePresentationController?.bookmarkListActiveReferenceResolver() ?? nil
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             .navigationBarBackButtonHidden(true)
-            .toolbar {
-                readerDestinationBackToolbarItem
-            }
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
         case .studyPads:
-            LabelManagerView(
-                onOpenStudyPad: { labelId in
-                    panePresentationController?.loadStudyPadDocument(labelId: labelId)
+            StudyPadSelectorView(
+                surfacePalette: readerThemeSurfacePalette,
+                workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace,
+                activeLabelID: panePresentationController?.activeStudyPadLabelId,
+                onDismiss: {
                     activeReaderDestination = nil
                 },
-                navigationTitle: String(localized: "studypads"),
-                opensStudyPadOnRowTap: true
+                onOpenStudyPad: { labelId, entryId in
+                    panePresentationController?.loadStudyPadDocument(labelId: labelId, bookmarkId: entryId)
+                    activeReaderDestination = nil
+                }
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
             .navigationBarBackButtonHidden(true)
-            .toolbar {
-                readerDestinationBackToolbarItem
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
             }
+        case .labelManager:
+            LabelManagerView(
+                workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace,
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil }
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1386,6 +1681,7 @@ public struct BibleReaderView: View {
             )
             MyDocumentsListView(
                 reservedInitials: reservedInitials,
+                surfacePalette: readerThemeSurfacePalette,
                 onDismiss: { activeReaderDestination = nil },
                 onLibrarySaved: refreshMyDocumentStores
             ) { bookInitials, pageKey in
@@ -1396,11 +1692,38 @@ public struct BibleReaderView: View {
                     activeReaderDestination = nil
                 }
             }
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
             }
+        case .workspaces:
+            WorkspaceSelectorView(
+                speakService: speakService,
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil }
+            )
+                .overlay(alignment: .topLeading) {
+                    readerRenderedContentStateExport
+                }
         case .readingPlans:
             ReadingPlanListView(
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil },
+                dailyReadingToolbarState: AndroidDailyReadingToolbarState(
+                    bibleTitle: panePresentationController?.activeModuleName,
+                    commentaryTitle: panePresentationController?.activeCommentaryModuleName,
+                    dictionaryTitle: panePresentationController?.activeDictionaryModuleName,
+                    isSpeaking: speakService.isSpeaking,
+                    isPaused: speakService.isPaused
+                ),
+                onOpenDailyReadingBible: openDailyReadingBible,
+                onOpenDailyReadingCommentary: openDailyReadingCommentary,
+                onOpenDailyReadingDictionary: openDailyReadingDictionary,
+                onToggleDailyReadingSpeechPause: toggleDailyReadingSpeechPause,
+                onStopDailyReadingSpeech: speakService.stop,
                 planVersificationResolver: { planCode in
                     guard let controller = panePresentationController else {
                         throw ReadingPlanDefinitionError.unavailable(planCode: planCode)
@@ -1418,25 +1741,274 @@ public struct BibleReaderView: View {
                 }
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
             .navigationBarBackButtonHidden(true)
-            .toolbar {
-                readerDestinationBackToolbarItem
-            }
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
+            }
+        case .readingProgress:
+            ReadingProgressView(
+                readingStore: panePresentationController?.readingProgressStore,
+                memorizationStore: panePresentationController?.memorizationProgressStore,
+                surfacePalette: readerThemeSurfacePalette,
+                initialTab: readingProgressInitialTab,
+                onBack: { activeReaderDestination = nil },
+                onOpenSettings: {
+                    presentChildReaderDestination(.readingProgressSettings)
+                },
+                onOpenMemorizeRange: { range in
+                    activeReaderDestination = nil
+                    _ = panePresentationController?.openMemorizeKJVARange(
+                        startOrdinal: range.startOrdinal,
+                        endOrdinal: range.endOrdinal
+                    )
+                },
+                onOpenChapter: { osisId, chapter in
+                    activeReaderDestination = nil
+                    _ = panePresentationController?.navigateToRef("\(osisId).\(chapter)")
+                }
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                AndroidActivityAccessibilityMarker(
+                    label: String(localized: "reading_progress_title", defaultValue: "Read/Memory Progress"),
+                    accessibilityIdentifier: "readingProgressScreen",
+                    surfaceColor: readerThemeSurfacePalette.backgroundColor
+                )
+            }
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .readingProgressSettings:
+            ReadingProgressSettingsView(
+                controller: panePresentationController,
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .passageChooser:
+            bookChooserDestinationContent
+                .overlay(alignment: .topLeading) {
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "choose_book", defaultValue: "Choose Book"),
+                        accessibilityIdentifier: "passageChooserScreen",
+                        surfaceColor: readerThemeSurfacePalette.backgroundColor
+                    )
+                }
+                .overlay(alignment: .topLeading) {
+                    readerRenderedContentStateExport
+                }
+        case .modulePicker:
+            documentChooserDestinationContent(
+                category: pickerCategory,
+                startsWithAllTypes: false
+            )
+        case .chooseDocument:
+            documentChooserDestinationContent(
+                category: panePresentationController?.currentCategory ?? pickerCategory,
+                startsWithAllTypes: true
+            )
+        case .speakControls:
+            SpeakControlView(
+                speakService: speakService,
+                surfacePalette: readerThemeSurfacePalette,
+                passageBooks: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
+                verseCountProvider: { book, chapter in
+                    panePresentationController?.verseCountForActiveModule(
+                        book: book.name,
+                        chapter: chapter
+                    ) ?? BibleReaderController.verseCount(for: book.name, chapter: chapter)
+                },
+                onBack: { activeReaderDestination = nil }
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                AndroidActivityAccessibilityMarker(
+                    label: String(localized: "speak", defaultValue: "Speak"),
+                    accessibilityIdentifier: "speakControlsScreen",
+                    surfaceColor: readerThemeSurfacePalette.backgroundColor
+                )
+            }
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .syncSettings:
+            SyncSettingsView(
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .dictionaryBrowser:
+            if let controller = panePresentationController,
+               let source = controller.activeDictionaryBrowserSource() {
+                DictionaryBrowserView(
+                    source: source,
+                    surfacePalette: readerThemeSurfacePalette,
+                    onBack: { activeReaderDestination = nil }
+                ) { key in
+                    activeReaderDestination = nil
+                    controller.loadDictionaryEntry(key: key)
+                }
+                .overlay(alignment: .topLeading) {
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "dictionary", defaultValue: "Dictionary"),
+                        accessibilityIdentifier: "dictionaryBrowserScreen",
+                        surfaceColor: readerThemeSurfacePalette.backgroundColor
+                    )
+                }
+            } else {
+                readerPanePreparationContent
+            }
+        case .generalBookBrowser:
+            if let controller = panePresentationController {
+                if let reader = controller.activeEpubReader {
+                    EpubBrowserView(
+                        reader: reader,
+                        surfacePalette: readerThemeSurfacePalette,
+                        onBack: { activeReaderDestination = nil }
+                    ) { key in
+                        activeReaderDestination = nil
+                        controller.loadEpubEntry(key: key)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        AndroidActivityAccessibilityMarker(
+                            label: String(localized: "general_book", defaultValue: "Book"),
+                            accessibilityIdentifier: "generalBookBrowserScreen",
+                            surfaceColor: readerThemeSurfacePalette.backgroundColor
+                        )
+                    }
+                } else if let module = controller.activeGeneralBookModule {
+                    GeneralBookBrowserView(
+                        module: module,
+                        title: String(localized: "general_book", defaultValue: "Book"),
+                        surfacePalette: readerThemeSurfacePalette,
+                        onBack: { activeReaderDestination = nil },
+                        onEmptyKeys: { firstGlobalKey in
+                            controller.handleEmptyGenericKeyChooser(
+                                module: module,
+                                category: .generalBook,
+                                firstGlobalKey: firstGlobalKey
+                            )
+                        }
+                    ) { key in
+                        activeReaderDestination = nil
+                        controller.loadGeneralBookEntry(key: key)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        AndroidActivityAccessibilityMarker(
+                            label: String(localized: "general_book", defaultValue: "Book"),
+                            accessibilityIdentifier: "generalBookBrowserScreen",
+                            surfaceColor: readerThemeSurfacePalette.backgroundColor
+                        )
+                    }
+                } else {
+                    readerPanePreparationContent
+                }
+            } else {
+                readerPanePreparationContent
+            }
+        case .mapBrowser:
+            if let controller = panePresentationController,
+               let module = controller.activeMapModule {
+                GeneralBookBrowserView(
+                    module: module,
+                    title: String(localized: "doc_type_map", defaultValue: "Map"),
+                    surfacePalette: readerThemeSurfacePalette,
+                    onBack: { activeReaderDestination = nil },
+                    onEmptyKeys: { firstGlobalKey in
+                        controller.handleEmptyGenericKeyChooser(
+                            module: module,
+                            category: .map,
+                            firstGlobalKey: firstGlobalKey
+                        )
+                    }
+                ) { key in
+                    activeReaderDestination = nil
+                    controller.loadMapEntry(key: key)
+                }
+                .overlay(alignment: .topLeading) {
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "doc_type_map", defaultValue: "Map"),
+                        accessibilityIdentifier: "mapBrowserScreen",
+                        surfaceColor: readerThemeSurfacePalette.backgroundColor
+                    )
+                }
+            } else {
+                readerPanePreparationContent
+            }
+        case .epubSearch:
+            if let reader = panePresentationController?.activeEpubReader {
+                EpubSearchView(
+                    reader: reader,
+                    modePreferences: SearchModePreferences(
+                        settingsStore: SettingsStore(modelContext: modelContext)
+                    ),
+                    surfacePalette: readerThemeSurfacePalette,
+                    onBack: { activeReaderDestination = nil },
+                    onAdoptRebuiltReader: { rebuiltReader in
+                        panePresentationController?.adoptRebuiltEpubReader(rebuiltReader) ?? false
+                    }
+                ) { result in
+                    activeReaderDestination = nil
+                    panePresentationController?.loadEpubEntry(
+                        key: result.key,
+                        jumpToOrdinal: result.ordinal
+                    )
+                }
+                .overlay(alignment: .topLeading) {
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "search", defaultValue: "Find"),
+                        accessibilityIdentifier: "epubSearchScreen",
+                        surfaceColor: readerThemeSurfacePalette.backgroundColor
+                    )
+                }
+            } else {
+                Text(String(localized: "reader_no_epub_loaded"))
+                    .padding()
             }
         case .settings:
             SettingsView(
                 nightMode: $nightMode,
                 nightModeMode: $nightModeMode,
                 readingProgressController: panePresentationController,
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: { activeReaderDestination = nil },
+                onOpenActivity: { destination in
+                    switch destination {
+                    case .globalTextOptions:
+                        presentGlobalTextOptions(
+                            from: panePresentationTargetWindowId,
+                            asChild: true
+                        )
+                    case .syncSettings:
+                        presentChildReaderDestination(.syncSettings)
+                    case .aiSettings:
+                        presentChildReaderDestination(.aiSettings)
+                    case .readingProgressSettings:
+                        presentChildReaderDestination(.readingProgressSettings)
+                    }
+                },
                 onSettingsChanged: applyApplicationPreferenceChange
             )
-            #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
-            #endif
             // The reader shell is removed from the accessibility tree while a destination is
             // pushed, so re-emit the compact reader-state export here. This keeps reader routing
             // tokens (for example `readerSheet=none;readerDestination=settings`) observable by UI
@@ -1445,11 +2017,18 @@ public struct BibleReaderView: View {
                 readerRenderedContentStateExport
             }
         case .aiSettings:
-            AISettingsView(swordManager: panePresentationController?.swordManager)
-                .accessibilityIdentifier("aiSettingsScreen")
-                #if os(iOS)
-                .toolbar(.visible, for: .navigationBar)
-                #endif
+            AISettingsView(
+                swordManager: panePresentationController?.swordManager,
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination
+            )
+                .overlay(alignment: .topLeading) {
+                    AndroidActivityAccessibilityMarker(
+                        label: String(localized: "ai_settings", defaultValue: "AI Settings"),
+                        accessibilityIdentifier: "aiSettingsScreen",
+                        surfaceColor: readerThemeSurfacePalette.backgroundColor
+                    )
+                }
                 .overlay(alignment: .topLeading) {
                     readerRenderedContentStateExport
                 }
@@ -1461,14 +2040,12 @@ public struct BibleReaderView: View {
                         isEasyStartAvailable: isStartupEasyStartAvailable
                     ),
                     versionText: AndBibleAppVersionMetadata.current().drawerFooterText,
+                    surfacePalette: readerThemeSurfacePalette,
                     onEasyStart: presentStartupDefaultDownloads,
                     onDownloadDocuments: presentStartupDownloadDocuments,
                     onLoadDocumentsFromFiles: presentStartupLoadDocumentsFromFiles,
                     onRestoreDatabase: presentStartupRestoreDatabase
                 )
-                #if os(iOS)
-                .toolbar(.visible, for: .navigationBar)
-                #endif
                 .overlay(alignment: .topLeading) {
                     readerRenderedContentStateExport
                 }
@@ -1479,6 +2056,7 @@ public struct BibleReaderView: View {
             ModuleBrowserView(
                 initialSearchText: downloadsInitialSearchText,
                 defaultDownloadMode: downloadsDefaultDownloadMode,
+                surfacePalette: readerThemeSurfacePalette,
                 onDefaultDownloadActivityChanged: { isInFlight in
                     handleStartupDefaultDownloadActivityChanged(isInFlight: isInFlight)
                 }
@@ -1489,14 +2067,13 @@ public struct BibleReaderView: View {
         case .importExport:
             ImportExportView(
                 startupRestoreImportTarget: startupRestoreImportTarget,
-                speakService: speakService
+                speakService: speakService,
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil }
             )
                 #if os(iOS)
-                .toolbar(.visible, for: .navigationBar)
                 .navigationBarBackButtonHidden(true)
-                .toolbar {
-                    readerDestinationBackToolbarItem
-                }
+                .toolbar(.hidden, for: .navigationBar)
                 #endif
                 .overlay(alignment: .topLeading) {
                     readerRenderedContentStateExport
@@ -1511,10 +2088,12 @@ public struct BibleReaderView: View {
                 ),
                 scope: .global,
                 workspaceName: windowManager.activeWorkspace?.name,
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination,
                 onChange: applyGlobalDisplaySettingsChange
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1526,11 +2105,18 @@ public struct BibleReaderView: View {
                 navigationTitle: textOptionsWorkspaceTitle,
                 scope: .workspace,
                 workspaceName: panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name,
-                onOpenGlobalSettings: { presentGlobalTextOptions(from: panePresentationTargetWindowId) },
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination,
+                onOpenGlobalSettings: {
+                    presentGlobalTextOptions(
+                        from: panePresentationTargetWindowId,
+                        asChild: true
+                    )
+                },
                 onChange: applyWorkspaceDisplaySettingsChange
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1541,14 +2127,24 @@ public struct BibleReaderView: View {
                 navigationTitle: textOptionsWindowTitle,
                 scope: .window,
                 workspaceName: panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name,
+                surfacePalette: readerThemeSurfacePalette,
+                onBack: dismissReaderDestination,
                 onOpenWorkspaceSettings: {
-                    presentWorkspaceTextOptions(from: panePresentationTargetWindowId)
+                    presentWorkspaceTextOptions(
+                        from: panePresentationTargetWindowId,
+                        asChild: true
+                    )
                 },
-                onOpenGlobalSettings: { presentGlobalTextOptions(from: panePresentationTargetWindowId) },
+                onOpenGlobalSettings: {
+                    presentGlobalTextOptions(
+                        from: panePresentationTargetWindowId,
+                        asChild: true
+                    )
+                },
                 onChange: applyWindowDisplaySettingsChange
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             // Mirror the Settings destination's state export so UI tests can distinguish the
             // window-level All Text Options route from global Application Preferences.
@@ -1558,10 +2154,37 @@ public struct BibleReaderView: View {
         case .windowColorSettings:
             ColorSettingsView(
                 settings: $windowDisplaySettings,
-                onChange: applyWindowDisplaySettingsChange
+                surfacePalette: readerThemeSurfacePalette,
+                activityTitle: String(localized: "colors", defaultValue: "Colors"),
+                onBack: { activeReaderDestination = nil },
+                onChange: {
+                    recordRecentTextSetting(.colors)
+                    applyWindowDisplaySettingsChange()
+                }
             )
             #if os(iOS)
-            .toolbar(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
+            }
+        case .windowHiddenLabels:
+            AndroidHiddenLabelsActivityView(
+                labels: BookmarkStore(modelContext: modelContext).labels(includeSystem: true),
+                hiddenLabelIDs: Binding(
+                    get: { windowDisplaySettings.bookmarksHideLabels },
+                    set: { windowDisplaySettings.bookmarksHideLabels = $0 }
+                ),
+                isWindow: true,
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil },
+                onChange: {
+                    recordRecentTextSetting(.bookmarksHideLabels)
+                    applyWindowDisplaySettingsChange()
+                }
+            )
+            #if os(iOS)
+            .toolbar(.hidden, for: .navigationBar)
             #endif
             .overlay(alignment: .topLeading) {
                 readerRenderedContentStateExport
@@ -1570,28 +2193,53 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Builds the app-owned reader-destination back action used by Android-parity drawer screens.
+     Builds Android's full-screen ChooseDocument activity on the same reader destination host as
+     Downloads.
 
-     Android launches Bookmarks, StudyPads, My Documents, and Reading Plans as app routes with
-     app-bar back navigation rather than sheet Done chrome. This toolbar item gives those iOS
-     destinations the same explicit escape hatch while keeping the route on the reader navigation
-     stack.
-
-     - Outputs: A navigation-leading toolbar item with a stable UI-test identifier.
-     - Side effects: Tapping the button clears `activeReaderDestination` and returns to the reader.
-     - Failure modes: No throwing failure path; the button is inert only if SwiftUI does not render
-       the hosting navigation toolbar.
+     - Parameters:
+       - category: Category-scoped filter requested by the launching toolbar, or the current pane
+         category for the drawer's all-types chooser.
+       - startsWithAllTypes: Whether Android launched without a type intent extra.
+     - Returns: The shared app-owned document-selection screen or pane-readiness fallback.
+     - Side effects: Back closes the destination; document-management and key-browser callbacks
+       replace it on the existing reader stack while preserving the captured pane.
+     - Failure modes: A pane still registering its controller shows the shared preparation state;
+       an unavailable pane can be dismissed without changing the reader's active document.
      */
-    @ToolbarContentBuilder
-    private var readerDestinationBackToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button {
-                activeReaderDestination = nil
-            } label: {
-                Image(systemName: "arrow.left")
+    @ViewBuilder
+    private func documentChooserDestinationContent(
+        category: DocumentCategory,
+        startsWithAllTypes: Bool
+    ) -> some View {
+        if let controller = panePresentationController {
+            BibleReaderModulePicker(
+                controller: controller,
+                category: category,
+                startsWithAllTypes: startsWithAllTypes,
+                surfacePalette: readerThemeSurfacePalette,
+                onDismiss: { activeReaderDestination = nil },
+                onOpenDownloads: { presentDownloadsPreservingPane() },
+                onOpenDictionaryBrowser: {
+                    presentReaderDestinationPreservingPane(.dictionaryBrowser)
+                },
+                onOpenGeneralBookBrowser: {
+                    presentReaderDestinationPreservingPane(.generalBookBrowser)
+                },
+                onOpenMapBrowser: {
+                    presentReaderDestinationPreservingPane(.mapBrowser)
+                },
+                onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane,
+                onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes
+            )
+            #if os(iOS)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
+            #endif
+            .overlay(alignment: .topLeading) {
+                readerRenderedContentStateExport
             }
-            .accessibilityLabel(String(localized: "back", defaultValue: "Back"))
-            .accessibilityIdentifier("readerDestinationBackButton")
+        } else {
+            readerPanePreparationContent
         }
     }
 
@@ -1626,18 +2274,6 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Cross-reference sheet for verse links resolved by the active pane.
-    @ViewBuilder
-    private var crossReferenceSheetContent: some View {
-        if let refs = crossReferences {
-            CrossReferenceView(references: refs) { book, chapter in
-                crossReferences = nil
-                panePresentationController?.navigateTo(book: book, chapter: chapter)
-            }
-            .presentationDetents([.medium, .large])
-        }
-    }
-
     /**
      Builds the reference chooser sheet for one bridge request generation.
 
@@ -1645,15 +2281,14 @@ public struct BibleReaderView: View {
      - Returns: Verse-level passage chooser seeded from the requesting pane.
      - Side effects: User actions resolve only the matching bridge request generation.
      - Failure modes: Missing/invalid KJVA selections complete the matching request as cancelled;
-       stale sheet callbacks are ignored by `BibleReaderReferenceChooserRequest`.
+       stale full-screen callbacks are ignored by `BibleReaderReferenceChooserRequest`.
      */
     private func refChooserSheetContent(
         for generation: BibleReaderReferenceChooserRequest.Generation
     ) -> some View {
         let progressContext = passageChooserProgressContext
 
-        return NavigationStack {
-            BookChooserView(
+        return BookChooserView(
                 books: panePresentationController?.bookList ?? BibleReaderController.defaultBooks,
                 navigateToVerse: true,
                 currentBook: panePresentationController?.currentBook,
@@ -1698,8 +2333,6 @@ public struct BibleReaderView: View {
                 }
                 completeReferenceChooser(with: verseName, for: generation)
             }
-        }
-        .presentationDetents([.large])
     }
 
     /**
@@ -1711,7 +2344,7 @@ public struct BibleReaderView: View {
 
      Side effects:
      - targets the requesting pane, captures progress, cancels any superseded bridge request, and
-       presents the chooser sheet
+       presents the chooser overlay
 
      Failure modes:
      - none; a superseded request is completed as cancelled instead of being orphaned
@@ -1726,14 +2359,14 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Resolves the pending chooser and closes its sheet.
+     Resolves the pending chooser and closes its app-owned overlay.
 
      - Parameters:
        - verseName: JSword short `Verse.name`, or `nil` for cancellation or invalid selection.
-       - generation: Sheet identity that owns the completion attempt.
+     - generation: Overlay identity that owns the completion attempt.
 
      Side effects:
-     - completes the matching bridge request at most once, dismisses only its sheet, and clears its
+     - completes the matching bridge request at most once, dismisses only its overlay, and clears its
        progress snapshot
 
      Failure modes:
@@ -1805,22 +2438,163 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Attempts typed-reference navigation from the bottom tab bar.
+     Opens Android's shared window popup from one bottom restore-strip button.
+
+     - Parameter window: Exact persisted window represented by the long-pressed button.
+     - Side effects: Activates visible targets as Android does, dismisses competing reader popups,
+       and presents the reader-wide anchored menu without restoring minimized windows.
+     - Failure modes: Windows no longer owned by the active workspace are ignored.
+     */
+    private func presentWindowTabMenu(for window: BibleCore.Window) {
+        guard windowManager.allWindows.contains(where: { $0.id == window.id }) else { return }
+        if window.layoutState != "minimized" {
+            windowManager.activateWindow(window)
+        }
+        dismissBibleQuickSelector()
+        dismissCommentaryQuickSelector()
+        showReaderOverflowMenu = false
+        windowTabMenuWindowID = window.id
+        withAnimation(.easeOut(duration: 0.12)) {
+            showWindowTabMenu = true
+        }
+    }
+
+    /** Reader-owned shared popup for the currently targeted restore-strip window. */
+    @ViewBuilder
+    private var windowTabMenuPopup: some View {
+        if let windowID = windowTabMenuWindowID,
+           let window = windowManager.allWindows.first(where: { $0.id == windowID }) {
+            let settings = resolvedDisplaySettings(for: window)
+            let palette = ReaderThemeSurfacePalette(
+                settings: settings,
+                nightMode: nightMode,
+                workspaceColor: window.workspace?.workspaceColor,
+                monochromeMode: monochromeModePref
+            )
+            let snapshot = BibleWindowPaneMenuSnapshotFactory.snapshot(
+                for: window,
+                windowManager: windowManager,
+                displaySettings: settings,
+                isAIConfigured: isAIConfigured,
+                referenceStore: windowMenuReferenceStore,
+                recentTextSettings: AndroidTextDisplayRecentSettings.displayedTypes(
+                    settingsStore: SettingsStore(modelContext: modelContext)
+                )
+            )
+            BibleWindowPaneMenuPopup(
+                items: BibleWindowPaneMenuModel(snapshot: snapshot).items,
+                colorScheme: colorScheme,
+                surfacePalette: palette,
+                maximumHeight: 440
+            ) { action in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    showWindowTabMenu = false
+                }
+                performWindowTabMenuAction(action, for: window)
+                windowTabMenuWindowID = nil
+            }
+        }
+    }
+
+    /**
+     Routes a restore-strip popup command through the same shared handler as the pane hamburger.
 
      - Parameters:
-       - window: Window whose controller should receive the reference.
-       - text: User-entered reference text.
-     - Returns: `true` when the reference was accepted by the window controller.
-     Side effects:
-     - may navigate the targeted pane
-     Failure modes:
-     - returns `false` when the controller is missing or cannot parse the reference
+       - action: Terminal Android menu command.
+       - window: Immutable target captured when the popup was opened.
+     - Side effects: May mutate window layout, present window-owned settings/AI UI, or copy a link.
+     - Failure modes: Missing controller-only actions are safe no-ops; manager guards reject stale
+       or non-removable windows.
      */
-    private func navigateWindowTabReference(_ window: BibleCore.Window, _ text: String) -> Bool {
-        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else {
-            return false
+    private func performWindowTabMenuAction(
+        _ action: BibleWindowPaneMenuAction,
+        for window: BibleCore.Window
+    ) {
+        let controller = windowManager.controllers[window.id] as? BibleReaderController
+        BibleWindowPaneMenuActionHandler(
+            windowManager: windowManager,
+            window: window,
+            onEditTextSetting: { type in
+                performWindowTextSetting(type, for: window)
+            },
+            onShowWindowTextOptions: { presentWindowTextOptions(from: window.id) },
+            onCopyWindowSettingsToWindow: { targetWindowID in
+                presentTextSettingsCopy(from: window.id, target: .window(targetWindowID))
+            },
+            onCopyWindowSettingsToWorkspace: {
+                presentTextSettingsCopy(from: window.id, target: .workspace)
+            },
+            onCopyWindowSettingsToGlobal: {
+                presentTextSettingsCopy(from: window.id, target: .global)
+            },
+            onAddWholePageBookmark: {
+                _ = controller?.createWindowMenuWholePageBookmark()
+            },
+            onExportHTML: {
+                controller?.requestWindowMenuHTMLExport()
+            },
+            onExportStudyPad: {
+                guard let labelID = controller?.windowMenuStudyPadLabelID else { return }
+                exportWindowMenuStudyPadArchive(labelID: labelID)
+            },
+            onExportStudyPadCSV: {
+                guard let labelID = controller?.windowMenuStudyPadLabelID else { return }
+                exportWindowMenuStudyPadCSV(labelID: labelID)
+            },
+            onOpenAIActions: { controller?.onRequestWindowAIAction?() },
+            onCopyLink: {
+                guard let reference = controller?.windowMenuReference() else { return }
+                windowMenuReferenceStore.copy(reference, onShowToast: showWindowTabToast)
+            },
+            onOpenCopiedReference: {
+                guard let reference = windowMenuReferenceStore.reference else { return }
+                navigateWindowMenuReference(reference, controller: controller)
+            },
+            onOpenSpeakReference: {
+                guard speakService.isSpeaking,
+                      let position = speakService.currentPosition,
+                      let reference = BibleWindowMenuReference.speechPosition(position) else {
+                    return
+                }
+                navigateWindowMenuReference(reference, controller: controller)
+            }
+        ).perform(action)
+    }
+
+    /** Starts the canonical specialized archive export for one active Study Pad window. */
+    private func exportWindowMenuStudyPadArchive(labelID: UUID) {
+        windowMenuStudyPadArchiveWorkflow.exportStudyPad(
+            labelID: labelID,
+            modelContainer: modelContext.container
+        )
+    }
+
+    /** Starts Bookmark-list's shared Android CSV sequence for one active Study Pad label. */
+    private func exportWindowMenuStudyPadCSV(labelID: UUID) {
+        let bookmarks = BookmarkStore(modelContext: modelContext)
+            .bibleBookmarks(withLabel: labelID)
+        windowMenuCSVExportWorkflow.beginExport(
+            bookmarks: bookmarks,
+            modelContext: modelContext
+        )
+    }
+
+    /** Applies one typed copied/speech reference to the immutable popup target controller. */
+    private func navigateWindowMenuReference(
+        _ reference: BibleWindowMenuReference,
+        controller: BibleReaderController?
+    ) {
+        guard let controller else {
+            showWindowTabToast(
+                String(localized: "error_occurred", defaultValue: "An error has occurred")
+            )
+            return
         }
-        return ctrl.navigateToRef(text)
+        do {
+            try controller.navigateToWindowMenuReference(reference)
+        } catch {
+            showWindowTabToast(error.localizedDescription)
+        }
     }
 
     /**
@@ -1864,18 +2638,257 @@ public struct BibleReaderView: View {
         return true
     }
 
-    // MARK: - Sheet and Destination Routing
+    /**
+     Opens Android's suggested Bible document and leaves the Daily Reading activity.
 
-    /// Presents a top-level reader sheet and captures the pane target that should back it.
-    private func presentReaderSheet(_ sheet: ReaderSheet, from windowId: UUID? = nil) {
-        setPanePresentationTarget(windowId)
-        activeReaderSheet = sheet
+     - Side effects: Switches the captured pane to its active Bible and clears the reader destination.
+     - Failure modes: Missing pane ownership leaves the activity unchanged.
+     */
+    private func openDailyReadingBible() {
+        guard let controller = panePresentationController else { return }
+        controller.switchBibleDocument(to: controller.activeModuleName)
+        activeReaderDestination = nil
     }
 
-    /// Presents a reader-stack destination and captures the pane target that should back it.
+    /**
+     Opens Android's suggested commentary document and leaves the Daily Reading activity.
+
+     - Side effects: Switches the captured pane to its retained commentary and clears the route.
+     - Failure modes: Missing pane ownership or commentary selection leaves the activity unchanged.
+     */
+    private func openDailyReadingCommentary() {
+        guard let controller = panePresentationController,
+              let moduleName = controller.activeCommentaryModuleName else { return }
+        controller.switchCommentaryDocument(to: moduleName)
+        activeReaderDestination = nil
+    }
+
+    /**
+     Opens Android's suggested dictionary and preserves the reader's exact-key fallback contract.
+
+     - Side effects: Clears Daily Reading, switches the captured pane, and may open the dictionary
+       key browser or retain retry feedback when the prior key cannot be reused.
+     - Failure modes: Missing pane, module name, or installed metadata leaves the activity unchanged.
+     */
+    private func openDailyReadingDictionary() {
+        guard let controller = panePresentationController,
+              let moduleName = controller.activeDictionaryModuleName,
+              let module = controller.installedDictionaryModules.first(where: {
+                  $0.name == moduleName
+              }) else { return }
+        let targetWindowId = panePresentationTargetWindowId ?? windowManager.activeWindow?.id
+        activeReaderDestination = nil
+        handleGenericQuickModuleSwitch(
+            controller.switchDictionaryDocument(to: moduleName),
+            module: module,
+            targetWindowId: targetWindowId,
+            browser: .dictionaryBrowser
+        )
+    }
+
+    /**
+     Toggles Android's Daily Reading speech action between Pause and Resume.
+
+     - Side effects: Mutates the shared `SpeakService` playback state.
+     - Failure modes: A stale non-speaking state is a no-op through `SpeakService` guards.
+     */
+    private func toggleDailyReadingSpeechPause() {
+        if speakService.isPaused {
+            speakService.resume()
+        } else {
+            speakService.pause()
+        }
+    }
+
+    // MARK: - Sheet and Destination Routing
+
+    /**
+     Presents Android's dialog-themed History activity as a reader-owned dialog window.
+
+     - Parameter windowId: Source pane whose History rows and navigation result must be retained.
+     - Side effects: Captures the pane target and installs a value request that renders the overlay.
+     - Failure modes: Does nothing when no active/captured reader window exists.
+     */
+    private func presentHistoryDialog(from windowId: UUID? = nil) {
+        setPanePresentationTarget(windowId)
+        guard let window = panePresentationTargetWindow else { return }
+        let position = windowManager.allWindows.firstIndex { $0.id == window.id }
+            .map { $0 + 1 } ?? (window.orderNumber + 1)
+        let format = String(
+            localized: "history_for",
+            defaultValue: "History (%@: Window %d)"
+        )
+        historyDialogRequest = HistoryDialogRequest(
+            windowID: window.id,
+            title: String.localizedStringWithFormat(format, window.workspace?.name ?? "", position)
+        )
+    }
+
+    /** Presents Android's Read History dialog with an immutable originating pane and chapter. */
+    private func presentChapterReadHistoryDialog(
+        target: ChapterReadHistoryTarget,
+        from windowId: UUID? = nil
+    ) {
+        setPanePresentationTarget(windowId)
+        guard let window = panePresentationTargetWindow else { return }
+        chapterReadHistoryDialogRequest = ChapterReadHistoryDialogRequest(
+            windowID: window.id,
+            target: target
+        )
+    }
+
+    /// Closes the reader-owned History dialog without mutating navigation or stored history.
+    private func dismissHistoryDialog() {
+        historyDialogRequest = nil
+    }
+
+    /// Closes Read History, causing its staged deletions to commit from the dialog content's exit.
+    private func dismissChapterReadHistoryDialog() {
+        chapterReadHistoryDialogRequest = nil
+    }
+
+    /// Closes the app-owned Help & Tips dialog without changing reader navigation state.
+    private func dismissHelpDialog() {
+        isHelpDialogPresented = false
+    }
+
+    /// Presents Android's Help & Tips dialog over the reader without generic sheet ownership.
+    private func presentHelpDialog() {
+        isHelpDialogPresented = true
+    }
+
+    /// Closes Android's app-owned Open Source License dialog without navigating the reader.
+    private func dismissLicenseDialog() {
+        isLicenseDialogPresented = false
+    }
+
+    /// Presents Android's bundled Open Source License dialog over the reader.
+    private func presentLicenseDialog() {
+        isLicenseDialogPresented = true
+    }
+
+    /// Closes Android's explanatory Rate & Review dialog without starting a system handoff.
+    private func dismissRateReviewDialog() {
+        isRateReviewDialogPresented = false
+    }
+
+    /// Shows Android's explanatory Rate & Review dialog before requesting an App Store review.
+    private func presentRateReviewDialog() {
+        isRateReviewDialogPresented = true
+    }
+
+    /** Dismisses the app dialog and then invokes the legitimate platform-owned review controller. */
+    private func proceedToSystemReview() {
+        dismissRateReviewDialog()
+        #if os(iOS)
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first {
+            SKStoreReviewController.requestReview(in: scene)
+        }
+        #endif
+    }
+
+    /// Cancels collection or consent without opening a system handoff.
+    private func dismissBugReportDialog() {
+        manualBugReportCoordinator.cancel()
+        manualBugReportPreparedPayload = nil
+        manualBugReportMailPayload = nil
+        if let export = manualBugReportExport {
+            ProductFeedbackReportExportBuilder.remove(export)
+        }
+        manualBugReportExport = nil
+    }
+
+    /// Collects available evidence before showing Android's manual-report consent question.
+    private func presentBugReportDialog() {
+        guard manualBugReportCoordinator.beginCollection() else { return }
+        Task { @MainActor in
+            await Task.yield()
+            let payload = ProductFeedbackReportPreparation.prepare()
+            guard manualBugReportCoordinator.completeCollection() else { return }
+            manualBugReportPreparedPayload = payload
+        }
+    }
+
+    /// Presents addressed mail only after the user has consented to the prepared report.
+    private func presentPreparedBugReport(_ payload: AddressedMailPayload) {
+        let capability = AddressedMailComposer.capability
+        guard manualBugReportCoordinator.requestMail(capability: capability) else { return }
+        guard capability == .available else { return }
+        manualBugReportMailPayload = payload
+    }
+
+    /** Builds and presents one complete ZIP only after Mail availability has been made explicit. */
+    private func exportPreparedBugReport(_ payload: AddressedMailPayload) {
+        guard manualBugReportCoordinator.beginExport() else { return }
+        do {
+            let export = try ProductFeedbackReportExportBuilder.write(payload: payload)
+            manualBugReportExport = export
+        } catch {
+            manualBugReportCoordinator.completeExport(success: false)
+        }
+    }
+
+    /**
+     Presents a root app-owned reader destination and captures its pane owner.
+
+     - Parameters:
+       - destination: Activity-equivalent destination to show above the reader.
+       - windowId: Optional pane whose controller and workspace should back the destination.
+     - Side effects: Clears any prior child-activity history, captures the pane target, and updates
+       the active destination consumed by SwiftUI navigation.
+     - Failure modes: A missing pane identifier falls back through `setPanePresentationTarget`;
+       destinations that require a controller render their existing preparation state.
+     */
     private func presentReaderDestination(_ destination: ReaderDestination, from windowId: UUID? = nil) {
+        readerDestinationBackStack.removeAll()
         setPanePresentationTarget(windowId)
         activeReaderDestination = destination
+    }
+
+    /**
+     Opens one app-owned destination as a child of the currently visible destination.
+
+     - Parameter destination: Child activity-equivalent destination to present.
+     - Side effects: Pushes the current destination onto the app-owned back stack and replaces the
+       visible destination without changing the captured reader pane.
+     - Failure modes: When no parent is active, the destination becomes a root route. Reopening the
+       already-active destination is ignored so duplicate Back entries cannot accumulate.
+     */
+    private func presentChildReaderDestination(_ destination: ReaderDestination) {
+        guard activeReaderDestination != destination else {
+            return
+        }
+        if let parent = activeReaderDestination {
+            readerDestinationBackStack.append(parent)
+        }
+        activeReaderDestination = destination
+    }
+
+    /**
+     Handles Back for an app-owned reader destination.
+
+     - Side effects: Restores the most recent parent destination, or closes the destination host
+       when no parent remains.
+     - Failure modes: An empty back stack intentionally returns to the reader shell.
+     */
+    private func dismissReaderDestination() {
+        activeReaderDestination = readerDestinationBackStack.popLast()
+    }
+
+    /**
+     Opens Android Reading Progress with either an explicit bridge tab or its persisted tab.
+
+     - Parameters:
+       - initialTab: Android intent-tab equivalent, or `nil` to restore the last selected tab.
+       - windowId: Reader pane that owns progress navigation and its child actions.
+     */
+    private func presentReadingProgress(
+        initialTab: ReadingProgressTab?,
+        from windowId: UUID? = nil
+    ) {
+        readingProgressInitialTab = initialTab
+        presentReaderDestination(.readingProgress, from: windowId)
     }
 
     /// Opens Application preferences as an integrated reader-stack destination.
@@ -1886,36 +2899,54 @@ public struct BibleReaderView: View {
     /**
      Opens Android's global Text Options route as app-scoped text-display settings.
 
-     - Parameter windowId: Pane context retained for parent-scope navigation.
+     - Parameters:
+       - windowId: Pane context retained for parent-scope navigation.
+       - asChild: Whether to preserve the current app-owned activity as the Back destination.
      - Side effects:
        - refreshes app-level text-display defaults from `SettingsStore`
-       - pushes the `.globalTextOptions` reader destination
+       - presents `.globalTextOptions` as either a root or child reader destination
      - Failure modes: Settings load falls back through `SettingsStore` defaults.
      */
-    private func presentGlobalTextOptions(from windowId: UUID? = nil) {
+    private func presentGlobalTextOptions(
+        from windowId: UUID? = nil,
+        asChild: Bool = false
+    ) {
         let store = SettingsStore(modelContext: modelContext)
         globalDisplaySettings = store.globalTextDisplaySettings()
-        presentReaderDestination(.globalTextOptions, from: windowId)
+        if asChild {
+            presentChildReaderDestination(.globalTextOptions)
+        } else {
+            presentReaderDestination(.globalTextOptions, from: windowId)
+        }
     }
 
     /**
      Opens Android's main reader All Text Options route as workspace-scoped settings.
 
-     - Parameter windowId: Pane whose workspace should own the pushed destination.
+     - Parameters:
+       - windowId: Pane whose workspace should own the pushed destination.
+       - asChild: Whether to preserve the current app-owned activity as the Back destination.
      - Side effects:
        - refreshes the workspace editor state from the current workspace/global inheritance chain
-       - pushes the `.workspaceTextOptions` reader destination
+       - presents `.workspaceTextOptions` as either a root or child reader destination
      - Failure modes: If no active workspace exists, the editor opens against global/app defaults
        and writes become no-ops in `applyWorkspaceDisplaySettingsChange`.
      */
-    private func presentWorkspaceTextOptions(from windowId: UUID? = nil) {
+    private func presentWorkspaceTextOptions(
+        from windowId: UUID? = nil,
+        asChild: Bool = false
+    ) {
         let targetWindow = windowId.flatMap { id in
             windowManager.allWindows.first { $0.id == id }
         } ?? windowManager.activeWindow
         workspaceDisplaySettings = resolvedWorkspaceDisplaySettings(
             for: targetWindow?.workspace ?? windowManager.activeWorkspace
         )
-        presentReaderDestination(.workspaceTextOptions, from: targetWindow?.id ?? windowId)
+        if asChild {
+            presentChildReaderDestination(.workspaceTextOptions)
+        } else {
+            presentReaderDestination(.workspaceTextOptions, from: targetWindow?.id ?? windowId)
+        }
     }
 
     /**
@@ -2115,37 +3146,6 @@ public struct BibleReaderView: View {
         presentReaderDestination(.importExport, from: windowManager.activeWindow?.id)
     }
 
-    /// Closes the currently active top-level reader sheet.
-    private func dismissReaderSheet() {
-        activeReaderSheet = nil
-        chapterReadHistoryTarget = nil
-    }
-
-    /**
-     Handles side effects that belong to a top-level reader sheet closing.
-
-     - Parameters:
-       - previousSheet: Sheet that was visible before SwiftUI reported the change.
-       - currentSheet: Sheet now visible after SwiftUI reported the change.
-
-     Side effects:
-     - currently no non-download sheet has extra close side effects; Downloads is handled as a
-       reader destination for Android parity
-
-     Failure modes:
-     - non-closing sheet transitions are ignored
-     */
-    private func handleActiveReaderSheetChange(
-        from previousSheet: ReaderSheet?,
-        to currentSheet: ReaderSheet?
-    ) {
-        guard currentSheet == nil, let previousSheet else {
-            return
-        }
-
-        _ = previousSheet
-    }
-
     /**
      Handles side effects that belong to a reader-stack destination closing.
 
@@ -2167,11 +3167,17 @@ public struct BibleReaderView: View {
         guard currentDestination == nil, let previousDestination else {
             return
         }
+        readerDestinationBackStack.removeAll()
         switch previousDestination {
         case .search:
             searchInitialQuery = ""
-        case .bookmarks, .studyPads, .myDocuments, .readingPlans, .aiSettings:
+        case .bookmarks, .studyPads, .myDocuments, .readingPlans, .readingProgress,
+             .readingProgressSettings, .workspaces, .speakControls, .syncSettings,
+             .dictionaryBrowser, .generalBookBrowser, .mapBrowser, .epubSearch, .labelManager,
+             .aiSettings, .modulePicker, .chooseDocument:
             break
+        case .passageChooser:
+            resetPassageChooserProgressContext()
         case .settings:
             reloadBehaviorPreferences()
         case .startupDocumentSetup:
@@ -2180,7 +3186,8 @@ public struct BibleReaderView: View {
             handleDownloadsDestinationClosed()
         case .importExport:
             handleImportExportDestinationClosed()
-        case .globalTextOptions, .workspaceTextOptions, .windowTextOptions, .windowColorSettings:
+        case .globalTextOptions, .workspaceTextOptions, .windowTextOptions, .windowColorSettings,
+             .windowHiddenLabels:
             break
         }
     }
@@ -2274,32 +3281,25 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Presents a follow-up top-level sheet after another flow already captured the pane target.
-    private func presentReaderSheetPreservingPane(_ sheet: ReaderSheet) {
-        activeReaderSheet = sheet
-    }
-
     /// Presents a follow-up reader destination after another flow already captured the pane target.
     private func presentReaderDestinationPreservingPane(_ destination: ReaderDestination) {
         activeReaderDestination = destination
     }
 
     /**
-     Moves the document chooser's StudyPads action onto the reader destination stack.
+     Replaces the document chooser destination with its StudyPads destination.
 
      Android treats StudyPads as an app-owned `ManageLabels` route rather than a nested chooser
-     sheet. The chooser has already captured the pane target, so this closes the active chooser
-     modal and pushes the existing `.studyPads` destination without changing pane ownership.
+     sheet. The chooser has already captured the pane target, so the destination changes without
+     changing pane ownership or introducing a second presentation host.
 
      Side effects:
-     - clears `activeReaderModal`
      - sets `activeReaderDestination` to `.studyPads`
 
      Failure modes:
      - if no pane controller is available, the destination renders its normal preparation fallback
      */
     private func presentStudyPadsDestinationPreservingPane() {
-        activeReaderModal = nil
         presentReaderDestinationPreservingPane(.studyPads)
     }
 
@@ -2345,12 +3345,12 @@ public struct BibleReaderView: View {
         passageChooserProgressContext = makePassageChooserProgressContext()
         showReaderNavigationDrawer = false
         showReaderOverflowMenu = false
-        showBookChooser = true
+        presentReaderDestinationPreservingPane(.passageChooser)
     }
 
     /// Closes the book chooser without changing the current pane target.
     private func dismissBookChooser() {
-        showBookChooser = false
+        activeReaderDestination = nil
         resetPassageChooserProgressContext()
     }
 
@@ -2595,13 +3595,13 @@ public struct BibleReaderView: View {
         _ outcome: BibleReaderGenericModuleSwitchOutcome,
         module: ModuleInfo,
         targetWindowId: UUID?,
-        browser: ReaderModal
+        browser: ReaderDestination
     ) {
         switch outcome {
         case .switchedPreservingKey:
             return
         case .switchedRequiringKeySelection:
-            presentReaderModalPreservingPane(browser)
+            presentReaderDestinationPreservingPane(browser)
         case .failed(let message):
             pendingGenericQuickModuleSwitchRetry = GenericQuickModuleSwitchRetry(
                 module: module,
@@ -2611,256 +3611,26 @@ public struct BibleReaderView: View {
         }
     }
 
-    // MARK: - Modal Routing
-
-    /// Presents a coordinator-owned modal and captures the pane target when that modal needs one.
-    private func presentReaderModal(_ modal: ReaderModal, from windowId: UUID? = nil) {
-        if modal.shouldCapturePanePresentationTarget {
-            setPanePresentationTarget(windowId)
-        }
-        activeReaderModal = modal
-    }
-
-    /// Closes the currently active coordinator-owned modal.
-    private func dismissReaderModal() {
-        activeReaderModal = nil
-    }
-
-    /**
-     Filters coordinator-owned modal state into the generic sheet presenter.
-
-     Android `ChooseDocument` routes are full-screen app-owned surfaces, so they are intentionally
-     excluded from the sheet binding and routed through `readerDocumentChooserModalBinding`.
-     */
-    private var readerSheetModalBinding: Binding<ReaderModal?> {
-        Binding(
-            get: {
-                guard activeReaderModal?.isDocumentChooserRoute != true else {
-                    return nil
-                }
-                return activeReaderModal
-            },
-            set: { activeReaderModal = $0 }
-        )
-    }
-
-    /**
-     Filters coordinator-owned modal state into Android-style full-screen chooser presentation.
-
-     Both the all-types drawer route and the category-scoped toolbar route map to Android
-     `ChooseDocument`, with or without a type extra. Keeping them in the same full-screen presenter
-     prevents one entry point from silently preserving the old iOS sheet behavior.
-     */
-    private var readerDocumentChooserModalBinding: Binding<ReaderModal?> {
-        Binding(
-            get: {
-                guard activeReaderModal?.isDocumentChooserRoute == true else {
-                    return nil
-                }
-                return activeReaderModal
-            },
-            set: { activeReaderModal = $0 }
-        )
-    }
-
     /// Presents the document-category module picker for a pane-scoped action.
     private func presentModulePicker(_ category: DocumentCategory, from windowId: UUID? = nil) {
         pickerCategory = category
-        presentReaderModal(.modulePicker, from: windowId)
-    }
-
-    /// Presents a follow-up modal after another modal already captured its pane target.
-    private func presentReaderModalPreservingPane(_ modal: ReaderModal) {
-        activeReaderModal = modal
-    }
-
-    @ViewBuilder
-    private func readerModalContent(_ modal: ReaderModal) -> some View {
-        switch modal {
-        case .syncSettings:
-            NavigationStack {
-                SyncSettingsView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: dismissReaderModal)
-                                .accessibilityIdentifier("syncSettingsDoneButton")
-                        }
-                    }
-            }
-        case .importExport:
-            NavigationStack {
-                ImportExportView(speakService: speakService)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: dismissReaderModal)
-                        }
-                    }
-            }
-        case .speakControls:
-            SpeakControlView(speakService: speakService)
-                .presentationDetents([.height(400), .large])
-        case .modulePicker:
-            if let controller = panePresentationController {
-                BibleReaderModulePicker(
-                    controller: controller,
-                    category: pickerCategory,
-                    onDismiss: dismissReaderModal,
-                    onOpenDownloads: { presentDownloadsPreservingPane() },
-                    onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
-                    onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
-                )
-            } else {
-                readerPanePreparationContent
-            }
-        case .dictionaryBrowser:
-            if let controller = panePresentationController,
-               let source = controller.activeDictionaryBrowserSource() {
-                DictionaryBrowserView(source: source) { key in
-                    dismissReaderModal()
-                    controller.loadDictionaryEntry(key: key)
-                }
-            } else {
-                readerPanePreparationContent
-            }
-        case .generalBookBrowser:
-            if let controller = panePresentationController {
-                if let reader = controller.activeEpubReader {
-                    EpubBrowserView(reader: reader) { key in
-                        dismissReaderModal()
-                        controller.loadEpubEntry(key: key)
-                    }
-                } else if let module = controller.activeGeneralBookModule {
-                    GeneralBookBrowserView(
-                        module: module,
-                        title: controller.activeGeneralBookModuleName ?? String(localized: "general_book"),
-                        onEmptyKeys: { firstGlobalKey in
-                            controller.handleEmptyGenericKeyChooser(
-                                module: module,
-                                category: .generalBook,
-                                firstGlobalKey: firstGlobalKey
-                            )
-                        }
-                    ) { key in
-                        dismissReaderModal()
-                        controller.loadGeneralBookEntry(key: key)
-                    }
-                } else {
-                    readerPanePreparationContent
-                }
-            } else {
-                readerPanePreparationContent
-            }
-        case .mapBrowser:
-            if let controller = panePresentationController,
-               let module = controller.activeMapModule {
-                GeneralBookBrowserView(
-                    module: module,
-                    title: controller.activeMapModuleName ?? String(localized: "map"),
-                    onEmptyKeys: { firstGlobalKey in
-                        controller.handleEmptyGenericKeyChooser(
-                            module: module,
-                            category: .map,
-                            firstGlobalKey: firstGlobalKey
-                        )
-                    }
-                ) { key in
-                    dismissReaderModal()
-                    controller.loadMapEntry(key: key)
-                }
-            } else {
-                readerPanePreparationContent
-            }
-        case .epubLibrary:
-            EpubLibraryView(onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes) { identifier in
-                dismissReaderModal()
-                panePresentationController?.switchEpub(identifier: identifier)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    presentReaderModalPreservingPane(.generalBookBrowser)
-                }
-            }
-        case .epubBrowser:
-            if let controller = panePresentationController {
-                if let reader = controller.activeEpubReader {
-                    EpubBrowserView(reader: reader) { key in
-                        dismissReaderModal()
-                        controller.loadEpubEntry(key: key)
-                    }
-                } else {
-                    EpubLibraryView(onDeleteEpub: reconcileDeletedEpubAcrossReaderPanes) { identifier in
-                        dismissReaderModal()
-                        controller.switchEpub(identifier: identifier)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            presentReaderModalPreservingPane(.generalBookBrowser)
-                        }
-                    }
-                }
-            } else {
-                readerPanePreparationContent
-            }
-        case .epubSearch:
-            if let reader = panePresentationController?.activeEpubReader {
-                EpubSearchView(
-                    reader: reader,
-                    modePreferences: SearchModePreferences(
-                        settingsStore: SettingsStore(modelContext: modelContext)
-                    )
-                ) { result in
-                    dismissReaderModal()
-                    panePresentationController?.loadEpubEntry(
-                        key: result.key,
-                        jumpToOrdinal: result.ordinal
-                    )
-                }
-            } else {
-                Text(String(localized: "reader_no_epub_loaded"))
-                    .padding()
-            }
-        case .labelManager:
-            NavigationStack {
-                LabelManagerView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: dismissReaderModal)
-                        }
-                    }
-            }
-        case .chooseDocument:
-            if let controller = panePresentationController {
-                BibleReaderModulePicker(
-                    controller: controller,
-                    category: controller.currentCategory,
-                    startsWithAllTypes: true,
-                    onDismiss: dismissReaderModal,
-                    onOpenDownloads: { presentDownloadsPreservingPane() },
-                    onOpenDictionaryBrowser: { presentReaderModalPreservingPane(.dictionaryBrowser) },
-                    onOpenGeneralBookBrowser: { presentReaderModalPreservingPane(.generalBookBrowser) },
-                    onOpenMapBrowser: { presentReaderModalPreservingPane(.mapBrowser) },
-                    onOpenStudyPadSelector: presentStudyPadsDestinationPreservingPane
-                )
-            } else {
-                readerPanePreparationContent
-            }
-        case .help:
-            NavigationStack {
-                HelpView()
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(String(localized: "done"), action: dismissReaderModal)
-                        }
-                    }
-            }
-        }
+        presentReaderDestination(.modulePicker, from: windowId)
     }
 
     // MARK: - Lifecycle Wiring
 
     /**
-     Performs one-time reader setup when the SwiftUI screen appears.
+     Reactivates the reader whenever SwiftUI makes the root screen visible.
 
-     This keeps the `body` focused on composition while leaving state loading and callback wiring
-     in the coordinator that owns the relevant services.
+     Persisted reader preferences are intentionally reloaded because a Settings destination may
+     change them. Speech restoration and callback binding are separately guarded to the first
+     appearance, while later destination returns only refresh the active bookmark owner.
+
+     - Side effects: Reloads reader state, performs first-appearance speech setup when required,
+       refreshes lightweight reader bindings, installs synchronized scrolling, and evaluates
+       pending launch/test routes.
+     - Failure modes: Missing active controllers leave speech bookmark ownership unchanged; startup
+       evaluation retains its existing retry behavior.
      */
     private func handleReaderAppear() {
         let store = SettingsStore(modelContext: modelContext)
@@ -2889,9 +3659,7 @@ public struct BibleReaderView: View {
      */
     private func evaluateStartupDownloadPromptIfNeeded() {
         guard !didEvaluateStartupDownloadPrompt,
-              activeReaderSheet == nil,
-              activeReaderDestination == nil,
-              activeReaderModal == nil else {
+              activeReaderDestination == nil else {
             return
         }
         let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
@@ -2952,7 +3720,7 @@ public struct BibleReaderView: View {
      */
     private func handleStartupDefaultDownloadActivityChanged(isInFlight: Bool) {
         startupDefaultDownloadsInFlight = isInFlight
-        guard !isInFlight, activeReaderSheet == nil, activeReaderDestination == nil else {
+        guard !isInFlight, activeReaderDestination == nil else {
             return
         }
 
@@ -3024,18 +3792,38 @@ public struct BibleReaderView: View {
         #endif
     }
 
-    /// Wires TTS settings and callbacks to the currently active reader pane.
+    /**
+     Coordinates first-appearance speech initialization and repeat reader reactivation.
+
+     - Parameter store: Current persistence boundary for global speech and behavior preferences.
+     - Side effects: Performs heavyweight restoration exactly once per `BibleReaderView` identity,
+       then refreshes the active bookmark owner on every appearance.
+     - Failure modes: Missing active workspace or controller data uses restored global settings and
+       leaves bookmark ownership unchanged.
+     */
     private func configureSpeakService(with store: SettingsStore) {
+        if speechLifecycleState.beginActivation() {
+            performInitialSpeakServiceSetup(with: store)
+        }
+        reactivateSpeakService()
+    }
+
+    /**
+     Restores persisted speech state and installs reader callbacks once per reader identity.
+
+     - Parameter store: Persistence boundary assigned before restoration.
+     - Side effects: Restores global settings and checkpoints, applies the initial workspace
+       settings, replaces speech callbacks, and installs late-bound reader session reconstruction.
+     - Failure modes: Missing workspace settings retain the restored global value; missing active
+       controllers fail closed inside the late-bound session callbacks.
+     */
+    private func performInitialSpeakServiceSetup(with store: SettingsStore) {
         speakService.settingsStore = store
         speakService.restoreSettings()
 
         let wm = windowManager
         if let workspaceSettings = wm.activeWorkspace?.workspaceSettings {
             speakService.applySettings(workspaceSettings.speakSettings, persist: false)
-        }
-        if let activeId = wm.activeWindow?.id,
-           let controller = wm.controllers[activeId] as? BibleReaderController {
-            speakService.bookmarkManager = controller.bookmarkService
         }
 
         speakService.onRequestNext = nil
@@ -3052,7 +3840,28 @@ public struct BibleReaderView: View {
             guard let wm, let activeId = wm.activeWindow?.id else { return nil }
             return wm.controllers[activeId] as? BibleReaderController
         }
-        speakService.reloadResumeBookmarks()
+    }
+
+    /**
+     Refreshes speech state that legitimately follows the currently active reader pane.
+
+     Reusing the same bookmark owner still reloads resume rows so bookmark changes made in a
+     destination are visible on return. Assigning a different owner relies on `SpeakService`'s
+     `didSet` reload and avoids duplicate database work.
+
+     - Side effects: May replace the weak bookmark persistence owner or reload its resume rows.
+     - Failure modes: Returns without mutation until an active Bible reader controller exists.
+     */
+    private func reactivateSpeakService() {
+        guard let activeId = windowManager.activeWindow?.id,
+              let controller = windowManager.controllers[activeId] as? BibleReaderController else {
+            return
+        }
+        if speakService.bookmarkManager !== controller.bookmarkService {
+            speakService.bookmarkManager = controller.bookmarkService
+        } else {
+            speakService.reloadResumeBookmarks()
+        }
     }
 
     /**
@@ -3144,11 +3953,11 @@ public struct BibleReaderView: View {
 
             switch presentation {
             case .labelManager:
-                presentReaderModal(.labelManager)
+                presentReaderDestination(.labelManager, from: windowManager.activeWindow?.id)
             case .bookmarks:
                 presentReaderDestination(.bookmarks, from: windowManager.activeWindow?.id)
             case .history:
-                presentReaderSheet(.history, from: windowManager.activeWindow?.id)
+                presentHistoryDialog(from: windowManager.activeWindow?.id)
             case .readingPlans:
                 presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             case .settings:
@@ -3156,19 +3965,15 @@ public struct BibleReaderView: View {
             case .textOptions:
                 presentWorkspaceTextOptions(from: windowManager.activeWindow?.id)
             case .workspaces:
-                presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.workspaces, from: windowManager.activeWindow?.id)
             case .downloads:
                 presentDownloads(from: windowManager.activeWindow?.id)
-            case .epubLibrary:
-                presentReaderModal(.epubLibrary, from: windowManager.activeWindow?.id)
             case .epubBrowser:
-                presentReaderModal(.epubBrowser, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.generalBookBrowser, from: windowManager.activeWindow?.id)
             case .epubSearch:
-                presentReaderModal(.epubSearch, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.epubSearch, from: windowManager.activeWindow?.id)
             case .help:
-                presentReaderModal(.help)
-            case .about:
-                presentReaderSheet(.about, from: windowManager.activeWindow?.id)
+                presentHelpDialog()
             }
         }
     }
@@ -3180,7 +3985,7 @@ public struct BibleReaderView: View {
 
     /** Opens History from the reader shell. */
     private func openHistoryFromReaderAction() {
-        presentReaderSheet(.history, from: windowManager.activeWindow?.id)
+        presentHistoryDialog(from: windowManager.activeWindow?.id)
     }
 
     /** Opens Reading Plans from the reader shell. */
@@ -3195,17 +4000,12 @@ public struct BibleReaderView: View {
 
     /** Opens Workspaces from the reader shell. */
     private func openWorkspacesFromReaderAction() {
-        presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id)
+        presentReaderDestination(.workspaces, from: windowManager.activeWindow?.id)
     }
 
     /** Opens Downloads from the reader shell. */
     private func openDownloadsFromReaderAction() {
         presentDownloads(from: windowManager.activeWindow?.id)
-    }
-
-    /** Opens About from the reader shell. */
-    private func openAboutFromReaderAction() {
-        presentReaderSheet(.about, from: windowManager.activeWindow?.id)
     }
 
     /**
@@ -3224,20 +4024,20 @@ public struct BibleReaderView: View {
             disableTwoStepBookmarking: disableTwoStepBookmarkingPref,
             hideWindowButtons: hideWindowButtonsPref,
             speakService: speakService,
+            windowMenuReferenceStore: windowMenuReferenceStore,
             onShowBookChooser: { presentBookChooser(from: window.id) },
             onShowSearch: { presentSearch(from: window.id) },
             onShowBookmarks: { presentReaderDestination(.bookmarks, from: window.id) },
             onShowSettings: { presentSettings(from: window.id) },
             onShowWindowTextOptions: { presentWindowTextOptions(from: window.id) },
-            onShowWindowColorSettings: { presentWindowColorSettings(from: window.id) },
-            onToggleWindowSectionTitles: {
-                toggleDisplaySetting(\.showSectionTitles, default: true, for: window)
+            onEditWindowTextSetting: { type in
+                performWindowTextSetting(type, for: window)
             },
-            onShowWindowStrongsMode: {
-                presentWindowStrongsMode(from: window.id)
+            onExportStudyPadArchive: { labelID in
+                exportWindowMenuStudyPadArchive(labelID: labelID)
             },
-            onToggleWindowVerseNumbers: {
-                toggleDisplaySetting(\.showVerseNumbers, default: true, for: window)
+            onExportStudyPadCSV: { labelID in
+                exportWindowMenuStudyPadCSV(labelID: labelID)
             },
             onCopyWindowSettingsToWindow: { targetWindowID in
                 presentTextSettingsCopy(from: window.id, target: .window(targetWindowID))
@@ -3251,23 +4051,27 @@ public struct BibleReaderView: View {
             onShowDownloads: { initialSearchText in
                 presentDownloads(from: window.id, initialSearchText: initialSearchText)
             },
-            onShowHistory: { presentReaderSheet(.history, from: window.id) },
+            onShowHistory: { presentHistoryDialog(from: window.id) },
             onShowCompare: {
                 (windowManager.controllers[window.id] as? BibleReaderController)?.loadCompareDocument()
             },
             onShowReadingPlans: { presentReaderDestination(.readingPlans, from: window.id) },
             onShowReadingProgress: { tab in
-                readingProgressInitialTab = ReadingProgressTab(androidTab: tab)
-                presentReaderSheet(.readingProgress, from: window.id)
+                presentReadingProgress(
+                    initialTab: ReadingProgressTab(androidTab: tab),
+                    from: window.id
+                )
             },
             onShowReadingProgressSettings: {
-                presentReaderSheet(.readingProgressSettings, from: window.id)
+                presentReaderDestination(.readingProgressSettings, from: window.id)
             },
             onShowChapterReadHistory: { target in
-                chapterReadHistoryTarget = target
-                presentReaderSheet(.chapterReadHistory, from: window.id)
+                presentChapterReadHistoryDialog(target: target, from: window.id)
             },
-            onShowSpeakControls: { presentReaderModal(.speakControls, from: window.id) },
+            onShowSpeakControls: { presentReaderDestination(.speakControls, from: window.id) },
+            onShowAIPromptEditor: { promptID in
+                presentAIPromptEditor(promptID, from: window.id)
+            },
             onShareText: { text in
                 myDocumentSharePayload = nil
                 shareText = text
@@ -3275,10 +4079,6 @@ public struct BibleReaderView: View {
             onShareMyDocument: { payload in
                 shareText = nil
                 myDocumentSharePayload = payload
-            },
-            onShowCrossReferences: { refs in
-                setPanePresentationTarget(window.id)
-                crossReferences = refs
             },
             onShowModulePicker: { category in
                 presentModulePicker(category, from: window.id)
@@ -3292,7 +4092,7 @@ public struct BibleReaderView: View {
                 toastWorkItem = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
             },
-            onShowWorkspaces: { presentReaderSheet(.workspaces, from: window.id) },
+            onShowWorkspaces: { presentReaderDestination(.workspaces, from: window.id) },
             onToggleFullScreen: {
                 if isFullScreen {
                     withAnimation(.easeInOut(duration: 0.2)) { isFullScreen = false }
@@ -3325,6 +4125,12 @@ public struct BibleReaderView: View {
         )
     }
 
+    /** Captures the source pane and opens Android PromptEditActivity as a reader destination. */
+    private func presentAIPromptEditor(_ promptID: UUID, from windowID: UUID) {
+        setPanePresentationTarget(windowID)
+        activeAIPromptEditorDestination = AIPromptEditorDestination(promptID: promptID)
+    }
+
     // MARK: - Document Header
 
     /**
@@ -3355,10 +4161,10 @@ public struct BibleReaderView: View {
             onBrowseAuxiliary: {
                 setPanePresentationTarget(windowManager.activeWindow?.id)
                 switch controller?.currentCategory {
-                case .dictionary: presentReaderModalPreservingPane(.dictionaryBrowser)
-                case .generalBook: presentReaderModalPreservingPane(.generalBookBrowser)
-                case .map: presentReaderModalPreservingPane(.mapBrowser)
-                case .epub: presentReaderModalPreservingPane(.epubBrowser)
+                case .dictionary: presentReaderDestinationPreservingPane(.dictionaryBrowser)
+                case .generalBook: presentReaderDestinationPreservingPane(.generalBookBrowser)
+                case .map: presentReaderDestinationPreservingPane(.mapBrowser)
+                case .epub: presentReaderDestinationPreservingPane(.generalBookBrowser)
                 default: break
                 }
             }
@@ -3448,6 +4254,7 @@ public struct BibleReaderView: View {
         BibleReaderOverflowMenu(
             state: readerOverflowMenuState,
             colorScheme: colorScheme,
+            surfacePalette: readerThemeSurfacePalette,
             onAction: handleReaderOverflowMenuAction
         )
     }
@@ -3541,8 +4348,10 @@ public struct BibleReaderView: View {
         case .toggleSectionTitles:
             toggleDisplaySetting(\.showSectionTitles, default: true)
         case .openStrongsMode:
+            let targetWindow = windowManager.activeWindow
             dismissReaderOverflowMenuAndPerform {
-                showReaderStrongsModeDialog = true
+                guard let targetWindow else { return }
+                presentWindowTextSettingEditor(.strongs, for: targetWindow)
             }
         case .toggleVerseNumbers:
             toggleDisplaySetting(\.showVerseNumbers, default: true)
@@ -3577,12 +4386,6 @@ public struct BibleReaderView: View {
 
                 readerOverflowMenu
                     .frame(width: width, alignment: .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
                     .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
@@ -3619,18 +4422,13 @@ public struct BibleReaderView: View {
                     BibleReaderQuickModuleSelector(
                         rows: rows,
                         colorScheme: colorScheme,
+                        surfacePalette: readerThemeSurfacePalette,
                         maximumHeight: placement.maximumHeight,
                         onSelect: { module in
                             selectBibleQuickModule(module, targetWindowId: targetWindowId)
                         }
                     )
                     .frame(width: width, alignment: .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
                     .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
                 }
@@ -3668,6 +4466,7 @@ public struct BibleReaderView: View {
                     BibleReaderQuickModuleSelector(
                         rows: rows,
                         colorScheme: colorScheme,
+                        surfacePalette: readerThemeSurfacePalette,
                         maximumHeight: placement.maximumHeight,
                         accessibilityIdentifier: "readerCommentaryQuickSelector",
                         rowAccessibilityIdentifierPrefix: "readerCommentaryQuickSelectorRow",
@@ -3676,12 +4475,6 @@ public struct BibleReaderView: View {
                         }
                     )
                     .frame(width: width, alignment: .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.45 : 0.12), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.32 : 0.18), radius: 14, y: 6)
                     .offset(x: placement.offset.width, y: placement.offset.height)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
                 }
@@ -3702,14 +4495,6 @@ public struct BibleReaderView: View {
                 versionText: readerNavigationDrawerVersionText,
                 onAction: handleReaderNavigationDrawerAction
             )
-        }
-    }
-
-    /// Full-screen dark chooser panel for Android-style passage selection.
-    private var bookChooserDrawerOverlay: some View {
-        ReaderPassageChooserOverlay {
-            bookChooserDrawerContent
-                .accessibilityIdentifier("passageChooserDrawer")
         }
     }
 
@@ -3766,7 +4551,7 @@ public struct BibleReaderView: View {
         switch action {
         case .chooseDocument:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderModal(.chooseDocument, from: windowManager.activeWindow?.id)
+                presentReaderDestination(.chooseDocument, from: windowManager.activeWindow?.id)
             }
         case .search:
             dismissReaderNavigationDrawerAndPerform {
@@ -3776,10 +4561,10 @@ public struct BibleReaderView: View {
             dismissReaderNavigationDrawerAndPerform {
                 speakLastUsed = Date().timeIntervalSince1970
                 if speakService.isSpeaking {
-                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
+                    presentReaderDestination(.speakControls, from: windowManager.activeWindow?.id)
                 } else {
                     panePresentationController?.speakCurrentChapter()
-                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
+                    presentReaderDestination(.speakControls, from: windowManager.activeWindow?.id)
                 }
             }
         case .bookmarks:
@@ -3798,20 +4583,26 @@ public struct BibleReaderView: View {
             dismissReaderNavigationDrawerAndPerform {
                 presentReaderDestination(.readingPlans, from: windowManager.activeWindow?.id)
             }
+        case .readingProgress:
+            dismissReaderNavigationDrawerAndPerform {
+                presentReadingProgress(initialTab: nil, from: windowManager.activeWindow?.id)
+            }
         case .history:
             dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.history, from: windowManager.activeWindow?.id)
+                presentHistoryDialog(from: windowManager.activeWindow?.id)
             }
         case .downloads:
             dismissReaderNavigationDrawerAndPerform {
                 presentDownloads(from: windowManager.activeWindow?.id)
             }
         case .importExport:
-            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.importExport) }
+            dismissReaderNavigationDrawerAndPerform {
+                presentReaderDestination(.importExport, from: windowManager.activeWindow?.id)
+            }
         case .syncSettings:
             dismissReaderNavigationDrawerAndPerform {
                 if !presentSyncSettings() {
-                    presentReaderModal(.syncSettings)
+                    presentReaderDestination(.syncSettings, from: windowManager.activeWindow?.id)
                 }
             }
         case .aiSettings:
@@ -3823,7 +4614,7 @@ public struct BibleReaderView: View {
                 presentSettings(from: windowManager.activeWindow?.id)
             }
         case .help:
-            dismissReaderNavigationDrawerAndPerform { presentReaderModal(.help) }
+            dismissReaderNavigationDrawerAndPerform { presentHelpDialog() }
         case .sponsorDevelopment:
             dismissReaderNavigationDrawerAndPerform {
                 openExternalLink("https://shop.andbible.org")
@@ -3836,31 +4627,16 @@ public struct BibleReaderView: View {
             dismissReaderNavigationDrawerAndPerform {
                 openExternalLink("https://github.com/AndBible/and-bible/wiki/How-to-contribute")
             }
-        case .about:
-            dismissReaderNavigationDrawerAndPerform {
-                presentReaderSheet(.about, from: windowManager.activeWindow?.id)
-            }
         case .appLicense:
-            dismissReaderNavigationDrawerAndPerform {
-                openExternalLink("https://www.gnu.org/licenses/gpl-3.0.html")
-            }
+            dismissReaderNavigationDrawerAndPerform { presentLicenseDialog() }
         case .tellFriend:
             dismissReaderNavigationDrawerAndPerform {
                 shareText = String(localized: "tell_friend_message")
             }
         case .rateApp:
-            dismissReaderNavigationDrawerAndPerform {
-                #if os(iOS)
-                if let scene = UIApplication.shared.connectedScenes
-                    .compactMap({ $0 as? UIWindowScene }).first {
-                    SKStoreReviewController.requestReview(in: scene)
-                }
-                #endif
-            }
+            dismissReaderNavigationDrawerAndPerform { presentRateReviewDialog() }
         case .reportBug:
-            dismissReaderNavigationDrawerAndPerform {
-                openExternalLink("https://github.com/AndBible/and-bible/issues")
-            }
+            dismissReaderNavigationDrawerAndPerform { presentBugReportDialog() }
         }
     }
 
@@ -4004,13 +4780,17 @@ public struct BibleReaderView: View {
             onShowSpeak: {
                 speakLastUsed = Date().timeIntervalSince1970
                 if speakService.isSpeaking {
-                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
+                    presentReaderDestination(.speakControls, from: windowManager.activeWindow?.id)
                 } else {
                     controller?.speakCurrentChapter()
-                    presentReaderModal(.speakControls, from: windowManager.activeWindow?.id)
+                    presentReaderDestination(.speakControls, from: windowManager.activeWindow?.id)
                 }
             },
             onApplyStrongsMode: { mode in applyStrongsMode(mode) },
+            onShowStrongsModeDialog: {
+                guard let window = windowManager.activeWindow else { return }
+                presentWindowTextSettingEditor(.strongs, for: window)
+            },
             onBibleTap: {
                 handleBibleToolbarTap(controller)
             },
@@ -4023,7 +4803,7 @@ public struct BibleReaderView: View {
             onCommentaryLongPress: {
                 handleCommentaryToolbarLongPress(controller)
             },
-            onShowWorkspaces: { presentReaderSheet(.workspaces, from: windowManager.activeWindow?.id) }
+            onShowWorkspaces: { presentReaderDestination(.workspaces, from: windowManager.activeWindow?.id) }
         ) {
             readerOverflowToolbarButton
         }
@@ -4154,18 +4934,149 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Executes one Android recent text-setting command against the popup's immutable target window.
+
+     Boolean preferences toggle immediately. Android activity preferences reuse their existing
+     full app-owned routes, while dialog preferences reuse the same staged editor component as All
+     Text Options. Unsupported platform-divergent types fail closed rather than showing inert UI.
+     */
+    private func performWindowTextSetting(
+        _ type: AndroidTextDisplaySettingType,
+        for window: BibleCore.Window
+    ) {
+        guard type.isAvailableOnIOS else { return }
+        switch type {
+        case .colors:
+            presentWindowColorSettings(from: window.id)
+        case .bookmarksHideLabels:
+            presentWindowHiddenLabels(from: window.id)
+        default:
+            if type.editorKind != nil {
+                presentWindowTextSettingEditor(type, for: window)
+            } else if toggleWindowTextSetting(type, for: window) {
+                recordRecentTextSetting(type)
+            }
+        }
+    }
+
+    /** Opens Android's full Manage Labels HIDELABELS activity for one exact pane. */
+    private func presentWindowHiddenLabels(from windowID: UUID) {
+        let targetWindow = windowManager.allWindows.first { $0.id == windowID }
+            ?? windowManager.activeWindow
+        windowDisplaySettings = resolvedDisplaySettings(for: targetWindow)
+        presentReaderDestination(.windowHiddenLabels, from: targetWindow?.id ?? windowID)
+    }
+
+    /** Prepares one reusable staged Android preference dialog over the target reader window. */
+    private func presentWindowTextSettingEditor(
+        _ type: AndroidTextDisplaySettingType,
+        for window: BibleCore.Window
+    ) {
+        guard type.editorKind != nil else { return }
+        let resolvedSettings = resolvedDisplaySettings(for: window)
+        windowTextSettingEditorSettings = resolvedSettings
+        windowTextSettingEditorPreviousSettings = resolvedSettings
+        windowTextSettingEditorRequest = WindowTextSettingEditorRequest(
+            windowID: window.id,
+            type: type
+        )
+    }
+
+    /** Persists one shared quick-editor terminal result back to its captured window. */
+    private func finishWindowTextSettingEditor(
+        _ request: WindowTextSettingEditorRequest,
+        recordsRecentType: Bool
+    ) {
+        let targetWindow = windowManager.allWindows.first { $0.id == request.windowID }
+        persistWindowDisplaySettings(
+            windowTextSettingEditorSettings,
+            for: targetWindow,
+            previousResolvedSettings: windowTextSettingEditorPreviousSettings
+        )
+        if recordsRecentType {
+            recordRecentTextSetting(request.type)
+        }
+        windowTextSettingEditorRequest = nil
+    }
+
+    /** Records Android's shared five-item text-setting history after a committed value change. */
+    private func recordRecentTextSetting(_ type: AndroidTextDisplaySettingType) {
+        AndroidTextDisplayRecentSettings.record(
+            type,
+            settingsStore: SettingsStore(modelContext: modelContext)
+        )
+    }
+
+    /** Toggles every iOS-backed Boolean Android text preference through the canonical mutation path. */
+    @discardableResult
+    private func toggleWindowTextSetting(
+        _ type: AndroidTextDisplaySettingType,
+        for window: BibleCore.Window
+    ) -> Bool {
+        switch type {
+        case .justify:
+            toggleDisplaySetting(\.justifyText, default: true, for: window)
+        case .hyphenation:
+            toggleDisplaySetting(\.hyphenation, default: true, for: window)
+        case .morphology:
+            toggleDisplaySetting(\.showMorphology, default: false, for: window)
+        case .footnotes:
+            toggleDisplaySetting(\.showFootNotes, default: true, for: window)
+        case .footnotesInline:
+            toggleDisplaySetting(\.showFootNotesInline, default: false, for: window)
+        case .expandXrefs:
+            toggleDisplaySetting(\.expandXrefs, default: false, for: window)
+        case .xrefs:
+            toggleDisplaySetting(\.showXrefs, default: true, for: window)
+        case .redLetters:
+            toggleDisplaySetting(\.showRedLetters, default: true, for: window)
+        case .sectionTitles:
+            toggleDisplaySetting(\.showSectionTitles, default: true, for: window)
+        case .verseNumbers:
+            toggleDisplaySetting(\.showVerseNumbers, default: true, for: window)
+        case .versePerLine:
+            toggleDisplaySetting(\.showVersePerLine, default: false, for: window)
+        case .bookmarksShow:
+            toggleDisplaySetting(\.showBookmarks, default: true, for: window)
+        case .myNotes:
+            toggleDisplaySetting(\.showMyNotes, default: true, for: window)
+        case .pageNumber:
+            toggleDisplaySetting(\.showPageNumber, default: false, for: window)
+        case .infiniteScroll:
+            toggleDisplaySetting(\.infiniteScroll, default: true, for: window)
+        case .nonStrongsWordItalic:
+            toggleDisplaySetting(\.nonStrongsWordItalic, default: false, for: window)
+        case .markAsReadButton:
+            toggleDisplaySetting(\.showMarkAsReadButton, default: true, for: window)
+        case .titleScrollButton:
+            toggleDisplaySetting(\.showTitleScrollButton, default: false, for: window)
+        case .memorizationIndicators:
+            toggleDisplaySetting(\.showMemorizationIndicators, default: false, for: window)
+        case .aiDocumentMarkers:
+            toggleDisplaySetting(\.showAiDocMarkers, default: true, for: window)
+        case .ordinals:
+            toggleDisplaySetting(\.showOrdinals, default: false, for: window)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /**
      Opens the Strong's mode chooser for a specific pane.
 
      - Parameter windowId: Pane whose Strong's setting should receive the selected value.
-     - Side effects: Makes the pane active so the existing chooser callback applies to it.
+     - Side effects: Makes the pane active and opens the shared window-scoped preference editor.
      - Failure modes: Missing windows fall back to current active-window behavior.
      */
     private func presentWindowStrongsMode(from windowId: UUID) {
-        if let targetWindow = windowManager.allWindows.first(where: { $0.id == windowId }) {
+        let targetWindow = windowManager.allWindows.first(where: { $0.id == windowId })
+            ?? windowManager.activeWindow
+        if let targetWindow {
             windowManager.activateWindow(targetWindow)
             syncActiveDisplaySettings()
+            presentWindowTextSettingEditor(.strongs, for: targetWindow)
         }
-        showReaderStrongsModeDialog = true
     }
 
     /**
@@ -4868,7 +5779,7 @@ public struct BibleReaderView: View {
         searchLastUsed = Date().timeIntervalSince1970
         if panePresentationController?.currentCategory == .generalBook,
            panePresentationController?.activeEpubReader != nil {
-            presentReaderModal(.epubSearch, from: windowId)
+            presentReaderDestination(.epubSearch, from: windowId)
             return
         }
         searchIsStrongsFindAll = isStrongsFindAll
@@ -5007,43 +5918,41 @@ private struct ReaderPanePreparationView: View {
     /// Whether the target window is visible and expected to register a controller shortly.
     let isPending: Bool
 
-    /// Dismisses the owning reader modal when the user leaves the readiness state.
+    /// Palette inherited from the captured reader pane's application-owned surface.
+    let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Dismisses the owning reader destination when the user leaves the readiness state.
     let onDismiss: () -> Void
 
     /**
-     Builds the modal surface for a pane that is pending or no longer available.
+     Builds the app-owned activity surface for a pane that is pending or no longer available.
 
-     - Returns: Navigation-wrapped content with an optional spinner while registration is expected.
-     - Side Effects: The Done toolbar action calls `onDismiss`.
+     - Returns: Shared Android activity chrome with either the common loading indicator or empty
+       state on the captured reader palette.
+     - Side Effects: The app-bar Up action calls `onDismiss`.
      - Failure Modes: None; this view is intentionally static until parent state changes.
      */
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                if isPending {
-                    ProgressView()
-                } else {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                Text(title)
-                    .font(.headline)
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle(String(localized: "choose_document", defaultValue: "Choose Document"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "done"), action: onDismiss)
-                }
+        AndroidActivityScreen(
+            title: String(localized: "choose_document", defaultValue: "Choose Document"),
+            accessibilityIdentifier: "readerPanePreparation",
+            palette: surfacePalette,
+            onBack: onDismiss,
+            actions: { EmptyView() }
+        ) {
+            if isPending {
+                AndroidActivityLoadingView(
+                    message: message,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "readerPanePreparationLoading"
+                )
+            } else {
+                AndroidActivityEmptyListView(
+                    title: title,
+                    detail: message,
+                    palette: surfacePalette,
+                    accessibilityIdentifier: "readerPanePreparationUnavailable"
+                )
             }
         }
     }

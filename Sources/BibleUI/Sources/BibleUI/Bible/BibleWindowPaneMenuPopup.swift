@@ -17,6 +17,9 @@ struct BibleWindowPaneMenuPopup: View {
     /// Current color scheme used by the shared popup surface.
     let colorScheme: ColorScheme
 
+    /// Window/workspace-owned reader colors used instead of a feature-local popup palette.
+    let surfacePalette: ReaderThemeSurfacePalette?
+
     /// Maximum popup height before menu rows scroll.
     let maximumHeight: CGFloat
 
@@ -32,6 +35,7 @@ struct BibleWindowPaneMenuPopup: View {
      - Parameters:
        - items: Top-level menu rows resolved by `BibleWindowPaneMenuModel`.
        - colorScheme: Current color scheme for Android-style popup colors.
+       - surfacePalette: Owning reader/window palette, or nil for global application colors.
        - maximumHeight: Height cap used before enabling row scrolling.
        - onAction: Command callback invoked for terminal rows.
      - Side effects: tapping terminal rows invokes `onAction`; submenu rows mutate local stack state.
@@ -40,11 +44,13 @@ struct BibleWindowPaneMenuPopup: View {
     init(
         items: [BibleWindowPaneMenuItem],
         colorScheme: ColorScheme,
+        surfacePalette: ReaderThemeSurfacePalette? = nil,
         maximumHeight: CGFloat = 440,
         onAction: @escaping (BibleWindowPaneMenuAction) -> Void
     ) {
         self.items = items
         self.colorScheme = colorScheme
+        self.surfacePalette = surfacePalette
         self.maximumHeight = maximumHeight
         self.onAction = onAction
     }
@@ -52,7 +58,11 @@ struct BibleWindowPaneMenuPopup: View {
     var body: some View {
         AndroidPopupMenuSurface(
             colorScheme: colorScheme,
-            accessibilityIdentifier: "windowPaneMenu"
+            accessibilityIdentifier: "windowPaneMenu",
+            backgroundColor: surfacePalette?.backgroundColor,
+            primaryTextColor: surfacePalette?.foregroundColor,
+            secondaryTextColor: surfacePalette?.secondaryForegroundColor,
+            accentColor: surfacePalette?.controlAccentColor
         ) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -109,6 +119,9 @@ struct BibleWindowPaneMenuPopup: View {
 
     /// Converts menu model icon data into the shared popup row icon representation.
     private func icon(for item: BibleWindowPaneMenuItem) -> AndroidPopupMenuIcon? {
+        if let iconAssetName = item.iconAssetName {
+            return .asset(iconAssetName)
+        }
         guard let systemImage = item.systemImage else { return nil }
         return .system(systemImage)
     }

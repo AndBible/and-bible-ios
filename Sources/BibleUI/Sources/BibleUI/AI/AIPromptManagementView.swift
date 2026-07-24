@@ -406,13 +406,29 @@ private struct AIPromptCSVImportSummary {
  through the surrounding SwiftData context; CSV add-on installation may also mutate module storage.
  */
 public struct AIPromptManagementView: View {
+    /// Pops the standalone prompt activity when no explicit owner is supplied.
+    @Environment(\.dismiss) private var dismiss
+    /// Current appearance used by the shared app-owned overflow surface.
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
 
     private let swordManager: SwordManager?
     /// Device-only credential boundary when this list is Android's configured AI Settings root.
     private let settingsRootCredentialStore: AICredentialStore?
+    /// Reader/workspace palette shared by the prompt manager and nested editor.
+    private let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command supplied by the activity owner.
+    private let onBack: (() -> Void)?
+    /// Opens the configured Connection settings activity.
+    private let onOpenConnection: (() -> Void)?
+    /// Opens an existing or new prompt in the configured activity owner.
+    private let onOpenPrompt: ((UUID?) -> Void)?
 
     @State private var revision = 0
+    /// Prompt editor locally replacing the standalone manager, if any.
+    @State private var locallyOpenedPromptID: UUID??
+    /// Whether Android's toolbar overflow popup is visible.
+    @State private var showsOverflowMenu = false
     @State private var failureMessage: String?
     @State private var deletingPromptID: UUID?
     /// Long-pressed prompt whose Android action list is currently visible.
@@ -460,6 +476,10 @@ public struct AIPromptManagementView: View {
     public init(swordManager: SwordManager? = nil) {
         self.swordManager = swordManager
         settingsRootCredentialStore = nil
+        surfacePalette = .standard
+        onBack = nil
+        onOpenConnection = nil
+        onOpenPrompt = nil
     }
 
     /**
@@ -468,15 +488,27 @@ public struct AIPromptManagementView: View {
      - Parameters:
        - swordManager: Optional installed-module source for read-only prompt packs.
        - settingsRootCredentialStore: Device-only Keychain boundary forwarded to Connection settings.
+       - surfacePalette: Palette inherited from the reader/workspace owner.
+       - onBack: Explicit Android Up command.
+       - onOpenConnection: Replaces the root with Connection settings.
+       - onOpenPrompt: Replaces the root with a prompt editor.
      - Side effects: None until a prompt or connection destination performs an explicit mutation.
      - Failure modes: Prompt failures are shown locally; connection failures belong to that route.
      */
     init(
         swordManager: SwordManager?,
-        settingsRootCredentialStore: AICredentialStore
+        settingsRootCredentialStore: AICredentialStore,
+        surfacePalette: ReaderThemeSurfacePalette,
+        onBack: @escaping () -> Void,
+        onOpenConnection: @escaping () -> Void,
+        onOpenPrompt: @escaping (UUID?) -> Void
     ) {
         self.swordManager = swordManager
         self.settingsRootCredentialStore = settingsRootCredentialStore
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
+        self.onOpenConnection = onOpenConnection
+        self.onOpenPrompt = onOpenPrompt
     }
 
     private var settingsStore: AISettingsStore { AISettingsStore(modelContext: modelContext) }
@@ -519,142 +551,17 @@ public struct AIPromptManagementView: View {
     }
 
     public var body: some View {
-        ZStack {
-            List {
-                ForEach(groups) { group in
-                    promptSection(group)
-                }
-
-                if settingsRootCredentialStore == nil {
-                    Section {
-                        NavigationLink {
-                            AIPromptEditorView(promptID: nil, swordManager: swordManager, onChanged: refresh)
-                        } label: {
-                            Label(String(localized: "new_prompt", defaultValue: "New prompt"), systemImage: "plus")
-                        }
-                        NavigationLink {
-                            AIPromptCategoryManagementView(swordManager: swordManager)
-                        } label: {
-                            Label(String(localized: "prompt_category", defaultValue: "Category"), systemImage: "folder")
-                        }
-                    }
-                }
-            }
-            .id(revision)
-            .accessibilityHidden(isPromptModalPresented)
-            .disabled(isPromptModalPresented)
-
-            promptDialogOverlay
-        }
-        .onAppear { resetCollapsedGroups() }
-        .navigationTitle(
-            settingsRootCredentialStore == nil
-                ? String(localized: "manage_prompts", defaultValue: "Manage AI Prompts")
-                : String(localized: "ai_settings", defaultValue: "AI Settings")
-        )
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(isPromptModalPresented)
-        .toolbar {
-            if let settingsRootCredentialStore {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    NavigationLink {
-                        AIPromptEditorView(promptID: nil, swordManager: swordManager, onChanged: refresh)
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel(String(localized: "new_prompt", defaultValue: "New prompt"))
-                    .accessibilityIdentifier("aiNewPromptButton")
-                    .disabled(isPromptModalPresented)
-
-                    NavigationLink {
-                        AIConnectionSettingsView(
-                            swordManager: swordManager,
-                            credentialStore: settingsRootCredentialStore
-                        )
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel(
-                        String(localized: "ai_connection_settings", defaultValue: "Connection settings")
-                    )
-                    .accessibilityIdentifier("aiConnectionSettingsLink")
-                    .disabled(isPromptModalPresented)
-
-                    Menu {
-                        Button {
-                            newCategoryName = ""
-                            showingNewCategory = true
-                        } label: {
-                            Label(
-                                String(localized: "new_category", defaultValue: "New category"),
-                                systemImage: "folder.badge.plus"
-                            )
-                        }
-                        Button {
-                            preparePromptExport()
-                        } label: {
-                            Label(
-                                String(localized: "export_prompts_csv", defaultValue: "Export prompts to CSV"),
-                                systemImage: "square.and.arrow.up"
-                            )
-                        }
-                        Button {
-                            showingImportOptions = true
-                        } label: {
-                            Label(
-                                String(localized: "import_prompts_csv", defaultValue: "Import prompts from CSV"),
-                                systemImage: "square.and.arrow.down"
-                            )
-                        }
-                        if !hiddenBuiltInIDs.isEmpty {
-                            Button {
-                                restoreHiddenPrompts()
-                            } label: {
-                                Label(
-                                    String(
-                                        localized: "ai_restore_hidden_prompts",
-                                        defaultValue: "Restore hidden prompts"
-                                    ),
-                                    systemImage: "arrow.uturn.backward"
-                                )
-                            }
-                        }
-                        #if DEBUG
-                        Button(role: .destructive) {
-                            showingResetConfirmation = true
-                        } label: {
-                            Label(
-                                String(
-                                    localized: "reset_all_ai_settings",
-                                    defaultValue: "Reset all AI settings"
-                                ),
-                                systemImage: "trash"
-                            )
-                        }
-                        #endif
-                        Button {
-                            helpDialog = .information(
-                                title: String(localized: "help", defaultValue: "Help"),
-                                message: String(
-                                    localized: "help_ai_settings_text",
-                                    defaultValue: "AI Settings is where you manage your prompts and categories. From here you can create new prompts, organise them into categories, import/export prompts as CSV, install add-on prompt packs, and reach the AI connection settings."
-                                )
-                            )
-                        } label: {
-                            Label(
-                                String(localized: "help", defaultValue: "Help"),
-                                systemImage: "questionmark.circle"
-                            )
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel(String(localized: "system_items1", defaultValue: "More"))
-                    .accessibilityIdentifier("aiPromptSettingsActionsMenu")
-                    .disabled(isPromptModalPresented)
-                }
+        Group {
+            if let localPrompt = locallyOpenedPromptID {
+                AIPromptEditorView(
+                    promptID: localPrompt,
+                    swordManager: swordManager,
+                    surfacePalette: surfacePalette,
+                    onBack: { locallyOpenedPromptID = nil },
+                    onChanged: refresh
+                )
+            } else {
+                promptManagerActivity
             }
         }
         .fileImporter(
@@ -674,27 +581,190 @@ public struct AIPromptManagementView: View {
             $helpDialog,
             credentialStore: settingsRootCredentialStore ?? .keychain()
         )
-        .alert(
-            String(localized: "ai_settings", defaultValue: "AI Settings"),
-            isPresented: Binding(
-                get: { noticeMessage != nil },
-                set: { if !$0 { noticeMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { noticeMessage = nil }
-        } message: {
-            Text(noticeMessage ?? "")
+        .overlay {
+            if let message = noticeMessage {
+                AndroidDecisionDialog(title: String(localized: "ai_settings", defaultValue: "AI Settings"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { noticeMessage = nil }
+                ])
+            } else if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
+    }
+
+    /** Full app-owned AI Settings/Manage Prompts activity matching Android's action bar and list. */
+    private var promptManagerActivity: some View {
+        ZStack {
+            AndroidActivityScreen(
+                title: settingsRootCredentialStore == nil
+                    ? String(localized: "manage_prompts", defaultValue: "Manage AI Prompts")
+                    : String(localized: "ai_settings", defaultValue: "AI Settings"),
+                accessibilityIdentifier: "aiPromptManagementTopAppBar",
+                palette: surfacePalette,
+                onBack: performBack
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityAddCircle"),
+                    accessibilityLabel: String(localized: "new_prompt", defaultValue: "New prompt"),
+                    accessibilityIdentifier: "aiNewPromptButton",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    openPrompt(nil)
+                }
+
+                if onOpenConnection != nil {
+                    AndroidActivityTopAppBarActionButton(
+                        icon: .asset("DrawerSettings"),
+                        accessibilityLabel: String(
+                            localized: "ai_connection_settings",
+                            defaultValue: "Connection settings"
+                        ),
+                        accessibilityIdentifier: "aiConnectionSettingsLink",
+                        foregroundColor: surfacePalette.toolbarForegroundColor
+                    ) {
+                        onOpenConnection?()
+                    }
+                }
+
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ToolbarOverflow"),
+                    accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                    accessibilityIdentifier: "aiPromptSettingsActionsMenu",
+                    foregroundColor: surfacePalette.toolbarForegroundColor
+                ) {
+                    showsOverflowMenu.toggle()
+                }
+                .androidPopupMenuAnchor(id: "aiPromptSettingsOverflowAnchor")
+            } content: {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(groups) { group in
+                            promptSection(group)
+                        }
+
+                        if entries.isEmpty {
+                            Text(
+                                String(
+                                    localized: "manage_prompts_summary",
+                                    defaultValue: "Create and edit AI prompts"
+                                )
+                            )
+                            .font(.system(size: 17))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .multilineTextAlignment(.center)
+                            .padding(32)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .id(revision)
+                }
+            }
+            .accessibilityHidden(isPromptModalPresented)
+            .disabled(isPromptModalPresented)
+
+            promptDialogOverlay
+        }
+        .onAppear { resetCollapsedGroups() }
+        .androidAnchoredPopupMenu(
+            anchorID: "aiPromptSettingsOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 310,
+            estimatedMenuHeight: 330,
+            accessibilityIdentifier: "aiPromptSettingsOverflowMenu"
         ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+            promptSettingsOverflowMenu
+        }
+    }
+
+    /** Shared anchored popup containing Android's `SHOW_AS_ACTION_NEVER` prompt commands. */
+    private var promptSettingsOverflowMenu: some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: "aiPromptSettingsOverflowMenu",
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: surfacePalette.controlAccentColor
+        ) {
+            VStack(spacing: 0) {
+                promptOverflowRow(
+                    title: String(localized: "new_category", defaultValue: "New category"),
+                    identifier: "aiNewCategoryMenuItem"
+                ) {
+                    newCategoryName = ""
+                    showingNewCategory = true
+                }
+                promptOverflowRow(
+                    title: String(localized: "export_prompts_csv", defaultValue: "Export prompts to CSV"),
+                    identifier: "aiExportPromptsMenuItem",
+                    action: preparePromptExport
+                )
+                promptOverflowRow(
+                    title: String(localized: "import_prompts_csv", defaultValue: "Import prompts from CSV"),
+                    identifier: "aiImportPromptsMenuItem"
+                ) {
+                    showingImportOptions = true
+                }
+                if !hiddenBuiltInIDs.isEmpty {
+                    promptOverflowRow(
+                        title: String(
+                            localized: "ai_restore_hidden_prompts",
+                            defaultValue: "Restore hidden prompts"
+                        ),
+                        identifier: "aiRestoreHiddenPromptsMenuItem",
+                        action: restoreHiddenPrompts
+                    )
+                }
+                #if DEBUG
+                promptOverflowRow(
+                    title: String(
+                        localized: "reset_all_ai_settings",
+                        defaultValue: "Reset all AI settings"
+                    ),
+                    identifier: "aiResetAllSettingsMenuItem"
+                ) {
+                    showingResetConfirmation = true
+                }
+                #endif
+                promptOverflowRow(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    identifier: "aiPromptHelpMenuItem"
+                ) {
+                    helpDialog = .help(.aiSettings)
+                }
+            }
+        }
+    }
+
+    /** Builds one overflow row and consistently dismisses the shared popup before its command. */
+    private func promptOverflowRow(
+        title: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        AndroidPopupMenuRow(title: title, accessibilityIdentifier: identifier) {
+            showsOverflowMenu = false
+            action()
+        }
+    }
+
+    /** Opens a prompt through the configured owner or the standalone app-owned replacement route. */
+    private func openPrompt(_ promptID: UUID?) {
+        if let onOpenPrompt {
+            onOpenPrompt(promptID)
+        } else {
+            locallyOpenedPromptID = .some(promptID)
+        }
+    }
+
+    /** Returns through the explicit activity owner or SwiftUI's standalone dismissal fallback. */
+    private func performBack() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 
@@ -906,14 +976,16 @@ public struct AIPromptManagementView: View {
     /** Builds one collapsible Android prompt group with category and prompt action controls. */
     @ViewBuilder
     private func promptSection(_ group: AIPromptManagementGroup) -> some View {
-        Section {
+        VStack(spacing: 0) {
+            promptSectionHeader(group)
+
             if !collapsedGroupIDs.contains(group.id) {
                 ForEach(group.entries, id: \.prompt.id) { entry in
                     promptRow(entry)
+                    Divider()
+                        .overlay(surfacePalette.secondaryForegroundColor.opacity(0.24))
                 }
             }
-        } header: {
-            promptSectionHeader(group)
         }
     }
 
@@ -927,14 +999,27 @@ public struct AIPromptManagementView: View {
                 collapsedGroupIDs.insert(group.id)
             }
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: collapsedGroupIDs.contains(group.id) ? "chevron.down" : "chevron.up")
-                    .imageScale(.small)
+            HStack(spacing: 8) {
+                AndBibleIconView(
+                    name: collapsedGroupIDs.contains(group.id)
+                        ? "PromptExpandIndicator"
+                        : "PromptCollapseIndicator",
+                    size: 20
+                )
+                .foregroundStyle(surfacePalette.secondaryForegroundColor)
                 Text(groupTitle(group))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(surfacePalette.foregroundColor)
                 Spacer(minLength: 8)
                 Text(String(group.entries.count))
+                    .font(.system(size: 14))
+                    .foregroundStyle(surfacePalette.secondaryForegroundColor)
                     .monospacedDigit()
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .background(surfacePalette.secondaryForegroundColor.opacity(0.09))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -982,39 +1067,77 @@ public struct AIPromptManagementView: View {
 
     /** Builds one prompt row while retaining source-aware editor and mutation behavior. */
     private func promptRow(_ entry: ResolvedAgentPrompt) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+            Button {
+                openPrompt(entry.prompt.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(entry.prompt.name)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(surfacePalette.foregroundColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if entry.origin == .builtIn {
+                            Text(String(localized: "built_in_prompt", defaultValue: "Built-in"))
+                                .font(.system(size: 13).italic())
+                                .foregroundStyle(surfacePalette.controlAccentColor)
+                        }
+                    }
+
+                    if case .swordPack(let moduleName) = entry.origin {
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(localized: "addon_prompt_badge", defaultValue: "Add-on: %@"),
+                                moduleName
+                            )
+                        )
+                        .font(.system(size: 13).italic())
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        .lineLimit(1)
+                    }
+
+                    if let description = entry.prompt.promptDescription, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 14))
+                            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Text(promptContextSummary(entry.prompt))
+                        .font(.system(size: 13).italic())
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor.opacity(0.82))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             Button {
                 setFavorite(!favoriteIDs.contains(entry.prompt.id), promptID: entry.prompt.id)
             } label: {
-                Image(systemName: favoriteIDs.contains(entry.prompt.id) ? "star.fill" : "star")
-                    .foregroundStyle(favoriteIDs.contains(entry.prompt.id) ? Color.yellow : Color.secondary)
+                AndBibleIconView(
+                    name: favoriteIDs.contains(entry.prompt.id)
+                        ? "PromptFavoriteFilled"
+                        : "PromptFavoriteOutline",
+                    size: 24
+                )
+                .foregroundStyle(
+                    favoriteIDs.contains(entry.prompt.id)
+                        ? AndroidResourcePalette.promptFavoriteFilled
+                        : AndroidResourcePalette.promptFavoriteOutline
+                )
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(
-                String(localized: "prompt_category_favorites", defaultValue: "Favorites")
-            )
-            .accessibilityAddTraits(
-                favoriteIDs.contains(entry.prompt.id) ? .isSelected : []
-            )
-
-            NavigationLink {
-                AIPromptEditorView(
-                    promptID: entry.prompt.id,
-                    swordManager: swordManager,
-                    onChanged: refresh
-                )
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.prompt.name)
-                    if let description = entry.prompt.promptDescription, !description.isEmpty {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-            }
+            .accessibilityLabel(String(localized: "prompt_category_favorites", defaultValue: "Favorites"))
+            .accessibilityAddTraits(favoriteIDs.contains(entry.prompt.id) ? .isSelected : [])
         }
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onLongPressGesture {
             promptActionDialog = AIPromptActionDialogContext(
@@ -1035,6 +1158,14 @@ public struct AIPromptManagementView: View {
                 )
             )
         }
+    }
+
+    /** Joins Android's localized `showIn` context names in enum order for one prompt row. */
+    private func promptContextSummary(_ prompt: AgentPrompt) -> String {
+        PromptContext.allCases
+            .filter { prompt.showIn.contains($0) }
+            .map(AIPromptPresentation.title(for:))
+            .joined(separator: ", ")
     }
 
     /** Restores Android's initial expansion state: every group except hidden categories is open. */
@@ -1395,7 +1526,7 @@ enum AIPromptAdvancedField: String, CaseIterable, Equatable {
 }
 
 /** Optional per-prompt permission-mode selection. */
-private enum AIPromptPermissionModeSelection: String, CaseIterable, Identifiable {
+private enum AIPromptPermissionModeSelection: String, CaseIterable, Identifiable, Hashable {
     case inherited
     case alwaysAsk
     case askOncePerRun
@@ -1406,7 +1537,7 @@ private enum AIPromptPermissionModeSelection: String, CaseIterable, Identifiable
 }
 
 /** Per-prompt tool availability override state. */
-private enum AIPromptToolSelection: String, CaseIterable, Identifiable {
+private enum AIPromptToolSelection: String, CaseIterable, Identifiable, Hashable {
     case inherited
     case allow
     case deny
@@ -1586,13 +1717,41 @@ enum AIPromptEditorBehavior {
  All controls write only local SwiftUI draft state. Save is the sole persistence boundary, including
  built-in model overrides; custom Back navigation confirms before discarding a dirty draft.
  */
+private enum AIPromptEditorModal: Identifiable {
+    /// Category Spinner replacement.
+    case category
+    /// Permission-mode Spinner replacement.
+    case permissionMode
+    /// Per-tool radio choice replacement.
+    case tool(AgentTool)
+    /// Advanced model ListPreference replacement.
+    case model
+    /// Advanced max-iterations EditTextPreference replacement.
+    case maxIterations
+
+    var id: String {
+        switch self {
+        case .category: return "category"
+        case .permissionMode: return "permissionMode"
+        case .tool(let tool): return "tool::\(tool.rawValue)"
+        case .model: return "model"
+        case .maxIterations: return "maxIterations"
+        }
+    }
+}
+
 struct AIPromptEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
 
     /// Active prompt identity; copying replaces this with the editable copy just as Android does.
     @State private var promptID: UUID?
     let swordManager: SwordManager?
+    /// Reader/workspace palette inherited from the owning activity.
+    let surfacePalette: ReaderThemeSurfacePalette
+    /// Explicit Android Up command, or nil for the environment fallback.
+    let onBack: (() -> Void)?
     let onChanged: () -> Void
 
     @State private var selectedTab = AIPromptEditorTab.prompt
@@ -1628,6 +1787,14 @@ struct AIPromptEditorView: View {
     @State private var failureMessage: String?
     /// Android-equivalent transient feedback for validation and successful copy operations.
     @State private var toastMessage: String?
+    /// App-owned Spinner/ListPreference dialog currently replacing an editor selection control.
+    @State private var activeModal: AIPromptEditorModal?
+    /// Whether the Available tools activity locally replaces the editor.
+    @State private var showsAvailableTools = false
+    /// Whether Android's `SHOW_AS_ACTION_NEVER` overflow popup is visible.
+    @State private var showsOverflowMenu = false
+    /// Tool category identities manually collapsed in the Permissions tab.
+    @State private var collapsedPermissionCategoryIDs: Set<String> = []
 
     /**
      Creates an editor whose active source can be replaced after Copy to customize.
@@ -1635,6 +1802,8 @@ struct AIPromptEditorView: View {
      - Parameters:
        - promptID: Existing source identity, or `nil` for a new user prompt.
        - swordManager: Optional SWORD prompt-pack provider.
+       - surfacePalette: Palette inherited from the reader/workspace owner.
+       - onBack: Explicit Android Up command, or nil for standalone dismissal.
        - onChanged: Callback invoked after successful persistence changes.
      - Side effects: None until the view loads or the user performs an action.
      - Failure modes: Loading and mutation failures are presented inside the editor.
@@ -1642,10 +1811,14 @@ struct AIPromptEditorView: View {
     init(
         promptID: UUID?,
         swordManager: SwordManager?,
+        surfacePalette: ReaderThemeSurfacePalette = .standard,
+        onBack: (() -> Void)? = nil,
         onChanged: @escaping () -> Void
     ) {
         _promptID = State(initialValue: promptID)
         self.swordManager = swordManager
+        self.surfacePalette = surfacePalette
+        self.onBack = onBack
         self.onChanged = onChanged
     }
 
@@ -1676,7 +1849,10 @@ struct AIPromptEditorView: View {
 
     /// Whether an Android editor dialog currently owns content and toolbar interaction.
     private var isEditorDialogPresented: Bool {
-        showingDiscardConfirmation || showingDeleteConfirmation || helpDialog != nil
+        showingDiscardConfirmation
+            || showingDeleteConfirmation
+            || helpDialog != nil
+            || activeModal != nil
     }
 
     /// Current value snapshot used only for dirty comparison until explicit Save.
@@ -1718,131 +1894,14 @@ struct AIPromptEditorView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                if isReadOnly {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "lock")
-                        Text(readOnlyNotice)
-                            .font(.subheadline)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(12)
-                    .background(Color.secondary.opacity(0.12))
-                }
-
-                Picker("", selection: $selectedTab) {
-                    ForEach(visibleTabs) { tab in
-                        Text(tabTitle(tab)).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding()
-
-                Form {
-                    switch selectedTab {
-                    case .prompt: promptFields
-                    case .permissions: permissionFields
-                    case .advanced: advancedFields
-                    }
-                }
-            }
-            .accessibilityHidden(isEditorDialogPresented)
-            .disabled(isEditorDialogPresented)
-
-            if showingDiscardConfirmation {
-                AIPromptDialogOverlay(onDismiss: { showingDiscardConfirmation = false }) {
-                    AIPromptConfirmationDialog(
-                        title: nil,
-                        message: String(
-                            localized: "discard_changes_confirmation",
-                            defaultValue: "Discard unsaved changes?"
-                        ),
-                        negativeTitle: String(localized: "no", defaultValue: "No"),
-                        positiveTitle: String(localized: "yes", defaultValue: "Yes"),
-                        onCancel: { showingDiscardConfirmation = false },
-                        onConfirm: { dismiss() }
-                    )
-                }
-            } else if showingDeleteConfirmation {
-                AIPromptDialogOverlay(onDismiss: { showingDeleteConfirmation = false }) {
-                    AIPromptConfirmationDialog(
-                        title: nil,
-                        message: String.localizedStringWithFormat(
-                            String(
-                                localized: "delete_prompt_confirmation",
-                                defaultValue: "Delete prompt \"%@\"?"
-                            ),
-                            name
-                        ),
-                        negativeTitle: String(localized: "no", defaultValue: "No"),
-                        positiveTitle: String(localized: "yes", defaultValue: "Yes"),
-                        onCancel: { showingDeleteConfirmation = false },
-                        onConfirm: deleteAndClose
-                    )
-                }
-            }
-        }
-        .navigationTitle(editorTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: requestClose) {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel(String(localized: "cancel", defaultValue: "Cancel"))
-                .disabled(isEditorDialogPresented)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if toolbarActions.contains(.save) {
-                    Button(action: validateAndSave) {
-                        Image(systemName: "checkmark")
-                    }
-                    .accessibilityLabel(String(localized: "okay", defaultValue: "OK"))
-                    .accessibilityIdentifier("aiPromptEditorSaveButton")
-                    .disabled(isEditorDialogPresented)
-                }
-                if toolbarActions.contains(.delete) {
-                    Button { showingDeleteConfirmation = true } label: {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel(String(localized: "delete", defaultValue: "Delete"))
-                    .accessibilityIdentifier("aiPromptEditorDeleteButton")
-                    .disabled(isEditorDialogPresented)
-                }
-                if toolbarActions.contains(.copyToCustomize) {
-                    Button(action: copyToCustomize) {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .accessibilityLabel(
-                        String(localized: "copy_to_customize", defaultValue: "Copy to customize")
-                    )
-                    .accessibilityIdentifier("aiPromptEditorCopyButton")
-                    .disabled(isEditorDialogPresented)
-                }
-                if toolbarActions.contains(.availableTools) {
-                    NavigationLink {
-                        AIPromptToolInfoView()
-                    } label: {
-                        Image(systemName: "info.circle")
-                    }
-                    .accessibilityLabel(
-                        String(localized: "ai_available_tools", defaultValue: "Available tools")
-                    )
-                    .accessibilityIdentifier("aiPromptEditorToolsButton")
-                    .disabled(isEditorDialogPresented)
-                }
-                if toolbarActions.contains(.help) {
-                    Button(action: showHelp) {
-                        Image(systemName: "questionmark.circle")
-                    }
-                    .accessibilityLabel(String(localized: "help", defaultValue: "Help"))
-                    .accessibilityIdentifier("aiPromptEditorHelpButton")
-                    .disabled(isEditorDialogPresented)
-                }
+        Group {
+            if showsAvailableTools {
+                AIPromptToolInfoView(
+                    surfacePalette: surfacePalette,
+                    onBack: { showsAvailableTools = false }
+                )
+            } else {
+                promptEditorActivity
             }
         }
         .task {
@@ -1864,16 +1923,363 @@ struct AIPromptEditorView: View {
         }
         .androidToastFeedback(toastMessage)
         .aiConfigurationDialog($helpDialog, credentialStore: .keychain())
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
+        }
+    }
+
+    /** Full app-owned PromptEditActivity using Android's exact action order and fixed tabs. */
+    private var promptEditorActivity: some View {
+        ZStack {
+            AndroidActivityScreen(
+                title: editorTitle,
+                accessibilityIdentifier: "aiPromptEditorTopAppBar",
+                palette: surfacePalette,
+                onBack: requestClose
+            ) {
+                if toolbarActions.contains(.save) {
+                    editorActionButton(
+                        icon: "ActivitySave",
+                        label: String(localized: "okay", defaultValue: "OK"),
+                        identifier: "aiPromptEditorSaveButton",
+                        action: validateAndSave
+                    )
+                }
+                if toolbarActions.contains(.delete) {
+                    editorActionButton(
+                        icon: "ActivityDelete",
+                        label: String(localized: "delete", defaultValue: "Delete"),
+                        identifier: "aiPromptEditorDeleteButton"
+                    ) {
+                        showingDeleteConfirmation = true
+                    }
+                }
+                if toolbarActions.contains(.copyToCustomize) {
+                    editorActionButton(
+                        icon: "ActivityCopy",
+                        label: String(localized: "copy_to_customize", defaultValue: "Copy to customize"),
+                        identifier: "aiPromptEditorCopyButton",
+                        action: copyToCustomize
+                    )
+                }
+                if toolbarActions.contains(.help) {
+                    editorActionButton(
+                        icon: "ActivityHelp",
+                        label: String(localized: "help", defaultValue: "Help"),
+                        identifier: "aiPromptEditorHelpButton",
+                        action: showHelp
+                    )
+                }
+                if toolbarActions.contains(.availableTools) {
+                    AndroidActivityTopAppBarActionButton(
+                        icon: .asset("ToolbarOverflow"),
+                        accessibilityLabel: String(localized: "system_items1", defaultValue: "More"),
+                        accessibilityIdentifier: "aiPromptEditorOverflowButton",
+                        foregroundColor: surfacePalette.toolbarForegroundColor
+                    ) {
+                        showsOverflowMenu.toggle()
+                    }
+                    .androidPopupMenuAnchor(id: "aiPromptEditorOverflowAnchor")
+                }
+            } content: {
+                VStack(spacing: 0) {
+                    if isReadOnly {
+                        HStack(alignment: .top, spacing: 8) {
+                            AndBibleIconView(name: "DocumentLock", size: 20)
+                                .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                            Text(readOnlyNotice)
+                                .font(.system(size: 14))
+                                .foregroundStyle(surfacePalette.foregroundColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .background(surfacePalette.secondaryForegroundColor.opacity(0.12))
+                    }
+
+                    AndroidFixedTabRow(
+                        items: visibleTabs.map {
+                            AndroidFixedTabItem(
+                                id: $0.rawValue,
+                                value: $0,
+                                title: tabTitle($0)
+                            )
+                        },
+                        selection: $selectedTab,
+                        backgroundColor: surfacePalette.backgroundColor,
+                        foregroundColor: surfacePalette.foregroundColor,
+                        secondaryForegroundColor: surfacePalette.secondaryForegroundColor,
+                        accentColor: surfacePalette.controlAccentColor
+                    )
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            switch selectedTab {
+                            case .prompt: promptFields
+                            case .permissions: permissionFields
+                            case .advanced: advancedFields
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .accessibilityHidden(isEditorDialogPresented)
+            .disabled(isEditorDialogPresented)
+
+            editorModalOverlay
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: "aiPromptEditorOverflowAnchor",
+            isPresented: $showsOverflowMenu,
+            menuWidth: 260,
+            estimatedMenuHeight: 52,
+            accessibilityIdentifier: "aiPromptEditorOverflowMenu"
         ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+            AndroidPopupMenuSurface(
+                colorScheme: colorScheme,
+                accessibilityIdentifier: "aiPromptEditorOverflowMenu",
+                backgroundColor: surfacePalette.backgroundColor,
+                primaryTextColor: surfacePalette.foregroundColor,
+                secondaryTextColor: surfacePalette.secondaryForegroundColor,
+                accentColor: surfacePalette.controlAccentColor
+            ) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "ai_available_tools", defaultValue: "Available tools"),
+                    icon: .asset("ActivityInfo"),
+                    accessibilityIdentifier: "aiPromptEditorToolsButton"
+                ) {
+                    showsOverflowMenu = false
+                    showsAvailableTools = true
+                }
+            }
+        }
+    }
+
+    /** Creates one exact-asset action in Android's prompt editor app bar. */
+    private func editorActionButton(
+        icon: String,
+        label: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        AndroidActivityTopAppBarActionButton(
+            icon: .asset(icon),
+            accessibilityLabel: label,
+            accessibilityIdentifier: identifier,
+            foregroundColor: surfacePalette.toolbarForegroundColor,
+            action: action
+        )
+    }
+
+    /** Presents the highest-priority app-owned editor confirmation or selection dialog. */
+    @ViewBuilder
+    private var editorModalOverlay: some View {
+        if showingDiscardConfirmation {
+            AIPromptDialogOverlay(onDismiss: { showingDiscardConfirmation = false }) {
+                AIPromptConfirmationDialog(
+                    title: nil,
+                    message: String(
+                        localized: "discard_changes_confirmation",
+                        defaultValue: "Discard unsaved changes?"
+                    ),
+                    negativeTitle: String(localized: "no", defaultValue: "No"),
+                    positiveTitle: String(localized: "yes", defaultValue: "Yes"),
+                    onCancel: { showingDiscardConfirmation = false },
+                    onConfirm: performDismiss
+                )
+            }
+        } else if showingDeleteConfirmation {
+            AIPromptDialogOverlay(onDismiss: { showingDeleteConfirmation = false }) {
+                AIPromptConfirmationDialog(
+                    title: nil,
+                    message: String.localizedStringWithFormat(
+                        String(
+                            localized: "delete_prompt_confirmation",
+                            defaultValue: "Delete prompt \"%@\"?"
+                        ),
+                        name
+                    ),
+                    negativeTitle: String(localized: "no", defaultValue: "No"),
+                    positiveTitle: String(localized: "yes", defaultValue: "Yes"),
+                    onCancel: { showingDeleteConfirmation = false },
+                    onConfirm: deleteAndClose
+                )
+            }
+        } else if let activeModal {
+            promptSelectionDialog(activeModal)
+        }
+    }
+
+    /** Builds the app-owned choice or EditTextPreference dialog represented by editor state. */
+    @ViewBuilder
+    private func promptSelectionDialog(_ modal: AIPromptEditorModal) -> some View {
+        switch modal {
+        case .category:
+            AndroidSingleChoiceDialog(
+                title: String(localized: "prompt_category", defaultValue: "Category"),
+                selectedValue: categoryID,
+                options: [
+                    AndroidSingleChoiceOption(
+                        id: "none",
+                        value: UUID?.none,
+                        title: String(localized: "category_none", defaultValue: "No category")
+                    ),
+                ] + categories.map {
+                    AndroidSingleChoiceOption(id: $0.id.uuidString, value: Optional($0.id), title: $0.name)
+                },
+                accessibilityIdentifier: "aiPromptCategoryDialog",
+                onSelect: {
+                    categoryID = $0
+                    activeModal = nil
+                },
+                onCancel: { activeModal = nil }
+            )
+        case .permissionMode:
+            AndroidSingleChoiceDialog(
+                title: String(localized: "prompt_permission_mode", defaultValue: "Permission mode"),
+                selectedValue: permissionMode,
+                options: AIPromptPermissionModeSelection.allCases.map {
+                    AndroidSingleChoiceOption(
+                        id: $0.rawValue,
+                        value: $0,
+                        title: permissionModeTitle($0)
+                    )
+                },
+                accessibilityIdentifier: "aiPromptPermissionModeDialog",
+                onSelect: {
+                    permissionMode = $0
+                    activeModal = nil
+                },
+                onCancel: { activeModal = nil }
+            )
+        case .tool(let tool):
+            AndroidSingleChoiceDialog(
+                title: AIPermissionPresentation.title(for: tool),
+                selectedValue: toolBinding(tool).wrappedValue,
+                options: AIPromptToolSelection.allCases.map {
+                    AndroidSingleChoiceOption(
+                        id: $0.rawValue,
+                        value: $0,
+                        title: toolPermissionTitle($0, tool: tool)
+                    )
+                },
+                accessibilityIdentifier: "aiPromptToolDialog::\(tool.rawValue)",
+                onSelect: {
+                    toolBinding(tool).wrappedValue = $0
+                    activeModal = nil
+                },
+                onCancel: { activeModal = nil }
+            )
+        case .model:
+            AndroidSingleChoiceDialog(
+                title: String(localized: "prompt_model_override", defaultValue: "Model"),
+                selectedValue: modelID,
+                options: [
+                    AndroidSingleChoiceOption(
+                        id: "default",
+                        value: UUID?.none,
+                        title: String(localized: "prompt_model_default", defaultValue: "Default")
+                    ),
+                ] + models.map {
+                    AndroidSingleChoiceOption(id: $0.id.uuidString, value: Optional($0.id), title: $0.modelId)
+                },
+                accessibilityIdentifier: "aiPromptModelDialog",
+                onSelect: {
+                    modelID = $0
+                    activeModal = nil
+                },
+                onCancel: { activeModal = nil }
+            )
+        case .maxIterations:
+            AndroidEditTextPreferenceDialog(
+                title: String(localized: "prompt_max_iterations", defaultValue: "Max iterations override"),
+                initialText: maxIterations,
+                placeholder: String(
+                    localized: "prompt_max_iterations_hint",
+                    defaultValue: "Leave empty for global default"
+                ),
+                accessibilityIdentifier: "aiPromptMaxIterationsDialog",
+                validator: { value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard trimmed.isEmpty || (Int(trimmed).map { $0 >= 0 } ?? false) else {
+                        return String(localized: "error_occurred", defaultValue: "An error has occurred")
+                    }
+                    return nil
+                },
+                onCancel: { activeModal = nil },
+                onSave: {
+                    maxIterations = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    activeModal = nil
+                }
+            )
+        }
+    }
+
+    /// Current category label shown by Android's category Spinner trigger.
+    private var selectedCategoryTitle: String {
+        guard let categoryID else {
+            return String(localized: "category_none", defaultValue: "No category")
+        }
+        return categories.first(where: { $0.id == categoryID })?.name
+            ?? String(localized: "category_none", defaultValue: "No category")
+    }
+
+    /// Current model label shown by Android's Advanced ListPreference row.
+    private var selectedModelTitle: String {
+        guard let modelID else {
+            return String(localized: "prompt_model_default", defaultValue: "Default")
+        }
+        return models.first(where: { $0.id == modelID })?.modelId
+            ?? String(localized: "prompt_model_default", defaultValue: "Default")
+    }
+
+    /** Returns Android's localized label for one optional prompt permission mode. */
+    private func permissionModeTitle(_ mode: AIPromptPermissionModeSelection) -> String {
+        switch mode {
+        case .inherited:
+            return String(localized: "prompt_permission_use_default", defaultValue: "Use default")
+        case .alwaysAsk:
+            return String(localized: "permission_always_ask", defaultValue: "Always ask")
+        case .askOncePerRun:
+            return String(localized: "permission_ask_once_per_run", defaultValue: "Ask once per run")
+        case .allowAll:
+            return String(localized: "permission_allow_all", defaultValue: "Allow all")
+        case .denyAll:
+            return String(localized: "permission_deny_all", defaultValue: "Deny all")
+        }
+    }
+
+    /** Returns the Android radio label for one per-tool override value. */
+    private func toolPermissionTitle(
+        _ selection: AIPromptToolSelection,
+        tool: AgentTool
+    ) -> String {
+        switch selection {
+        case .inherited:
+            return defaultToolPermissionTitle(tool)
+        case .allow:
+            return tool.access == .write
+                ? String(localized: "permission_option_always_allow", defaultValue: "Always allow")
+                : String(localized: "tool_option_enabled", defaultValue: "Enabled")
+        case .deny:
+            return tool.access == .write
+                ? String(localized: "permission_option_always_deny", defaultValue: "Always deny")
+                : String(localized: "tool_option_disabled", defaultValue: "Disabled")
+        }
+    }
+
+    /** Returns from the editor through its explicit owner or standalone environment fallback. */
+    private func performDismiss() {
+        if let onBack {
+            onBack()
+        } else {
+            dismiss()
         }
     }
 
@@ -1929,147 +2335,360 @@ struct AIPromptEditorView: View {
     /** Main prompt text, context, category, and model fields. */
     @ViewBuilder
     private var promptFields: some View {
-        Section {
-            TextField(String(localized: "prompt_name", defaultValue: "Name"), text: $name)
-                .disabled(isReadOnly)
-            TextField(String(localized: "prompt_description", defaultValue: "Description"), text: $description, axis: .vertical)
-                .disabled(isReadOnly)
+        VStack(alignment: .leading, spacing: 16) {
+            promptTextField(
+                title: String(localized: "prompt_name", defaultValue: "Name"),
+                text: $name,
+                identifier: "aiPromptNameField"
+            )
+            promptTextField(
+                title: String(localized: "prompt_description", defaultValue: "Description"),
+                text: $description,
+                identifier: "aiPromptDescriptionField"
+            )
+
             VStack(alignment: .leading, spacing: 6) {
                 Text(String(localized: "prompt_template", defaultValue: "Prompt template"))
-                    .font(.subheadline)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(surfacePalette.foregroundColor)
                 TextEditor(text: $template)
+                    .scrollContentBackground(.hidden)
+                    .font(.system(size: 16))
+                    .foregroundStyle(surfacePalette.foregroundColor)
+                    .padding(8)
                     .frame(minHeight: 180)
+                    .background(surfacePalette.secondaryForegroundColor.opacity(0.08))
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(surfacePalette.inactiveBorderColor)
+                            .frame(height: 1)
+                    }
                     .disabled(isReadOnly)
+                    .opacity(isReadOnly ? 0.45 : 1)
+                    .accessibilityIdentifier("aiPromptTemplateField")
             }
-            Picker(String(localized: "prompt_category", defaultValue: "Category"), selection: $categoryID) {
-                Text(String(localized: "category_none", defaultValue: "No category")).tag(UUID?.none)
-                ForEach(categories) { category in
-                    Text(category.name).tag(Optional(category.id))
-                }
+
+            AndroidSelectionField(
+                title: String(localized: "prompt_category", defaultValue: "Category"),
+                value: selectedCategoryTitle,
+                isEnabled: !isReadOnly,
+                palette: surfacePalette,
+                accessibilityIdentifier: "aiPromptCategoryField"
+            ) {
+                activeModal = .category
             }
-            .disabled(isReadOnly)
         }
-        Section(String(localized: "prompt_show_in", defaultValue: "Show in")) {
-            Toggle(
-                String(localized: "prompt_bible_only", defaultValue: "Bible documents only"),
-                isOn: $bibleOnly
+
+        VStack(alignment: .leading, spacing: 2) {
+            Text(String(localized: "prompt_show_in", defaultValue: "Show in"))
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(surfacePalette.foregroundColor)
+                .padding(.top, 8)
+
+            AndroidCheckboxRow(
+                title: String(localized: "prompt_bible_only", defaultValue: "Bible documents only"),
+                isOn: $bibleOnly,
+                isEnabled: !isReadOnly,
+                foregroundColor: surfacePalette.foregroundColor,
+                accentColor: surfacePalette.controlAccentColor,
+                accessibilityIdentifier: "aiPromptBibleOnlyCheckbox"
             )
-            .disabled(isReadOnly)
             ForEach(PromptContext.allCases, id: \.self) { context in
-                Toggle(AIPromptPresentation.title(for: context), isOn: contextBinding(context))
-                    .disabled(
-                        isReadOnly
-                            || (bibleOnly && (context == .workspaceMenu || context == .noteEditor))
-                    )
+                AndroidCheckboxRow(
+                    title: AIPromptPresentation.title(for: context),
+                    isOn: contextBinding(context),
+                    isEnabled: !isReadOnly
+                        && !(bibleOnly && (context == .workspaceMenu || context == .noteEditor)),
+                    foregroundColor: surfacePalette.foregroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    accessibilityIdentifier: "aiPromptContext::\(context.rawValue)"
+                )
             }
-            Toggle(
-                String(localized: "prompt_is_text_transformation", defaultValue: "Text transformation"),
-                isOn: $isTextTransformation
+
+            AndroidCheckboxRow(
+                title: String(localized: "prompt_is_text_transformation", defaultValue: "Text transformation"),
+                isOn: $isTextTransformation,
+                isEnabled: !isReadOnly,
+                foregroundColor: surfacePalette.foregroundColor,
+                accentColor: surfacePalette.controlAccentColor,
+                accessibilityIdentifier: "aiPromptTextTransformationCheckbox"
             )
-            .disabled(isReadOnly)
             Text(
                 String(
                     localized: "prompt_is_text_transformation_description",
                     defaultValue: "Uses a simplified system prompt that preserves formatting (links, headings, bold/italic) while transforming text content. No tools are used. Ideal for translation and editing prompts."
                 )
             )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.system(size: 13))
+            .foregroundStyle(surfacePalette.secondaryForegroundColor)
+            .padding(.leading, 32)
         }
     }
 
-    /** Renders a summary under an Android preference-style prompt setting. */
+    /** Renders one labeled AppCompat single-line prompt editor field. */
     @ViewBuilder
-    private func advancedToggle(
+    private func promptTextField(
         title: String,
-        summary: String,
-        value: Binding<Bool>
+        text: Binding<String>,
+        identifier: String
     ) -> some View {
-        Toggle(isOn: value) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(surfacePalette.foregroundColor)
+            AndroidActivityTextInput(
+                placeholder: "",
+                text: text,
+                foregroundColor: surfacePalette.foregroundColor,
+                backgroundColor: surfacePalette.secondaryForegroundColor.opacity(0.08),
+                borderColor: surfacePalette.inactiveBorderColor,
+                accessibilityIdentifier: identifier
+            )
         }
+        .disabled(isReadOnly)
+        .opacity(isReadOnly ? 0.45 : 1)
     }
 
     /** Per-prompt mode and complete allowed/denied tool controls. */
     @ViewBuilder
     private var permissionFields: some View {
-        Section {
-            Picker(
-                String(localized: "prompt_permission_mode", defaultValue: "Permission mode"),
-                selection: $permissionMode
-            ) {
-                Text(String(localized: "prompt_permission_use_default", defaultValue: "Use default"))
-                    .tag(AIPromptPermissionModeSelection.inherited)
-                Text(String(localized: "permission_always_ask", defaultValue: "Always ask"))
-                    .tag(AIPromptPermissionModeSelection.alwaysAsk)
-                Text(String(localized: "permission_ask_once_per_run", defaultValue: "Ask once per run"))
-                    .tag(AIPromptPermissionModeSelection.askOncePerRun)
-                Text(String(localized: "permission_allow_all", defaultValue: "Allow all"))
-                    .tag(AIPromptPermissionModeSelection.allowAll)
-                Text(String(localized: "permission_deny_all", defaultValue: "Deny all"))
-                    .tag(AIPromptPermissionModeSelection.denyAll)
-            }
-            .disabled(isReadOnly)
-            Text(
-                String(
-                    localized: "prompt_permission_mode_description",
-                    defaultValue: "Controls when user confirmation is required before the AI performs write operations. The per-tool settings below can override this for individual tools."
-                )
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        AndroidSelectionField(
+            title: String(localized: "prompt_permission_mode", defaultValue: "Permission mode"),
+            value: permissionModeTitle(permissionMode),
+            summary: String(
+                localized: "prompt_permission_mode_description",
+                defaultValue: "Controls when user confirmation is required before the AI performs write operations. The per-tool settings below can override this for individual tools."
+            ),
+            isEnabled: !isReadOnly,
+            palette: surfacePalette,
+            accessibilityIdentifier: "aiPromptPermissionModeField"
+        ) {
+            activeModal = .permissionMode
         }
+
         ForEach(AIPermissionPresentation.categories, id: \.category.rawValue) { group in
-            Section(group.title) {
-                ForEach(group.tools, id: \.self) { tool in
-                    Picker(AIPermissionPresentation.title(for: tool), selection: toolBinding(tool)) {
-                        Text(String(localized: "prompt_permission_use_default", defaultValue: "Use default"))
-                            .tag(AIPromptToolSelection.inherited)
-                        Text(String(localized: "permission_option_always_allow", defaultValue: "Always allow"))
-                            .tag(AIPromptToolSelection.allow)
-                        Text(String(localized: "permission_option_always_deny", defaultValue: "Always deny"))
-                            .tag(AIPromptToolSelection.deny)
-                    }
-                    .disabled(isReadOnly)
-                }
-            }
+            promptPermissionCategory(group)
         }
+
         if !isReadOnly {
-            Section {
-                Button(String(localized: "reset_all_permissions", defaultValue: "Reset all")) {
+            AndroidRaisedTextButton(
+                title: String(localized: "reset_all_permissions", defaultValue: "Reset all"),
+                foregroundColor: surfacePalette.controlAccentColor,
+                backgroundColor: surfacePalette.secondaryForegroundColor.opacity(0.08),
+                accessibilityIdentifier: "aiPromptResetPermissionsButton"
+            ) {
                     allowedTools.removeAll()
                     deniedTools.removeAll()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /** Builds Android's expandable permission category with read/write aggregate checkboxes. */
+    private func promptPermissionCategory(
+        _ group: AIPermissionPresentation.CategoryGroup
+    ) -> some View {
+        let categoryID = group.category.rawValue
+        let readTools = group.tools.filter { $0.access != .write }
+        let writeTools = group.tools.filter { $0.access == .write }
+        let isCollapsed = collapsedPermissionCategoryIDs.contains(categoryID)
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    if isCollapsed {
+                        collapsedPermissionCategoryIDs.remove(categoryID)
+                    } else {
+                        collapsedPermissionCategoryIDs.insert(categoryID)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        AndBibleIconView(
+                            name: isCollapsed ? "PromptExpandIndicator" : "PromptCollapseIndicator",
+                            size: 24
+                        )
+                        .foregroundStyle(surfacePalette.secondaryForegroundColor)
+                        Text(group.title)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(surfacePalette.foregroundColor)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 4)
+
+                if !readTools.isEmpty {
+                    permissionGroupToggle(
+                        title: String(localized: "tool_category_read", defaultValue: "Read"),
+                        tools: readTools,
+                        categoryID: categoryID,
+                        identifier: "read"
+                    )
+                }
+                if !writeTools.isEmpty {
+                    permissionGroupToggle(
+                        title: String(localized: "tool_category_write", defaultValue: "Write"),
+                        tools: writeTools,
+                        categoryID: categoryID,
+                        identifier: "write"
+                    )
+                }
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+
+            if !isCollapsed {
+                ForEach(group.tools, id: \.self) { tool in
+                    promptToolPermissionRow(tool)
+                }
             }
         }
+        .accessibilityIdentifier("aiPromptPermissionCategory::\(categoryID)")
+    }
+
+    /** Creates Android's compact category checkbox that resets or denies a complete tool subset. */
+    private func permissionGroupToggle(
+        title: String,
+        tools: [AgentTool],
+        categoryID: String,
+        identifier: String
+    ) -> some View {
+        let isOn = tools.allSatisfy { !deniedTools.contains($0) }
+        return Button {
+            setPermissionGroup(to: !isOn, tools: tools, categoryID: categoryID)
+        } label: {
+            HStack(spacing: 2) {
+                AndroidCheckboxIndicator(
+                    isOn: isOn,
+                    uncheckedColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor
+                )
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(surfacePalette.foregroundColor)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly)
+        .opacity(isReadOnly ? 0.45 : 1)
+        .accessibilityLabel(title)
+        .accessibilityValue(
+            isOn
+                ? String(localized: "tool_option_enabled", defaultValue: "Enabled")
+                : String(localized: "tool_option_disabled", defaultValue: "Disabled")
+        )
+        .accessibilityIdentifier("aiPromptPermissionCategory::\(categoryID)::\(identifier)")
+    }
+
+    /** Renders one Android horizontal three-state tool permission radio group. */
+    private func promptToolPermissionRow(_ tool: AgentTool) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(AIPermissionPresentation.title(for: tool))
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(surfacePalette.foregroundColor)
+
+            HStack(alignment: .top, spacing: 8) {
+                AndroidInlineRadioOption(
+                    title: defaultToolPermissionTitle(tool),
+                    value: AIPromptToolSelection.inherited,
+                    selection: toolBinding(tool),
+                    isEnabled: !isReadOnly,
+                    foregroundColor: surfacePalette.foregroundColor,
+                    secondaryColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    accessibilityIdentifier: "aiPromptTool::\(tool.rawValue)::default"
+                )
+                AndroidInlineRadioOption(
+                    title: tool.access == .write
+                        ? String(localized: "permission_option_always_allow", defaultValue: "Always allow")
+                        : String(localized: "tool_option_enabled", defaultValue: "Enabled"),
+                    value: AIPromptToolSelection.allow,
+                    selection: toolBinding(tool),
+                    isEnabled: !isReadOnly,
+                    foregroundColor: surfacePalette.foregroundColor,
+                    secondaryColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    accessibilityIdentifier: "aiPromptTool::\(tool.rawValue)::allow"
+                )
+                AndroidInlineRadioOption(
+                    title: tool.access == .write
+                        ? String(localized: "permission_option_always_deny", defaultValue: "Always deny")
+                        : String(localized: "tool_option_disabled", defaultValue: "Disabled"),
+                    value: AIPromptToolSelection.deny,
+                    selection: toolBinding(tool),
+                    isEnabled: !isReadOnly,
+                    foregroundColor: surfacePalette.foregroundColor,
+                    secondaryColor: surfacePalette.secondaryForegroundColor,
+                    accentColor: surfacePalette.controlAccentColor,
+                    accessibilityIdentifier: "aiPromptTool::\(tool.rawValue)::deny"
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    /** Applies Android's aggregate toggle rule and automatic expand/collapse behavior. */
+    private func setPermissionGroup(
+        to enabled: Bool,
+        tools: [AgentTool],
+        categoryID: String
+    ) {
+        for tool in tools {
+            allowedTools.remove(tool)
+            if enabled {
+                deniedTools.remove(tool)
+            } else {
+                deniedTools.insert(tool)
+            }
+        }
+
+        let categoryTools = AIPermissionPresentation.categories
+            .first(where: { $0.category.rawValue == categoryID })?.tools ?? []
+        if categoryTools.allSatisfy({ deniedTools.contains($0) }) {
+            collapsedPermissionCategoryIDs.insert(categoryID)
+        } else {
+            collapsedPermissionCategoryIDs.remove(categoryID)
+        }
+    }
+
+    /** Resolves Android's globally qualified Default label for one prompt tool. */
+    private func defaultToolPermissionTitle(_ tool: AgentTool) -> String {
+        let settings = try? settingsStore.globalSettings()
+        if tool.access != .write {
+            return (settings?.permanentlyDeniedTools ?? []).contains(tool)
+                ? String(localized: "tool_option_default_disabled", defaultValue: "Default (disabled)")
+                : String(localized: "tool_option_default_enabled", defaultValue: "Default (enabled)")
+        }
+        if (settings?.permanentlyAllowedTools ?? []).contains(tool) {
+            return String(localized: "tool_option_default_allowed", defaultValue: "Default (allowed)")
+        }
+        if (settings?.permanentlyDeniedTools ?? []).contains(tool) {
+            return String(localized: "tool_option_default_denied", defaultValue: "Default (denied)")
+        }
+        return String(localized: "permission_status_default", defaultValue: "Ask (default)")
     }
 
     /** Iteration, cache, context prefetch, and result-routing fields. */
     @ViewBuilder
     private var advancedFields: some View {
-        Section {
+        AndroidPreferenceSection(palette: surfacePalette) {
             ForEach(visibleAdvancedFields, id: \.self) { field in
                 switch field {
                 case .model:
-                    Picker(
-                        String(localized: "prompt_model_override", defaultValue: "Model"),
-                        selection: $modelID
+                    AndroidCatalogActionPreferenceRow(
+                        title: String(localized: "prompt_model_override", defaultValue: "Model"),
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "model_override"),
+                        trailingValue: selectedModelTitle,
+                        isEnabled: !isReadOnly || origin == .builtIn,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptModelPreference"
                     ) {
-                        Text(String(localized: "prompt_model_default", defaultValue: "Default"))
-                            .tag(UUID?.none)
-                        ForEach(models) { model in
-                            Text(model.modelId).tag(Optional(model.id))
-                        }
+                        activeModal = .model
                     }
-                    .disabled(isReadOnly && origin != .builtIn)
                 case .strictContextMatching:
-                    advancedToggle(
+                    AndroidCatalogSwitchPreferenceRow(
                         title: String(
                             localized: "prompt_strict_context_matching",
                             defaultValue: "Context-dependent cache"
@@ -2078,44 +2697,44 @@ struct AIPromptEditorView: View {
                             localized: "prompt_strict_context_matching_description",
                             defaultValue: "When enabled, cache matches only when all context (Bible version, selected text) is the same. When disabled, cache matches when verses are the same regardless of Bible version."
                         ),
-                        value: $strictContextMatching
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "strict_context_matching"),
+                        isOn: $strictContextMatching,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptStrictContextPreference"
                     )
-                    .disabled(isReadOnly)
                 case .maxIterations:
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(String(localized: "prompt_max_iterations", defaultValue: "Max iterations override"))
-                        TextField(
-                            String(
-                                localized: "prompt_max_iterations_hint",
-                                defaultValue: "Leave empty for global default"
-                            ),
-                            text: $maxIterations
-                        )
-                        #if os(iOS)
-                        .keyboardType(.numberPad)
-                        #endif
-                        Text(
-                            String(
-                                localized: "prompt_max_iterations_description",
-                                defaultValue: "Override the global max iterations for this prompt. Empty = global default, 0 = unlimited."
-                            )
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    AndroidCatalogActionPreferenceRow(
+                        title: String(localized: "prompt_max_iterations", defaultValue: "Max iterations override"),
+                        summary: String(
+                            localized: "prompt_max_iterations_description",
+                            defaultValue: "Override the global max iterations for this prompt. Empty = global default, 0 = unlimited."
+                        ),
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "max_iterations"),
+                        trailingValue: maxIterations.isEmpty
+                            ? String(localized: "prompt_max_iterations_hint", defaultValue: "Leave empty for global default")
+                            : maxIterations,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptMaxIterationsPreference"
+                    ) {
+                        activeModal = .maxIterations
                     }
-                    .disabled(isReadOnly)
                 case .specifyBeforeRun:
-                    advancedToggle(
+                    AndroidCatalogSwitchPreferenceRow(
                         title: String(localized: "prompt_edit_before_run", defaultValue: "Specify before run"),
                         summary: String(
                             localized: "prompt_edit_before_run_description",
                             defaultValue: "Show a text field for specifying the task before running the prompt"
                         ),
-                        value: $specifyBeforeRun
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "specify_before_run"),
+                        isOn: $specifyBeforeRun,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptSpecifyBeforeRunPreference"
                     )
-                    .disabled(isReadOnly)
                 case .noDocumentCreation:
-                    advancedToggle(
+                    AndroidCatalogSwitchPreferenceRow(
                         title: String(
                             localized: "prompt_no_document_creation",
                             defaultValue: "No document creation"
@@ -2124,11 +2743,14 @@ struct AIPromptEditorView: View {
                             localized: "prompt_no_document_creation_description",
                             defaultValue: "When enabled, the AI will not create a document. Results are only shown in the activity log. Useful for action-only prompts (bookmarks, labels, StudyPad operations)."
                         ),
-                        value: $noDocumentCreation
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "no_document_creation"),
+                        isOn: $noDocumentCreation,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptNoDocumentCreationPreference"
                     )
-                    .disabled(isReadOnly)
                 case .autoIncludeDocuments:
-                    advancedToggle(
+                    AndroidCatalogSwitchPreferenceRow(
                         title: String(
                             localized: "prompt_auto_include_documents",
                             defaultValue: "Auto-include installed documents"
@@ -2137,11 +2759,14 @@ struct AIPromptEditorView: View {
                             localized: "prompt_auto_include_documents_description",
                             defaultValue: "Automatically include the list of installed documents in the prompt context, saving an AI iteration."
                         ),
-                        value: $autoIncludeDocuments
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "auto_include_documents"),
+                        isOn: $autoIncludeDocuments,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptAutoIncludeDocumentsPreference"
                     )
-                    .disabled(isReadOnly)
                 case .autoIncludeCommentaries:
-                    advancedToggle(
+                    AndroidCatalogSwitchPreferenceRow(
                         title: String(
                             localized: "prompt_auto_include_commentaries",
                             defaultValue: "Auto-include commentaries"
@@ -2150,9 +2775,16 @@ struct AIPromptEditorView: View {
                             localized: "prompt_auto_include_commentaries_description",
                             defaultValue: "Automatically fetch and include commentary entries for the selected verses, saving an AI iteration."
                         ),
-                        value: $autoIncludeCommentaries
+                        icon: AndBibleIconCatalog.settingsIcon(forAndroidKey: "auto_include_commentaries"),
+                        isOn: $autoIncludeCommentaries,
+                        isEnabled: !isReadOnly,
+                        palette: surfacePalette,
+                        accessibilityIdentifier: "aiPromptAutoIncludeCommentariesPreference"
                     )
-                    .disabled(isReadOnly)
+                }
+
+                if field != visibleAdvancedFields.last {
+                    AndroidPreferenceDivider(palette: surfacePalette)
                 }
             }
         }
@@ -2251,19 +2883,13 @@ struct AIPromptEditorView: View {
         if isDirty {
             showingDiscardConfirmation = true
         } else {
-            dismiss()
+            performDismiss()
         }
     }
 
     /** Opens Android's prompt-editor help copy in the shared app-owned information dialog. */
     private func showHelp() {
-        helpDialog = .information(
-            title: String(localized: "help", defaultValue: "Help"),
-            message: String(
-                localized: "help_prompt_edit_text",
-                defaultValue: "Custom prompts let you create reusable AI instructions for your study. Set a name, description, template, the contexts where it should appear, and optionally a custom provider/model. Built-in prompts cannot be edited directly — use \"Copy to customize\" to create your own version."
-            )
-        )
+        helpDialog = .help(.promptEditor)
     }
 
     /**
@@ -2303,7 +2929,7 @@ struct AIPromptEditorView: View {
         do {
             try repository.setConfiguredModel(promptID: promptID, modelID: modelID)
             onChanged()
-            dismiss()
+            performDismiss()
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
@@ -2315,7 +2941,7 @@ struct AIPromptEditorView: View {
         do {
             try repository.delete(id: promptID)
             onChanged()
-            dismiss()
+            performDismiss()
         } catch {
             showingDeleteConfirmation = false
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
@@ -2353,7 +2979,7 @@ struct AIPromptEditorView: View {
                 try repository.update(value)
             }
             onChanged()
-            dismiss()
+            performDismiss()
         } catch {
             failureMessage = String(localized: "error_occurred", defaultValue: "An error has occurred")
         }
@@ -2432,6 +3058,7 @@ private enum AIPromptPresentation {
 
 /** Category CRUD, visibility, and ordering for built-in and user-owned groups. */
 private struct AIPromptCategoryManagementView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     let swordManager: SwordManager?
@@ -2462,64 +3089,77 @@ private struct AIPromptCategoryManagementView: View {
 
     var body: some View {
         ZStack {
-            List {
-                ForEach(categories) { category in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(category.name)
-                            if (try? repository.isCategoryHidden(category)) == true {
-                                Text(String(localized: "ai_hidden_status", defaultValue: "hidden"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                    .onLongPressGesture {
-                        let isBuiltIn = BuiltInPromptCatalog.categories().contains { $0.id == category.id }
-                        let isHidden = (try? repository.isCategoryHidden(category)) == true
-                        categoryActionDialog = AIPromptCategoryDialogContext(
-                            categoryID: category.id,
-                            categoryName: category.name,
-                            isBuiltIn: isBuiltIn,
-                            actions: AIPromptDialogBehavior.categoryActions(
-                                isBuiltIn: isBuiltIn,
-                                isHidden: isHidden,
-                                canMoveUp: categoryMoveTargetID(category.id, offset: -1) != nil,
-                                canMoveDown: categoryMoveTargetID(category.id, offset: 1) != nil
-                            )
-                        )
-                    }
-                }
-                Button {
+            AndroidActivityScreen(
+                title: String(localized: "prompt_category", defaultValue: "Category"),
+                accessibilityIdentifier: "aiPromptCategoryTopAppBar",
+                palette: .standard,
+                onBack: { dismiss() }
+            ) {
+                AndroidActivityTopAppBarActionButton(
+                    icon: .asset("ActivityAddCircle"),
+                    accessibilityLabel: String(localized: "new_category", defaultValue: "New category"),
+                    accessibilityIdentifier: "aiPromptCategoryAddButton",
+                    foregroundColor: ReaderThemeSurfacePalette.standard.toolbarForegroundColor
+                ) {
                     newCategoryName = ""
                     showingNewCategory = true
-                } label: {
-                    Label(String(localized: "new_category", defaultValue: "New category"), systemImage: "plus")
+                }
+            } content: {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(categories) { category in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(category.name)
+                                        .foregroundStyle(ReaderThemeSurfacePalette.standard.foregroundColor)
+                                    if (try? repository.isCategoryHidden(category)) == true {
+                                        Text(String(localized: "ai_hidden_status", defaultValue: "hidden"))
+                                            .font(.caption)
+                                            .foregroundStyle(
+                                                ReaderThemeSurfacePalette.standard.secondaryForegroundColor
+                                            )
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .contentShape(Rectangle())
+                            .onLongPressGesture {
+                                let isBuiltIn = BuiltInPromptCatalog.categories().contains {
+                                    $0.id == category.id
+                                }
+                                let isHidden = (try? repository.isCategoryHidden(category)) == true
+                                categoryActionDialog = AIPromptCategoryDialogContext(
+                                    categoryID: category.id,
+                                    categoryName: category.name,
+                                    isBuiltIn: isBuiltIn,
+                                    actions: AIPromptDialogBehavior.categoryActions(
+                                        isBuiltIn: isBuiltIn,
+                                        isHidden: isHidden,
+                                        canMoveUp: categoryMoveTargetID(category.id, offset: -1) != nil,
+                                        canMoveDown: categoryMoveTargetID(category.id, offset: 1) != nil
+                                    )
+                                )
+                            }
+                            Divider()
+                                .overlay(ReaderThemeSurfacePalette.standard.inactiveBorderColor)
+                        }
+                    }
+                    .id(revision)
                 }
             }
-            .id(revision)
             .accessibilityHidden(isCategoryDialogPresented)
             .disabled(isCategoryDialogPresented)
 
             categoryDialogOverlay
         }
-        .navigationTitle(String(localized: "prompt_category", defaultValue: "Category"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .navigationBarBackButtonHidden(isCategoryDialogPresented)
-        .alert(
-            String(localized: "error", defaultValue: "Error"),
-            isPresented: Binding(
-                get: { failureMessage != nil },
-                set: { if !$0 { failureMessage = nil } }
-            )
-        ) {
-            Button(String(localized: "okay", defaultValue: "OK")) { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "")
+        .overlay {
+            if let message = failureMessage {
+                AndroidDecisionDialog(title: String(localized: "error", defaultValue: "Error"), message: message, actions: [
+                    .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), style: .normal) { failureMessage = nil }
+                ])
+            }
         }
     }
 

@@ -300,52 +300,55 @@ extension AndBibleUITests {
     }
 
     /**
-     Taps one native alert button and waits for the alert to disappear before continuing.
+     Taps one semantic action in an app-owned Android dialog and waits for the action to close.
+     *
+     * Native `XCUIElement.alerts` queries are deliberately excluded: application decisions use
+     * shared Android dialog windows, while only operating-system handoffs may surface native iOS
+     * alerts. Stable semantic IDs keep the test valid across translated button labels.
      *
      * - Parameters:
-     *   - title: Visible button title expected inside the currently presented alert.
+     *   - actionIdentifier: Full shared-dialog action identifier, including its semantic action ID.
+     *   - dialogIdentifier: Stable identifier of the owning app dialog when SwiftUI exposes its
+     *     noninteractive container separately from the parent activity.
+     *   - expectedTitle: Optional English-locale label assertion that verifies visible copy without
+     *     using it as the control locator.
      *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the button and dismissal.
+     *   - timeout: Maximum number of seconds to wait for the action and dismissal.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - resolves the live alert button, taps it, and blocks until the alert no longer exists
+     *   - taps the real app-owned dialog action and blocks until that action disappears
+     *   - also verifies container dismissal when the dialog container has its own accessible node
      * - Failure modes:
-     *   - records an XCTest failure if the alert button never appears or the alert does not
-     *     dismiss after the tap
+     *   - records an XCTest failure when the action is absent, visible copy is wrong, the action
+     *     remains after activation, or an exposed dialog container remains after the action
      */
-    func tapAlertButton(
-        _ title: String,
+    func tapAppOwnedDialogAction(
+        _ actionIdentifier: String,
+        dialogIdentifier: String,
+        expectedTitle: String? = nil,
         in app: XCUIApplication,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(
-            alert.waitForExistence(timeout: timeout),
-            "Expected an alert before tapping '\(title)'.",
-            file: file,
-            line: line
-        )
-        let button = alert.buttons[title].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: timeout),
-            "Expected alert button '\(title)' to exist within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        tapElementReliably(button, timeout: timeout, file: file, line: line)
+        let dialog = resolvedElement(dialogIdentifier, in: app)
+        let action = requireElement(actionIdentifier, in: app, timeout: timeout, file: file, line: line)
+        if let expectedTitle {
+            XCTAssertEqual(
+                action.label,
+                expectedTitle,
+                "Expected app-owned dialog action '\(actionIdentifier)' to render translated copy '\(expectedTitle)'.",
+                file: file,
+                line: line
+            )
+        }
 
-        let dismissedPredicate = NSPredicate(format: "exists == false")
-        expectation(for: dismissedPredicate, evaluatedWith: alert)
-        waitForExpectations(timeout: timeout)
-        XCTAssertFalse(
-            alert.exists,
-            "Expected the alert to dismiss after tapping '\(title)'.",
-            file: file,
-            line: line
-        )
+        tapElementReliably(action, timeout: timeout, file: file, line: line)
+        waitForElementToDisappear(action, timeout: timeout, file: file, line: line)
+        if let dialog {
+            waitForElementToDisappear(dialog, timeout: timeout, file: file, line: line)
+        }
     }
 
     /**
@@ -739,28 +742,39 @@ extension AndBibleUITests {
      *   - timeout: Maximum time to wait for the chooser row and visible My Notes document.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
-	     * - Side effects:
-	     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
-	     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
-	     *     WebView-owned My Notes document to render
-	     * - Failure modes:
-	     *   - records an XCTest failure if the chooser, pseudo-document row, or My Notes state never
-	     *     becomes visible
+     * - Side effects:
+     *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
+     *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
+     *     WebView-owned My Notes document to render
+     * - Failure modes:
+     *   - records an XCTest failure if the chooser search, pseudo-document row, or My Notes state
+     *     never becomes visible
      */
-	    func openMyNotesFromReader(
-	        in app: XCUIApplication,
-	        timeout: TimeInterval = 20,
-	        file: StaticString = #filePath,
-	        line: UInt = #line
-	    ) {
-	        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
-	        _ = requireElement("modulePickerScreen", in: app, timeout: timeout, file: file, line: line)
-	        let searchField = requireElement("modulePickerSearchField", in: app, timeout: timeout, file: file, line: line)
-	        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
-	        tapElementReliably(
-	            requireElement("modulePickerPseudoRow::myNotes", in: app, timeout: timeout, file: file, line: line),
-	            timeout: timeout
-	        )
+    func openMyNotesFromReader(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: timeout, file: file, line: line)
+        let searchField = requireElement(
+            "modulePickerSearchField",
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+        replaceText(in: searchField, with: "My Note", placeholderHints: ["Search"])
+        tapElementReliably(
+            requireElement(
+                "modulePickerPseudoRow::myNotes",
+                in: app,
+                timeout: timeout,
+                file: file,
+                line: line
+            ),
+            timeout: timeout
+        )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
         waitForVisibleMyNotesState(
             containing: "myNotesVisible=true",
@@ -863,58 +877,4 @@ extension AndBibleUITests {
         )
     }
 
-    /**
-     Dismisses the bookmark list surface if the StudyPad handoff leaves it visible over the reader.
-
-     - Parameters:
-       - app: Running application that may still show the bookmark list.
-       - timeout: Maximum number of seconds to spend on the close attempt.
-     - Side effects:
-       - taps the sheet Done button or destination back button when either is visible
-     - Failure modes:
-       - returns without failing when the bookmark list is not visible
-     */
-    func dismissBookmarkListIfVisible(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        guard bookmarkListSurfaceIsVisible(in: app) else {
-            return
-        }
-        let doneButton = app.buttons["bookmarkListDoneButton"].firstMatch
-        if tapElementIfPossible(doneButton, timeout: min(timeout, 2)) {
-            _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
-            return
-        }
-
-        let backButton = app.navigationBars.buttons.element(boundBy: 0)
-        _ = tapElementIfPossible(backButton, timeout: min(timeout, 2))
-        _ = waitForBookmarkListDismissal(in: app, timeout: timeout)
-    }
-
-    /**
-     Waits for the StudyPad screen title to appear.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the StudyPad title.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - polls the live accessibility hierarchy until the StudyPad title appears
-     * - Failure modes:
-     *   - records an XCTest failure if the native StudyPad title never appears before timeout
-     */
-    func waitForStudyPadPresentation(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 20,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        XCTAssertTrue(
-            requireElement("readerStudyPadTitle", in: app, timeout: timeout, file: file, line: line).exists,
-            file: file,
-            line: line
-        )
-    }
 }

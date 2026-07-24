@@ -50,13 +50,13 @@ enum AndBibleSettingsPreferenceLayout {
 }
 
 /**
- Shared label layout for Android-shaped native SwiftUI settings rows.
+ Shared label layout for Android-shaped app-owned settings rows.
 
  The view keeps the Android preference-screen geometry, icon placement, row density, and
- title/summary hierarchy while inheriting iOS system text colors and accent tint from the active app
- theme. It intentionally does not own controls such as `Toggle`, `Picker`, or `NavigationLink`;
- those native controls wrap the label so interaction, accessibility, and platform theming stay
- SwiftUI-native.
+ title/summary hierarchy. Callers may supply the owning reader/workspace palette so a destination
+ does not silently fall back to the device color scheme; default values preserve existing global
+ settings callers until they also receive an owner palette. Interaction remains with the shared
+ app-owned preference row that wraps this label.
 
  - Parameters:
    - title: Primary row title shown beside the icon column.
@@ -85,6 +85,15 @@ struct AndBibleSettingsRowLabel: View {
     /// Whether text and icon styling should use enabled or disabled emphasis.
     var isEnabled = true
 
+    /// Owner-resolved title color.
+    var foregroundColor: Color = .primary
+
+    /// Owner-resolved summary and disabled color.
+    var secondaryColor: Color = .secondary
+
+    /// Owner-resolved icon color.
+    var iconColor: Color? = nil
+
     /// Fixed icon column width matching Android preference row geometry.
     static let iconColumnWidth = AndBibleSettingsPreferenceLayout.iconColumnWidth
 
@@ -102,20 +111,20 @@ struct AndBibleSettingsRowLabel: View {
             VStack(alignment: .leading, spacing: AndBibleSettingsPreferenceLayout.labelTextSpacing) {
                 Text(title)
                     .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(isEnabled ? .primary : .tertiary)
+                    .foregroundStyle(isEnabled ? foregroundColor : secondaryColor.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let summary, !summary.isEmpty {
                     Text(summary)
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(isEnabled ? .secondary : .tertiary)
+                        .foregroundStyle(isEnabled ? secondaryColor : secondaryColor.opacity(0.55))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let detail, !detail.isEmpty {
                     Text(detail)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(secondaryColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -130,7 +139,11 @@ struct AndBibleSettingsRowLabel: View {
     private var iconColumn: some View {
         if let icon {
             AndBibleIconView(name: icon.assetName, size: Self.iconSize)
-                .foregroundStyle(isEnabled ? .secondary : .tertiary)
+                .foregroundStyle(
+                    isEnabled
+                        ? (iconColor ?? secondaryColor)
+                        : secondaryColor.opacity(0.55)
+                )
                 .frame(width: Self.iconColumnWidth, alignment: .center)
                 .accessibilityHidden(true)
         } else {
@@ -157,6 +170,9 @@ struct AndBibleSettingsSectionHeader: View {
     /// User-visible section title.
     let title: String
 
+    /// Owner-resolved section accent; defaults to the application accent for legacy callers.
+    var accentColor: Color = .accentColor
+
     /// Leading space reserved for row icons, matching `AndBibleSettingsRowLabel`.
     private let textOffset = AndBibleSettingsRowLabel.iconColumnWidth + AndBibleSettingsRowLabel.contentSpacing
 
@@ -164,7 +180,7 @@ struct AndBibleSettingsSectionHeader: View {
     var body: some View {
         Text(title)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(accentColor)
             .textCase(nil)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, textOffset)

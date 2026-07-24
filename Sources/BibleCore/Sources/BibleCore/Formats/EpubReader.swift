@@ -29,6 +29,9 @@ public struct EpubInfo: Sendable, Equatable, Identifiable {
     /// Package title from OPF metadata.
     public let title: String
 
+    /// Package description used by Android's document About dialog.
+    public let description: String
+
     /// Package creator from OPF metadata.
     public let author: String
 
@@ -124,6 +127,9 @@ public final class EpubReader: @unchecked Sendable {
     /// Current on-disk index schema/transform version.
     static let indexVersion = "8"
 
+    /// Android `EPUB_OPTIMIZER_VERSION` projected by the generated-book About metadata.
+    public static let androidOptimizerVersion = "2"
+
     /// Serializes publication and identity-conflict checks across local EPUB imports/deletions.
     static let libraryMutationLock = NSRecursiveLock()
 
@@ -162,6 +168,9 @@ public final class EpubReader: @unchecked Sendable {
 
     /// Package title loaded from the index.
     public private(set) var title: String = ""
+
+    /// Package description loaded from the index for Android's document About dialog.
+    public private(set) var description: String = ""
 
     /// Package creator loaded from the index.
     public private(set) var author: String = ""
@@ -286,6 +295,43 @@ public final class EpubReader: @unchecked Sendable {
      */
     public static func delete(identifier: String) throws {
         try delete(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+    }
+
+    /**
+     Rebuilds one installed EPUB's search/index generation and opens the replacement reader.
+
+     Android exposes Rebuild index from EPUB Search. The native adapter fulfills that command by
+     copying the currently published immutable package, constructing a complete replacement SQLite
+     index, atomically switching the stable generation pointer, and only then opening the new
+     generation. Existing readers retain their leased package/index pair until they close.
+
+     - Parameter identifier: Stable identifier of the installed EPUB to rebuild.
+     - Returns: A reader leased to the newly published generation.
+     - Side effects: Writes and atomically publishes one immutable EPUB generation, then opens its
+       SQLite index read-only.
+     - Throws: Validation, index-construction, publication, or reopen failures. Any prior generation
+       remains current when publication fails; existing readers are never mutated in place.
+     */
+    public static func rebuildSearchIndex(identifier: String) throws -> EpubReader {
+        try rebuildSearchIndex(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+    }
+
+    /**
+     Deletes one installed EPUB's full-text search index without removing the document.
+
+     Android exposes Delete search index from the Choose Document contextual action mode. The
+     native adapter publishes a new immutable generation whose rendered content, navigation, and
+     resources remain intact while its FTS table is empty. Existing readers retain their prior
+     searchable generation until released.
+
+     - Parameter identifier: Stable identifier of the installed EPUB whose FTS rows are removed.
+     - Returns: A reader leased to the newly published index-free generation.
+     - Side effects: Writes and atomically publishes one immutable EPUB generation.
+     - Throws: Validation, staging, SQLite, publication, or reopen failures; the prior stable
+       generation remains selected whenever publication fails.
+     */
+    public static func deleteSearchIndex(identifier: String) throws -> EpubReader {
+        try deleteSearchIndex(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
     }
 
     /**
@@ -868,13 +914,14 @@ public final class EpubReader: @unchecked Sendable {
 
     // MARK: - Runtime helpers
 
-    /// Loads title, author, and language metadata from the open index.
+    /// Loads Android-visible package metadata from the open index.
     private func loadMetadata() {
         initials = metadataValue("initials") ?? initials
         sourceFileName = metadataValue("source_file_name")
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? identifier
         title = metadataValue("title") ?? identifier
+        description = metadataValue("description") ?? sourceFileName
         author = metadataValue("author") ?? ""
         language = metadataValue("language") ?? "en"
     }

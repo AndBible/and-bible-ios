@@ -46,4 +46,60 @@ final class ReaderThemeSurfacePaletteTests: XCTestCase {
         XCTAssertEqual(nightPalette.foregroundColorInt, nightTextColor)
     }
 
+    /**
+     Protects Android's independent app, workspace, and window color ownership.
+
+     Setup:
+     - Builds day, night, and monochrome palettes with a conspicuous custom workspace color and
+       custom reader content colors.
+
+     Expected result:
+     - Controls use AppCompat's DayNight accent.
+     - The custom workspace color remains limited to toolbar/navigation chrome.
+     - Monochrome toolbar behavior does not replace the global application accent.
+
+     Failure meaning:
+     - A workspace or window color has leaked into shared application controls, causing menus,
+       switches, and settings across unrelated activities to change color with the reader pane.
+     */
+    func testControlAccentUsesGlobalDayNightThemeInsteadOfWorkspaceOrWindowColors() {
+        var settings = TextDisplaySettings.appDefaults
+        settings.dayBackground = Int(Int32(bitPattern: 0xFFFAF4E8))
+        settings.dayTextColor = Int(Int32(bitPattern: 0xFF17130F))
+        let workspaceColor = Int(Int32(bitPattern: 0xFFFF00FF))
+
+        let dayPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor
+        )
+        let nightPalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: true,
+            workspaceColor: workspaceColor
+        )
+        let monochromePalette = ReaderThemeSurfacePalette(
+            settings: settings,
+            nightMode: false,
+            workspaceColor: workspaceColor,
+            monochromeMode: true
+        )
+
+        XCTAssertEqual(
+            dayPalette.controlAccentColor,
+            AndroidDialogSurfacePalette.accent(for: .light)
+        )
+        XCTAssertEqual(
+            nightPalette.controlAccentColor,
+            AndroidDialogSurfacePalette.accent(for: .dark)
+        )
+        XCTAssertEqual(
+            monochromePalette.controlAccentColor,
+            AndroidDialogSurfacePalette.accent(for: .light)
+        )
+        XCTAssertEqual(dayPalette.toolbarBackgroundColorInt, workspaceColor)
+        XCTAssertEqual(nightPalette.navigationDrawerColorInt, workspaceColor)
+        XCTAssertEqual(monochromePalette.toolbarBackgroundColorInt, -1)
+    }
+
 }

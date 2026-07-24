@@ -53,6 +53,9 @@ enum ReaderWorkspaceChromeColor {
  Determinism: pure value derivation with no shared state.
  */
 struct ReaderThemeSurfacePalette: Equatable {
+    /// Whether Android's global AppCompat theme is using its night control palette.
+    private let usesNightApplicationTheme: Bool
+
     /// Background color encoded with the Android/Vue signed ARGB convention.
     let backgroundColorInt: Int
 
@@ -88,6 +91,8 @@ struct ReaderThemeSurfacePalette: Equatable {
         monochromeMode: Bool = false,
         defaults: TextDisplaySettings = .appDefaults
     ) {
+        usesNightApplicationTheme = nightMode
+
         if nightMode {
             backgroundColorInt = settings.nightBackground ?? defaults.nightBackground ?? -16777216
             foregroundColorInt = settings.nightTextColor ?? defaults.nightTextColor ?? -1
@@ -135,6 +140,21 @@ struct ReaderThemeSurfacePalette: Equatable {
     /// SwiftUI foreground color for the navigation drawer/home affordance.
     var navigationDrawerColor: Color {
         Color(argbInt: navigationDrawerColorInt)
+    }
+
+    /**
+     Global AppCompat control accent shared by app-owned menus, switches, sliders, and section
+     headings.
+
+     Android resolves `android.R.attr.colorAccent` from `Theme.AppCompat.DayNight.DarkActionBar`.
+     The workspace color independently owns reader action-bar chrome; window text/background
+     colors independently own document surfaces. Keeping those three layers separate prevents a
+     custom workspace toolbar color from recoloring every interactive control in the application.
+     */
+    var controlAccentColor: Color {
+        AndroidDialogSurfacePalette.accent(
+            for: usesNightApplicationTheme ? .dark : .light
+        )
     }
 
     /// Low-contrast toolbar foreground color for inactive actions and secondary labels.

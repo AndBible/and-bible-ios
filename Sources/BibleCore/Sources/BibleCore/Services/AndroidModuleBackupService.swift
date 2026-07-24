@@ -340,14 +340,6 @@ public final class AndroidModuleBackupService {
     /// Android's default module backup filename.
     public static let moduleBackupFileName = "AndBibleModulesBackup.abmd.zip"
 
-    /// Integer producer build included in Android's manifest; command-line hosts fall back to zero.
-    private static var currentProducerVersion: Int {
-        let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
-        if let number = value as? NSNumber { return number.intValue }
-        if let string = value as? String, let number = Int(string) { return number }
-        return 0
-    }
-
     private let fileManager: FileManager
     private let moduleDirectory: URL
     private let temporaryDirectory: URL
@@ -396,7 +388,7 @@ public final class AndroidModuleBackupService {
             moduleDirectory: resolvedModuleDirectory,
             temporaryDirectory: temporaryDirectory ?? fileManager.temporaryDirectory,
             epubLibraryRootURL: epubLibraryRootURL,
-            producerVersion: producerVersion ?? Self.currentProducerVersion
+            producerVersion: producerVersion ?? AndroidBackupManifestCodec.producerVersion()
         )
     }
 

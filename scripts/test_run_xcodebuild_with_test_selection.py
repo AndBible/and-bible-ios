@@ -360,7 +360,11 @@ class MainTests(unittest.TestCase):
         self,
         run_mock: mock.Mock,
     ) -> None:
-        with mock.patch.dict(
+        """Read environment selections without depending on local derived-data contents."""
+        with mock.patch(
+            "run_xcodebuild_with_test_selection.discover_single_xctestrun_path",
+            return_value=None,
+        ), mock.patch.dict(
             os.environ,
             {
                 "TEST_SELECTION_ARGS": (
