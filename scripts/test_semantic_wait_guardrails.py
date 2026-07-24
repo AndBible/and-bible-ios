@@ -614,15 +614,39 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
         self.assertNotRegex(body, re.compile(r"\brepeat\s*\{"))
 
     def test_reader_state_export_includes_window_tab_orders_for_tab_fallback(self) -> None:
-        """Expose tab order metadata so tests can tap the real footer without stale queries."""
+        """Keep tab-order metadata in the ordered reader accessibility export.
+
+        The UI harness parses the semicolon-delimited export to locate the real window
+        footer after tab mutations. The export may gain additional tokens, but window,
+        content, and tab-order state must remain present in that order. A failure means
+        footer fallback tests could act on stale accessibility queries.
+        """
         source = (
             REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         ).read_text(encoding="utf-8")
         body = swift_property_body(source, "readerRenderedContentStateValue")
+        returned_tokens_match = re.search(
+            r'return\s*\[(?P<tokens>.*?)\]\s*\.joined\(separator:\s*";"\)',
+            body,
+            re.DOTALL,
+        )
 
         self.assertIn("windowTabOrders=", body)
         self.assertIn("windowManager.allWindows", body)
-        self.assertIn('return "\\(windowToken);\\(contentToken);\\(tabOrdersToken);', body)
+        if returned_tokens_match is None:
+            self.fail(
+                "Expected reader state tokens to be joined with semicolon delimiters."
+            )
+        returned_tokens = [
+            token.strip()
+            for token in returned_tokens_match.group("tokens").split(",")
+            if token.strip()
+        ]
+        self.assertGreaterEqual(len(returned_tokens), 3)
+        self.assertEqual(
+            returned_tokens[:3],
+            ["windowToken", "contentToken", "tabOrdersToken"],
+        )
 
     def test_icloud_sync_toggle_waits_on_semantic_state_not_manual_run_loop(self) -> None:
         """Keep the iCloud live-apply smoke tied to exported Sync Settings state."""
