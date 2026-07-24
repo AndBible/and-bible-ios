@@ -81,8 +81,9 @@ struct ReaderWindowControlsAvoidanceMetrics {
  - `colorScheme` from the environment participates in effective night-mode resolution
 
  Side effects:
- - `onAppear` loads persisted preferences, wires TTS callbacks, restores speech settings, and
-   registers synchronized-scrolling callbacks on `WindowManager`
+ - `onAppear` reloads persisted reader preferences and performs lightweight service reactivation;
+   the first appearance alone restores speech settings and wires TTS callbacks
+ - reader appearances register synchronized-scrolling callbacks on `WindowManager`
  - iOS `onAppear` and `onDisappear` start and stop tilt-to-scroll based on workspace settings
  - sheet dismissals reload behavior preferences or refresh installed-module lists where needed
  - toolbar toggles and helper actions mutate SwiftData-backed workspace/settings state and push
@@ -439,6 +440,9 @@ public struct BibleReaderView: View {
 
     /// Shared text-to-speech service used by all panes and speak-related overlays.
     @StateObject private var speakService = SpeakService()
+
+    /// Guards heavyweight speech restoration and callback binding to the first reader appearance.
+    @State private var speechLifecycleState = BibleReaderSpeechLifecycleState()
 
     /// Pending plain-text payload for the native share sheet.
     @State private var shareText: String?
@@ -3616,10 +3620,17 @@ public struct BibleReaderView: View {
     // MARK: - Lifecycle Wiring
 
     /**
-     Performs one-time reader setup when the SwiftUI screen appears.
+     Reactivates the reader whenever SwiftUI makes the root screen visible.
 
-     This keeps the `body` focused on composition while leaving state loading and callback wiring
-     in the coordinator that owns the relevant services.
+     Persisted reader preferences are intentionally reloaded because a Settings destination may
+     change them. Speech restoration and callback binding are separately guarded to the first
+     appearance, while later destination returns only refresh the active bookmark owner.
+
+     - Side effects: Reloads reader state, performs first-appearance speech setup when required,
+       refreshes lightweight reader bindings, installs synchronized scrolling, and evaluates
+       pending launch/test routes.
+     - Failure modes: Missing active controllers leave speech bookmark ownership unchanged; startup
+       evaluation retains its existing retry behavior.
      */
     private func handleReaderAppear() {
         let store = SettingsStore(modelContext: modelContext)
@@ -3781,18 +3792,38 @@ public struct BibleReaderView: View {
         #endif
     }
 
-    /// Wires TTS settings and callbacks to the currently active reader pane.
+    /**
+     Coordinates first-appearance speech initialization and repeat reader reactivation.
+
+     - Parameter store: Current persistence boundary for global speech and behavior preferences.
+     - Side effects: Performs heavyweight restoration exactly once per `BibleReaderView` identity,
+       then refreshes the active bookmark owner on every appearance.
+     - Failure modes: Missing active workspace or controller data uses restored global settings and
+       leaves bookmark ownership unchanged.
+     */
     private func configureSpeakService(with store: SettingsStore) {
+        if speechLifecycleState.beginActivation() {
+            performInitialSpeakServiceSetup(with: store)
+        }
+        reactivateSpeakService()
+    }
+
+    /**
+     Restores persisted speech state and installs reader callbacks once per reader identity.
+
+     - Parameter store: Persistence boundary assigned before restoration.
+     - Side effects: Restores global settings and checkpoints, applies the initial workspace
+       settings, replaces speech callbacks, and installs late-bound reader session reconstruction.
+     - Failure modes: Missing workspace settings retain the restored global value; missing active
+       controllers fail closed inside the late-bound session callbacks.
+     */
+    private func performInitialSpeakServiceSetup(with store: SettingsStore) {
         speakService.settingsStore = store
         speakService.restoreSettings()
 
         let wm = windowManager
         if let workspaceSettings = wm.activeWorkspace?.workspaceSettings {
             speakService.applySettings(workspaceSettings.speakSettings, persist: false)
-        }
-        if let activeId = wm.activeWindow?.id,
-           let controller = wm.controllers[activeId] as? BibleReaderController {
-            speakService.bookmarkManager = controller.bookmarkService
         }
 
         speakService.onRequestNext = nil
@@ -3809,7 +3840,28 @@ public struct BibleReaderView: View {
             guard let wm, let activeId = wm.activeWindow?.id else { return nil }
             return wm.controllers[activeId] as? BibleReaderController
         }
-        speakService.reloadResumeBookmarks()
+    }
+
+    /**
+     Refreshes speech state that legitimately follows the currently active reader pane.
+
+     Reusing the same bookmark owner still reloads resume rows so bookmark changes made in a
+     destination are visible on return. Assigning a different owner relies on `SpeakService`'s
+     `didSet` reload and avoids duplicate database work.
+
+     - Side effects: May replace the weak bookmark persistence owner or reload its resume rows.
+     - Failure modes: Returns without mutation until an active Bible reader controller exists.
+     */
+    private func reactivateSpeakService() {
+        guard let activeId = windowManager.activeWindow?.id,
+              let controller = windowManager.controllers[activeId] as? BibleReaderController else {
+            return
+        }
+        if speakService.bookmarkManager !== controller.bookmarkService {
+            speakService.bookmarkManager = controller.bookmarkService
+        } else {
+            speakService.reloadResumeBookmarks()
+        }
     }
 
     /**
