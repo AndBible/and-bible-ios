@@ -653,6 +653,194 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies a normal restore-strip button toggles its pane through Android's manager-owned path.
+
+     The setup creates two auto-pinned visible panes, then taps the second pane's restore button
+     twice through `toggleWindowVisibility`. Android's `WindowControl.restoreWindow` first minimizes
+     the visible pane and then restores and focuses it. A failure means iOS or macOS has reverted to
+     treating the bottom control as a focus-only tab or cannot restore the hidden pane.
+     */
+    func testWindowManagerRestoreButtonTogglesNormalWindowVisibilityLikeAndroid() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let secondWindow = try XCTUnwrap(manager.addWindow(from: firstWindow))
+
+        manager.toggleWindowVisibility(secondWindow)
+
+        XCTAssertEqual(secondWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, firstWindow.id)
+
+        manager.toggleWindowVisibility(secondWindow)
+
+        XCTAssertEqual(secondWindow.layoutState, "split")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, secondWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, secondWindow.id)
+    }
+
+    /**
+     Protects Android's final-visible-window minimization guard through the restore-button entry.
+
+     The workspace contains exactly one visible pane and sends its footer action through
+     `toggleWindowVisibility`. Android's `isWindowMinimizable` rejects that transition, so the pane,
+     focus, and split layout must remain unchanged. A failure means a future lifecycle edit can
+     leave the reader with no visible window despite the toggle's documented safety guarantee.
+     */
+    func testWindowManagerRestoreButtonCannotMinimizeOnlyVisibleWindow() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Final Visible Restore Button")
+        let onlyWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+
+        manager.toggleWindowVisibility(onlyWindow)
+
+        XCTAssertEqual(manager.allWindows.map(\.id), [onlyWindow.id])
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [onlyWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, onlyWindow.id)
+        XCTAssertEqual(onlyWindow.layoutState, "split")
+    }
+
+    /**
+     Verifies Android's closed layout state takes the hidden restore branch.
+
+     Synced or legacy workspace data can retain Android's `CLOSED` state even though ordinary iOS
+     removal deletes a window. Android's `Window.isVisible` returns false for that state, so a
+     restore-button action must reveal and focus the durable window rather than treating it as a
+     visible terminal pane to close. A failure means imported Android state can invert the toggle.
+     */
+    func testWindowManagerRestoreButtonRestoresClosedWindow() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Closed Restore Button")
+        let closedWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        closedWindow.layoutState = "closed"
+        store.persistChanges()
+        manager.setActiveWorkspace(workspace)
+
+        manager.toggleWindowVisibility(closedWindow)
+
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == closedWindow.id }))
+        XCTAssertEqual(closedWindow.layoutState, "split")
+        XCTAssertEqual(manager.activeWindow?.id, closedWindow.id)
+    }
+
+    /**
+     Protects Android's distinct primary and terminal nested links restore-button behavior.
+
+     The setup creates the workspace primary links window and one nested terminal links window.
+     Android closes a visible non-primary links window with no live chained target, while its primary
+     links window remains durable and follows ordinary minimize/restore toggling. A failure means
+     transient links panes leak as hidden tabs or the reusable primary links pane is deleted.
+     */
+    func testWindowManagerRestoreButtonClosesTerminalNestedLinksButTogglesPrimaryLinks() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Links Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let primaryLinksWindow = try XCTUnwrap(manager.linksWindow(for: firstWindow))
+        let nestedLinksWindow = try XCTUnwrap(manager.linksWindow(for: primaryLinksWindow))
+
+        manager.toggleWindowVisibility(nestedLinksWindow)
+
+        XCTAssertFalse(manager.allWindows.contains(where: { $0.id == nestedLinksWindow.id }))
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == primaryLinksWindow.id }))
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, primaryLinksWindow.id])
+
+        manager.toggleWindowVisibility(primaryLinksWindow)
+
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == primaryLinksWindow.id }))
+        XCTAssertEqual(primaryLinksWindow.layoutState, "minimized")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+
+        manager.toggleWindowVisibility(primaryLinksWindow)
+
+        XCTAssertEqual(primaryLinksWindow.layoutState, "split")
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id, primaryLinksWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, primaryLinksWindow.id)
+    }
+
+    /**
+     Verifies dangling nested-links metadata degrades to Android's terminal-window behavior.
+
+     The setup creates primary links → nested links → terminal links, removes the terminal target,
+     and leaves the middle pane's stored target identifier dangling. Android's
+     `ownTargetLinksWindow` then resolves to null, making that middle non-primary pane terminal; its
+     next visible restore-button tap must close it. A failure means stale relationship metadata can
+     turn transient links panes into durable hidden tabs.
+     */
+    func testWindowManagerRestoreButtonClosesNestedLinksWindowAfterTargetBecomesStale() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Stale Nested Links Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let primaryLinksWindow = try XCTUnwrap(manager.linksWindow(for: firstWindow))
+        let nestedLinksWindow = try XCTUnwrap(manager.linksWindow(for: primaryLinksWindow))
+        let terminalLinksWindow = try XCTUnwrap(manager.linksWindow(for: nestedLinksWindow))
+        let terminalLinksWindowId = terminalLinksWindow.id
+
+        manager.removeWindow(terminalLinksWindow)
+
+        XCTAssertEqual(nestedLinksWindow.targetLinksWindowId, terminalLinksWindowId)
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == nestedLinksWindow.id }))
+
+        manager.toggleWindowVisibility(nestedLinksWindow)
+
+        XCTAssertFalse(manager.allWindows.contains(where: { $0.id == nestedLinksWindow.id }))
+        XCTAssertTrue(manager.allWindows.contains(where: { $0.id == primaryLinksWindow.id }))
+        XCTAssertEqual(
+            manager.visibleWindows.map(\.id),
+            [firstWindow.id, primaryLinksWindow.id]
+        )
+    }
+
+    /**
+     Protects Android's maximization-aware `Window.isVisible` restore-button branch.
+
+     A terminal nested links pane remains in split state while another pane is maximized, making it
+     hidden even though it is not minimized. Android routes that hidden pane through restore/focus,
+     not the visible terminal-links close branch. The maximized layout remains authoritative and the
+     nested pane must survive for a later unmaximize. A failure means a future non-footer caller can
+     delete a hidden pane merely because its persisted layout state says split.
+     */
+    func testWindowManagerRestoreButtonDoesNotCloseSplitWindowHiddenByMaximization() throws {
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: ModelContext(container))
+        let manager = WindowManager(workspaceStore: store)
+        let workspace = store.createWorkspace(name: "Maximized Restore Button")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        manager.setActiveWorkspace(workspace)
+        let primaryLinksWindow = try XCTUnwrap(manager.linksWindow(for: firstWindow))
+        let hiddenTerminalLinksWindow = try XCTUnwrap(
+            manager.linksWindow(for: primaryLinksWindow)
+        )
+        manager.maximizeWindow(firstWindow)
+
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+        XCTAssertEqual(hiddenTerminalLinksWindow.layoutState, "split")
+
+        manager.toggleWindowVisibility(hiddenTerminalLinksWindow)
+
+        XCTAssertTrue(
+            manager.allWindows.contains(where: { $0.id == hiddenTerminalLinksWindow.id })
+        )
+        XCTAssertEqual(hiddenTerminalLinksWindow.layoutState, "split")
+        XCTAssertEqual(workspace.maximizedWindowId, firstWindow.id)
+        XCTAssertEqual(manager.visibleWindows.map(\.id), [firstWindow.id])
+        XCTAssertEqual(manager.activeWindow?.id, firstWindow.id)
+    }
+
+    /**
      Verifies visible-window ordering keeps pinned panes before unpinned panes.
 
      The setup flips pin state so a later pane is pinned while the first pane is not. The expected

@@ -111,20 +111,42 @@ final class WindowTabBarLayoutTests: XCTestCase {
     }
 
     /**
+     Protects Android restore-button visibility toggling on the shared iOS and macOS footer.
+
+     Android's `SplitBibleArea.createRestoreButton` sends every button tap to
+     `WindowControl.restoreWindow`: a visible pane minimizes, while a minimized pane restores.
+     The recording target proves SwiftUI delegates one visibility-toggle command instead of deciding
+     the lifecycle branch from rendered state. Manager tests cover the resulting minimize, restore,
+     and transient-links closure branches. A failure means the footer has resumed treating a visible
+     window button like a conventional focus-only tab.
+     */
+    func testWindowTabSelectionDelegatesAndroidRestoreButtonBehaviorToManager() {
+        let window = BibleCore.Window()
+        let target = RecordingWindowTabActionTarget()
+        let dispatcher = WindowTabActionDispatcher(target: target)
+
+        dispatcher.perform(.select, for: window)
+
+        XCTAssertEqual(target.calls, [
+            .toggleVisibility(window.id),
+        ])
+    }
+
+    /**
      Executes every state-changing tab command through the dispatcher used by `WindowTabBar`.
 
      The recording target stands in for `WindowManager` and proves selection, focus, movement,
      synchronization, pinning, grouping, layout, and close actions delegate exactly once without
-     directly mutating the window fixture. A failure means the UI command seam no longer preserves
-     the manager-owned lifecycle contract.
+     directly mutating the window fixture. Selection delegates Android's restore-strip behavior to
+     the manager rather than branching from the view's snapshot. A failure means the UI command seam
+     no longer preserves the manager-owned lifecycle contract.
     */
     func testWindowTabDispatcherRoutesEveryMutationToManagerBoundary() {
         let window = BibleCore.Window(isSynchronized: true, isPinMode: false, syncGroup: 0)
         let target = RecordingWindowTabActionTarget()
         let dispatcher = WindowTabActionDispatcher(target: target)
 
-        dispatcher.perform(.select(isMinimized: false), for: window)
-        dispatcher.perform(.select(isMinimized: true), for: window)
+        dispatcher.perform(.select, for: window)
         dispatcher.perform(.activate, for: window)
         dispatcher.perform(.restore, for: window)
         dispatcher.perform(.move(toPosition: 3), for: window)
@@ -137,8 +159,7 @@ final class WindowTabBarLayoutTests: XCTestCase {
         dispatcher.perform(.close, for: window)
 
         let expectedCalls: [RecordingWindowTabActionTarget.Call] = [
-            .activate(window.id),
-            .restore(window.id),
+            .toggleVisibility(window.id),
             .activate(window.id),
             .restore(window.id),
             .move(window.id, position: 3),
@@ -296,6 +317,8 @@ private final class RecordingWindowTabActionTarget: WindowTabActionTarget {
     enum Call: Equatable {
         /// Window activation request.
         case activate(UUID)
+        /// Android restore-strip visibility-toggle request.
+        case toggleVisibility(UUID)
         /// Window restoration request.
         case restore(UUID)
         /// Window movement request and zero-based destination.
@@ -321,6 +344,11 @@ private final class RecordingWindowTabActionTarget: WindowTabActionTarget {
 
     /// Records activation without mutating the window.
     func activateWindow(_ window: BibleCore.Window) { calls.append(.activate(window.id)) }
+
+    /// Records Android restore-strip selection without mutating the window.
+    func toggleWindowVisibility(_ window: BibleCore.Window) {
+        calls.append(.toggleVisibility(window.id))
+    }
 
     /// Records restoration without mutating the window.
     func restoreWindow(_ window: BibleCore.Window) { calls.append(.restore(window.id)) }

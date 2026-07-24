@@ -79,7 +79,19 @@ struct BibleReaderSpeechSelection: Equatable {
  */
 @Observable
 public final class BibleReaderController: NSObject, BibleBridgeDelegate {
+    /// Native/Vue bridge dedicated to this controller's reader window.
     let bridge: BibleBridge
+
+    /**
+     Per-window owner of the live WebView host and its weak WebKit delegates.
+
+     The window manager retains this controller while a pane is minimized, so retaining the render
+     session here gives iOS and macOS Android's `BibleViewFactory` lifetime: SwiftUI can detach the
+     pane without destroying the loaded Vue client. Closing the window unregisters this controller
+     and releases the cached host.
+     */
+    let webViewSession: BibleWebViewSession
+
   /// Cancellable app-owned subscription that keeps this pane's Vue marker state current.
   @ObservationIgnored
   private var aiDocMarkerEventObservation: MyDocumentAIDocMarkerEventObservation?
@@ -986,6 +998,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      - Parameters:
        - bridge: Bridge used to emit events to the Vue.js reader and receive callbacks.
+       - webViewSession: Optional pre-created render session already used by the pane's first
+         SwiftUI pass. When omitted, the controller creates a session around `bridge`.
        - bookmarkService: Optional bookmark/studypad service used for annotation features.
        - initializesSword: Whether to initialize SWORD immediately. Pane controllers that will
          copy an existing controller's shared module state pass `false` to avoid creating a
@@ -994,19 +1008,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
      Side effects:
      - assigns itself as the bridge delegate
+     - retains the render session until the controller leaves the window registry
      - initializes SWORD state and installed-module caches when `initializesSword` is `true`
 
      Failure modes:
+     - a supplied render session paired with another bridge fails fast because mixing the two would
+       route Vue callbacks and native emissions to different windows
      - if SWORD initialization is requested and `SwordManager` creation fails, the controller
        remains usable for placeholder/fallback rendering with empty installed-module caches.
      */
     public init(
         bridge: BibleBridge,
+        webViewSession: BibleWebViewSession? = nil,
         bookmarkService: BookmarkService? = nil,
     initializesSword: Bool = true,
     aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared
     ) {
+        let resolvedWebViewSession = webViewSession ?? BibleWebViewSession(bridge: bridge)
+        precondition(
+            resolvedWebViewSession.bridge === bridge,
+            "BibleReaderController and BibleWebViewSession must share one bridge"
+        )
         self.bridge = bridge
+        self.webViewSession = resolvedWebViewSession
         self.bookmarkService = bookmarkService
         self.compareDocumentBuildOperation = BibleReaderCompareDocumentBuilder.buildDocumentJSON
         super.init()
@@ -1017,8 +1041,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
+    /**
+     Creates a controller with an injected SWORD manager for deterministic integration tests.
+
+     - Parameters:
+       - bridge: Window-scoped native/Vue bridge.
+       - webViewSession: Optional matching render session; omitted tests receive a lazy empty
+         session that never creates a WebView unless explicitly attached.
+       - bookmarkService: Optional bookmark service used by annotation paths.
+       - swordManagerOverride: Preconfigured SWORD manager replacing production discovery.
+       - compareDocumentBuildOperation: Injectable Compare payload builder.
+       - aiDocMarkerEventCenter: Typed marker event source observed by this pane.
+     - Side Effects: Assigns the bridge delegate, retains the render session, subscribes to marker
+       events, and projects the supplied SWORD manager into controller state.
+     - Failure Modes: A render session paired with another bridge fails fast.
+     */
     init(
         bridge: BibleBridge,
+        webViewSession: BibleWebViewSession? = nil,
         bookmarkService: BookmarkService? = nil,
         swordManagerOverride: SwordManager,
     compareDocumentBuildOperation:
@@ -1026,7 +1066,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       BibleReaderCompareDocumentBuilder.buildDocumentJSON,
     aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared
     ) {
+        let resolvedWebViewSession = webViewSession ?? BibleWebViewSession(bridge: bridge)
+        precondition(
+            resolvedWebViewSession.bridge === bridge,
+            "BibleReaderController and BibleWebViewSession must share one bridge"
+        )
         self.bridge = bridge
+        self.webViewSession = resolvedWebViewSession
         self.bookmarkService = bookmarkService
         self.compareDocumentBuildOperation = compareDocumentBuildOperation
         super.init()

@@ -329,7 +329,7 @@ struct WindowTabBar: View {
         )
 
         return Button {
-            actionDispatcher.perform(.select(isMinimized: isMinimized), for: window)
+            actionDispatcher.perform(.select, for: window)
         } label: {
             ZStack(alignment: .topLeading) {
                 tabShape

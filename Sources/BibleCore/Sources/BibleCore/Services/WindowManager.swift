@@ -239,6 +239,66 @@ public final class WindowManager {
         }
     }
 
+    /**
+     Applies Android's restore-strip tap behavior to one managed window.
+
+     Android routes both visible and hidden restore buttons through `WindowControl.restoreWindow`.
+     A window Android considers hidden is restored and focused; a visible window is minimized unless
+     it is a terminal non-primary links window, which Android closes instead. Visibility includes
+     Android's maximized-window rule rather than assuming every non-minimized window is on screen.
+     The terminal check resolves the target identifier against current manager state so stale target
+     metadata behaves like Android's nullable `ownTargetLinksWindow`.
+
+     - Parameter window: Active-workspace window represented by the tapped restore-strip button.
+     - Side Effects: Delegates to `restoreWindow`, `minimizeWindow`, or `removeWindow`, including
+       their persistence, focus repair, controller cleanup, and published-window refresh behavior.
+     - Failure Modes: Foreign windows are ignored. Existing lifecycle guards keep the final visible
+       pane from being minimized and the final workspace window from being removed.
+     - Note: Visibility is read at execution time rather than accepted from SwiftUI so a stale render
+       snapshot cannot invert the requested transition.
+     */
+    public func toggleWindowVisibility(_ window: Window) {
+        guard allWindows.contains(where: { $0.id == window.id }) else { return }
+
+        if !isVisibleForAndroidRestoreAction(window) {
+            restoreWindow(window)
+            return
+        }
+
+        let isPrimaryLinksWindow = activeWorkspace?.primaryTargetLinksWindowId == window.id
+        let isTerminalLinksWindow = window.isLinksWindow
+            && explicitLinksWindowTarget(for: window) == nil
+        if isTerminalLinksWindow && !isPrimaryLinksWindow {
+            removeWindow(window)
+        } else {
+            minimizeWindow(window)
+        }
+    }
+
+    /**
+     Resolves Android's `Window.isVisible` branch for restore-strip actions.
+
+     When a workspace is maximized, Android treats only the maximized pane as visible except for
+     that pane's explicit chained links target. Outside that special case, any pane that is neither
+     minimized nor closed is visible. Keeping this projection separate from `visibleWindows`
+     preserves the chained-links exception and prevents a split-but-hidden peer from being
+     misclassified as visible.
+
+     - Parameter window: Managed window whose restore-strip action is being classified.
+     - Returns: `true` when Android would take the visible minimize/close branch.
+     - Side Effects: None.
+     - Failure Modes: A stale maximized identifier falls back to ordinary layout-state visibility,
+       matching `refreshWindows` repairing an unresolved maximized pane.
+     */
+    private func isVisibleForAndroidRestoreAction(_ window: Window) -> Bool {
+        if let maximizedWindowId = activeWorkspace?.maximizedWindowId,
+           let maximizedWindow = allWindows.first(where: { $0.id == maximizedWindowId }),
+           maximizedWindow.targetLinksWindowId != window.id {
+            return maximizedWindowId == window.id
+        }
+        return window.layoutState != "minimized" && window.layoutState != "closed"
+    }
+
     // MARK: - Window Lifecycle
 
     /**

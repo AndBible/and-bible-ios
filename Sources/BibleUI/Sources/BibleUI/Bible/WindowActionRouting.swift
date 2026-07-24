@@ -13,6 +13,9 @@ protocol WindowTabActionTarget: AnyObject {
     /// Activates a visible window and applies the manager's focus normalization.
     func activateWindow(_ window: BibleCore.Window)
 
+    /// Applies Android's restore-strip visibility toggle, including transient links-window closure.
+    func toggleWindowVisibility(_ window: BibleCore.Window)
+
     /// Restores a minimized window through the manager lifecycle.
     func restoreWindow(_ window: BibleCore.Window)
 
@@ -48,8 +51,8 @@ protocol WindowTabActionTarget: AnyObject {
  validation, normalization, and persistence behavior to its `WindowTabActionTarget`.
  */
 enum WindowTabAction: Equatable {
-    /// Selects a tab, restoring it when it is currently minimized and activating it otherwise.
-    case select(isMinimized: Bool)
+    /// Delegates an Android restore-strip tap using the manager's current visibility and links state.
+    case select
 
     /// Activates the tab before a secondary action such as typed-reference navigation.
     case activate
@@ -85,9 +88,9 @@ enum WindowTabAction: Equatable {
 /**
  Routes typed window-tab commands into the production window lifecycle boundary.
 
- The dispatcher contains no window behavior of its own beyond choosing restore versus activate for
- tab selection. Every mutation is delegated to `WindowManager` in production, preserving its
- validation, normalization, synchronization, and persistence contracts.
+ The dispatcher contains no window behavior of its own. Restore-strip selection and every explicit
+ mutation are delegated to `WindowManager` in production, preserving its validation, normalization,
+ synchronization, and persistence contracts.
  */
 struct WindowTabActionDispatcher {
     /// Production manager or recording test target that receives routed commands.
@@ -116,12 +119,8 @@ struct WindowTabActionDispatcher {
      */
     func perform(_ action: WindowTabAction, for window: BibleCore.Window) {
         switch action {
-        case .select(let isMinimized):
-            if isMinimized {
-                target.restoreWindow(window)
-            } else {
-                target.activateWindow(window)
-            }
+        case .select:
+            target.toggleWindowVisibility(window)
         case .activate:
             target.activateWindow(window)
         case .restore:
