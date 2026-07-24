@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import BibleView
 
@@ -9,6 +10,58 @@ import XCTest
  request classification, malformed-argument rejection, and passive-scroll focus behavior.
  */
 final class BridgeDispatchTests: XCTestCase {
+    /**
+     Verifies document replacement uses Android's single-evaluation bridge contract.
+
+     The bridge must queue clear, current initial config, replacement document, and setup in one
+     JavaScript evaluation and in Android order. Payload extraction also proves the transaction's
+     event markers preserve each independently encoded JSON argument for downstream contract tests.
+
+     - Side effects: Records one JavaScript evaluation through a test-only bridge observer.
+     - Failure modes: Fails if replacement is split across evaluations, event order changes, or
+       config/document/setup payloads are corrupted.
+     */
+    func testDocumentReplacementUsesOneAndroidOrderedEvaluation() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+
+        XCTAssertTrue(
+            bridge.replaceDocument(
+                configData: #"{"initial":true,"appSettings":{"nightMode":false}}"#,
+                document: ["id": "document-1", "type": "bible"],
+                setup: ["jumpToOrdinal": 42]
+            )
+        )
+
+        let scripts = recordedScripts()
+        XCTAssertEqual(scripts.count, 1)
+        let script = try XCTUnwrap(scripts.first)
+        let clearRange = try XCTUnwrap(script.range(of: "emit('clear_document'"))
+        let configRange = try XCTUnwrap(script.range(of: "emit('set_config'"))
+        let documentRange = try XCTUnwrap(script.range(of: "emit('add_documents'"))
+        let setupRange = try XCTUnwrap(script.range(of: "emit('setup_content'"))
+        XCTAssertLessThan(clearRange.lowerBound, configRange.lowerBound)
+        XCTAssertLessThan(configRange.lowerBound, documentRange.lowerBound)
+        XCTAssertLessThan(documentRange.lowerBound, setupRange.lowerBound)
+
+        XCTAssertEqual(
+            try bridgeEmissionPayloadJSON(from: scripts, event: "set_config"),
+            #"{"initial":true,"appSettings":{"nightMode":false}}"#
+        )
+        let documentJSON = try bridgeEmissionPayloadJSON(from: scripts, event: "add_documents")
+        let documentData = try XCTUnwrap(documentJSON.data(using: .utf8))
+        let document = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: documentData) as? [String: String]
+        )
+        XCTAssertEqual(document, ["id": "document-1", "type": "bible"])
+
+        let setupJSON = try bridgeEmissionPayloadJSON(from: scripts, event: "setup_content")
+        let setupData = try XCTUnwrap(setupJSON.data(using: .utf8))
+        let setup = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: setupData) as? [String: Int]
+        )
+        XCTAssertEqual(setup, ["jumpToOrdinal": 42])
+    }
+
     func testBridgeCallIdRequestMappingMatchesWebClientContract() {
         let bridge = BibleBridge()
 

@@ -7,6 +7,7 @@ import XCTest
 @testable import SwordKit
 #if os(iOS)
 import UIKit
+import WebKit
 #endif
 
 private let memorizeParitySQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -56,7 +57,125 @@ extension AndBibleTests {
         )
         XCTAssertNil(configuration.name)
     }
+
+    /**
+     Verifies the iOS reader host retains Android's opaque native background contract during Vue
+     document replacement.
+
+     - Side effects: Constructs an in-memory WebView host and loads its controller view.
+     - Failure modes: Fails if WebKit can expose a transparent/default backing surface or if any
+       native layer drifts from the resolved reader ARGB background.
+     */
+    @MainActor
+    func testReaderWebViewOwnsOpaqueResolvedBackgroundAcrossAllNativeSurfaces() {
+        let bridge = BibleBridge()
+        let webView = WKWebView()
+        let controller = BibleWebViewController(webView: webView, bridge: bridge)
+        let backgroundColorInt = Int(Int32(bitPattern: 0xFFDDE7FA))
+        let expectedColor = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
+        controller.backgroundColorInt = backgroundColorInt
+
+        controller.loadViewIfNeeded()
+
+        XCTAssertTrue(webView.isOpaque)
+        XCTAssertEqual(webView.backgroundColor, expectedColor)
+        XCTAssertEqual(webView.scrollView.backgroundColor, expectedColor)
+        XCTAssertEqual(controller.view.backgroundColor, expectedColor)
+        let underPageComponents = webView.underPageBackgroundColor.cgColor.components ?? []
+        let expectedComponents = expectedColor.cgColor.components ?? []
+        XCTAssertEqual(underPageComponents.count, expectedComponents.count)
+        for (actual, expected) in zip(underPageComponents, expectedComponents) {
+            XCTAssertEqual(actual, expected, accuracy: 0.000_001)
+        }
+    }
     #endif
+
+    /**
+     Verifies a Bible document switch begins with Android's atomic theme-preserving replacement.
+
+     Android evaluates `clear_document` and an initial `set_config` carrying the current window
+     palette/night policy in one JavaScript turn before adding replacement content. That ordering
+     prevents Vue defaults or a native host background from becoming visible while the new document
+     is loading.
+
+     - Side effects:
+       - creates a two-Bible controller with a non-default resolved day/night palette
+       - completes the client-ready replay, then switches from KJV to WEB
+       - records the exact JavaScript evaluations queued through `BibleBridge`
+     - Failure modes:
+       - fails if clearing and theme reassertion are dispatched in separate JavaScript evaluations
+       - fails if replacement config is not marked initial or loses the active day-mode colors
+       - fails if replacement content is queued before the atomic clear/config transaction
+     */
+    @MainActor
+    func testBibleDocumentSwitchAtomicallyReassertsCurrentThemeBeforeReplacementContent() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        try seedThemeParityBibleAlias(named: "WEB", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.dayTextColor = Int(Int32(bitPattern: 0xFF213547))
+        displaySettings.dayBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+        displaySettings.nightTextColor = Int(Int32(bitPattern: 0xFFF0E7FA))
+        displaySettings.nightBackground = Int(Int32(bitPattern: 0xFF2B183C))
+        controller.displaySettings = displaySettings
+        controller.nightMode = false
+
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+
+        controller.switchBibleDocument(to: "WEB")
+        let replacementDeadline = Date(timeIntervalSinceNow: 2)
+        while Date() < replacementDeadline,
+              !recordedScripts()
+                .dropFirst(baselineScriptCount)
+                .contains(where: { $0.contains("emit('clear_document'") }) {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        let switchScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let replacementIndex = try XCTUnwrap(
+            switchScripts.firstIndex { $0.contains("emit('clear_document'") }
+        )
+        let replacementScript = switchScripts[replacementIndex]
+        XCTAssertTrue(
+            replacementScript.contains("emit('set_config'"),
+            "Expected clear_document and set_config in one atomic JavaScript evaluation: \(replacementScript)"
+        )
+        let clearRange = try XCTUnwrap(replacementScript.range(of: "emit('clear_document'"))
+        let configRange = try XCTUnwrap(replacementScript.range(of: "emit('set_config'"))
+        let documentRange = try XCTUnwrap(replacementScript.range(of: "emit('add_documents'"))
+        let setupRange = try XCTUnwrap(replacementScript.range(of: "emit('setup_content'"))
+        XCTAssertLessThan(clearRange.lowerBound, configRange.lowerBound)
+        XCTAssertLessThan(configRange.lowerBound, documentRange.lowerBound)
+        XCTAssertLessThan(documentRange.lowerBound, setupRange.lowerBound)
+
+        let configPayload = try XCTUnwrap(
+            memorizeParityBridgeEmissionPayload(
+                from: [replacementScript],
+                event: "set_config"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(configPayload["initial"] as? Bool, true)
+        let appSettings = try XCTUnwrap(configPayload["appSettings"] as? [String: Any])
+        XCTAssertEqual(appSettings["nightMode"] as? Bool, false)
+        let config = try XCTUnwrap(configPayload["config"] as? [String: Any])
+        let colors = try XCTUnwrap(config["colors"] as? [String: Any])
+        XCTAssertEqual(colors["dayBackground"] as? Int, displaySettings.dayBackground)
+        XCTAssertEqual(colors["nightBackground"] as? Int, displaySettings.nightBackground)
+
+        let addDocumentIndex = try XCTUnwrap(
+            switchScripts.firstIndex { $0.contains("emit('add_documents'") }
+        )
+        XCTAssertEqual(replacementIndex, addDocumentIndex)
+    }
 
     /**
      Verifies local memorization progress can write Android's KJVA-global rows directly.
@@ -475,13 +594,15 @@ extension AndBibleTests {
     }
 
     /**
-     Guards native Memorization progress UI affordances against preserving iOS-only shortcuts.
+     Guards app-owned Memorization progress UI affordances against iOS-only shortcuts.
 
      Android's `ReadingProgressActivity` displays counted pagination labels, target progress as a
      percentage plus ratio, destructive confirmations with the affected passage/goal name, and
-     tappable chapter detail cells that return to the selected Bible chapter. The SwiftUI callbacks
-     are private view composition, so this app-host guard reads the source boundary directly. The
-     separate reading-cycle reset keeps its own Android-parity confirmation dialog.
+     tappable chapter detail cells that return to the selected Bible chapter. Shared app-owned
+     dialogs preserve Android presentation instead of falling back to native SwiftUI alerts. The
+     SwiftUI callbacks are private view composition, so this app-host guard reads the source
+     boundary directly. The separate reading-cycle reset keeps its own Android-parity decision
+     dialog.
 
      Failure means the data model may still be Android-shaped while the user-visible progress UI
      has drifted away from Android behavior.
@@ -490,8 +611,8 @@ extension AndBibleTests {
         let progressSource = try memorizeParitySource(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/ReadingProgressViews.swift"
         )
-        let sheetSource = try memorizeParitySource(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderActiveSheetContent.swift"
+        let readerSource = try memorizeParitySource(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
         )
 
         XCTAssertTrue(progressSource.contains("let onOpenChapter: (String, Int) -> Void"))
@@ -503,16 +624,19 @@ extension AndBibleTests {
         XCTAssertTrue(progressSource.contains("String(format: \"%.0f%% (%d/%d)\", percent, memorized, total)"))
         XCTAssertTrue(progressSource.contains("removeMemorizedPassageConfirmationTitle(passage.title)"))
         XCTAssertTrue(progressSource.contains("removeMemorizationTargetConfirmationTitle(item.title)"))
-        XCTAssertTrue(progressSource.contains(".alert(item: $memorizationDeletionRequest)"))
-        XCTAssertTrue(progressSource.contains(".default(Text(String(localized: \"ok\", defaultValue: \"OK\")))"))
-        XCTAssertTrue(progressSource.contains(".cancel(Text(String(localized: \"cancel\", defaultValue: \"Cancel\")))"))
-        XCTAssertTrue(progressSource.contains("isPresented: $showNewReadingCycleConfirmation"))
+        XCTAssertTrue(progressSource.contains("else if let request = memorizationDeletionRequest"))
+        XCTAssertTrue(progressSource.contains("AndroidDecisionDialog("))
+        XCTAssertTrue(progressSource.contains("title: String(localized: \"okay\", defaultValue: \"OK\")"))
+        XCTAssertTrue(progressSource.contains("title: String(localized: \"cancel\", defaultValue: \"Cancel\")"))
+        XCTAssertTrue(progressSource.contains("else if showNewReadingCycleConfirmation"))
+        XCTAssertFalse(progressSource.contains(".alert("))
+        XCTAssertFalse(progressSource.contains(".confirmationDialog("))
         XCTAssertTrue(progressSource.contains("onOpenChapter(detail.osisId, chapter.chapter)"))
-        XCTAssertTrue(progressSource.contains("MemorizationSummaryView(summary: presentation.summary)"))
+        XCTAssertTrue(progressSource.contains("ReadingProgressSummaryCounters("))
         XCTAssertTrue(progressSource.contains("MemorizationViewToggle(overviewActive: $memorizationOverviewActive)"))
         XCTAssertTrue(progressSource.contains("weight: overviewActive ? .bold : .regular"))
         XCTAssertTrue(progressSource.contains("weight: overviewActive ? .regular : .bold"))
-        XCTAssertTrue(progressSource.contains(".buttonStyle(.borderless)"))
+        XCTAssertTrue(progressSource.contains(".buttonStyle(.plain)"))
         XCTAssertTrue(progressSource.contains(".font(.system(size: 28, weight: .bold))"))
         XCTAssertTrue(progressSource.contains(".font(.system(size: 12))"))
         XCTAssertTrue(progressSource.contains(".frame(maxWidth: .infinity, alignment: .center)"))
@@ -520,8 +644,8 @@ extension AndBibleTests {
         XCTAssertTrue(progressSource.contains("AndroidReadingProgressColor.memorizationProgressColor"))
         XCTAssertTrue(progressSource.contains("AndroidReadingProgressColor.memorizationCalendarColor"))
         XCTAssertTrue(progressSource.contains("AndroidReadingProgressColor.memorizationTextColor"))
-        XCTAssertTrue(progressSource.contains("Array(repeating: GridItem(.flexible(), spacing: 2), count: 6)"))
-        XCTAssertTrue(progressSource.contains("min(max(detail.chapters.count, 5), 10)"))
+        XCTAssertTrue(progressSource.contains("Array(repeating: GridItem(.flexible(), spacing: 4), count: 6)"))
+        XCTAssertTrue(progressSource.contains("Array(repeating: GridItem(.flexible(), spacing: 4), count: 10)"))
         XCTAssertTrue(progressSource.contains(".font(.system(size: 11))"))
         XCTAssertTrue(progressSource.contains(".font(.system(size: 12))"))
         XCTAssertTrue(progressSource.contains("let calendarLevelColors: [Color]"))
@@ -535,8 +659,12 @@ extension AndBibleTests {
         XCTAssertFalse(progressSource.contains("Color.orange.opacity"))
         XCTAssertFalse(progressSource.contains("Color.blue.opacity"))
 
-        XCTAssertTrue(sheetSource.contains("onOpenChapter: { osisId, chapter in"))
-        XCTAssertTrue(sheetSource.contains("_ = controller?.navigateToRef(\"\\(osisId).\\(chapter)\")"))
+        XCTAssertTrue(readerSource.contains("onOpenChapter: { osisId, chapter in"))
+        XCTAssertTrue(
+            readerSource.contains(
+                "_ = panePresentationController?.navigateToRef(\"\\(osisId).\\(chapter)\")"
+            )
+        )
     }
 
     /**
@@ -1127,6 +1255,32 @@ private func makeMemorizeParityTemporarySwordPath(file: StaticString = #filePath
 }
 
 /**
+ Publishes a second Bible identity backed by the KJV fixture for document-switch tests.
+
+ - Parameters:
+   - moduleName: SWORD initials to expose for the alias.
+   - modulePath: Temporary SWORD root containing the copied KJV fixture.
+ - Side effects: Writes one module descriptor under `mods.d`.
+ - Failure modes: Propagates descriptor read/write failures.
+ */
+private func seedThemeParityBibleAlias(named moduleName: String, in modulePath: String) throws {
+    let modsDURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+        .appendingPathComponent("mods.d", isDirectory: true)
+    let sourceURL = modsDURL.appendingPathComponent("kjv.conf", isDirectory: false)
+    var config = try String(contentsOf: sourceURL, encoding: .utf8)
+    config = config.replacingOccurrences(of: "[KJV]", with: "[\(moduleName)]")
+    config = config.replacingOccurrences(
+        of: "Description=King James Version (1769) with Strongs Numbers and Morphology  and CatchWords",
+        with: "Description=Theme parity Bible"
+    )
+    try config.write(
+        to: modsDURL.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+/**
  Finds the repository root that contains the package SWORD fixture.
 
  - Parameter sourceFile: Source file URL used as the upward-search anchor.
@@ -1239,12 +1393,28 @@ private func memorizeParityBridgeEmissionPayload(from scripts: [String], event: 
     return try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
 }
 
+/**
+ Extracts one JSON argument from a standalone bridge emission or atomic replacement transaction.
+
+ - Parameters:
+   - scripts: Ordered JavaScript evaluations recorded by the app-host test bridge.
+   - event: Vue event whose payload should be extracted.
+ - Returns: Raw JSON text for the requested event.
+ - Side effects: None.
+ - Failure modes: Throws XCTest unwrap failures when the event or its matching suffix is absent.
+ */
 private func memorizeParityBridgeEmissionPayloadJSON(from scripts: [String], event: String) throws -> String {
     let prefix = "bibleView.emit('\(event)', "
     let script = try XCTUnwrap(scripts.first { $0.contains(prefix) })
     let start = try XCTUnwrap(script.range(of: prefix)?.upperBound)
+    let transactionSuffix = "); /* bible-bridge-event-end:\(event) */"
     let end = try XCTUnwrap(
-        script.range(of: "); } catch", options: .backwards, range: start..<script.endIndex)?.lowerBound
+        script.range(of: transactionSuffix, range: start..<script.endIndex)?.lowerBound
+            ?? script.range(
+                of: "); } catch",
+                options: .backwards,
+                range: start..<script.endIndex
+            )?.lowerBound
     )
     return String(script[start..<end])
 }

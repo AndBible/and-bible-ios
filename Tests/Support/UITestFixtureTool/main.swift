@@ -40,6 +40,8 @@ private enum FixtureScenario: String, CaseIterable {
     case commentaryModuleThreeWindows = "commentary-module-three-windows"
     case searchIndexed = "search-indexed"
     case searchMultiTranslation = "search-multi-translation"
+    case documentSwitchCustomTheme = "document-switch-custom-theme"
+    case documentSwitchCustomNightTheme = "document-switch-custom-night-theme"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkNavigationThreeWindows = "bookmark-navigation-three-windows"
     case bookmarkMultiRow = "bookmark-multirow"
@@ -400,6 +402,16 @@ private final class FixtureContext {
         case .searchMultiTranslation:
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
+        case .documentSwitchCustomTheme:
+            try seedUITestBibleModule()
+            seedCustomColorSettings()
+            seedScopedThemeColorSettings(baseline: baseline)
+            seedReaderSystemDayMode()
+        case .documentSwitchCustomNightTheme:
+            try seedUITestBibleModule()
+            seedCustomColorSettings()
+            seedScopedThemeColorSettings(baseline: baseline)
+            seedReaderNightMode()
         case .bookmarkNavigation:
             try seedBookmarkNavigation()
         case .bookmarkNavigationThreeWindows:
@@ -1672,6 +1684,39 @@ private final class FixtureContext {
     }
 
     /**
+     Seeds distinct workspace and window theme overrides above the custom global palette.
+
+     The three scopes intentionally use visibly different day and night backgrounds. Document-switch
+     recordings can therefore identify a transient loss of the window override as a workspace,
+     global, or application-default fallback instead of merely asserting the final Boolean mode.
+
+     - Parameter baseline: Canonical fixture graph whose active workspace/window receive overrides.
+     - Side effects:
+       - stores green/blue theme colors on the active workspace
+       - stores lavender/purple theme colors on the active window page manager
+     - Failure modes: none; the baseline contract always supplies both owning models.
+     */
+    private func seedScopedThemeColorSettings(baseline: BaselineState) {
+        var workspaceSettings = TextDisplaySettings()
+        workspaceSettings.dayTextColor = Int(Int32(bitPattern: 0xFF173528))
+        workspaceSettings.dayBackground = Int(Int32(bitPattern: 0xFFE0F0E8))
+        workspaceSettings.dayNoise = 0
+        workspaceSettings.nightTextColor = Int(Int32(bitPattern: 0xFFE0EDF8))
+        workspaceSettings.nightBackground = Int(Int32(bitPattern: 0xFF1B2735))
+        workspaceSettings.nightNoise = 0
+        baseline.workspace.textDisplaySettings = workspaceSettings
+
+        var windowSettings = TextDisplaySettings()
+        windowSettings.dayTextColor = Int(Int32(bitPattern: 0xFF213547))
+        windowSettings.dayBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+        windowSettings.dayNoise = 0
+        windowSettings.nightTextColor = Int(Int32(bitPattern: 0xFFF0E7FA))
+        windowSettings.nightBackground = Int(Int32(bitPattern: 0xFF2B183C))
+        windowSettings.nightNoise = 0
+        baseline.pageManager.textDisplaySettings = windowSettings
+    }
+
+    /**
      Seeds Android's manual night-mode policy with its toggle enabled.
 
      Reader UI tests use this scenario to prove night rendering from the persisted Android-equivalent
@@ -1684,6 +1729,23 @@ private final class FixtureContext {
     private func seedReaderNightMode() {
         settingsStore.setString(.nightModePref3, value: NightModeSetting.manual.rawValue)
         settingsStore.setBool("night_mode", value: true)
+    }
+
+    /**
+     Seeds Android's System night-mode policy while the simulator is in day appearance.
+
+     Passage-chooser regressions must exercise System mode explicitly: Manual mode ignores the
+     environment scheme and would conceal a pushed destination leaking a dark preference into the
+     reader window.
+
+     - Side effects:
+       - stores `system` for `night_mode_pref3`
+       - clears the persisted manual `night_mode` toggle
+     - Failure modes: none; `SettingsStore` applies registry-backed values synchronously.
+     */
+    private func seedReaderSystemDayMode() {
+        settingsStore.setString(.nightModePref3, value: NightModeSetting.system.rawValue)
+        settingsStore.setBool("night_mode", value: false)
     }
 
     /**

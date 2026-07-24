@@ -723,7 +723,25 @@ public struct BibleReaderView: View {
         let historyDialogToken = "historyDialog=\(historyDialogRequest == nil ? "none" : "presented")"
         let searchToken = "searchVisible=\(activeReaderDestination == .search ? "true" : "false")"
         let nightModeToken = "nightMode=\(nightMode ? "true" : "false")"
-        return "\(windowToken);\(contentToken);\(tabOrdersToken);\(myNotesToken);\(studyPadToken);strongsMode=\(strongsMode);\(drawerToken);\(overflowToken);\(destinationToken);\(modalToken);\(historyDialogToken);\(searchToken);\(nightModeToken)"
+        let strongsModeToken = "strongsMode=\(strongsMode)"
+        let readerBackgroundToken =
+            "readerBackground=\(readerThemeSurfacePalette.backgroundColorInt)"
+        return [
+            windowToken,
+            contentToken,
+            tabOrdersToken,
+            myNotesToken,
+            studyPadToken,
+            strongsModeToken,
+            drawerToken,
+            overflowToken,
+            destinationToken,
+            modalToken,
+            historyDialogToken,
+            searchToken,
+            nightModeToken,
+            readerBackgroundToken,
+        ].joined(separator: ";")
     }
 
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
@@ -1393,7 +1411,20 @@ public struct BibleReaderView: View {
         )
     }
 
-    /// Android GridChoosePassageBook-equivalent content used by reader navigation commands.
+    /**
+     Builds Android's passage chooser as a reader-owned navigation destination.
+
+     `BookChooserView` owns its fixed dark appearance inside its own environment, matching
+     Android's separately themed `GridChoosePassageTheme` activity. This destination must not set
+     `preferredColorScheme`, because a preference emitted from a pushed SwiftUI destination
+     retargets the enclosing window and can be misread by the reader as a system appearance change.
+
+     - Returns: The configured passage chooser and its pane-scoped progress providers.
+     - Side effects: Selecting a passage dismisses the destination and navigates the captured pane;
+       cancelling only dismisses the destination.
+     - Failure modes: Missing pane state falls back to default books and native verse counts.
+     - Note: The chooser's visual scheme is intentionally isolated from reader night-mode policy.
+     */
     private var bookChooserDestinationContent: some View {
         let progressContext = passageChooserProgressContext
 
@@ -1427,7 +1458,6 @@ public struct BibleReaderView: View {
             dismissBookChooser()
             panePresentationController?.navigateTo(book: book, chapter: chapter, verse: verse)
         }
-        .preferredColorScheme(.dark)
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
 

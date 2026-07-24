@@ -141,31 +141,41 @@ struct BibleReaderConfigurationCoordinator {
     /**
      Builds the typed reader configuration payload consumed by Vue.
 
-     - Parameter context: Fully resolved controller inputs collected at emission time.
+     - Parameters:
+       - context: Fully resolved controller inputs collected at emission time.
+       - initial: Whether Vue should apply the payload as part of an initial/replacement load.
      - Returns: The bridge payload for the existing `set_config` `{ config, appSettings, initial }`
        envelope.
      - Side effects: None.
      - Failure modes: None; unset display values fall back through `TextDisplaySettings.appDefaults`
        and the same literal defaults used before extraction.
      */
-    func configPayload(context: BibleReaderConfigurationContext) -> BibleReaderSetConfigPayload {
+    func configPayload(
+        context: BibleReaderConfigurationContext,
+        initial: Bool = false
+    ) -> BibleReaderSetConfigPayload {
         BibleReaderSetConfigPayload(
             config: BibleReaderDisplayConfig(settings: context.displaySettings, defaults: context.defaults),
             appSettings: BibleReaderAppSettings(context: context),
-            initial: false
+            initial: initial
         )
     }
 
     /**
      Encodes the current reader configuration payload as JSON for `BibleBridge.emit`.
 
-     - Parameter context: Fully resolved controller inputs collected at emission time.
+     - Parameters:
+       - context: Fully resolved controller inputs collected at emission time.
+       - initial: Whether Vue should apply the payload as part of an initial/replacement load.
      - Returns: UTF-8 JSON string, or `nil` if encoding unexpectedly fails.
      - Side effects: None.
      - Failure modes: Returns `nil` instead of emitting malformed JSON.
      */
-    func configJSON(context: BibleReaderConfigurationContext) -> String? {
-        let payload = configPayload(context: context)
+    func configJSON(
+        context: BibleReaderConfigurationContext,
+        initial: Bool = false
+    ) -> String? {
+        let payload = configPayload(context: context, initial: initial)
         let encoder = JSONEncoder()
         guard let data = try? encoder.encode(payload) else { return nil }
         return String(data: data, encoding: .utf8)

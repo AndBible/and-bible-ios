@@ -51,10 +51,22 @@ public class BibleWebViewController: UIViewController {
         applyBackground()
     }
 
-    /// Applies the configured ARGB background color to all visible web view surfaces.
+    /**
+     Applies the configured Android-style ARGB background to every native WebView surface.
+
+     Android keeps both `BibleView` and its owning `BibleFrame` opaque and painted with the
+     resolved window background while Vue replaces documents. Matching that ownership on iOS
+     prevents WebKit's transparent compositor backing from exposing its default dark surface
+     between the old and replacement document frames.
+
+     - Side effects: Makes the hosted WebView opaque and updates the WebView, scroll view,
+       controller view, and under-page colors.
+     - Failure modes: Invalid or truncated ARGB inputs retain the existing byte-wise conversion
+       behavior; this method performs no asynchronous WebKit work.
+     */
     func applyBackground() {
         let color = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
-        webView.isOpaque = false
+        webView.isOpaque = true
         webView.backgroundColor = color
         webView.scrollView.backgroundColor = color
         view.backgroundColor = color

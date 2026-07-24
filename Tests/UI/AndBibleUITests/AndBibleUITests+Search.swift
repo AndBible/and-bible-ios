@@ -747,6 +747,269 @@ extension AndBibleUITests {
     }
 
     /**
+     Reproduces a two-document scripture switch directly from Android's reader toolbar shortcut.
+
+     The custom-theme fixture installs KJV and AATESTWEB, which makes the toolbar's two-document
+     action switch immediately instead of opening a picker. Its distinct global, workspace, and
+     window palettes expose an inheritance fallback that default day colors would conceal. Keeping
+     this path separate from Search and Choose Document isolates reader content/theme reloading from
+     destination-pop animations.
+
+     - Side effects:
+       - launches the deterministic two-Bible fixture with scoped custom colors in day mode
+       - taps the production Bible toolbar action once
+       - waits for the alternate Bible to become the rendered pane document
+     - Failure modes:
+       - fails if the fixture does not start on KJV
+       - fails if the toolbar shortcut cannot switch to AATESTWEB
+       - fails if either side of the switch loses the window-scoped day background
+       - the app-host bridge contract separately rejects any paint boundary between clear and config
+     */
+    func testReaderQuickScriptureSwitchPreservesDayTheme() {
+        let app = makeApp()
+        app.launch()
+        let expectedBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+
+        waitForReaderRenderedContentState(containing: "category=bible;module=KJV", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(
+            requireElement("readerBibleToolbarButton", in: app, timeout: 20),
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=AATESTWEB",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Verifies Android's fixed-dark passage chooser cannot mutate a System/day reader into night mode.
+
+     The fixture explicitly selects System night mode, seeds visibly different day/night window
+     colors, and launches the simulator in light appearance. Android presents its chooser in a
+     separately themed activity with theme changes disabled; the iOS chooser must likewise scope
+     dark styling to its own subtree instead of emitting a window-wide preferred color scheme.
+
+     - Side effects:
+       - launches the custom-theme fixture in explicit System/day mode
+       - opens the production passage chooser and observes reader state while it remains presented
+       - selects Genesis 2 and waits for the destination pop to finish
+     - Failure modes:
+       - fails if opening the chooser changes `nightMode` to true or selects the night background
+       - fails if choosing Genesis 2 does not return to the same day-themed reader
+       - fails if the reader state export becomes unavailable while the chooser is presented
+     - Note: The negative observation spans the stable open chooser, where the former feedback loop
+       held night mode true; it does not depend on sampling a single animation frame.
+     */
+    func testPassageChooserPreservesSystemDayTheme() {
+        let app = makeApp()
+        app.launch()
+        let expectedBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+        let unexpectedNightBackground = Int(Int32(bitPattern: 0xFF2B183C))
+
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(
+            requireElement("bookChooserButton", in: app, timeout: 20),
+            timeout: 20
+        )
+        XCTAssertTrue(requireElement("passageChooserScreen", in: app, timeout: 20).exists)
+        let chooserReaderState = app.staticTexts["readerRenderedContentState"].firstMatch
+        XCTAssertTrue(
+            chooserReaderState.waitForExistence(timeout: 5),
+            "Expected the chooser destination's reader-state export to remain available."
+        )
+        let expectedDayState = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@",
+                "readerDestination=passageChooser",
+                "nightMode=false",
+                "readerBackground=\(expectedBackground)"
+            ),
+            object: chooserReaderState
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectedDayState], timeout: 5),
+            .completed,
+            "Expected the open chooser to retain the System/day reader state."
+        )
+        let unexpectedNightState = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS %@ OR value CONTAINS %@",
+                "nightMode=true",
+                "readerBackground=\(unexpectedNightBackground)"
+            ),
+            object: chooserReaderState
+        )
+        unexpectedNightState.isInverted = true
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [unexpectedNightState], timeout: 1.5),
+            .completed,
+            "The fixed-dark chooser must not be interpreted as a dark system appearance."
+        )
+
+        tapElementReliably(
+            app.buttons["passageBookCell.Gen"].firstMatch,
+            timeout: 20
+        )
+        tapElementReliably(
+            app.buttons["passageChapterCell.2"].firstMatch,
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=none",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+        XCTAssertTrue(
+            requireReaderReferenceValue(in: app, timeout: 20)
+                .localizedCaseInsensitiveContains("Genesis 2"),
+            "Expected passage selection to return to Genesis 2 in the original reader."
+        )
+    }
+
+    /**
+     Reproduces scripture replacement through Android's full Choose Document activity.
+
+     This is the reported regression path: the current custom day-themed reader opens the app-owned
+     document chooser, activates another installed Bible, and returns through the same reader stack.
+     Global, workspace, and window fixtures use different colors, so recordings distinguish a lost
+     window override from a mode change or application-default fallback. It complements the toolbar
+     test so a failure can be attributed to destination dismissal or to the shared controller reload.
+
+     - Side effects:
+       - launches KJV/AATESTWEB with distinct global/workspace/window palettes in day mode
+       - opens Choose Document through the production reader action
+       - filters and selects AATESTWEB, then waits for the reader destination to close
+     - Failure modes:
+       - fails if Choose Document cannot open or expose the seeded module
+       - fails if selection does not render AATESTWEB in the original pane
+       - fails if the night policy or resolved window-scoped day background changes
+     */
+    func testDocumentChooserScriptureSwitchPreservesDayTheme() {
+        let app = makeApp()
+        app.launch()
+        let expectedBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+
+        waitForReaderRenderedContentState(containing: "category=bible;module=KJV", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=chooseDocument",
+            in: app,
+            timeout: 20
+        )
+        let searchField = requireElement("modulePickerSearchField", in: app, timeout: 20)
+        replaceText(in: searchField, with: "AATESTWEB", placeholderHints: ["Search"])
+        tapElementReliably(
+            requireElement("modulePickerRow::AATESTWEB", in: app, timeout: 20),
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=AATESTWEB",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Reproduces scripture replacement while a non-default night palette is active.
+
+     The fixture's window-scoped purple night background differs from its workspace blue, global
+     blue-black, and Vue default black. That distinction catches a transient inheritance fallback
+     even when the Boolean night-mode policy itself remains unchanged.
+
+     - Side effects:
+       - launches the deterministic KJV/AATESTWEB fixture in manual night mode
+       - opens Choose Document, filters to AATESTWEB, and activates that Bible
+       - returns to the reader with the configured night policy still active
+     - Failure modes:
+       - fails if the custom-night fixture does not start on KJV in night mode
+       - fails if selection does not render AATESTWEB in the original pane
+       - fails if either side of the switch loses the window-scoped night background
+       - the app-host bridge contract separately rejects any paint boundary between clear and config
+     */
+    func testDocumentChooserScriptureSwitchPreservesCustomNightTheme() {
+        let app = makeApp()
+        app.launch()
+        let expectedBackground = Int(Int32(bitPattern: 0xFF2B183C))
+
+        waitForReaderRenderedContentState(containing: "category=bible;module=KJV", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "nightMode=true", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+
+        tapReaderAction("readerChooseDocumentAction", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=chooseDocument",
+            in: app,
+            timeout: 20
+        )
+        let searchField = requireElement("modulePickerSearchField", in: app, timeout: 20)
+        replaceText(in: searchField, with: "AATESTWEB", placeholderHints: ["Search"])
+        tapElementReliably(
+            requireElement("modulePickerRow::AATESTWEB", in: app, timeout: 20),
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=AATESTWEB",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 20)
+        waitForReaderRenderedContentState(containing: "nightMode=true", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
      Guards the shared text-entry placeholder normalization against SwiftUI prompt fields whose
      placeholder values surface through XCUI as `Optional(...)`.
      *

@@ -55,7 +55,8 @@ struct BibleReaderAuxiliaryModuleEntryRequest {
  Side effects:
  - invokes controller-supplied reset, rendered-state, persistence, and background closures
  - reads the selected exact `SwordModule` key through `SwordRawOSISFragment`
- - emits `clear_document`, `add_documents`, and `setup_content` events through `BibleBridge`
+ - emits one atomic `clear_document`, `set_config`, `add_documents`, and `setup_content`
+   transaction through the shared replacement emitter
 
  Failure modes:
  - if document JSON serialization fails, no document event is emitted after any required state reset
@@ -69,8 +70,8 @@ struct BibleReaderAuxiliaryContentLoader {
     /// Shared setup payload used by auxiliary single-document loads.
     private static let setupContentPayload = ReaderSetupContentPayload()
 
-    /// Bridge used to emit Vue reader events.
-    private let bridge: BibleBridge
+    /// Shared Android-parity Vue document replacement transaction.
+    private let documentReplacement: BibleReaderDocumentReplacementEmitter
     /// Factory that owns document JSON schema assembly.
     private let documentPayloadFactory: BibleReaderDocumentPayloadFactory
     /// Controller callback that clears transient reader state before replacing content.
@@ -84,7 +85,7 @@ struct BibleReaderAuxiliaryContentLoader {
      Creates an auxiliary content loader for one render pass.
 
      - Parameters:
-       - bridge: Web bridge used to emit document events.
+       - documentReplacement: Shared atomic Vue document replacement transaction.
        - documentPayloadFactory: Factory configured from the controller's current reader state.
        - resetReaderState: Clears transient selection/editing/special-document flags.
        - setRenderedContentState: Records the rendered category/module/book/key for UI tests.
@@ -93,13 +94,13 @@ struct BibleReaderAuxiliaryContentLoader {
      - Failure modes: None during initialization.
      */
     init(
-        bridge: BibleBridge,
+        documentReplacement: BibleReaderDocumentReplacementEmitter,
         documentPayloadFactory: BibleReaderDocumentPayloadFactory,
         resetReaderState: @escaping () -> Void,
         setRenderedContentState: @escaping RenderedContentStateSetter,
         applyNightModeBackground: @escaping () -> Void
     ) {
-        self.bridge = bridge
+        self.documentReplacement = documentReplacement
         self.documentPayloadFactory = documentPayloadFactory
         self.resetReaderState = resetReaderState
         self.setRenderedContentState = setRenderedContentState
@@ -190,10 +191,10 @@ struct BibleReaderAuxiliaryContentLoader {
        - renderedModuleName: Module token recorded in rendered-content state.
        - renderedBook: Book token recorded in rendered-content state.
        - renderedKey: Key token recorded in rendered-content state.
-     - Side effects: Emits `clear_document`, `add_documents`, and `setup_content`, updates the
+     - Side effects: Emits one Android-parity replacement transaction, updates the
        controller-rendered content state through a closure, and reapplies reader background styling.
-     - Failure modes: If document serialization fails, the reader is cleared but no replacement
-       document/setup event is emitted, matching the previous inline controller behavior.
+     - Failure modes: If document serialization or transaction dispatch fails, the existing reader
+       document remains visible and rendered-content state is not advanced.
      */
     private func emitDocument(
         request: BibleReaderAuxiliaryModuleEntryRequest,
@@ -202,7 +203,6 @@ struct BibleReaderAuxiliaryContentLoader {
         renderedBook: String,
         renderedKey: String
     ) {
-        bridge.emit(event: "clear_document")
         let source = fragment.source
         let contentOrdinalRange = fragment.contentOrdinalRange
         guard let document = documentPayloadFactory.documentJSON(
@@ -239,8 +239,12 @@ struct BibleReaderAuxiliaryContentLoader {
         ) else {
             return
         }
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: Self.setupContentPayload)
+        guard documentReplacement.replace(
+            documentJSON: document,
+            setup: Self.setupContentPayload
+        ) else {
+            return
+        }
         setRenderedContentState(request.category, renderedModuleName, renderedBook, renderedKey)
         applyNightModeBackground()
     }
@@ -254,8 +258,10 @@ struct BibleReaderAuxiliaryContentLoader {
        - renderedModuleName: Module token recorded in rendered state.
        - renderedBook: Book token recorded in rendered state.
        - renderedKey: Key token recorded in rendered state.
-     - Side effects: Emits clear/add/setup events and updates rendered state/background.
-     - Failure modes: Serialization failure leaves the reader cleared without fabricated XML.
+     - Side effects: Emits one Android-parity replacement transaction and updates rendered
+       state/background.
+     - Failure modes: Serialization or dispatch failure leaves the existing reader document and
+       rendered state unchanged.
      */
     private func emitErrorDocument(
         request: BibleReaderAuxiliaryModuleEntryRequest,
@@ -264,10 +270,13 @@ struct BibleReaderAuxiliaryContentLoader {
         renderedBook: String,
         renderedKey: String
     ) {
-        bridge.emit(event: "clear_document")
         guard let document = documentPayloadFactory.errorDocumentJSON(message: message) else { return }
-        bridge.emit(event: "add_documents", data: document)
-        bridge.emit(event: "setup_content", data: Self.setupContentPayload)
+        guard documentReplacement.replace(
+            documentJSON: document,
+            setup: Self.setupContentPayload
+        ) else {
+            return
+        }
         setRenderedContentState(request.category, renderedModuleName, renderedBook, renderedKey)
         applyNightModeBackground()
     }
