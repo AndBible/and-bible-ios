@@ -84,18 +84,19 @@ func setConfigPayload(
 }
 
 /**
- Extracts the payload argument from a recorded `try { void bibleView.emit(...) } catch` wrapper.
+ Extracts one payload from either a standalone bridge emission or atomic replacement transaction.
 
  Production bridge emissions normally pass JSON, but this helper intentionally treats the payload as
- raw text before callers decide whether to parse it. It finds the wrapper suffix with a backwards
- search so payload content that resembles `); } catch` does not truncate the extracted contract.
+ raw text before callers decide whether to parse it. Atomic replacements provide an event-specific
+ marker; standalone emissions retain the legacy outer-wrapper suffix. Both suffix searches run
+ backwards so marker-like user content cannot truncate the extracted contract.
 
  - Parameters:
    - scripts: Recorded JavaScript evaluations from `makeRecordingBridge`.
    - event: Vue event name passed to `bibleView.emit`.
    - file: XCTest source location used when reporting extraction failures.
    - line: XCTest source location used when reporting extraction failures.
- - Returns: The raw payload text between the emit prefix and the outer bridge suffix.
+ - Returns: Raw payload text between the emit prefix and its event-specific or outer suffix.
  - Side effects: none.
  - Failure modes: Throws XCTest unwrap errors when the event emission, prefix, or suffix is missing.
  */
@@ -118,8 +119,18 @@ func bridgeEmissionPayloadJSON(
         file: file,
         line: line
     )
+    let transactionSuffix = "); /* bible-bridge-event-end:\(event) */"
     let end = try XCTUnwrap(
-        script.range(of: "); } catch", options: .backwards, range: start..<script.endIndex)?.lowerBound,
+        script.range(
+            of: transactionSuffix,
+            options: .backwards,
+            range: start..<script.endIndex
+        )?.lowerBound
+            ?? script.range(
+                of: "); } catch",
+                options: .backwards,
+                range: start..<script.endIndex
+            )?.lowerBound,
         "Expected \(event) payload suffix in script: \(script)",
         file: file,
         line: line
