@@ -182,6 +182,37 @@ class ProductFeedbackLocalizationContractTests(unittest.TestCase):
         for key in REMOVED_PRODUCT_FEEDBACK_KEYS:
             self.assertNotIn(f'localized: "{key}"', source, key)
 
+    def test_ios_only_product_feedback_keys_stay_ios_only_until_android_owns_them(self) -> None:
+        """A sanctioned iOS-only key must move to Android sourcing once Android owns it.
+
+        The iOS-only registry exists only for strings absent from Android's committed catalog.
+        When this test fails, Android has gained the listed keys (for example after the staged
+        `android-ios-report-strings.patch` merges upstream and the pinned Android ref advances):
+        move each key from ``PRODUCT_FEEDBACK_IOS_FALLBACKS`` into
+        ``PRODUCT_FEEDBACK_ANDROID_KEYS`` and re-run the product-feedback sync so real
+        translations replace the English fallback.
+        """
+        catalog = build_android_shared_localization(REPO_ROOT, default_android_root())
+        android_owned = sorted(
+            key for key in PRODUCT_FEEDBACK_IOS_FALLBACKS if key in catalog.english_by_key
+        )
+        self.assertEqual(
+            android_owned,
+            [],
+            "Android now owns these product-feedback keys; move them to "
+            "PRODUCT_FEEDBACK_ANDROID_KEYS and re-sync: " + ", ".join(android_owned),
+        )
+        from check_settings_localization_guardrails import PRODUCT_FEEDBACK_IOS_TRANSLATIONS
+
+        unknown = sorted(
+            set(PRODUCT_FEEDBACK_IOS_TRANSLATIONS) - set(PRODUCT_FEEDBACK_IOS_FALLBACKS)
+        )
+        self.assertEqual(
+            unknown,
+            [],
+            "PRODUCT_FEEDBACK_IOS_TRANSLATIONS keys must be registered iOS-only fallbacks",
+        )
+
 
 class AILocalizationContractTests(unittest.TestCase):
     """Verifies Android-owned AI text across both shipped localization trees."""

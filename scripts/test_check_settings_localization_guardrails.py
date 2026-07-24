@@ -867,11 +867,11 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         )
 
     def test_product_feedback_sync_covers_every_key_and_removes_superseded_copy(self) -> None:
-        """Covers Android-sourced report translations and obsolete-key removal.
+        """Covers Android report text, sanctioned iOS-only copy, and obsolete-key removal.
 
-        Every product-feedback key is Android-owned, so previously iOS-only strings such as
-        `bug_report_screenshot_unavailable` must receive the Android locale translation instead
-        of a hardcoded English fallback.
+        Android-owned keys receive the locale translation. Sanctioned iOS-only keys ship their
+        English fallback unless a curated ``PRODUCT_FEEDBACK_IOS_TRANSLATIONS`` variant exists
+        for the locale, which must win over the fallback.
         """
         english_by_key = {
             key: f"English {key}"
@@ -907,6 +907,10 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 localization_guardrails,
                 "LOCALE_TO_ANDROID_VALUES",
                 {"en": "values", "fr": "values-fr"},
+            ), mock.patch.object(
+                localization_guardrails,
+                "PRODUCT_FEEDBACK_IOS_TRANSLATIONS",
+                {"bug_report_not_sent": {"fr": "Rapport de bogue non envoyé"}},
             ):
                 result = localization_guardrails.sync_product_feedback_localizations(
                     root,
@@ -927,8 +931,14 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                     "Francais report_bug_line_1",
                 )
                 self.assertEqual(
+                    localization_guardrails.unescape_ios(french["bug_report_not_sent"]),
+                    "Rapport de bogue non envoyé",
+                )
+                self.assertEqual(
                     french["bug_report_screenshot_unavailable"],
-                    "Francais bug_report_screenshot_unavailable",
+                    localization_guardrails.PRODUCT_FEEDBACK_IOS_FALLBACKS[
+                        "bug_report_screenshot_unavailable"
+                    ],
                 )
                 self.assertNotIn("bug_report_attached_evidence", french)
                 self.assertNotIn("bug_report_reproduction_prompt", french)

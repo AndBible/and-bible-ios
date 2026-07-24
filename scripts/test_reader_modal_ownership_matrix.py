@@ -974,8 +974,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "AI/AIRawLogHistoryView.swift": [".sheet(item: $bugReportMail)"],
             "AI/AIReaderLiveRawLogView.swift": [".sheet(item: $bugReportMail)"],
             "Bible/BibleReaderView.swift": [
-                ".sheet(item: $manualBugReportMailPayload)",
-                ".sheet(item: $manualBugReportExport)",
+                ".sheet(item: $manualBugReportMailPayload, onDismiss: finishBugReportMailPresentation)",
+                ".sheet(item: $manualBugReportExport, onDismiss: finishBugReportExportShare)",
                 ".sheet(isPresented: shareSheetBinding)",
             ],
             "MyDocuments/MyDocumentPagesListView.swift": [
@@ -1239,7 +1239,8 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("bugReportDialogOverlay", source)
         self.assertIn("ManualBugReportCoordinator", source)
         self.assertIn("manualBugReportCoordinator", source)
-        self.assertIn("ProductFeedbackReportPreparation.prepare()", source)
+        self.assertIn("ProductFeedbackReportPreparation.captureUIEvidence()", source)
+        self.assertIn("ProductFeedbackReportPreparation.prepare(uiEvidence:", source)
         self.assertIn("presentPreparedBugReport", source)
         self.assertIn("AddressedMailComposer", source)
         self.assertIn(
@@ -1247,7 +1248,11 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            ".sheet(item: $manualBugReportMailPayload)",
+            ".sheet(item: $manualBugReportMailPayload, onDismiss: finishBugReportMailPresentation)",
+            source,
+        )
+        self.assertIn(
+            ".sheet(item: $manualBugReportExport, onDismiss: finishBugReportExportShare)",
             source,
         )
         self.assertNotIn(
@@ -1259,15 +1264,17 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             collection_body,
         )
         self.assertNotIn(
-            "manualBugReportMailPayload = ProductFeedbackReportPreparation.prepare()",
+            "manualBugReportMailPayload = ProductFeedbackReportPreparation.prepare(",
             collection_body,
         )
         self.assertIn("AddressedMailComposer.capability", consent_body)
         self.assertIn("guard capability == .available else { return }", consent_body)
         self.assertIn("manualBugReportMailPayload = payload", consent_body)
         self.assertNotIn("shareText = AndroidBugReportDiagnostic.manualReport()", source)
-        self.assertIn("bug_report_app_id", preparation_source)
-        self.assertIn("bug_report_operating_system", preparation_source)
+        self.assertIn("App id: ", preparation_source)
+        self.assertIn("Operating system: ", preparation_source)
+        self.assertNotIn("bug_report_app_id", preparation_source)
+        self.assertNotIn("bug_report_operating_system", preparation_source)
         self.assertIn("ProductFeedbackContract.diagnosticRecipient", preparation_source)
         self.assertIn("androidBugReportDialog", report_source)
 

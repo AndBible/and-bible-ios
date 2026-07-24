@@ -192,23 +192,9 @@ OBSOLETE_DISCRETE_MODE_SENTENCE = (
     "access the Bible. Disable this toggle to return to normal."
 )
 PRODUCT_FEEDBACK_ANDROID_KEYS = (
-    "bug_report_archive_too_large",
     "bug_report_attachment_line_1",
-    "bug_report_attachment_too_large",
-    "bug_report_collecting_evidence",
     "bug_report_email_text",
     "bug_report_email_title",
-    "bug_report_export",
-    "bug_report_export_failed",
-    "bug_report_export_preparing",
-    "bug_report_log_empty",
-    "bug_report_log_unavailable",
-    "bug_report_mail_unavailable",
-    "bug_report_no_attachments",
-    "bug_report_not_sent",
-    "bug_report_preparation_notes",
-    "bug_report_screenshot_unavailable",
-    "bug_report_show_in_finder",
     "cancel",
     "report_bug_big_heading",
     "report_bug_email_subject_3",
@@ -218,20 +204,48 @@ PRODUCT_FEEDBACK_ANDROID_KEYS = (
     "report_bug_line_1",
     "send_bug_report_title",
 )
-"""Android-owned strings used by the manual feedback and crash-evidence flow.
+"""Android-owned strings used by the manual feedback and crash-evidence flow."""
 
-Every user-visible report string is sourced from Android's catalog so both platforms share one
-translation pipeline. Strings that only iOS displays (export, Finder, delivery-state dialogs)
-still live in Android's `values/strings.xml` and receive translations through Android's normal
-localization process instead of shipping invented iOS-only English fallbacks.
+PRODUCT_FEEDBACK_IOS_FALLBACKS = {
+    "bug_report_not_sent": "Bug report not sent",
+    "bug_report_mail_unavailable": (
+        "Mail is not configured on this device. No bug report has been sent."
+    ),
+    "bug_report_export_failed": (
+        "The report could not be exported. No bug report has been sent."
+    ),
+    "bug_report_export": "Export report",
+    "bug_report_show_in_finder": "Show in Finder",
+    "bug_report_collecting_evidence": (
+        "Collecting available diagnostic evidence. Nothing has been sent."
+    ),
+    "bug_report_export_preparing": (
+        "Preparing your report for export. Nothing has been sent."
+    ),
+    "bug_report_no_attachments": "No diagnostic attachments were available.",
+    "bug_report_preparation_notes": "Preparation notes:",
+    "bug_report_screenshot_unavailable": "Current app-window screenshot could not be captured.",
+    "bug_report_log_empty": "Current-process application log contained no exportable entries.",
+    "bug_report_log_unavailable": "Current-process application log could not be captured.",
+    "bug_report_attachment_too_large": "Attachment is too large to export: %@",
+    "bug_report_archive_too_large": "The complete bug report is too large to export.",
+}
+"""Sanctioned iOS-only report copy that Android's committed catalog does not own yet.
+
+Policy: a key may live here only while Android's `values/strings.xml` has no entry for it. These
+strings are staged for Android upstreaming (see the workspace patch
+`android-ios-report-strings.patch`); once Android owns a key, a contract test fails with
+instructions to move it into ``PRODUCT_FEEDBACK_ANDROID_KEYS`` so translations flow from
+Android's pipeline. Until then, non-English locales may carry curated variants through
+``PRODUCT_FEEDBACK_IOS_TRANSLATIONS``.
 """
 
-PRODUCT_FEEDBACK_IOS_FALLBACKS: dict[str, str] = {}
-"""iOS-only report copy with no Android catalog entry.
+PRODUCT_FEEDBACK_IOS_TRANSLATIONS: dict[str, dict[str, str]] = {}
+"""Curated per-locale variants for sanctioned iOS-only report keys.
 
-Deliberately empty: an iOS-only English fallback is a last resort. New report strings must be
-added to Android's `values/strings.xml` first (see PRODUCT_FEEDBACK_ANDROID_KEYS) so every locale
-can receive a real translation.
+Maps ``key -> {locale: value}``. The sync overlays these on top of the English fallback so a
+locale ships a real translation as soon as one is curated, without waiting for Android to own
+the key. Keys must exist in ``PRODUCT_FEEDBACK_IOS_FALLBACKS``.
 """
 
 REMOVED_PRODUCT_FEEDBACK_KEYS = {
@@ -1246,9 +1260,10 @@ def product_feedback_values_for_locale(
     """Return complete product-feedback copy for one iOS locale.
 
     Android-owned dialog, subject, and report-body text uses Android's translation when available
-    and Android English otherwise. iOS-only evidence, delivery, and export statements use a
-    truthful English fallback until Android owns equivalent resources. The function performs no
-    file I/O and raises ``ValueError`` if the Android-derived catalog is stale or incomplete.
+    and Android English otherwise. Sanctioned iOS-only keys use their English fallback, overlaid
+    with any curated ``PRODUCT_FEEDBACK_IOS_TRANSLATIONS`` variant for the locale. The function
+    performs no file I/O and raises ``ValueError`` if the Android-derived catalog is stale or
+    incomplete.
     """
     missing = sorted(set(PRODUCT_FEEDBACK_ANDROID_KEYS) - set(catalog.english_by_key))
     if missing:
@@ -1260,6 +1275,9 @@ def product_feedback_values_for_locale(
         for key in PRODUCT_FEEDBACK_ANDROID_KEYS
     }
     values.update(PRODUCT_FEEDBACK_IOS_FALLBACKS)
+    for key, locale_values in PRODUCT_FEEDBACK_IOS_TRANSLATIONS.items():
+        if locale in locale_values:
+            values[key] = locale_values[locale]
     return values
 
 
