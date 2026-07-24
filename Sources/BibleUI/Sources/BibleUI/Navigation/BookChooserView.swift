@@ -200,7 +200,20 @@ public struct BookChooserView: View {
     }
 
     /**
-     Builds the Android-style chooser shell and current selection step.
+     Builds Android's fixed-dark passage chooser without changing its enclosing reader window.
+
+     Android hosts the chooser in a separately themed `GridChoosePassageTheme` activity and sets
+     `allowThemeChange = false`. The SwiftUI equivalent injects `.dark` only into this view's
+     environment, so chooser controls retain Android's palette while the parent reader continues
+     observing the real system appearance.
+
+     - Returns: The chooser app bar, active book/chapter/verse step, and anchored options popup.
+     - Side effects: Loads persisted chooser options on first appearance; chooser actions can
+       persist option changes and invoke the caller's selection or cancellation callbacks.
+     - Failure modes: Missing optional progress providers render empty progress, and missing
+       cancellation ownership falls back to SwiftUI's dismiss action.
+     - Note: Do not replace the subtree environment with `preferredColorScheme`; that preference
+       propagates to a navigation presentation boundary and corrupts System night-mode detection.
      */
     public var body: some View {
         VStack(spacing: 0) {
@@ -218,7 +231,6 @@ public struct BookChooserView: View {
             chooserStep
         }
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .tint(.white)
         .onAppear { loadChooserOptionsIfNeeded() }
         .androidAnchoredPopupMenu(
@@ -236,6 +248,7 @@ public struct BookChooserView: View {
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
         #endif
+        .environment(\.colorScheme, .dark)
     }
 
     /**

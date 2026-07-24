@@ -16,6 +16,7 @@
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteSelectAdvanceResetAndImportAffordanceFlow": "baseline",
   "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": "search-multi-translation",
   "AndBibleUITests/AndBibleUITests/testReaderQuickScriptureSwitchPreservesDayTheme": "document-switch-custom-theme",
+  "AndBibleUITests/AndBibleUITests/testPassageChooserPreservesSystemDayTheme": "document-switch-custom-theme",
   "AndBibleUITests/AndBibleUITests/testDocumentChooserScriptureSwitchPreservesDayTheme": "document-switch-custom-theme",
   "AndBibleUITests/AndBibleUITests/testDocumentChooserScriptureSwitchPreservesCustomNightTheme": "document-switch-custom-night-theme",
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": "baseline",

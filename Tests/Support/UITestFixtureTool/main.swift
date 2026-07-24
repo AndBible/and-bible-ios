@@ -406,6 +406,7 @@ private final class FixtureContext {
             try seedUITestBibleModule()
             seedCustomColorSettings()
             seedScopedThemeColorSettings(baseline: baseline)
+            seedReaderSystemDayMode()
         case .documentSwitchCustomNightTheme:
             try seedUITestBibleModule()
             seedCustomColorSettings()
@@ -1728,6 +1729,23 @@ private final class FixtureContext {
     private func seedReaderNightMode() {
         settingsStore.setString(.nightModePref3, value: NightModeSetting.manual.rawValue)
         settingsStore.setBool("night_mode", value: true)
+    }
+
+    /**
+     Seeds Android's System night-mode policy while the simulator is in day appearance.
+
+     Passage-chooser regressions must exercise System mode explicitly: Manual mode ignores the
+     environment scheme and would conceal a pushed destination leaking a dark preference into the
+     reader window.
+
+     - Side effects:
+       - stores `system` for `night_mode_pref3`
+       - clears the persisted manual `night_mode` toggle
+     - Failure modes: none; `SettingsStore` applies registry-backed values synchronously.
+     */
+    private func seedReaderSystemDayMode() {
+        settingsStore.setString(.nightModePref3, value: NightModeSetting.system.rawValue)
+        settingsStore.setBool("night_mode", value: false)
     }
 
     /**

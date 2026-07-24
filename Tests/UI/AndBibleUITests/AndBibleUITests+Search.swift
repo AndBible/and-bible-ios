@@ -797,6 +797,104 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies Android's fixed-dark passage chooser cannot mutate a System/day reader into night mode.
+
+     The fixture explicitly selects System night mode, seeds visibly different day/night window
+     colors, and launches the simulator in light appearance. Android presents its chooser in a
+     separately themed activity with theme changes disabled; the iOS chooser must likewise scope
+     dark styling to its own subtree instead of emitting a window-wide preferred color scheme.
+
+     - Side effects:
+       - launches the custom-theme fixture in explicit System/day mode
+       - opens the production passage chooser and observes reader state while it remains presented
+       - selects Genesis 2 and waits for the destination pop to finish
+     - Failure modes:
+       - fails if opening the chooser changes `nightMode` to true or selects the night background
+       - fails if choosing Genesis 2 does not return to the same day-themed reader
+       - fails if the reader state export becomes unavailable while the chooser is presented
+     - Note: The negative observation spans the stable open chooser, where the former feedback loop
+       held night mode true; it does not depend on sampling a single animation frame.
+     */
+    func testPassageChooserPreservesSystemDayTheme() {
+        let app = makeApp()
+        app.launch()
+        let expectedBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+        let unexpectedNightBackground = Int(Int32(bitPattern: 0xFF2B183C))
+
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(
+            requireElement("bookChooserButton", in: app, timeout: 20),
+            timeout: 20
+        )
+        XCTAssertTrue(requireElement("passageChooserScreen", in: app, timeout: 20).exists)
+        let chooserReaderState = app.staticTexts["readerRenderedContentState"].firstMatch
+        XCTAssertTrue(
+            chooserReaderState.waitForExistence(timeout: 5),
+            "Expected the chooser destination's reader-state export to remain available."
+        )
+        let expectedDayState = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@",
+                "readerDestination=passageChooser",
+                "nightMode=false",
+                "readerBackground=\(expectedBackground)"
+            ),
+            object: chooserReaderState
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectedDayState], timeout: 5),
+            .completed,
+            "Expected the open chooser to retain the System/day reader state."
+        )
+        let unexpectedNightState = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "value CONTAINS %@ OR value CONTAINS %@",
+                "nightMode=true",
+                "readerBackground=\(unexpectedNightBackground)"
+            ),
+            object: chooserReaderState
+        )
+        unexpectedNightState.isInverted = true
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [unexpectedNightState], timeout: 1.5),
+            .completed,
+            "The fixed-dark chooser must not be interpreted as a dark system appearance."
+        )
+
+        tapElementReliably(
+            app.buttons["passageBookCell.Gen"].firstMatch,
+            timeout: 20
+        )
+        tapElementReliably(
+            app.buttons["passageChapterCell.2"].firstMatch,
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "readerDestination=none",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "nightMode=false", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "readerBackground=\(expectedBackground)",
+            in: app,
+            timeout: 20
+        )
+        XCTAssertTrue(
+            requireReaderReferenceValue(in: app, timeout: 20)
+                .localizedCaseInsensitiveContains("Genesis 2"),
+            "Expected passage selection to return to Genesis 2 in the original reader."
+        )
+    }
+
+    /**
      Reproduces scripture replacement through Android's full Choose Document activity.
 
      This is the reported regression path: the current custom day-themed reader opens the app-owned
