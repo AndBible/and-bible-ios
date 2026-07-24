@@ -12,7 +12,7 @@ import AppKit
 
  Usage:
  ```swift
- BibleWebView(bridge: bridge)
+ BibleWebView(session: BibleWebViewSession(bridge: bridge))
      .onAppear { bridge.emit(event: "loadDocument", data: documentJson) }
  ```
  */
@@ -79,29 +79,59 @@ public class BibleWebViewController: UIViewController {
 /**
  SwiftUI wrapper that hosts the Vue.js Bible client inside `WKWebView`.
 
- The native bridge/controller layer owns this view and uses `BibleBridge.emit(event:data:)`
- to push documents, config, and bookmark updates into the already loaded client bundle.
+ A window-scoped `BibleWebViewSession` owns the rendered `WKWebView` and coordinator. SwiftUI may
+ dismantle this representable while a pane is minimized, but recreating it with the same session
+ wraps and reattaches the already-loaded Vue client instead of constructing and replaying another
+ `WKWebView`.
  */
 public struct BibleWebView: UIViewControllerRepresentable {
     public typealias UIViewControllerType = BibleWebViewController
 
-    let bridge: BibleBridge
+    /// Window-scoped owner of the bridge, coordinator, and cached WebView.
+    let session: BibleWebViewSession
+
+    /// Optional serialized bootstrap state retained for compatibility with existing callers.
     let initialState: String?
+
+    /// Android-style signed ARGB color applied to every native host surface.
     var backgroundColorInt: Int
 
-    /// Creates a new bridge-backed web view wrapper.
-    public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
-        self.bridge = bridge
+    /**
+     Creates a transient SwiftUI wrapper around one persistent window render session.
+
+     - Parameters:
+       - session: Per-window session whose cached WebView should be attached by this representable.
+       - initialState: Reserved serialized bootstrap state retained for API compatibility.
+       - backgroundColorInt: Signed Android ARGB color for the WebView and native backing surfaces.
+     - Side Effects: None; WebView creation remains lazy until SwiftUI calls `makeUIViewController`.
+     - Failure Modes: Reusing one session in simultaneous visible hierarchies violates the session
+       ownership contract.
+     */
+    public init(
+        session: BibleWebViewSession,
+        initialState: String? = nil,
+        backgroundColorInt: Int = -1
+    ) {
+        self.session = session
         self.initialState = initialState
         self.backgroundColorInt = backgroundColorInt
     }
 
-    /// Builds the UIKit controller wrapper and initial web view.
+    /**
+     Wraps and attaches the session's cached WebView, creating and loading it only on first use.
+
+     - Parameter context: SwiftUI representable context whose coordinator is session-owned.
+     - Returns: A transient UIKit controller containing the persistent per-window `WKWebView`.
+     - Side Effects: First use creates a WebView and starts the packaged Vue bundle navigation.
+     - Failure Modes: Bundle lookup retains the existing placeholder fallback behavior.
+     */
     public func makeUIViewController(context: Context) -> BibleWebViewController {
-        let webView = createWebView(coordinator: context.coordinator)
-        let vc = BibleWebViewController(webView: webView, bridge: bridge)
-        vc.backgroundColorInt = backgroundColorInt
-        return vc
+        let webView = session.webView {
+            createWebView(coordinator: context.coordinator)
+        }
+        let viewController = BibleWebViewController(webView: webView, bridge: session.bridge)
+        viewController.backgroundColorInt = backgroundColorInt
+        return viewController
     }
 
     /// Reapplies visual state that can change after creation.
@@ -120,9 +150,15 @@ public struct BibleWebView: UIViewControllerRepresentable {
         return UIColor(red: r, green: g, blue: b, alpha: a)
     }
 
-    /// Creates the coordinator that owns navigation, logging, and gesture callbacks.
+    /**
+     Returns the coordinator retained by the per-window session.
+
+     - Returns: Stable coordinator identity for the cached host's complete lifetime.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
     public func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(bridge: bridge)
+        session.coordinator
     }
 }
 #elseif os(macOS)
@@ -173,30 +209,64 @@ final class InteractionReportingWKWebView: WKWebView {
 public struct BibleWebView: NSViewRepresentable {
     public typealias NSViewType = WKWebView
 
-    let bridge: BibleBridge
+    /// Window-scoped owner of the bridge, coordinator, and cached AppKit WebView.
+    let session: BibleWebViewSession
+
+    /// Optional serialized bootstrap state retained for compatibility with existing callers.
     let initialState: String?
+
+    /// Android-style signed ARGB color retained for cross-platform API symmetry.
     var backgroundColorInt: Int
 
-    /// Creates a new bridge-backed macOS web view wrapper.
-    public init(bridge: BibleBridge, initialState: String? = nil, backgroundColorInt: Int = -1) {
-        self.bridge = bridge
+    /**
+     Creates a transient SwiftUI wrapper around one persistent window render session.
+
+     - Parameters:
+       - session: Per-window session whose cached WebView should be attached.
+       - initialState: Reserved serialized bootstrap state retained for API compatibility.
+       - backgroundColorInt: Signed Android ARGB color retained for cross-platform API symmetry.
+     - Side Effects: None; host creation remains lazy until SwiftUI calls `makeNSView`.
+     - Failure Modes: Reusing one session in simultaneous visible hierarchies violates the session
+       ownership contract.
+     */
+    public init(
+        session: BibleWebViewSession,
+        initialState: String? = nil,
+        backgroundColorInt: Int = -1
+    ) {
+        self.session = session
         self.initialState = initialState
         self.backgroundColorInt = backgroundColorInt
     }
 
-    /// Builds the `WKWebView` and attaches the coordinator.
+    /**
+     Attaches the session's cached AppKit WebView, creating and loading it only on first use.
+
+     - Parameter context: SwiftUI representable context whose coordinator is session-owned.
+     - Returns: The same `WKWebView` across pane detach/reattach cycles.
+     - Side Effects: First use creates a WebView and starts the packaged Vue bundle navigation.
+     - Failure Modes: Bundle lookup retains the existing placeholder fallback behavior.
+     */
     public func makeNSView(context: Context) -> WKWebView {
-        let webView = createWebView(coordinator: context.coordinator)
-        webView.setValue(false, forKey: "drawsBackground")
-        return webView
+        session.webView {
+            let webView = createWebView(coordinator: context.coordinator)
+            webView.setValue(false, forKey: "drawsBackground")
+            return webView
+        }
     }
 
     /// macOS currently has no incremental update work beyond the bridge itself.
     public func updateNSView(_ webView: WKWebView, context: Context) {}
 
-    /// Creates the coordinator that owns navigation and logging callbacks.
+    /**
+     Returns the coordinator retained by the per-window session.
+
+     - Returns: Stable coordinator identity for the cached host's complete lifetime.
+     - Side Effects: None.
+     - Failure Modes: None.
+     */
     public func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(bridge: bridge)
+        session.coordinator
     }
 }
 #endif
@@ -331,7 +401,7 @@ extension BibleWebView {
 
         // Register bridge message handler
         let contentController = WKUserContentController()
-        contentController.add(bridge, name: BibleBridge.handlerName)
+        contentController.add(session.bridge, name: BibleBridge.handlerName)
 
         // Inject platform detection and Android API shim before page loads.
         // The Vue.js code calls window.android.xxx() directly (from android.ts).
@@ -383,7 +453,7 @@ extension BibleWebView {
 
         #if os(macOS)
         let webView = InteractionReportingWKWebView(frame: .zero, configuration: config)
-        webView.onNativeUserInteraction = { [weak bridge] in
+        webView.onNativeUserInteraction = { [weak bridge = session.bridge] in
             bridge?.onNativeUserInteraction?()
         }
         #else
@@ -401,7 +471,7 @@ extension BibleWebView {
         coordinator.installSwipeRecognizersIfNeeded(on: webView)
         #endif
 
-        bridge.webView = webView
+        session.bridge.webView = webView
         coordinator.webView = webView
         webView.navigationDelegate = coordinator
 

@@ -42,11 +42,11 @@ enum BibleWindowPaneReferenceRouter {
 /**
  Hosts one fully independent reading pane inside the multi-window reader.
 
- Each pane uses the `BibleBridge` and `BibleReaderController` registered for its `Window`, while
- delegating sheet/alert/toast presentation back to `BibleReaderView` through callback closures.
- Keeping that controller/bridge pair scoped to the window, not transient SwiftUI appearances, lets
- multiple panes render different modules and references simultaneously while still sharing
- workspace-level state from `WindowManager`.
+ Each pane uses the `BibleBridge`, `BibleWebViewSession`, and `BibleReaderController` registered for
+ its `Window`, while delegating sheet/alert/toast presentation back to `BibleReaderView` through
+ callback closures. Keeping the controller, bridge, and actual WebView host scoped to the window—not
+ transient SwiftUI appearances—lets minimized panes reattach instantly and lets multiple panes
+ render different modules and references simultaneously.
 
  Data dependencies:
  - `window`, `displaySettings`, `nightMode`, `monochromeMode`, `disableTwoStepBookmarking`, and
@@ -57,7 +57,8 @@ enum BibleWindowPaneReferenceRouter {
    bookmark, history, and settings mutations initiated by the controller
 
  Side effects:
- - `onAppear` lazily creates or reuses the pane controller and registers it with `WindowManager`
+ - `onAppear` lazily creates or reuses the pane controller and its retained WebView session, then
+   registers the controller with `WindowManager`
  - window removal or workspace switching unregisters controllers from `WindowManager`
  - `onChange` for `nightMode` and `displaySettings` pushes updated display state into the
    embedded web view via `BibleReaderController.updateDisplaySettings`
@@ -87,8 +88,8 @@ struct BibleWindowPane: View {
     /// Reader-session owner for Android's typed Copy/Open reference contract.
     let windowMenuReferenceStore: BibleWindowMenuReferenceStore
 
-    /// Native/web bridge for this pane's WKWebView instance.
-    @State private var bridge = BibleBridge()
+    /// First-appearance bridge/session pair adopted by a newly created pane controller.
+    @State private var renderSeed = BibleWindowRenderSeed()
 
     /// Controller that owns module state, navigation, and bridge callbacks for this pane.
     @State private var controller: BibleReaderController?
@@ -117,15 +118,22 @@ struct BibleWindowPane: View {
   /// Shared search index used by Android-compatible AI search tools.
   @Environment(SearchIndexService.self) private var searchIndexService
 
-    /// Bridge that should back the current `BibleWebView` render pass.
-    private var webBridge: BibleBridge {
+    /**
+     Render session that should back the current SwiftUI representable pass.
+
+     - Returns: The local controller session, the manager-registered controller session during
+       restoration, or the initial seed before any controller exists.
+     - Side Effects: None.
+     - Failure Modes: None; the seed guarantees a session for the first render.
+     */
+    private var webViewSession: BibleWebViewSession {
         if let controller {
-            return controller.bridge
+            return controller.webViewSession
         }
         if let registeredController = windowManager.controllers[window.id] as? BibleReaderController {
-            return registeredController.bridge
+            return registeredController.webViewSession
         }
-        return bridge
+        return renderSeed.webViewSession
     }
 
     /// Requests the parent reader to present the book chooser.
@@ -237,9 +245,21 @@ struct BibleWindowPane: View {
         )
     }
 
+    /**
+     Renders the cached WebView host with pane-owned overlays and lifecycle wiring.
+
+     The `BibleWebView` receives the stable session resolved from the registered controller, so
+     removing this pane from the split hierarchy detaches rather than destroys its Vue client.
+
+     - Returns: One pane surface with selection, window-menu, help, and AI overlays.
+     - Side Effects: Appearance creates/configures/registers the pane controller; display-setting
+       changes emit updated configuration through that controller.
+     - Failure Modes: Before controller registration, the render seed supplies the first host and
+       is adopted by the controller during `onAppear`.
+     */
     var body: some View {
         ZStack(alignment: .bottom) {
-            BibleWebView(bridge: webBridge, backgroundColorInt: activeBackgroundColorInt)
+            BibleWebView(session: webViewSession, backgroundColorInt: activeBackgroundColorInt)
                 .ignoresSafeArea(edges: .bottom)
 
             // Selection action bar — shows when text is long-press selected
@@ -583,7 +603,6 @@ struct BibleWindowPane: View {
         let store = SettingsStore(modelContext: modelContext)
 
         if let existingController = windowManager.controllers[window.id] as? BibleReaderController {
-            bridge = existingController.bridge
             controller = existingController
             configureController(existingController, workspaceStore: workspaceStore, settingsStore: store)
       configureAICoordinator(for: existingController)
@@ -596,7 +615,8 @@ struct BibleWindowPane: View {
         let sharedControllers = windowManager.controllers.values
             .compactMap { $0 as? BibleReaderController }
         let ctrl = BibleReaderController(
-            bridge: bridge,
+            bridge: renderSeed.bridge,
+            webViewSession: renderSeed.webViewSession,
             bookmarkService: bookmarkService,
             initializesSword: sharedControllers.isEmpty
         )
