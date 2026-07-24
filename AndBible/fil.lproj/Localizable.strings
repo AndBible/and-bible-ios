@@ -22,8 +22,8 @@
 "go_to_reference_invalid" = "Could not find that reference";
 "go" = "Go";
 "browse" = "Browse...";
-"move_up" = "Move Up";
-"move_down" = "Move Down";
+"move_up" = "Ilipat pataas";
+"move_down" = "Ilipat pababa";
 "reference_copied" = "Reference copied";
 "ok" = "OK";
 "yes" = "Oo";
@@ -130,13 +130,13 @@
 "labels" = "Mga Label";
 "new_label" = "New Label";
 "study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"my_notes" = "Aking Mga Tala";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "Pagkakasunud-sunod ng Bibliya";
 "sort_date_created" = "Date Created";
-"sort_last_updated" = "Last Updated";
+"sort_last_updated" = "Huling na-update noong";
 "edit_labels" = "Edit Labels";
 "add_labels" = "Add labels";
 "open_studypad_for_label %@" = "Open \"%@\" StudyPad";
@@ -144,7 +144,7 @@
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
 "studypad" = "Study Pad";
-"open_studypad" = "Open StudyPad";
+"open_studypad" = "Buksan ang study pad";
 "edit_label" = "I-edit ang label";
 "label_edit_name" = "Pangalan";
 "label_edit_color" = "Color";
@@ -152,7 +152,7 @@
 "no_icon" = "No Icon";
 "label_edit_options" = "Options";
 "favourite" = "Favourite";
-"underline_style" = "Underline Style";
+"underline_style" = "Salungguhit";
 "underline_whole_verse" = "Underline Whole Verse";
 "studypad_empty" = "Empty StudyPad";
 "studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
@@ -169,7 +169,7 @@
 "whole_bible" = "Buong Bibliya";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "Kasalukuyang aklat";
 "search_index" = "Search Index";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -177,7 +177,7 @@
 "search_indexing_message" = "Kapag natapos na ang pag-index, dadalhin ka sa screen ng paghahanap.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
-"search_bible_text" = "Search Bible text";
+"search_bible_text" = "Maghanap sa Bibliya";
 "search_match" = "Match";
 "search_scope_all" = "Lahat";
 "search_scope_ot" = "OT";
@@ -222,7 +222,7 @@
 "delete_module_index" = "Delete Index";
 "uninstall_module_title" = "Uninstall Module";
 "uninstall_module_message_format" = "Remove %@ from this device?";
-"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_title" = "Tanggalin ang search index";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
 "module_name" = "Pangalan";
@@ -231,11 +231,11 @@
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
-"module_installed_version" = "Installed";
+"module_installed_version" = "Naka-install";
 "module_version_unavailable" = "No version metadata available.";
 "module_install_size" = "Install size";
 "module_local_state" = "Local State";
-"module_installed" = "Installed";
+"module_installed" = "Naka-install";
 "module_encrypted" = "Encrypted";
 "module_unlocked" = "Unlocked";
 "module_locked" = "Locked";
@@ -251,41 +251,41 @@
 "font_size" = "Size";
 "font_family" = "Family";
 "settings_layout" = "Layout";
-"line_spacing" = "Line Spacing";
-"justify_text" = "Justify Text";
-"verse_per_line" = "Verse Per Line";
+"line_spacing" = "Espasyo ng linya";
+"justify_text" = "I-justify-align ang teksto";
+"verse_per_line" = "Isang talata bawat linya";
 "hyphenation" = "Hyphenation";
 "settings_content" = "Nilalaman";
-"verse_numbers" = "Verse Numbers";
-"section_titles" = "Section Titles";
+"verse_numbers" = "Ipakita ang mga bilang ng talata";
+"section_titles" = "Mga pamagat ng seksyon";
 "footnotes" = "Mga footnote";
 "inline_footnotes" = "Inline Footnotes";
 "red_letters" = "Red Letters";
 "cross_references" = "Mga cross-reference";
 "expand_cross_references" = "Expand Cross References";
-"strongs_numbers" = "Strong's Numbers";
+"strongs_numbers" = "Mga numero ng Strong";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
 "show_bookmarks" = "Ipakita ang mga bookmark";
 "show_my_notes" = "Show My Notes";
-"verse_selection" = "Verse Selection";
+"verse_selection" = "Pagpili ng talata";
 
 /* Colors */
 "colors" = "Colors";
 "night_mode" = "Night Mode";
 "day_theme" = "Day Theme";
 "night_theme" = "Night Theme";
-"text_color" = "Text Color";
-"background" = "Background";
+"text_color" = "Kulay ng teksto";
+"background" = "Kulay ng background";
 "color_workspace" = "Kulay ng workspace";
 "prefs_noise_title" = "Background noise";
 "prefs_noise_summary" = "Ang pagdaragdag ng kaunting noise sa background ay maaaring maging mas komportable sa mata.";
-"reset_to_defaults" = "Reset to Defaults";
+"reset_to_defaults" = "I-reset sa default";
 
 /* Dictionaries */
 "settings_dictionaries" = "Mga Diksyonaryo";
-"hebrew_dictionary" = "Hebrew Dictionary";
-"greek_dictionary" = "Greek Dictionary";
+"hebrew_dictionary" = "Diksyonaryong Hebreo ng Strong's";
+"greek_dictionary" = "Diksyonaryong Griyego ng Strong's";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
 
 /* Data */
@@ -347,7 +347,7 @@
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
-"add_custom_repository" = "Add custom repository";
+"add_custom_repository" = "Magdagdag ng Custom na Repository";
 "custom_repositories" = "Mga custom na repository";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
@@ -379,12 +379,12 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "Nakumpleto";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "Pumili ng Plano sa Pagbabasa";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "Custom";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
-"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_read" = "Hindi mabasa ang file";
 "reading_plan_import_error_format" = "Invalid reading plan format";
 "plan_duplicate_user_plan" = "Mayroong isang user reading plan sa sdcard jsword/readingplan na may parehong pangalan ng isang internal na plano. Hindi ito mailista dito. Mangyaring palitan ang pangalan ng file sa ibang bagay, na iniiwan ang extension ng file bilang .properties";
 
@@ -405,7 +405,7 @@
 "speed" = "Speed";
 "sleep_timer" = "Sleep Timer";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "natigil";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
@@ -415,7 +415,7 @@
    Compare Translations
    ======================================== */
 "compare_select_translations" = "Select Translations";
-"compare_choose_translations" = "Choose Translations";
+"compare_choose_translations" = "Pumili ng mga salin…";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
 "compare_loading_translations" = "Loading translations...";
 "compare_select_translations_header" = "Select translations to compare";
@@ -445,7 +445,7 @@
    Window Management
    ======================================== */
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "I-maximize";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "I-pin";
@@ -553,7 +553,7 @@
 "text_display_font_size_title_format" = "Laki ng font (%d pt)";
 "text_display_font_family_title_format" = "Pamilya ng font (%@)";
 "text_display_line_spacing_title_format" = "Espasyo ng linya (%1.1fx)";
-"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_margin_size_title_format" = "Laki ng margin (%1$d/%2$d/%3$d mm)";
 "text_display_top_margin_title_format" = "Tuktok na margin (%d mm)";
 "text_display_left_margin_title_format" = "Kaliwang margin (%d mm)";
 "text_display_right_margin_title_format" = "Kanang margin (%d mm)";
@@ -563,13 +563,13 @@
    Quick Settings & Help
    ======================================== */
 "fullscreen" = "Fullscreen";
-"tilt_to_scroll" = "Tilt to Scroll";
+"tilt_to_scroll" = "Itilt para mag-scroll";
 "reversed_split_mode" = "Reversed na split mode";
-"window_pinning" = "Window Pinning";
-"label_settings" = "Label Settings";
+"window_pinning" = "Pag-pin ng window";
+"label_settings" = "Mga setting ng label";
 "all_text_options_window_menutitle" = "Lahat ng opsyon sa teksto";
-"all_text_options" = "All Text Options";
-"help_tips" = "Help & Tips";
+"all_text_options" = "Lahat ng opsyon sa teksto";
+"help_tips" = "Tulong at mga tip";
 "sponsor_development" = "Sponsor Development";
 "about" = "Tungkol sa";
 "rate_app" = "Rate App";
@@ -587,13 +587,13 @@
 /* Help Sections */
 "help_navigation" = "Nabigasyon";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
-"help_selection" = "Text Selection";
+"help_selection" = "Pagpili ng teksto";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
-"help_pinning" = "Window Pinning";
+"help_pinning" = "Pag-pin ng window";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
 "help_bookmarks" = "Mga Bookmark";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
-"help_studypads" = "StudyPads";
+"help_studypads" = "Mga Study Pad";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
 "help_search" = "Paghahanap";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
@@ -724,7 +724,7 @@
 "auth_folder_path_summary" = "Parent folder para sa sync data (walang laman = root)";
 "invalid_url_message" = "Ang URL na iyong ipinasok ay hindi wasto. Mangyaring magpasok ng wastong URL (hal., https://nextcloud.example.com)";
 "prefs_sync_introduction_summary1" = "Piliin kung aling cloud service ang nais mong gamitin para i-synchronize ang maraming device.";
-"test_connection" = "Test Connection";
+"test_connection" = "Subukan ang koneksyon";
 "overrideBackup" = "May nakitang umiiral na database sa Cloud na hindi naka-synchronize ang device na ito. Ang database ay naglalaman ng %@. Ano ang nais mong gawin?";
 "cloud_fetch_and_restore_initial" = "Kopyahin mula sa Cloud papunta sa device na ito";
 "cloud_create_new" = "Kopyahin mula sa device na ito papunta sa Cloud";
@@ -779,17 +779,17 @@
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
 "cross_references" = "Mga cross-reference";
-"verse_per_line" = "Verse per line";
+"verse_per_line" = "Isang talata bawat linya";
 "show_bookmarks" = "Ipakita ang mga bookmark";
 "hide_labels" = "Hide labels";
-"my_notes" = "My notes";
+"my_notes" = "Aking Mga Tala";
 "page_number" = "Page number";
 "infinite_scroll" = "Walang katapusang pag-scroll";
 "non_strongs_word_italic" = "I-italicize ang mga idinagdag na salita";
 "mark_as_read_button" = "Button na markahan bilang nabasa";
 "title_scroll_button" = "Button na scroll ng pamagat";
 "memorization_indicators" = "Mga indicator ng memorisasyon";
-"ai_document_markers" = "AI document markers";
+"ai_document_markers" = "Ipakita ang mga AI document marker";
 "page_scroll_amount" = "Dami ng page scroll";
 "ordinals" = "Ordinals";
 "error_no_content" = "Walang nilalaman para sa napiling talata";
@@ -1390,29 +1390,20 @@
 "word_not_found_in_dictionaries" = "Hindi nahanap ang salita sa anumang diksyonaryo";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "Ang pagkakaroon ng mga file na ito na nakalakip ay malaki ang naitutulong sa mga developer ng app sa pag-aayos ng iniulat na bug.";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "PAKISULAT ANG IYONG FEEDBACK O ULAT NG BUG SA ITAAS NG LINYANG ITO";
 "report_bug_email_subject_3" = "[%1$@] Ulat ng bug para sa %2$@ %3$@";
 "report_bug_heading1" = "Mga Tagubilin:";
@@ -1662,3 +1653,9 @@
 "prefs_top_margin_title_mm" = "Tuktok na margin (%d mm)";
 "share_verse_widget_title" = "I-share ang seleksyon";
 "sort_by_alphabetical" = "Pagkakasunud-sunod ng alpabeto";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"backup_modules" = "I-backup ang Mga Dokumento sa…";

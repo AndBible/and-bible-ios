@@ -22,8 +22,8 @@
 "go_to_reference_invalid" = "Could not find that reference";
 "go" = "Go";
 "browse" = "Browse...";
-"move_up" = "Move Up";
-"move_down" = "Move Down";
+"move_up" = "اوپر منتقل کریں";
+"move_down" = "نیچے منتقل کریں";
 "reference_copied" = "Reference copied";
 "ok" = "ٹھیک ہے";
 "yes" = "ہاں";
@@ -129,14 +129,14 @@
 "bookmark_note" = "Note";
 "labels" = "لیبل";
 "new_label" = "New Label";
-"study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"study_pad" = "مطالعہ پیڈ";
+"my_notes" = "میرے نوٹس";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "بائبلی ترتیب";
 "sort_date_created" = "Date Created";
-"sort_last_updated" = "Last Updated";
+"sort_last_updated" = "آخری اپ ڈیٹ";
 "edit_labels" = "Edit Labels";
 "add_labels" = "Add labels";
 "open_studypad_for_label %@" = "Open \"%@\" StudyPad";
@@ -144,7 +144,7 @@
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
 "studypad" = "مطالعہ پیڈ";
-"open_studypad" = "Open StudyPad";
+"open_studypad" = "مطالعہ پیڈ کھولیں";
 "edit_label" = "لیبل ترمیم کریں";
 "label_edit_name" = "نام";
 "label_edit_color" = "Color";
@@ -152,7 +152,7 @@
 "no_icon" = "No Icon";
 "label_edit_options" = "Options";
 "favourite" = "Favourite";
-"underline_style" = "Underline Style";
+"underline_style" = "انڈر لائن کریں";
 "underline_whole_verse" = "Underline Whole Verse";
 "studypad_empty" = "Empty StudyPad";
 "studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
@@ -169,7 +169,7 @@
 "whole_bible" = "پوری بائبل";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "موجودہ کتاب";
 "search_index" = "تلاش انڈیکس";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -177,7 +177,7 @@
 "search_indexing_message" = "انڈیکسنگ مکمل ہونے پر آپ کو تلاش اسکرین پر لے جایا جائے گا۔";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
-"search_bible_text" = "Search Bible text";
+"search_bible_text" = "بائبل تلاش کریں";
 "search_match" = "Match";
 "search_scope_all" = "تمام";
 "search_scope_ot" = "OT";
@@ -222,7 +222,7 @@
 "delete_module_index" = "Delete Index";
 "uninstall_module_title" = "Uninstall Module";
 "uninstall_module_message_format" = "Remove %@ from this device?";
-"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_title" = "تلاش انڈیکس حذف کریں";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
 "module_name" = "نام";
@@ -231,11 +231,11 @@
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
-"module_installed_version" = "Installed";
+"module_installed_version" = "انسٹال شدہ";
 "module_version_unavailable" = "No version metadata available.";
 "module_install_size" = "Install size";
 "module_local_state" = "Local State";
-"module_installed" = "Installed";
+"module_installed" = "انسٹال شدہ";
 "module_encrypted" = "Encrypted";
 "module_unlocked" = "Unlocked";
 "module_locked" = "Locked";
@@ -251,41 +251,41 @@
 "font_size" = "Size";
 "font_family" = "Family";
 "settings_layout" = "Layout";
-"line_spacing" = "Line Spacing";
-"justify_text" = "Justify Text";
-"verse_per_line" = "Verse Per Line";
+"line_spacing" = "لائن اسپیسنگ";
+"justify_text" = "متن کو جسٹیفائی کریں";
+"verse_per_line" = "ہر لائن پر ایک آیت";
 "hyphenation" = "ہائفنیشن";
 "settings_content" = "مواد";
-"verse_numbers" = "Verse Numbers";
-"section_titles" = "Section Titles";
+"verse_numbers" = "آیت نمبر دکھائیں";
+"section_titles" = "حصے کے عنوانات";
 "footnotes" = "حاشیے";
 "inline_footnotes" = "Inline Footnotes";
-"red_letters" = "Red Letters";
+"red_letters" = "سرخ حروف";
 "cross_references" = "کراس حوالہ جات";
 "expand_cross_references" = "Expand Cross References";
-"strongs_numbers" = "Strong's Numbers";
+"strongs_numbers" = "Strong's نمبر";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
 "show_bookmarks" = "بک مارکس دکھائیں";
 "show_my_notes" = "Show My Notes";
-"verse_selection" = "Verse Selection";
+"verse_selection" = "آیت انتخاب";
 
 /* Colors */
 "colors" = "Colors";
-"night_mode" = "Night Mode";
+"night_mode" = "رات کا موڈ";
 "day_theme" = "Day Theme";
 "night_theme" = "Night Theme";
-"text_color" = "Text Color";
-"background" = "Background";
+"text_color" = "متن کا رنگ";
+"background" = "پس منظر کا رنگ";
 "color_workspace" = "ورک اسپیس رنگ";
 "prefs_noise_title" = "پس منظر شور";
 "prefs_noise_summary" = "پس منظر میں تھوڑا شور شامل کرنا آنکھوں کو زیادہ آرام دہ بنا سکتا ہے۔";
-"reset_to_defaults" = "Reset to Defaults";
+"reset_to_defaults" = "ڈیفالٹ پر ری سیٹ کریں";
 
 /* Dictionaries */
 "settings_dictionaries" = "لغات";
-"hebrew_dictionary" = "Hebrew Dictionary";
-"greek_dictionary" = "Greek Dictionary";
+"hebrew_dictionary" = "Strongs عبرانی لغت";
+"greek_dictionary" = "Strongs یونانی لغت";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
 
 /* Data */
@@ -347,7 +347,7 @@
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
-"add_custom_repository" = "Add custom repository";
+"add_custom_repository" = "کسٹم ذخیرہ شامل کریں";
 "custom_repositories" = "کسٹم ذخائر";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
@@ -379,12 +379,12 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "مکمل";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "مطالعہ منصوبہ منتخب کریں";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "کسٹم";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
-"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_read" = "فائل نہیں پڑھ سکتے";
 "reading_plan_import_error_format" = "Invalid reading plan format";
 "plan_duplicate_user_plan" = "sdcard jsword/readingplan میں کسی اندرونی منصوبے کے نام جیسا صارف مطالعہ منصوبہ ہے۔ اسے یہاں درج نہیں کیا جا سکتا۔ براہ کرم فائل کا نام تبدیل کریں، فائل ایکسٹنشن .properties رکھیں۔";
 
@@ -403,19 +403,19 @@
 "pause" = "رکیں";
 "stop" = "روکیں";
 "speed" = "Speed";
-"sleep_timer" = "Sleep Timer";
+"sleep_timer" = "نیند ٹائمر";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "رک گیا";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
-"speak_sleep_timer" = "Sleep Timer";
+"speak_sleep_timer" = "نیند ٹائمر";
 
 /* ========================================
    Compare Translations
    ======================================== */
 "compare_select_translations" = "Select Translations";
-"compare_choose_translations" = "Choose Translations";
+"compare_choose_translations" = "تراجم منتخب کریں…";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
 "compare_loading_translations" = "Loading translations...";
 "compare_select_translations_header" = "Select translations to compare";
@@ -445,7 +445,7 @@
    Window Management
    ======================================== */
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "بڑا کریں";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "پن کریں";
@@ -553,7 +553,7 @@
 "text_display_font_size_title_format" = "فونٹ سائز (%d pt)";
 "text_display_font_family_title_format" = "فونٹ فیملی (%@)";
 "text_display_line_spacing_title_format" = "لائن اسپیسنگ (%1.1fx)";
-"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_margin_size_title_format" = "حاشیے کا سائز (%1$d/%2$d/%3$d ملی میٹر)";
 "text_display_top_margin_title_format" = "اوپری حاشیہ (%d ملی میٹر)";
 "text_display_left_margin_title_format" = "بایاں حاشیہ (%d ملی میٹر)";
 "text_display_right_margin_title_format" = "دایاں حاشیہ (%d ملی میٹر)";
@@ -563,13 +563,13 @@
    Quick Settings & Help
    ======================================== */
 "fullscreen" = "فل اسکرین";
-"tilt_to_scroll" = "Tilt to Scroll";
+"tilt_to_scroll" = "جھکا کر اسکرول کریں";
 "reversed_split_mode" = "الٹا تقسیم موڈ";
-"window_pinning" = "Window Pinning";
-"label_settings" = "Label Settings";
+"window_pinning" = "ونڈو پننگ";
+"label_settings" = "لیبل ترتیبات";
 "all_text_options_window_menutitle" = "تمام متن کے اختیارات";
-"all_text_options" = "All Text Options";
-"help_tips" = "Help & Tips";
+"all_text_options" = "تمام متن کے اختیارات";
+"help_tips" = "مدد اور تجاویز";
 "sponsor_development" = "Sponsor Development";
 "about" = "کے بارے میں";
 "rate_app" = "Rate App";
@@ -587,13 +587,13 @@
 /* Help Sections */
 "help_navigation" = "نیویگیشن";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
-"help_selection" = "Text Selection";
+"help_selection" = "متن انتخاب";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
-"help_pinning" = "Window Pinning";
+"help_pinning" = "ونڈو پننگ";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
 "help_bookmarks" = "بک مارکس";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
-"help_studypads" = "StudyPads";
+"help_studypads" = "مطالعہ پیڈز";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
 "help_search" = "تلاش";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
@@ -724,7 +724,7 @@
 "auth_folder_path_summary" = "ہم آہنگی ڈیٹا کے لیے پیرنٹ فولڈر (خالی = روٹ)";
 "invalid_url_message" = "آپ کا داخل کردہ URL غلط ہے۔ براہ کرم ایک درست URL داخل کریں (مثلاً، https://nextcloud.example.com)";
 "prefs_sync_introduction_summary1" = "منتخب کریں کہ آپ متعدد ڈیوائسز ہم آہنگ کرنے کے لیے کون سی بیک اینڈ کلاؤڈ سروس استعمال کرنا چاہتے ہیں۔";
-"test_connection" = "Test Connection";
+"test_connection" = "کنکشن جانچیں";
 "overrideBackup" = "کلاؤڈ میں ایسا موجودہ ڈیٹابیس ملا جس سے یہ ڈیوائس ہم آہنگ نہیں ہے۔ ڈیٹابیس میں %@ ہے۔ آپ کیا کرنا چاہتے ہیں؟";
 "cloud_fetch_and_restore_initial" = "کلاؤڈ سے اس ڈیوائس پر کاپی کریں";
 "cloud_create_new" = "اس ڈیوائس سے کلاؤڈ پر کاپی کریں";
@@ -779,17 +779,17 @@
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
 "cross_references" = "کراس حوالہ جات";
-"verse_per_line" = "Verse per line";
+"verse_per_line" = "ہر لائن پر ایک آیت";
 "show_bookmarks" = "بک مارکس دکھائیں";
 "hide_labels" = "Hide labels";
-"my_notes" = "My notes";
+"my_notes" = "میرے نوٹس";
 "page_number" = "Page number";
 "infinite_scroll" = "لامحدود اسکرول";
 "non_strongs_word_italic" = "اضافی الفاظ ترچھا کریں";
 "mark_as_read_button" = "پڑھا ہوا نشان لگانے کا بٹن";
 "title_scroll_button" = "عنوان اسکرول بٹن";
 "memorization_indicators" = "حفظ کے اشارے";
-"ai_document_markers" = "AI document markers";
+"ai_document_markers" = "AI دستاویز مارکر دکھائیں";
 "page_scroll_amount" = "صفحہ اسکرول مقدار";
 "ordinals" = "Ordinals";
 "error_no_content" = "منتخب آیت کے لیے کوئی مواد نہیں";
@@ -1417,29 +1417,20 @@
 "word_not_found_in_dictionaries" = "لفظ کسی لغت میں نہیں ملا";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "ان فائلوں کا منسلق ہونا ڈویلپرز کو رپورٹ کردہ بگ ٹھیک کرنے میں بہت مدد کرتا ہے۔";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "براہ کرم اس لائن سے اوپر اپنی رائے یا بگ رپورٹ لکھیں";
 "report_bug_email_subject_3" = "[%1$@] %2$@ %3$@ کے لیے بگ رپورٹ";
 "report_bug_heading1" = "ہدایات:";
@@ -1695,3 +1686,9 @@
 "prefs_top_margin_title_mm" = "اوپری حاشیہ (%d ملی میٹر)";
 "share_verse_widget_title" = "انتخاب شیئر کریں";
 "sort_by_alphabetical" = "حروف تہجی کی ترتیب";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"backup_modules" = "دستاویزات کا بیک اپ کریں…";

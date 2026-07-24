@@ -77,11 +77,11 @@
 "labels" = "Labels";
 "new_label" = "Təzə etiket";
 "study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"my_notes" = "Qeydlərim";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "Müqəddəs Kitab sıralaması";
 "sort_date_created" = "Date Created";
 "sort_last_updated" = "Last Updated";
 "edit_labels" = "Edit Labels";
@@ -103,7 +103,7 @@
 "whole_bible" = "Müqəddəs Kitab'ın hamısı";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "Seçilmiş kitabda";
 "search_index" = "Axtarış indeksi";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -139,7 +139,7 @@
 "verse_per_line" = "Sətir başına tək ayə";
 "hyphenation" = "Hyphenation";
 "settings_content" = "Content";
-"verse_numbers" = "Ayə nömrələri";
+"verse_numbers" = "Ayə nömrələri göstərilir";
 "section_titles" = "Hissə başlıqları";
 "footnotes" = "Qeydlər";
 "inline_footnotes" = "Inline Footnotes";
@@ -225,7 +225,7 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "Completed";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "Oxumaq planını seçin";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "Custom";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
@@ -242,13 +242,13 @@
 "pause" = "Fasilə";
 "stop" = "Dayandır";
 "speed" = "Speed";
-"sleep_timer" = "Sleep Timer";
+"sleep_timer" = "Gözləmə taymeri";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "Dayandırılıb";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
-"speak_sleep_timer" = "Sleep Timer";
+"speak_sleep_timer" = "Gözləmə taymeri";
 "compare_select_translations" = "Select Translations";
 "compare_choose_translations" = "Choose Translations";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
@@ -264,7 +264,7 @@
 "history_no_history" = "No History";
 "history_no_history_description" = "Navigation history will appear as you browse.";
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "Böyüt";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "Pin";
@@ -331,7 +331,7 @@
 
 /* Quick Settings & Help */
 "fullscreen" = "Fullscreen";
-"tilt_to_scroll" = "Tilt to Scroll";
+"tilt_to_scroll" = "Avtomatik sürüşdür";
 "reversed_split_mode" = "Bölünmüşün əks rejimi";
 "window_pinning" = "Window Pinning";
 "label_settings" = "Label Settings";
@@ -658,31 +658,22 @@
 "search_bible_section_group_prompt" = "Axtarış yeri";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "Having these files attached helps app developers a lot in fixing the reported bug.";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_email_text" = "Next, please select your preferred email application (Gmail for example) to send the report to the developer team.";
 "bug_report_email_title" = "Send bug report via email";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE";
 "report_bug_email_subject_3" = "[%1$@] Bug report for %2$@ %3$@";
 "report_bug_heading1" = "Instructions:";
@@ -737,3 +728,9 @@
 "lang_default" = "İlkin təyin olunan";
 "my_notes_abbreviation" = "Qeydlərim";
 "sort_by_alphabetical" = "Əlifba sırası ilə";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"delete_module_index_title" = "Axtarış indeksini sil";

@@ -77,11 +77,11 @@
 "labels" = "လေဘယ်လ်များ";
 "new_label" = "လေဘယ်လ် အသစ်";
 "study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"my_notes" = "ကိုယ်ပိုင်မှတ်စုများ";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "သမ္မာကျမ်းစာဆိုင်ရာ အစီအစဉ်";
 "sort_date_created" = "Date Created";
 "sort_last_updated" = "Last Updated";
 "edit_labels" = "Edit Labels";
@@ -103,7 +103,7 @@
 "whole_bible" = "ကျမ်းစာတစ်အုပ်လုံး";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "လက်ရှိစာအုပ်";
 "search_index" = "အညွှန်း ရွေးချယ်ပါ";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -139,7 +139,7 @@
 "verse_per_line" = "တစ်ကြောင်းတွင် အခန်းငယ်တစ်ခုစီ";
 "hyphenation" = "တုံးတို";
 "settings_content" = "Content";
-"verse_numbers" = "အခန်းငယ် နံပါတ်များ";
+"verse_numbers" = "အခန်းငယ် နံပါတ်များကိုပြပါ";
 "section_titles" = "အစိတ်အပိုင်း ခေါင်းစဉ်များ";
 "footnotes" = "အောက်ခြေမှတ်စု";
 "inline_footnotes" = "Inline Footnotes";
@@ -160,8 +160,8 @@
 "background" = "နောက်ခံအရောင်";
 "reset_to_defaults" = "Reset to Defaults";
 "settings_dictionaries" = "အဘိဓာန်များ";
-"hebrew_dictionary" = "Hebrew Dictionary";
-"greek_dictionary" = "Greek Dictionary";
+"hebrew_dictionary" = "Strongs ​ဟီဘရူး အဘိဓာန်";
+"greek_dictionary" = "Strongs ဂရိ အဘိဓာန်";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
 "settings_data" = "Data";
 "import_export" = "Import & Export";
@@ -222,7 +222,7 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "Completed";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "စာဖတ်ခြင်း အစီအစဉ်တစ်ခုကို ရွေးချယ်ပါ";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "Custom";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
@@ -239,13 +239,13 @@
 "pause" = "ခေတ္တရပ်တန့်ရန်";
 "stop" = "ရပ်ပါ";
 "speed" = "Speed";
-"sleep_timer" = "Sleep Timer";
+"sleep_timer" = "အိပ်ချိန် သတ်မှတ်ချက်";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "ရပ်တန့်နေပါပြီ";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
-"speak_sleep_timer" = "Sleep Timer";
+"speak_sleep_timer" = "အိပ်ချိန် သတ်မှတ်ချက်";
 "compare_select_translations" = "Select Translations";
 "compare_choose_translations" = "Choose Translations";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
@@ -261,7 +261,7 @@
 "history_no_history" = "No History";
 "history_no_history_description" = "Navigation history will appear as you browse.";
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "အကြီးချဲ့ပါ";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "တွဲပါ";
@@ -328,22 +328,22 @@
 
 /* Quick Settings & Help */
 "fullscreen" = "မျက်နှာပြင်အပြည့်";
-"tilt_to_scroll" = "Tilt to Scroll";
+"tilt_to_scroll" = "အပေါ်အောက်ရွေ့ရန် တိမ်းစောင်းပါ";
 "reversed_split_mode" = "ခွဲခြမ်းခြင်းအသွင် ပြောင်းလဲခြင်း";
-"window_pinning" = "Window Pinning";
-"label_settings" = "Label Settings";
-"all_text_options" = "All Text Options";
-"help_tips" = "Help & Tips";
+"window_pinning" = "ဝင်းဒိုးတွင် တွဲထားခြင်း";
+"label_settings" = "လေဘယ်လ် ဆက်တင်များ";
+"all_text_options" = "စာသားအားလုံး ရွေးချယ်စရာများ";
+"help_tips" = "& ကိုကူညီပါ; အကြံပြုချက်များ";
 "sponsor_development" = "Sponsor Development";
 "help_navigation" = "ညွှန်ကြားပြသခြင်း";
 "help_navigation_body" = "Swipe left or right to move between chapters. Tap the book name in the toolbar to choose a different book and chapter.";
 "help_selection" = "Text Selection";
 "help_selection_body" = "Long-press on a verse to select it. An action bar appears with options: Bookmark, Copy, Share, Compare, Speak, and Web Search.";
-"help_pinning" = "Window Pinning";
+"help_pinning" = "ဝင်းဒိုးတွင် တွဲထားခြင်း";
 "help_pinning_body" = "When you have multiple windows, pin a window to keep it visible when switching Bible/Commentary categories.";
 "help_bookmarks" = "စာညှပ်များ";
 "help_bookmarks_body" = "Long-press a verse and tap Bookmark. Add labels to organize and notes for your thoughts.";
-"help_studypads" = "StudyPads";
+"help_studypads" = "လေ့လာရေးစာရွက်များ";
 "help_studypads_body" = "Rich text journals attached to labels. Access them from the label manager or bookmark list.";
 "help_search" = "ရှာဖွေပါ";
 "help_search_body" = "Full-text search with All Words, Any Word, and Phrase modes. You will be prompted to create an index on first use.";
@@ -719,31 +719,22 @@
 "unlock_info" = "စကားဝှက်ခံထားသည့်သင်ခန်းစာများ သော့ဖွင့်ခြင်း သတင်းအချက်အလက်";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "ဤဖိုင်များကိုတွဲပေးခြင်းဖြင့် သတင်းပို့ထားသည့်ချို့ယွင်းမှုများ ပြပြင်ရာတွင် ဖန်တီးသူများအား အထောက်အကူ ဖြစ်စေပါသည်။";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_email_text" = "Next, please select your preferred email application (Gmail for example) to send the report to the developer team.";
 "bug_report_email_title" = "Send bug report via email";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "ဤမျဉ်းအပေါ်တွင် သင်၏တုံ့ပြန်ချက် သို့မဟုတ် စက်ချို့ယွင်းမှုကို ကျေးဇူးပြုပြီး သတင်းပို့ပါ";
 "report_bug_email_subject_3" = "[%1$@] Bug report for %2$@ %3$@";
 "report_bug_heading1" = "လမ်းညွှန်ချက်များ";
@@ -905,3 +896,9 @@
 "prefs_top_margin_title_mm" = "အပေါ်မာဂျင် (%d mm)";
 "share_verse_widget_title" = "ရွေးချယ်မှုကို ဝေမျှပါ";
 "sort_by_alphabetical" = "အက္ခရာစဉ်";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"delete_module_index_title" = "အညွှန်း ရှာဖွေမှုကို ဖျက်ပါ";

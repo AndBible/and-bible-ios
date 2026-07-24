@@ -7,19 +7,70 @@ import BibleCore
 import UIKit
 #endif
 
+/**
+ Evidence that can only be captured on the main actor: the live window image and device identity.
+
+ The remaining collection work — log export, crash-diagnostic reads, and body formatting — is
+ file and log-store bound, so it runs off the main actor to keep the reader responsive while the
+ blocking collection dialog is visible.
+ */
+struct ProductFeedbackUIEvidence {
+    /// Captured app-window screenshot, or `nil` when capture failed.
+    let screenshot: AddressedMailAttachment?
+
+    /// Truthful preparation note recorded when the screenshot could not be captured.
+    let screenshotWarning: String?
+
+    /// User-facing device model description resolved from live UI state.
+    let deviceDescription: String
+}
+
 /** Builds an addressed, unsent manual diagnostic report before the consent prompt. */
-@MainActor
 enum ProductFeedbackReportPreparation {
     private static let screenshotByteLimit = 2 * 1_024 * 1_024
 
     /**
-     Prepares available app and device evidence without uploading or sending it.
+     Captures the evidence that requires live main-actor UI access.
 
-     - Returns: A complete, pre-addressed payload the reader may present only after consent.
-     - Side effects: Captures the current app window when available.
-     - Failure modes: Screenshot failure becomes a truthful preparation note; remaining evidence is retained.
+     - Returns: Screenshot evidence or its warning, plus the device description for the report body.
+     - Side effects: Renders the current key window when one is available.
+     - Failure modes: Screenshot failure becomes a truthful preparation note; the report proceeds.
      */
-    static func prepare() -> AddressedMailPayload {
+    @MainActor
+    static func captureUIEvidence() -> ProductFeedbackUIEvidence {
+        #if os(iOS)
+        let device = UIDevice.current
+        let deviceDescription = "\(device.model) (\(device.userInterfaceIdiom == .pad ? "iPad" : "iPhone"))"
+        if let screenshot = currentWindowScreenshot() {
+            return ProductFeedbackUIEvidence(
+                screenshot: .init(data: screenshot, filename: "current_window.jpg", mimeType: "image/jpeg"),
+                screenshotWarning: nil,
+                deviceDescription: deviceDescription
+            )
+        }
+        return ProductFeedbackUIEvidence(
+            screenshot: nil,
+            screenshotWarning: String(
+                localized: "bug_report_screenshot_unavailable",
+                defaultValue: "Current app-window screenshot could not be captured."
+            ),
+            deviceDescription: deviceDescription
+        )
+        #else
+        return ProductFeedbackUIEvidence(screenshot: nil, screenshotWarning: nil, deviceDescription: "Unavailable")
+        #endif
+    }
+
+    /**
+     Prepares the complete report from pre-captured UI evidence without touching the main actor.
+
+     - Parameter uiEvidence: Screenshot and device identity captured on the main actor first.
+     - Returns: A complete, pre-addressed payload the reader may present only after consent.
+     - Side effects: Reads the process log store and any retained crash diagnostic.
+     - Failure modes: Log capture failure becomes a truthful preparation note; remaining evidence
+       is retained. Attachment order stays log, screenshot, then crash diagnostic.
+     */
+    nonisolated static func prepare(uiEvidence: ProductFeedbackUIEvidence) -> AddressedMailPayload {
         let metadata = AndBibleAppVersionMetadata.current()
         var attachments: [AddressedMailAttachment] = []
         var warnings: [String] = []
@@ -28,19 +79,21 @@ enum ProductFeedbackReportPreparation {
         case .attachment(let log): attachments.append(log)
         case .unavailable(let warning): warnings.append(warning)
         }
-        if let screenshot = currentWindowScreenshot() {
-            attachments.append(.init(data: screenshot, filename: "current_window.jpg", mimeType: "image/jpeg"))
-        } else {
-            warnings.append(String(
-                localized: "bug_report_screenshot_unavailable",
-                defaultValue: "Current app-window screenshot could not be captured."
-            ))
+        if let screenshot = uiEvidence.screenshot {
+            attachments.append(screenshot)
+        } else if let screenshotWarning = uiEvidence.screenshotWarning {
+            warnings.append(screenshotWarning)
         }
         if let recentCrash = RecentCrashDiagnosticStore.shared.recentAttachment() {
             attachments.append(recentCrash)
         }
         #endif
-        return makePayload(metadata: metadata, attachments: attachments, warnings: warnings)
+        return makePayload(
+            metadata: metadata,
+            attachments: attachments,
+            warnings: warnings,
+            deviceDescription: uiEvidence.deviceDescription
+        )
     }
 
     /**
@@ -52,7 +105,8 @@ enum ProductFeedbackReportPreparation {
     static func makePayload(
         metadata: AndBibleAppVersionMetadata,
         attachments: [AddressedMailAttachment],
-        warnings: [String]
+        warnings: [String],
+        deviceDescription: String
     ) -> AddressedMailPayload {
         let attachmentEvidence = attachments.isEmpty
             ? String(
@@ -87,23 +141,31 @@ enum ProductFeedbackReportPreparation {
         return AddressedMailPayload(
             recipient: ProductFeedbackContract.diagnosticRecipient,
             subject: subject,
-            body: diagnosticBody(metadata: metadata, attachmentDescription: attachmentDescription) + notes,
+            body: diagnosticBody(
+                metadata: metadata,
+                attachmentDescription: attachmentDescription,
+                deviceDescription: deviceDescription
+            ) + notes,
             attachments: attachments
         )
     }
 
-    /** Builds credential-free report metadata after evidence collection has completed. */
-    private static func diagnosticBody(metadata: AndBibleAppVersionMetadata, attachmentDescription: String) -> String {
+    /**
+     Builds credential-free report metadata after evidence collection has completed.
+
+     The device-info labels are intentionally unlocalized English literals, matching Android's
+     `BugReport.createErrorText`, so the developer team can read every submitted report regardless
+     of the sender's locale. User-facing headings above this block remain Android-localized.
+     */
+    private static func diagnosticBody(
+        metadata: AndBibleAppVersionMetadata,
+        attachmentDescription: String,
+        deviceDescription: String
+    ) -> String {
         let bundle = Bundle.main
         let processInfo = ProcessInfo.processInfo
-        let unavailable = String(localized: "bug_report_unavailable", defaultValue: "Unavailable")
+        let unavailable = "Unavailable"
         let freeStorage = (try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage.map(String.init) ?? unavailable
-        #if os(iOS)
-        let device = UIDevice.current
-        let deviceDescription = "\(device.model) (\(device.userInterfaceIdiom == .pad ? "iPad" : "iPhone"))"
-        #else
-        let deviceDescription = unavailable
-        #endif
         return """
         \(String(localized: "report_bug_big_heading", defaultValue: "PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE"))
 
@@ -113,19 +175,20 @@ enum ProductFeedbackReportPreparation {
         \(attachmentDescription)
 
         \(String(localized: "report_bug_heading_4", defaultValue: "Device info:"))
-        \(String(localized: "bug_report_app_id", defaultValue: "App id:")) \(bundle.bundleIdentifier ?? unavailable)
-        \(String(localized: "bug_report_version", defaultValue: "Version:")) \(metadata.detailText)
-        \(String(localized: "bug_report_operating_system", defaultValue: "Operating system:")) \(processInfo.operatingSystemVersionString)
-        \(String(localized: "bug_report_device", defaultValue: "Device:")) \(deviceDescription)
-        \(String(localized: "bug_report_locale", defaultValue: "Locale:")) \(Locale.current.identifier)
-        \(String(localized: "bug_report_time_zone", defaultValue: "Time zone:")) \(TimeZone.current.identifier)
-        \(String(localized: "bug_report_physical_memory", defaultValue: "Physical memory bytes:")) \(processInfo.physicalMemory)
-        \(String(localized: "bug_report_free_storage", defaultValue: "Free storage bytes:")) \(freeStorage)
+        App id: \(bundle.bundleIdentifier ?? unavailable)
+        Version: \(metadata.detailText)
+        Operating system: \(processInfo.operatingSystemVersionString)
+        Device: \(deviceDescription)
+        Locale: \(Locale.current.identifier)
+        Time zone: \(TimeZone.current.identifier)
+        Physical memory bytes: \(processInfo.physicalMemory)
+        Free storage bytes: \(freeStorage)
         """
     }
 
     #if os(iOS)
     /** Captures the key app window and progressively lowers resolution/quality to the 2 MiB ceiling. */
+    @MainActor
     private static func currentWindowScreenshot() -> Data? {
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows).first(where: \.isKeyWindow), window.bounds.width > 0, window.bounds.height > 0 else { return nil }
         let sourceSize = window.bounds.size

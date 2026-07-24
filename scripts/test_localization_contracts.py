@@ -168,6 +168,7 @@ class ProductFeedbackLocalizationContractTests(unittest.TestCase):
             "ProductFeedbackLogExporter.swift",
             "ProductFeedbackReportExport.swift",
             "ProductFeedbackReportPreparation.swift",
+            "ShareSheet.swift",
         ]
         source_root = REPO_ROOT / "Sources/BibleUI/Sources/BibleUI/Shared"
         source = "\n".join(

@@ -867,7 +867,12 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
         )
 
     def test_product_feedback_sync_covers_every_key_and_removes_superseded_copy(self) -> None:
-        """Covers Android report text, iOS evidence fallbacks, and obsolete-key removal."""
+        """Covers Android-sourced report translations and obsolete-key removal.
+
+        Every product-feedback key is Android-owned, so previously iOS-only strings such as
+        `bug_report_screenshot_unavailable` must receive the Android locale translation instead
+        of a hardcoded English fallback.
+        """
         english_by_key = {
             key: f"English {key}"
             for key in localization_guardrails.PRODUCT_FEEDBACK_ANDROID_KEYS
@@ -923,9 +928,7 @@ class SettingsLocalizationGuardrailTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     french["bug_report_screenshot_unavailable"],
-                    localization_guardrails.PRODUCT_FEEDBACK_IOS_FALLBACKS[
-                        "bug_report_screenshot_unavailable"
-                    ],
+                    "Francais bug_report_screenshot_unavailable",
                 )
                 self.assertNotIn("bug_report_attached_evidence", french)
                 self.assertNotIn("bug_report_reproduction_prompt", french)

@@ -106,14 +106,14 @@
 "bookmark_note" = "Note";
 "labels" = "Etiketter";
 "new_label" = "New Label";
-"study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"study_pad" = "Studieblok";
+"my_notes" = "Mine noter";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "Bibelsk orden";
 "sort_date_created" = "Date Created";
-"sort_last_updated" = "Last Updated";
+"sort_last_updated" = "Sidst opdateret den";
 "edit_labels" = "Edit Labels";
 "add_labels" = "Add labels";
 "open_studypad_for_label %@" = "Open \"%@\" StudyPad";
@@ -121,7 +121,7 @@
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
 "studypad" = "Studieblok";
-"open_studypad" = "Open StudyPad";
+"open_studypad" = "Åbn studieblok";
 "edit_label" = "Redigér etiket";
 "label_edit_name" = "Navn";
 "label_edit_color" = "Color";
@@ -129,7 +129,7 @@
 "no_icon" = "No Icon";
 "label_edit_options" = "Options";
 "favourite" = "Favourite";
-"underline_style" = "Underline Style";
+"underline_style" = "Understregning";
 "underline_whole_verse" = "Underline Whole Verse";
 "studypad_empty" = "Empty StudyPad";
 "studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
@@ -146,7 +146,7 @@
 "whole_bible" = "Hele Bibelen";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "Aktuel bog";
 "search_index" = "Søgeindeks";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -154,7 +154,7 @@
 "search_indexing_message" = "Når indekseringen er færdig, føres du til søgeskærmen.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
-"search_bible_text" = "Search Bible text";
+"search_bible_text" = "Søg i Bibelen";
 "search_match" = "Match";
 "search_scope_all" = "Alle";
 "search_scope_ot" = "OT";
@@ -191,7 +191,7 @@
 "delete_module_index" = "Delete Index";
 "uninstall_module_title" = "Uninstall Module";
 "uninstall_module_message_format" = "Remove %@ from this device?";
-"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_title" = "Slet søgeindeks";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
 "module_name" = "Navn";
@@ -200,11 +200,11 @@
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
-"module_installed_version" = "Installed";
+"module_installed_version" = "Installeret";
 "module_version_unavailable" = "No version metadata available.";
 "module_install_size" = "Install size";
 "module_local_state" = "Local State";
-"module_installed" = "Installed";
+"module_installed" = "Installeret";
 "module_encrypted" = "Encrypted";
 "module_unlocked" = "Unlocked";
 "module_locked" = "Locked";
@@ -220,41 +220,41 @@
 "font_size" = "Size";
 "font_family" = "Family";
 "settings_layout" = "Layout";
-"line_spacing" = "Line Spacing";
-"justify_text" = "Justify Text";
-"verse_per_line" = "Verse Per Line";
+"line_spacing" = "Linjeafstand";
+"justify_text" = "Juster-justeret tekst";
+"verse_per_line" = "Ét vers pr. linje";
 "hyphenation" = "Orddeling";
 "settings_content" = "Indhold";
-"verse_numbers" = "Verse Numbers";
-"section_titles" = "Section Titles";
+"verse_numbers" = "Vis versnumre";
+"section_titles" = "Afsnitstitel";
 "footnotes" = "Fodnoter";
 "inline_footnotes" = "Inline Footnotes";
-"red_letters" = "Red Letters";
+"red_letters" = "Røde bogstaver";
 "cross_references" = "Krydshenvisninger";
 "expand_cross_references" = "Expand Cross References";
-"strongs_numbers" = "Strong's Numbers";
+"strongs_numbers" = "Strongs numre";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
 "show_bookmarks" = "Vis bogmærker";
 "show_my_notes" = "Show My Notes";
-"verse_selection" = "Verse Selection";
+"verse_selection" = "Versvalg";
 
 /* Colors */
 "colors" = "Colors";
-"night_mode" = "Night Mode";
+"night_mode" = "Nattilstand";
 "day_theme" = "Day Theme";
 "night_theme" = "Night Theme";
-"text_color" = "Text Color";
-"background" = "Background";
+"text_color" = "Tekstfarve";
+"background" = "Baggrundsfarve";
 "color_workspace" = "Arbejdsområdefarve";
 "prefs_noise_title" = "Baggrundsstøj";
 "prefs_noise_summary" = "Tilføjelse af lidt støj til baggrunden kan gøre den mere behagelig for øjnene.";
-"reset_to_defaults" = "Reset to Defaults";
+"reset_to_defaults" = "Nulstil til standard";
 
 /* Dictionaries */
 "settings_dictionaries" = "Ordbøger";
-"hebrew_dictionary" = "Hebrew Dictionary";
-"greek_dictionary" = "Greek Dictionary";
+"hebrew_dictionary" = "Strongs hebraiske ordbog";
+"greek_dictionary" = "Strongs græske ordbog";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
 
 /* Data */
@@ -313,7 +313,7 @@
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
-"add_custom_repository" = "Add custom repository";
+"add_custom_repository" = "Tilføj tilpasset arkiv";
 "custom_repositories" = "Tilpassede arkiver";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
@@ -343,12 +343,12 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "Fuldført";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "Vælg en læseplan";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "Brugerdefineret";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
-"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_read" = "Kan ikke læse filen";
 "reading_plan_import_error_format" = "Invalid reading plan format";
 "plan_duplicate_user_plan" = "Der er en brugerdefineret læseplan på sdcard jsword/readingplan med samme navn som en intern plan. Den kan ikke vises her. Omdøb venligst filen til noget andet, og behold filendelsen .properties";
 
@@ -367,19 +367,19 @@
 "pause" = "Pause";
 "stop" = "Stop";
 "speed" = "Speed";
-"sleep_timer" = "Sleep Timer";
+"sleep_timer" = "Sove-timer";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "stoppet";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
-"speak_sleep_timer" = "Sleep Timer";
+"speak_sleep_timer" = "Sove-timer";
 
 /* ========================================
    Compare Translations
    ======================================== */
 "compare_select_translations" = "Select Translations";
-"compare_choose_translations" = "Choose Translations";
+"compare_choose_translations" = "Vælg oversættelser…";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
 "compare_loading_translations" = "Loading translations...";
 "compare_select_translations_header" = "Select translations to compare";
@@ -409,7 +409,7 @@
    Window Management
    ======================================== */
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "Maksimér";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "Fastgør";
@@ -543,7 +543,7 @@
 "text_display_font_size_title_format" = "Skriftstørrelse (%d pt)";
 "text_display_font_family_title_format" = "Skriftfamilie (%@)";
 "text_display_line_spacing_title_format" = "Linjeafstand (%1.1fx)";
-"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_margin_size_title_format" = "Margenbredde (%1$d/%2$d/%3$d mm)";
 "text_display_top_margin_title_format" = "Øverste margen (%d mm)";
 "text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
 "text_display_left_margin_title_format" = "Venstremargen (%d mm)";
@@ -649,7 +649,7 @@
 "auth_folder_path_summary" = "Overordnet mappe for synkroniseringsdata (tom = rod)";
 "invalid_url_message" = "Den URL, du har indtastet, er ugyldig. Indtast venligst en gyldig URL (f.eks. https://nextcloud.example.com)";
 "prefs_sync_introduction_summary1" = "Vælg hvilken cloud-tjeneste du vil bruge til at synkronisere flere enheder.";
-"test_connection" = "Test Connection";
+"test_connection" = "Test forbindelsen";
 "overrideBackup" = "En eksisterende database, som denne enhed ikke er synkroniseret til, er fundet i Cloud. Databasen indeholder %@. Hvad vil du gøre?";
 "cloud_fetch_and_restore_initial" = "Kopiér fra Cloud til denne enhed";
 "cloud_create_new" = "Kopiér fra denne enhed til Cloud";
@@ -716,17 +716,17 @@
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
 "cross_references" = "Krydshenvisninger";
-"verse_per_line" = "Verse per line";
+"verse_per_line" = "Ét vers pr. linje";
 "show_bookmarks" = "Vis bogmærker";
 "hide_labels" = "Hide labels";
-"my_notes" = "My notes";
+"my_notes" = "Mine noter";
 "page_number" = "Page number";
 "infinite_scroll" = "Uendelig rulning";
 "non_strongs_word_italic" = "Kursivér tilføjede ord";
 "mark_as_read_button" = "Knap til at markere som læst";
 "title_scroll_button" = "Rulleknap til titel";
 "memorization_indicators" = "Memoriseringsindikatorer";
-"ai_document_markers" = "AI document markers";
+"ai_document_markers" = "Vis AI-dokumentmarkører";
 "page_scroll_amount" = "Sidescrullmængde";
 "ordinals" = "Ordinals";
 
@@ -1369,29 +1369,20 @@
 "word_not_found_in_dictionaries" = "Ordet blev ikke fundet i nogen ordbog";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "At have disse filer vedhæftet hjælper app-udviklerne meget med at rette den rapporterede fejl.";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "SKRIV VENLIGST DIN TILBAGEMELDING ELLER FEJLRAPPORT OVER DENNE LINJE";
 "report_bug_email_subject_3" = "[%1$@] Fejlrapport for %2$@ %3$@";
 "report_bug_heading1" = "Vejledning:";
@@ -1645,3 +1636,19 @@
 "prefs_top_margin_title_mm" = "Øverste margen (%d mm)";
 "share_verse_widget_title" = "Del markering";
 "sort_by_alphabetical" = "Alfabetisk orden";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"all_text_options" = "Alle tekstindstillinger";
+"backup_modules" = "Sikkerhedskopier dokumenter til…";
+"help_pinning" = "Fastgøring af vindue";
+"help_selection" = "Tekstvalg";
+"help_studypads" = "Studieblokke";
+"help_tips" = "Hjælp og tips";
+"label_settings" = "Etiketindstillinger";
+"move_down" = "Flyt ned";
+"move_up" = "Flyt op";
+"tilt_to_scroll" = "Vip for at rulle";
+"window_pinning" = "Fastgøring af vindue";

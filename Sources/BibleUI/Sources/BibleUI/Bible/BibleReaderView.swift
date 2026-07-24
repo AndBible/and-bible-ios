@@ -321,6 +321,9 @@ public struct BibleReaderView: View {
     /// Complete ZIP retained only while the user chooses an export destination after unavailable mail.
     @State private var manualBugReportExport: ProductFeedbackReportExport?
 
+    /// Written ZIP retained for file cleanup on share dismissal paths that clear the sheet item first.
+    @State private var manualBugReportExportPendingCleanup: ProductFeedbackReportExport?
+
     /// Initial search applied when Downloads is opened from an Android-compatible download link.
     @State private var downloadsInitialSearchText = ""
 
@@ -916,7 +919,7 @@ public struct BibleReaderView: View {
                     commentaryQuickModuleSelectorOverlay(anchor: anchor)
                 }
             }
-            .sheet(item: $manualBugReportMailPayload) { payload in
+            .sheet(item: $manualBugReportMailPayload, onDismiss: finishBugReportMailPresentation) { payload in
                 AddressedMailComposer(payload: payload, onFinish: {
                     manualBugReportMailPayload = nil
                 }, onResult: { result in
@@ -924,12 +927,9 @@ public struct BibleReaderView: View {
                     manualBugReportPreparedPayload = nil
                 })
             }
-            .sheet(item: $manualBugReportExport) { export in
+            .sheet(item: $manualBugReportExport, onDismiss: finishBugReportExportShare) { export in
                 ShareSheet(items: [export.fileURL]) { _ in
-                    ProductFeedbackReportExportBuilder.remove(export)
                     manualBugReportExport = nil
-                    manualBugReportCoordinator.completeExport(success: true)
-                    manualBugReportPreparedPayload = nil
                 }
             }
     }
@@ -2823,20 +2823,29 @@ public struct BibleReaderView: View {
         manualBugReportCoordinator.cancel()
         manualBugReportPreparedPayload = nil
         manualBugReportMailPayload = nil
-        if let export = manualBugReportExport {
+        if let export = manualBugReportExportPendingCleanup ?? manualBugReportExport {
             ProductFeedbackReportExportBuilder.remove(export)
         }
+        manualBugReportExportPendingCleanup = nil
         manualBugReportExport = nil
     }
 
-    /// Collects available evidence before showing Android's manual-report consent question.
+    /**
+     Collects available evidence before showing Android's manual-report consent question.
+
+     Screenshot and device identity are captured on the main actor first; log and crash-diagnostic
+     collection then runs off the main actor so large evidence cannot freeze the reader behind the
+     blocking collection dialog. A cancellation during collection drops the finished payload.
+     */
     private func presentBugReportDialog() {
         guard manualBugReportCoordinator.beginCollection() else { return }
-        Task { @MainActor in
-            await Task.yield()
-            let payload = ProductFeedbackReportPreparation.prepare()
-            guard manualBugReportCoordinator.completeCollection() else { return }
-            manualBugReportPreparedPayload = payload
+        let uiEvidence = ProductFeedbackReportPreparation.captureUIEvidence()
+        Task.detached(priority: .userInitiated) {
+            let payload = ProductFeedbackReportPreparation.prepare(uiEvidence: uiEvidence)
+            await MainActor.run {
+                guard manualBugReportCoordinator.completeCollection() else { return }
+                manualBugReportPreparedPayload = payload
+            }
         }
     }
 
@@ -2848,15 +2857,46 @@ public struct BibleReaderView: View {
         manualBugReportMailPayload = payload
     }
 
-    /** Builds and presents one complete ZIP only after Mail availability has been made explicit. */
+    /**
+     Builds one complete ZIP only after Mail availability has been made explicit, then shares it.
+
+     The preparation phase ends as soon as the ZIP is written, before the share sheet presents.
+     The system share surface cannot guarantee a completion callback on every dismissal path, so no
+     coordinator phase may depend on one; `finishBugReportExportShare` owns file cleanup instead.
+     */
     private func exportPreparedBugReport(_ payload: AddressedMailPayload) {
         guard manualBugReportCoordinator.beginExport() else { return }
         do {
             let export = try ProductFeedbackReportExportBuilder.write(payload: payload)
+            manualBugReportCoordinator.completeExport(success: true)
+            manualBugReportPreparedPayload = nil
+            manualBugReportExportPendingCleanup = export
             manualBugReportExport = export
         } catch {
             manualBugReportCoordinator.completeExport(success: false)
         }
+    }
+
+    /**
+     Ends a Mail handoff whose sheet closed without delivering a composer delegate result.
+
+     Mail sheet dismissal is not guaranteed to route through `MFMailComposeViewController`'s
+     delegate on every platform path, so the coordinator phase may not depend on one. A normal
+     delegate result has already returned the phase to idle, making this cleanup a no-op.
+     */
+    private func finishBugReportMailPresentation() {
+        manualBugReportCoordinator.finishMail(.cancelled)
+        manualBugReportMailPayload = nil
+        manualBugReportPreparedPayload = nil
+    }
+
+    /** Deletes the temporary report ZIP after the share surface closes on any dismissal path. */
+    private func finishBugReportExportShare() {
+        if let export = manualBugReportExportPendingCleanup {
+            ProductFeedbackReportExportBuilder.remove(export)
+        }
+        manualBugReportExportPendingCleanup = nil
+        manualBugReportExport = nil
     }
 
     /**
