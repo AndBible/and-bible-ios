@@ -106,14 +106,14 @@
 "bookmark_note" = "Note";
 "labels" = "Label";
 "new_label" = "New Label";
-"study_pad" = "StudyPad";
-"my_notes" = "My Notes";
+"study_pad" = "Pad Kajian";
+"my_notes" = "Nota Saya";
 "no_bookmarks" = "No Bookmarks";
 "no_bookmarks_description" = "Long-press on a verse to add a bookmark.";
 "search_bookmarks" = "Search bookmarks";
-"sort_bible_order" = "Bible Order";
+"sort_bible_order" = "Susunan Alkitab";
 "sort_date_created" = "Date Created";
-"sort_last_updated" = "Last Updated";
+"sort_last_updated" = "Dikemas kini terakhir pada";
 "edit_labels" = "Edit Labels";
 "add_labels" = "Add labels";
 "open_studypad_for_label %@" = "Open \"%@\" StudyPad";
@@ -121,7 +121,7 @@
 "no_labels_description" = "Create labels to organize your bookmarks and notes.";
 "label_name" = "Label name";
 "studypad" = "Pad Kajian";
-"open_studypad" = "Open StudyPad";
+"open_studypad" = "Buka pad kajian";
 "edit_label" = "Edit label";
 "label_edit_name" = "Nama";
 "label_edit_color" = "Color";
@@ -129,7 +129,7 @@
 "no_icon" = "No Icon";
 "label_edit_options" = "Options";
 "favourite" = "Favourite";
-"underline_style" = "Underline Style";
+"underline_style" = "Garis bawah";
 "underline_whole_verse" = "Underline Whole Verse";
 "studypad_empty" = "Empty StudyPad";
 "studypad_empty_description" = "Add notes or bookmark verses to build your study journal.";
@@ -146,7 +146,7 @@
 "whole_bible" = "Seluruh Alkitab";
 "old_testament_short" = "OT";
 "new_testament_short" = "NT";
-"current_book" = "Current Book";
+"current_book" = "Buku semasa";
 "search_index" = "Indeks Carian";
 "search_checking_index" = "Checking index...";
 "search_need_index" = "To search a document we need an index.";
@@ -154,7 +154,7 @@
 "search_indexing_message" = "Apabila pengindeksan selesai, anda akan dibawa ke skrin carian.";
 "search_searching" = "Searching...";
 "search_enter_prompt" = "Enter a word or phrase to search";
-"search_bible_text" = "Search Bible text";
+"search_bible_text" = "Cari Alkitab";
 "search_match" = "Match";
 "search_scope_all" = "Semua";
 "search_scope_ot" = "OT";
@@ -191,7 +191,7 @@
 "delete_module_index" = "Delete Index";
 "uninstall_module_title" = "Uninstall Module";
 "uninstall_module_message_format" = "Remove %@ from this device?";
-"delete_module_index_title" = "Delete Search Index";
+"delete_module_index_title" = "Padamkan indeks carian";
 "delete_module_index_message_format" = "Delete the search index for %@?";
 "module_initials" = "Initials";
 "module_name" = "Nama";
@@ -200,11 +200,11 @@
 "module_source" = "Source";
 "module_versions" = "Versions";
 "module_latest_version" = "Latest";
-"module_installed_version" = "Installed";
+"module_installed_version" = "Dipasang";
 "module_version_unavailable" = "No version metadata available.";
 "module_install_size" = "Install size";
 "module_local_state" = "Local State";
-"module_installed" = "Installed";
+"module_installed" = "Dipasang";
 "module_encrypted" = "Encrypted";
 "module_unlocked" = "Unlocked";
 "module_locked" = "Locked";
@@ -220,41 +220,41 @@
 "font_size" = "Size";
 "font_family" = "Family";
 "settings_layout" = "Layout";
-"line_spacing" = "Line Spacing";
-"justify_text" = "Justify Text";
-"verse_per_line" = "Verse Per Line";
+"line_spacing" = "Jarak baris";
+"justify_text" = "Rata kanan-kiri teks";
+"verse_per_line" = "Satu ayat setiap baris";
 "hyphenation" = "Pemotongan suku kata";
 "settings_content" = "Kandungan";
-"verse_numbers" = "Verse Numbers";
-"section_titles" = "Section Titles";
+"verse_numbers" = "Tunjukkan nombor ayat";
+"section_titles" = "Tajuk bahagian";
 "footnotes" = "Nota kaki";
 "inline_footnotes" = "Inline Footnotes";
-"red_letters" = "Red Letters";
+"red_letters" = "Huruf Merah";
 "cross_references" = "Rujukan silang";
 "expand_cross_references" = "Expand Cross References";
-"strongs_numbers" = "Strong's Numbers";
+"strongs_numbers" = "Nombor Strong's";
 "morphology" = "Morphology";
 "settings_annotations" = "Annotations";
 "show_bookmarks" = "Tunjukkan penanda buku";
 "show_my_notes" = "Show My Notes";
-"verse_selection" = "Verse Selection";
+"verse_selection" = "Pemilihan ayat";
 
 /* Colors */
 "colors" = "Colors";
-"night_mode" = "Night Mode";
+"night_mode" = "Mod malam";
 "day_theme" = "Day Theme";
 "night_theme" = "Night Theme";
-"text_color" = "Text Color";
-"background" = "Background";
+"text_color" = "Warna teks";
+"background" = "Warna latar belakang";
 "color_workspace" = "Warna ruang kerja";
 "prefs_noise_title" = "Hingar latar belakang";
 "prefs_noise_summary" = "Menambah sedikit hingar pada latar belakang mungkin menjadikannya lebih selesa untuk mata.";
-"reset_to_defaults" = "Reset to Defaults";
+"reset_to_defaults" = "Set semula ke lalai";
 
 /* Dictionaries */
 "settings_dictionaries" = "Kamus";
-"hebrew_dictionary" = "Hebrew Dictionary";
-"greek_dictionary" = "Greek Dictionary";
+"hebrew_dictionary" = "Kamus Ibrani Strong's";
+"greek_dictionary" = "Kamus Greek Strong's";
 "no_dictionaries_hint" = "No dictionary modules installed. Download Strong's Hebrew/Greek from Downloads.";
 
 /* Data */
@@ -313,7 +313,7 @@
 "sources_count_%lld_%lld" = "%lld sources configured, %lld enabled";
 "reset_sources_title" = "Reset Sources?";
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
-"add_custom_repository" = "Add custom repository";
+"add_custom_repository" = "Tambah Repositori Tersuai";
 "custom_repositories" = "Repositori tersuai";
 "custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
@@ -343,12 +343,12 @@
 "reading_plan_start" = "Start Plan";
 "reading_plan_active" = "Active Plans";
 "reading_plan_completed" = "Selesai";
-"reading_plan_choose" = "Choose a reading plan to start";
+"reading_plan_choose" = "Pilih Rancangan Bacaan";
 "reading_plan_import_custom" = "Import Custom Plan";
 "reading_plan_custom" = "Tersuai";
 "reading_plan_import_footer" = "Import a .properties file in the AndBible reading plan format.";
 "reading_plan_available" = "Available Plans";
-"reading_plan_import_error_read" = "Could not read file";
+"reading_plan_import_error_read" = "Tidak dapat membaca fail";
 "reading_plan_import_error_format" = "Invalid reading plan format";
 "plan_duplicate_user_plan" = "Terdapat rancangan bacaan pengguna dalam sdcard jsword/readingplan dengan nama yang sama seperti rancangan dalaman. Ia tidak dapat disenaraikan di sini. Sila namakan semula fail tersebut kepada nama lain, dengan mengekalkan sambungan fail sebagai .properties";
 
@@ -367,19 +367,19 @@
 "pause" = "Jeda";
 "stop" = "Berhenti";
 "speed" = "Speed";
-"sleep_timer" = "Sleep Timer";
+"sleep_timer" = "Pemasa tidur";
 "speak_now_speaking" = "Now Speaking";
-"speak_stopped" = "Stopped";
+"speak_stopped" = "dihentikan";
 "speak_paused" = "Paused";
 "speak_playing" = "Playing";
 "speak_speed" = "Speed";
-"speak_sleep_timer" = "Sleep Timer";
+"speak_sleep_timer" = "Pemasa tidur";
 
 /* ========================================
    Compare Translations
    ======================================== */
 "compare_select_translations" = "Select Translations";
-"compare_choose_translations" = "Choose Translations";
+"compare_choose_translations" = "Pilih terjemahan…";
 "compare_install_additional_modules" = "Install additional Bible modules from Downloads to compare translations.";
 "compare_loading_translations" = "Loading translations...";
 "compare_select_translations_header" = "Select translations to compare";
@@ -409,7 +409,7 @@
    Window Management
    ======================================== */
 "restore_size" = "Restore Size";
-"maximize" = "Maximize";
+"maximize" = "Maksimumkan";
 "minimize" = "Minimize";
 "sync_scrolling" = "Sync Scrolling";
 "pin" = "Tetap";
@@ -543,7 +543,7 @@
 "text_display_font_size_title_format" = "Saiz fon (%d pt)";
 "text_display_font_family_title_format" = "Keluarga fon (%@)";
 "text_display_line_spacing_title_format" = "Jarak baris (%1.1fx)";
-"text_display_margin_size_title_format" = "Margin size (%d/%d/%d mm)";
+"text_display_margin_size_title_format" = "Saiz jidar (%1$d/%2$d/%3$d mm)";
 "text_display_top_margin_title_format" = "Jidar atas (%d mm)";
 "text_display_page_scroll_amount_title_format" = "Page scroll amount (%d%%)";
 "text_display_left_margin_title_format" = "Jidar kiri (%d mm)";
@@ -649,7 +649,7 @@
 "auth_folder_path_summary" = "Folder induk untuk data segerak (kosong = akar)";
 "invalid_url_message" = "URL yang anda masukkan tidak sah. Sila masukkan URL yang sah (cth., https://nextcloud.contoh.com)";
 "prefs_sync_introduction_summary1" = "Pilih perkhidmatan awan bahagian belakang yang ingin anda gunakan untuk menyegerakkan pelbagai peranti.";
-"test_connection" = "Test Connection";
+"test_connection" = "Uji sambungan";
 "overrideBackup" = "Pangkalan data sedia ada yang tidak disegerakkan dengan peranti ini ditemui dalam Awan. Pangkalan data mengandungi %@. Apa yang anda ingin lakukan?";
 "cloud_fetch_and_restore_initial" = "Salin dari Awan ke peranti ini";
 "cloud_create_new" = "Salin dari peranti ini ke Awan";
@@ -716,17 +716,17 @@
 "footnotes_inline" = "Inline footnotes";
 "expand_cross_references" = "Expand cross references";
 "cross_references" = "Rujukan silang";
-"verse_per_line" = "Verse per line";
+"verse_per_line" = "Satu ayat setiap baris";
 "show_bookmarks" = "Tunjukkan penanda buku";
 "hide_labels" = "Hide labels";
-"my_notes" = "My notes";
+"my_notes" = "Nota Saya";
 "page_number" = "Page number";
 "infinite_scroll" = "Tatal tanpa had";
 "non_strongs_word_italic" = "Italikkan perkataan tambahan";
 "mark_as_read_button" = "Butang tandakan sebagai dibaca";
 "title_scroll_button" = "Butang tatal tajuk";
 "memorization_indicators" = "Penunjuk hafalan";
-"ai_document_markers" = "AI document markers";
+"ai_document_markers" = "Tunjukkan penanda dokumen AI";
 "page_scroll_amount" = "Jumlah tatal halaman";
 "ordinals" = "Ordinals";
 
@@ -1369,29 +1369,20 @@
 "word_not_found_in_dictionaries" = "Perkataan tidak ditemui dalam mana-mana kamus";
 
 /* Android shared translations */
-"bug_report_app_id" = "App id:";
 "bug_report_archive_too_large" = "The complete bug report is too large to export.";
 "bug_report_attachment_line_1" = "Mempunyai fail-fail ini dilampirkan sangat membantu pembangun aplikasi dalam memperbaiki pepijat yang dilaporkan.";
 "bug_report_attachment_too_large" = "Attachment is too large to export: %@";
 "bug_report_collecting_evidence" = "Collecting available diagnostic evidence. Nothing has been sent.";
-"bug_report_device" = "Device:";
 "bug_report_export" = "Export report";
 "bug_report_export_failed" = "The report could not be exported. No bug report has been sent.";
 "bug_report_export_preparing" = "Preparing your report for export. Nothing has been sent.";
-"bug_report_free_storage" = "Free storage bytes:";
-"bug_report_locale" = "Locale:";
 "bug_report_log_empty" = "Current-process application log contained no exportable entries.";
 "bug_report_log_unavailable" = "Current-process application log could not be captured.";
 "bug_report_mail_unavailable" = "Mail is not configured on this device. No bug report has been sent.";
 "bug_report_no_attachments" = "No diagnostic attachments were available.";
 "bug_report_not_sent" = "Bug report not sent";
-"bug_report_operating_system" = "Operating system:";
-"bug_report_physical_memory" = "Physical memory bytes:";
 "bug_report_preparation_notes" = "Preparation notes:";
 "bug_report_screenshot_unavailable" = "Current app-window screenshot could not be captured.";
-"bug_report_time_zone" = "Time zone:";
-"bug_report_unavailable" = "Unavailable";
-"bug_report_version" = "Version:";
 "report_bug_big_heading" = "SILA TULIS MAKLUM BALAS ATAU LAPORAN PEPIJAT ANDA DI ATAS BARIS INI";
 "report_bug_email_subject_3" = "[%1$@] Laporan pepijat untuk %2$@ %3$@";
 "report_bug_heading1" = "Arahan:";
@@ -1647,3 +1638,19 @@
 "prefs_top_margin_title_mm" = "Jidar atas (%d mm)";
 "share_verse_widget_title" = "Kongsi pilihan";
 "sort_by_alphabetical" = "Susunan abjad";
+
+/* Android shared translations */
+"bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"all_text_options" = "Semua opsyen teks";
+"backup_modules" = "Sandaran Dokumen ke…";
+"help_pinning" = "Penepatan tetingkap";
+"help_selection" = "Pemilihan teks";
+"help_studypads" = "Pad Kajian";
+"help_tips" = "Bantuan & petua";
+"label_settings" = "Tetapan label";
+"move_down" = "Pindah ke bawah";
+"move_up" = "Pindah ke atas";
+"tilt_to_scroll" = "Tilt untuk menatal";
+"window_pinning" = "Penepatan tetingkap";

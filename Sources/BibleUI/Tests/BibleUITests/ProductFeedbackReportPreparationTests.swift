@@ -12,12 +12,15 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
         let payload = ProductFeedbackReportPreparation.makePayload(
             metadata: AndBibleAppVersionMetadata(marketingVersion: "2.1", buildNumber: "42"),
             attachments: [screenshot, crash],
-            warnings: ["Application log could not be captured."]
+            warnings: ["Application log could not be captured."],
+            deviceDescription: "iPhone (iPhone)"
         )
 
         XCTAssertEqual(payload.recipient, "errors.andbible@gmail.com")
         XCTAssertEqual(payload.subject, "[42 manual] Bug report for AndBible 2.1")
         XCTAssertEqual(payload.attachments, [screenshot, crash])
+        XCTAssertTrue(payload.body.contains("Device:"))
+        XCTAssertTrue(payload.body.contains("iPhone (iPhone)"))
         XCTAssertTrue(payload.body.contains("PLEASE WRITE YOUR FEEDBACK OR BUG REPORT ABOVE THIS LINE"))
         XCTAssertTrue(payload.body.contains("Instructions:"))
         XCTAssertTrue(payload.body.contains("Tell us briefly what did you do / what happened when issue took place."))
@@ -42,12 +45,37 @@ final class ProductFeedbackReportPreparationTests: XCTestCase {
         let payload = ProductFeedbackReportPreparation.makePayload(
             metadata: metadata,
             attachments: [log],
-            warnings: ["Current app-window screenshot could not be captured."]
+            warnings: ["Current app-window screenshot could not be captured."],
+            deviceDescription: "iPad (iPad)"
         )
 
         XCTAssertEqual(payload.attachments, [log])
         XCTAssertTrue(payload.body.contains("current_application_log.txt"))
         XCTAssertTrue(payload.body.contains("Current app-window screenshot could not be captured."))
+    }
+
+    /**
+     Evidence preparation must run to completion without main-actor access.
+
+     `prepare(uiEvidence:)` performs log-store and crash-diagnostic reads that previously froze the
+     reader behind the blocking collection dialog. The detached task proves the collection stage
+     neither requires nor hops back to the main actor, while UI-captured evidence still lands in
+     the report body and attachment list.
+     */
+    func testEvidencePreparationCompletesOffTheMainActor() async {
+        let uiEvidence = ProductFeedbackUIEvidence(
+            screenshot: .init(data: Data([0x03]), filename: "current_window.jpg", mimeType: "image/jpeg"),
+            screenshotWarning: nil,
+            deviceDescription: "Background test device"
+        )
+
+        let payload = await Task.detached(priority: .userInitiated) {
+            ProductFeedbackReportPreparation.prepare(uiEvidence: uiEvidence)
+        }.value
+
+        XCTAssertTrue(payload.body.contains("Background test device"))
+        XCTAssertTrue(payload.attachments.contains(where: { $0.filename == "current_window.jpg" }))
+        XCTAssertEqual(payload.recipient, "errors.andbible@gmail.com")
     }
 
     /** Export failures must use the same localized copy shipped by the report-flow contract. */

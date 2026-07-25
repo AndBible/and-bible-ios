@@ -69,6 +69,67 @@ final class ManualBugReportCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.phase, .idle)
     }
 
+    /**
+     Export must end when the ZIP is written, before any share surface presents.
+
+     Share-sheet dismissal paths such as an interactive swipe-down or a Catalyst click-away can
+     skip the platform completion callback entirely. If any phase waited for that callback, the
+     blocking preparation dialog would persist and every later launch would be rejected. This test
+     proves the flow is already idle and re-launchable with no share-surface signal at all.
+     */
+    func testExportEndsAtZipCreationSoSilentShareDismissalCannotStrandTheFlow() {
+        var coordinator = ManualBugReportCoordinator()
+        XCTAssertTrue(coordinator.beginCollection())
+        XCTAssertTrue(coordinator.completeCollection())
+        XCTAssertTrue(coordinator.requestMail(capability: .unavailable))
+        XCTAssertTrue(coordinator.beginExport())
+
+        coordinator.completeExport(success: true)
+
+        XCTAssertEqual(coordinator.phase, .idle)
+        XCTAssertTrue(coordinator.beginCollection())
+        XCTAssertEqual(coordinator.phase, .collecting)
+    }
+
+    /**
+     A Mail sheet that closes without any composer delegate result must still end the handoff.
+
+     Some platform dismissal paths never route through the `MFMailComposeViewController` delegate.
+     The reader synthesizes a cancelled result on sheet dismissal; this proves that fallback ends
+     the phase, keeps the flow re-launchable, and that a late duplicate signal after a delegate
+     result already ran is ignored.
+     */
+    func testMailSheetDismissalWithoutComposerResultEndsHandoffAndAllowsRelaunch() {
+        var coordinator = ManualBugReportCoordinator()
+        XCTAssertTrue(coordinator.beginCollection())
+        XCTAssertTrue(coordinator.completeCollection())
+        XCTAssertTrue(coordinator.requestMail(capability: .available))
+
+        coordinator.finishMail(.cancelled)
+
+        XCTAssertEqual(coordinator.phase, .idle)
+        XCTAssertTrue(coordinator.beginCollection())
+
+        coordinator.finishMail(.cancelled)
+
+        XCTAssertEqual(coordinator.phase, .collecting)
+    }
+
+    /** A stale share-surface completion arriving after the flow ended must not corrupt a new launch. */
+    func testLateShareCompletionSignalIsIgnoredAfterExportEnded() {
+        var coordinator = ManualBugReportCoordinator()
+        XCTAssertTrue(coordinator.beginCollection())
+        XCTAssertTrue(coordinator.completeCollection())
+        XCTAssertTrue(coordinator.requestMail(capability: .unavailable))
+        XCTAssertTrue(coordinator.beginExport())
+        coordinator.completeExport(success: true)
+        XCTAssertTrue(coordinator.beginCollection())
+
+        coordinator.completeExport(success: false)
+
+        XCTAssertEqual(coordinator.phase, .collecting)
+    }
+
     /** Exact 24-hour evidence is allowed; older and future crash diagnostics are excluded. */
     func testCrashDiagnosticExpiryBoundary() {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)

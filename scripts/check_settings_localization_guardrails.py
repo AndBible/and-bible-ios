@@ -215,6 +215,7 @@ PRODUCT_FEEDBACK_IOS_FALLBACKS = {
         "The report could not be exported. No bug report has been sent."
     ),
     "bug_report_export": "Export report",
+    "bug_report_show_in_finder": "Show in Finder",
     "bug_report_collecting_evidence": (
         "Collecting available diagnostic evidence. Nothing has been sent."
     ),
@@ -223,28 +224,49 @@ PRODUCT_FEEDBACK_IOS_FALLBACKS = {
     ),
     "bug_report_no_attachments": "No diagnostic attachments were available.",
     "bug_report_preparation_notes": "Preparation notes:",
-    "bug_report_app_id": "App id:",
-    "bug_report_version": "Version:",
-    "bug_report_operating_system": "Operating system:",
-    "bug_report_device": "Device:",
-    "bug_report_locale": "Locale:",
-    "bug_report_time_zone": "Time zone:",
-    "bug_report_physical_memory": "Physical memory bytes:",
-    "bug_report_free_storage": "Free storage bytes:",
-    "bug_report_unavailable": "Unavailable",
     "bug_report_screenshot_unavailable": "Current app-window screenshot could not be captured.",
     "bug_report_log_empty": "Current-process application log contained no exportable entries.",
     "bug_report_log_unavailable": "Current-process application log could not be captured.",
     "bug_report_attachment_too_large": "Attachment is too large to export: %@",
     "bug_report_archive_too_large": "The complete bug report is too large to export.",
 }
-"""Truthful iOS-only report copy shipped as English fallback until Android owns an equivalent."""
+"""Sanctioned iOS-only report copy that Android's committed catalog does not own yet.
+
+Policy: a key may live here only while Android's `values/strings.xml` has no entry for it. These
+strings are staged for Android upstreaming (see the workspace patch
+`android-ios-report-strings.patch`); once Android owns a key, a contract test fails with
+instructions to move it into ``PRODUCT_FEEDBACK_ANDROID_KEYS`` so translations flow from
+Android's pipeline. Until then, non-English locales may carry curated variants through
+``PRODUCT_FEEDBACK_IOS_TRANSLATIONS``.
+"""
+
+PRODUCT_FEEDBACK_IOS_TRANSLATIONS: dict[str, dict[str, str]] = {}
+"""Curated per-locale variants for sanctioned iOS-only report keys.
+
+Maps ``key -> {locale: value}``. The sync overlays these on top of the English fallback so a
+locale ships a real translation as soon as one is curated, without waiting for Android to own
+the key. Keys must exist in ``PRODUCT_FEEDBACK_IOS_FALLBACKS``.
+"""
 
 REMOVED_PRODUCT_FEEDBACK_KEYS = {
     "bug_report_attached_evidence",
     "bug_report_reproduction_prompt",
+    "bug_report_app_id",
+    "bug_report_version",
+    "bug_report_operating_system",
+    "bug_report_device",
+    "bug_report_locale",
+    "bug_report_time_zone",
+    "bug_report_physical_memory",
+    "bug_report_free_storage",
+    "bug_report_unavailable",
 }
-"""Superseded iOS-only strings replaced by Android's report-body resources."""
+"""Superseded iOS-only strings.
+
+The first two were replaced by Android's report-body resources. The device-info labels follow
+Android's `BugReport.createErrorText`, which intentionally hardcodes English so the developer
+team can read every submitted report; they are plain literals on iOS as well, not localized keys.
+"""
 
 LINE_RE = re.compile(r'^"(?P<key>[^"]+)"\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)";\s*$')
 LOCALE_OPTIONS_BLOCK_RE = re.compile(
@@ -276,22 +298,31 @@ LOCALE_PREF_RESOURCE_OVERRIDES = {
 
 
 ANDROID_SHARED_KEY_MAPPINGS = {
+    "%@ (%@)": "something_with_parenthesis",
     "Find in %@": "search_in",
+    "add_custom_repository": "custom_repositories_create_button_label",
+    "ai_document_markers": "prefs_show_ai_doc_markers_title",
     "ai_hidden_status": "hidden",
+    "all_text_options": "all_text_options_window_menutitle",
     "app_name": "app_name_andbible",
     "application_preferences": "settings",
+    "background": "color_background",
     "backup_backup_message_ios": "backup_backup_message",
+    "backup_modules": "backup_modules2",
     "bookmark": "add_bookmark1",
     "buy_development2": "buy_development2",
     "calculator_pin": "prefs_calculator_pin",
     "calculator_pin_description": "prefs_calculator_pin_desc",
     "choose_book": "choosePassageBookName",
     "choose_document": "chooce_document",
+    "compare_choose_translations": "choose_translations",
     "completed": "agent_log_completed",
     "copy_of %@": "copy_of_workspace",
     "create": "index_create",
     "cross_references": "prefs_show_xrefs_title",
+    "current_book": "search_current_book",
     "delete_custom_repository_message_format": "delete_doc",
+    "delete_module_index_title": "delete_index",
     "description": "prompt_description",
     "dictionaries": "prefs_dictionaries_cat",
     "discrete_help_summary": "prefs_persecuted_summary",
@@ -303,54 +334,77 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "extracting_zip_file": "extracting_zip_file",
     "footnotes": "prefs_show_footnotes_title",
     "fullscreen": "toggle_fullscreen",
+    "greek_dictionary": "choose_strongs_greek_dictionary_title",
+    "hebrew_dictionary": "choose_strongs_hebrew_dictionary_title",
     "help_bookmarks": "bookmarks",
     "help_full_documentation_link": "help_full_documentation_link",
     "help_navigation": "help_nav_title",
+    "help_pinning": "window_pinning_menutitle",
     "help_search": "help_search_title",
+    "help_selection": "prompt_context_text_selection",
+    "help_studypads": "studypads",
+    "help_tips": "help_and_tips",
     "help_workspaces": "help_workspaces_title",
     "hyphenation": "prefs_hyphenation_title",
     "import": "import2",
     "infinite_scroll": "prefs_infinite_scroll_title",
     "install_failed_reason": "install_failed_reason",
     "install_zip_successfull": "install_zip_successfull",
+    "justify_text": "prefs_justify_title",
     "label_edit_name": "label_name_prompt",
+    "label_settings": "auto_assign_labels_title",
     "labels_search_hint": "labels_search_hint",
-    "paragraph_break": "add_paragraph_break",
+    "line_spacing": "line_spacing_title",
     "links": "strongs_links",
     "main_menu": "menu",
     "map": "doc_type_map",
     "mark_as_read_button": "prefs_mark_as_read_button_title",
+    "maximize": "windowMaximise",
     "memorization_indicators": "prefs_show_memorization_indicators_title",
     "module_category": "prompt_category",
     "module_install_phase_committing": "install_zip_title",
     "module_install_phase_downloading": "download_document_confirm_prefix",
     "module_install_phase_queued": "please_wait",
+    "module_installed": "cloud_doc_filter_installed",
+    "module_installed_version": "cloud_doc_filter_installed",
     "module_language": "chooce_language_hint",
     "module_name": "prompt_name",
+    "move_down": "move_category_down",
+    "move_up": "move_category_up",
     "my_documents": "my_documents_title",
+    "my_notes": "mynotes",
     "name": "prompt_name",
     "new_testament": "search_new_testament",
+    "night_mode": "options_menu_night_mode",
     "non_strongs_word_italic": "prefs_non_strongs_word_italic_title",
     "ok": "okay",
     "old_testament": "search_old_testament",
+    "open_studypad": "tool_finish_with_study_pad",
     "overwrite": "yes",
-    "page_scroll_amount": "prefs_page_scroll_amount_title",
     "package_directory": "packages_dir",
+    "page_scroll_amount": "prefs_page_scroll_amount_title",
+    "paragraph_break": "add_paragraph_break",
     "pin": "window_pin_mode",
+    "read": "tool_category_read",
+    "reading_plan_choose": "rdg_plan_selector_title",
     "reading_plan_completed": "agent_log_completed",
     "reading_plan_custom": "custom_system_prompt_custom",
+    "reading_plan_import_error_read": "sqlite_cant_read",
     "reading_plan_set_current_day": "set_current_day",
     "reading_plan_set_start_date": "rdg_plan_set_start_date",
     "reading_plans": "reading_plans_plural",
-    "read": "tool_category_read",
+    "red_letters": "prefs_red_letter_title",
     "repository_url": "repository_specification",
     "reset": "reset_generic",
+    "reset_to_defaults": "reset_to_default",
     "save": "save_and_exit",
     "search_all": "all",
     "search_bible": "tool_search_bible",
+    "search_bible_text": "tool_search_bible",
     "search_create_index": "index_create",
     "search_indexing_message": "indexing_wait_msg",
     "search_scope_all": "all",
+    "section_titles": "prefs_section_title_title",
     "settings_about": "about",
     "settings_content": "search_mode_content",
     "settings_dictionaries": "prefs_dictionaries_cat",
@@ -359,25 +413,41 @@ ANDROID_SHARED_KEY_MAPPINGS = {
     "show_bookmarks": "prefs_show_bookmarks_title",
     "show_calculator": "prefs_show_calculator",
     "skip": "error_skip",
+    "sleep_timer": "speak_sleep_timer_title",
+    "sort_bible_order": "sort_by_bible_book",
+    "sort_last_updated": "last_updated_at",
+    "speak_sleep_timer": "speak_sleep_timer_title",
+    "speak_stopped": "speak_status_stopped",
+    "storage_space_warning": "storage_space_warning",
     "strongs_hidden": "strongs_hidden_links",
     "strongs_inline": "strongs_text_and_links",
+    "strongs_numbers": "prefs_show_strongs_title",
+    "study_pad": "studypad",
     "success": "done",
     "summary": "default_prompt_summary",
-    "storage_space_warning": "storage_space_warning",
     "sync_disabled": "tool_option_disabled",
+    "test_connection": "easy_setup_test_connection",
+    "text_color": "color_text",
     "text_display_font_family_title_format": "pref_font_family_label_name",
     "text_display_font_size_title_format": "font_size_title_pt",
     "text_display_left_margin_title_format": "pref_left_margin_label_mm",
     "text_display_line_spacing_title_format": "prefs_line_spacing_pt_title",
+    "text_display_margin_size_title_format": "prefs_margin_size_mm_title",
     "text_display_max_width_title_format": "pref_maximum_width_of_text_label_mm",
     "text_display_right_margin_title_format": "pref_right_margin_label_mm",
     "text_display_top_margin_title_format": "prefs_top_margin_title_mm",
+    "tilt_to_scroll": "prefs_tilt_to_scroll_title",
     "title_scroll_button": "prefs_title_scroll_button_title",
     "top_margin": "prefs_top_margin_title",
     "translations": "search_translations",
+    "underline_style": "display_mode_underline",
     "undo": "cancel",
+    "verse_numbers": "show_versenumbers",
+    "verse_per_line": "prefs_verse_per_line_title",
+    "verse_selection": "prompt_context_verse_selection",
     "whole_bible": "search_all_bible",
     "window_disable_sync": "disable_sync",
+    "window_pinning": "window_pinning_menutitle",
     "workspaces": "help_workspaces_title",
 }
 """Explicit iOS-key to Android-key localization mappings.
@@ -395,6 +465,8 @@ IOS_PLATFORM_ENGLISH_OVERRIDES = {
     "backup_backup_message_ios": (
         "Backup to phone or elsewhere via Share function (email, iCloud Drive etc.)?"
     ),
+    "maximize": "Maximize",
+    "speak_stopped": "Stopped",
 }
 """English platform-boundary copy layered on Android translation provenance.
 
@@ -1188,9 +1260,10 @@ def product_feedback_values_for_locale(
     """Return complete product-feedback copy for one iOS locale.
 
     Android-owned dialog, subject, and report-body text uses Android's translation when available
-    and Android English otherwise. iOS-only evidence, delivery, and export statements use a
-    truthful English fallback until Android owns equivalent resources. The function performs no
-    file I/O and raises ``ValueError`` if the Android-derived catalog is stale or incomplete.
+    and Android English otherwise. Sanctioned iOS-only keys use their English fallback, overlaid
+    with any curated ``PRODUCT_FEEDBACK_IOS_TRANSLATIONS`` variant for the locale. The function
+    performs no file I/O and raises ``ValueError`` if the Android-derived catalog is stale or
+    incomplete.
     """
     missing = sorted(set(PRODUCT_FEEDBACK_ANDROID_KEYS) - set(catalog.english_by_key))
     if missing:
@@ -1202,6 +1275,9 @@ def product_feedback_values_for_locale(
         for key in PRODUCT_FEEDBACK_ANDROID_KEYS
     }
     values.update(PRODUCT_FEEDBACK_IOS_FALLBACKS)
+    for key, locale_values in PRODUCT_FEEDBACK_IOS_TRANSLATIONS.items():
+        if locale in locale_values:
+            values[key] = locale_values[locale]
     return values
 
 

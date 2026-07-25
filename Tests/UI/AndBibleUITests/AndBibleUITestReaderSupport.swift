@@ -978,7 +978,7 @@ extension AndBibleUITests {
         case "readerOpenBookmarksAction":
             return "Bookmarks"
         case "readerOpenStudyPadsAction":
-            return "StudyPads"
+            return "Study Pads"
         case "readerOpenMyNotesAction":
             return "My Notes"
         case "readerOpenHistoryAction":
@@ -1000,9 +1000,9 @@ extension AndBibleUITests {
         case "readerOpenAISettingsAction":
             return "AI Settings"
         case "readerOpenLabelSettingsAction":
-            return "Label Settings…"
+            return "Label settings…"
         case "readerOpenHelpAction":
-            return "Help & Tips"
+            return "Help & tips"
         case "readerSponsorDevelopmentAction":
             return "Buy development work"
         case "readerNeedHelpAction":

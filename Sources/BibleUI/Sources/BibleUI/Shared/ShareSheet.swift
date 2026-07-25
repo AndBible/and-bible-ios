@@ -25,6 +25,35 @@ struct ShareSheetCompletion {
     let error: Error?
 }
 
+/**
+ Classifies the first representable share item for platforms without a native share surface.
+
+ The macOS fallback view cannot pass arbitrary `Any` items to a system controller, so it renders
+ exactly one payload kind: copyable text, a local file it can reveal, or an explicit unsupported
+ state. Web URLs degrade to their absolute string so links stay copyable.
+ */
+enum ShareSheetFallbackPayload: Equatable {
+    /// Copyable text content, including non-file URLs rendered as absolute strings.
+    case text(String)
+    /// Local file that the fallback can reveal in the platform file browser.
+    case fileURL(URL)
+    /// No supplied item has a fallback representation.
+    case unsupported
+
+    /** Resolves the first item the fallback surface can represent, in caller order. */
+    static func resolve(from items: [Any]) -> ShareSheetFallbackPayload {
+        for item in items {
+            if let text = item as? String {
+                return .text(text)
+            }
+            if let url = item as? URL {
+                return url.isFileURL ? .fileURL(url) : .text(url.absoluteString)
+            }
+        }
+        return .unsupported
+    }
+}
+
 #if os(iOS)
 /**
  Wraps `UIActivityViewController` for SwiftUI presentations on iOS.
@@ -96,33 +125,35 @@ struct ShareSheet: UIViewControllerRepresentable {
 /**
  Provides a simple SwiftUI share fallback on macOS.
 
- The macOS implementation does not currently bridge `NSSharingServicePicker`; instead it exposes
- the first share item as text and provides a copy-to-clipboard action.
+ The macOS implementation does not currently bridge `NSSharingServicePicker`; instead it resolves
+ the first representable item through `ShareSheetFallbackPayload` and offers copy-to-clipboard for
+ text or reveal-in-Finder for local files.
 
  Data dependencies:
- - `items` provides the share payload, with the first string item used for display and clipboard
-   copying
- - `onCompletion` receives a successful copy result when the user taps Copy to Clipboard
+ - `items` provides the share payload, resolved through `ShareSheetFallbackPayload`
+ - `onCompletion` receives a successful result after the copy or reveal action
 
  Side effects:
- - tapping the copy button writes the first string item to the general pasteboard
- - tapping the copy button invokes `onCompletion` after the pasteboard write
+ - the copy button writes the resolved text to the general pasteboard
+ - the reveal button selects the resolved file in Finder
+ - both actions invoke `onCompletion` with a completed result
  */
 struct ShareSheet: View {
     /// Items supplied for sharing.
     let items: [Any]
 
-    /// Callback invoked after the macOS fallback completes its copy action.
+    /// Callback invoked after the macOS fallback completes its copy or reveal action.
     let onCompletion: (ShareSheetCompletion) -> Void
 
     /**
      Creates the macOS fallback share view.
 
      - Parameters:
-       - items: Values exposed by the fallback, with the first string displayed and copied.
-       - onCompletion: Callback invoked after Copy to Clipboard succeeds.
-     - Side effects: none until the user taps Copy to Clipboard.
-     - Failure modes: The fallback does not currently surface pasteboard write errors.
+       - items: Values exposed by the fallback, resolved to the first representable payload.
+       - onCompletion: Callback invoked after Copy to Clipboard or Show in Finder succeeds.
+     - Side effects: none until the user taps an action.
+     - Failure modes: The fallback does not currently surface pasteboard write errors; items with
+       no fallback representation render an explicit unavailable state with no action.
      */
     init(
         items: [Any],
@@ -139,14 +170,13 @@ struct ShareSheet: View {
         VStack(spacing: 12) {
             Text(String(localized: "share", defaultValue: "Share"))
                 .font(.headline)
-            if let text = items.first as? String {
+            switch ShareSheetFallbackPayload.resolve(from: items) {
+            case .text(let text):
                 Text(text)
                     .font(.body)
                     .padding()
                     .textSelection(.enabled)
-            }
-            Button(String(localized: "copy", defaultValue: "Copy")) {
-                if let text = items.first as? String {
+                Button(String(localized: "copy", defaultValue: "Copy")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                     onCompletion(
@@ -157,8 +187,28 @@ struct ShareSheet: View {
                         )
                     )
                 }
+                .buttonStyle(.borderedProminent)
+            case .fileURL(let url):
+                Text(url.lastPathComponent)
+                    .font(.body)
+                    .padding()
+                    .textSelection(.enabled)
+                Button(String(localized: "bug_report_show_in_finder", defaultValue: "Show in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                    onCompletion(
+                        ShareSheetCompletion(
+                            completed: true,
+                            activityIdentifier: "revealInFinder",
+                            error: nil
+                        )
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+            case .unsupported:
+                Text(String(localized: "error_occurred", defaultValue: "An error has occurred"))
+                    .font(.body)
+                    .padding()
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding()
         .frame(minWidth: 300)
