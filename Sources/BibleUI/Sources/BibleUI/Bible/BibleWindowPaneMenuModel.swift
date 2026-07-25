@@ -144,7 +144,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "newWindow",
                 title: Self.localized("new_window", default: "New window"),
-                systemImage: "plus.rectangle.on.rectangle",
+                iconAssetName: "ToolbarWindowAdd",
                 action: .newWindow
             ))
         }
@@ -153,7 +153,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "maximize",
                 title: Self.localized("windowMaximise", default: "Maximise"),
-                systemImage: "arrow.up.left.and.arrow.down.right",
+                iconAssetName: "WindowMaximise",
                 action: .maximize
             ))
         }
@@ -162,7 +162,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "minimize",
                 title: Self.localized("windowMinimise", default: "Minimise"),
-                systemImage: "minus",
+                iconAssetName: "WindowMinimise",
                 action: .minimize
             ))
         }
@@ -171,7 +171,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "changeToNormal",
                 title: Self.localized("change_to_normal", default: "Change to normal window"),
-                systemImage: "link",
+                iconAssetName: "SettingsIconLink",
                 action: .changeToNormalWindow
             ))
         }
@@ -184,7 +184,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "pin",
                 title: Self.localized("window_pin_mode", default: "Pin"),
-                systemImage: "pin",
+                iconAssetName: "OverflowWindowPinning",
                 isCheckable: true,
                 isChecked: snapshot.isPinned,
                 action: .togglePin
@@ -202,7 +202,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     "add_whole_page_bookmark",
                     default: "Add bookmark for whole page"
                 ),
-                systemImage: "bookmark",
+                iconAssetName: "SettingsIconBookmark",
                 action: .addWholePageBookmark
             ))
         }
@@ -214,7 +214,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     format: Self.localized("export_fileformat", default: "Export as %@"),
                     "HTML"
                 ),
-                systemImage: "square.and.arrow.up",
+                iconAssetName: "FileExport",
                 action: .exportHTML
             ))
         }
@@ -226,7 +226,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     format: Self.localized("export_something", default: "Export %@"),
                     Self.localized("studypad", default: "Study Pad")
                 ),
-                systemImage: "square.and.arrow.up",
+                iconAssetName: "FileExport",
                 action: .exportStudyPad
             ))
         }
@@ -241,7 +241,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     ),
                     "CSV"
                 ),
-                systemImage: "square.and.arrow.up",
+                iconAssetName: "FileExport",
                 action: .exportStudyPadCSV
             ))
         }
@@ -254,7 +254,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "aiActions",
                 title: Self.localized("llm_actions", default: "AI actions"),
-                systemImage: "sparkles",
+                iconAssetName: "SettingsIconRobot",
                 action: .openAIActions
             ))
         }
@@ -263,7 +263,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "copyLink",
                 title: Self.localized("copyReference", default: "Copy link to clipboard"),
-                systemImage: "doc.on.clipboard",
+                iconAssetName: "ActivityCopy",
                 action: .copyLink
             ))
         }
@@ -275,7 +275,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     format: Self.localized("go_to_ref", default: "Open %@"),
                     copiedReferenceName
                 ),
-                systemImage: "doc.on.clipboard",
+                iconAssetName: "ActivityPaste",
                 action: .openCopiedReference
             ))
         }
@@ -287,7 +287,7 @@ struct BibleWindowPaneMenuModel: Equatable {
                     format: Self.localized("go_to_ref", default: "Open %@"),
                     speakReferenceName
                 ),
-                systemImage: "headphones",
+                iconAssetName: "DrawerSpeak",
                 action: .openSpeakReference
             ))
         }
@@ -310,7 +310,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             resolvedItems.append(.action(
                 id: "close",
                 title: Self.localized("close", default: "Close"),
-                systemImage: "xmark",
+                iconAssetName: "ActivityClose",
                 action: .close
             ))
         }
@@ -322,6 +322,7 @@ struct BibleWindowPaneMenuModel: Equatable {
         guard !snapshot.isLinksWindow, !snapshot.isMaximized else { return nil }
         let candidates = snapshot.allWindowsInPersistedOrder.filter { $0.isPinned == snapshot.isPinned }
         guard candidates.count > 1 else { return nil }
+        let currentBucketIndex = candidates.firstIndex { $0.id == snapshot.windowID } ?? 0
 
         let children = candidates.enumerated().compactMap { bucketIndex, candidate -> BibleWindowPaneMenuItem? in
             guard candidate.id != snapshot.windowID else { return nil }
@@ -334,7 +335,7 @@ struct BibleWindowPaneMenuModel: Equatable {
             return .action(
                 id: "moveTo::\(bucketIndex)",
                 title: title,
-                systemImage: "arrow.up.and.down",
+                iconAssetName: bucketIndex < currentBucketIndex ? "ArrowDropUp" : "ArrowDropDown",
                 action: .moveToPosition(bucketIndex)
             )
         }
@@ -343,7 +344,7 @@ struct BibleWindowPaneMenuModel: Equatable {
         return BibleWindowPaneMenuItem(
             id: "moveTo",
             title: localized("move_window", default: "Move to"),
-            systemImage: "arrow.up.and.down.square",
+            iconAssetName: "WindowMoveTo",
             children: children
         )
     }
@@ -371,7 +372,7 @@ struct BibleWindowPaneMenuModel: Equatable {
         return BibleWindowPaneMenuItem(
             id: "synchronize",
             title: localized("windowSynchronise", default: "Synchronise"),
-            systemImage: "arrow.triangle.2.circlepath",
+            iconAssetName: "WindowSync",
             children: children
         )
     }

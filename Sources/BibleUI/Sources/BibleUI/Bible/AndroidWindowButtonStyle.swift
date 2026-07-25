@@ -29,6 +29,34 @@ enum AndroidWindowButtonMetrics {
     /// Android links-window marker icon size used inside compact window buttons.
     static let paneLinksIconSize: CGFloat = 14
 
+    /// Android `ic_sync_white_24dp` status overlay asset used inside window buttons.
+    static let paneSyncIconName = "WindowSyncStatus"
+
+    /// Android `ic_pin` status overlay asset used inside window buttons.
+    static let panePinIconName = "WindowPinStatus"
+
+    /// Android status-overlay `ImageView` box (12dip in `window_button.xml`).
+    static let paneStatusIconBoxSize: CGFloat = 12
+
+    /// Android status-overlay internal padding (2.5dip start, and top for the sync icon).
+    static let paneStatusIconInset: CGFloat = 2.5
+
+    /// Rendered status glyph size after Android's internal 2.5dip `ImageView` padding.
+    static let paneStatusIconSize: CGFloat = paneStatusIconBoxSize - paneStatusIconInset
+
+    /// Android sync-group label text size (10sp on `syncGroup`).
+    static let paneSyncGroupTextSize: CGFloat = 10
+
+    /// Android sync-group label leading padding (1dip after the sync icon).
+    static let paneSyncGroupLeadingPadding: CGFloat = 1
+
+    /**
+     Pin overlay top inset: below the 12dip sync box plus the fit-center offset of the square pin
+     drawable inside its 9.5x12 padded content area.
+     */
+    static let panePinIconTopInset: CGFloat =
+        paneStatusIconBoxSize + ((paneStatusIconBoxSize - paneStatusIconSize) / 2)
+
     /// Android pane button sits directly on the pane corner rather than inside extra native inset.
     static let paneOverlayInset: CGFloat = 0
 }

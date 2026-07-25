@@ -97,6 +97,18 @@ struct BibleWindowPane: View {
     /// Whether the custom Android-style pane hamburger menu is visible.
     @State private var isWindowMenuPresented = false
 
+    /// Whether the pane window button is currently revealed ahead of Android's idle fade.
+    @State private var isWindowButtonRevealed = true
+
+    /// Token that invalidates previously scheduled window-button fades after new interaction.
+    @State private var windowButtonFadeToken = UUID()
+
+    /// Widest intrinsic pane-menu row width, matching Android's content-measured popup sizing.
+    @State private var windowMenuIdealWidth: CGFloat = 0
+
+    /// Intrinsic pane-menu height used for Android's flip-up placement in short bottom panes.
+    @State private var windowMenuIdealHeight: CGFloat = 0
+
     /// Whether Android's two-step bookmark popup is visible above the selection action bar.
     @State private var isSelectionBookmarkMenuPresented = false
 
@@ -273,6 +285,20 @@ struct BibleWindowPane: View {
             if !hideWindowButtons && !windowManager.isMaximized {
                 windowMenuButton
                     .padding(AndroidWindowButtonMetrics.paneOverlayInset)
+                    .opacity(isWindowButtonRevealed || isWindowMenuPresented ? 1 : (nightMode ? 0.5 : 0.2))
+                    .animation(.easeInOut(duration: 0.3), value: isWindowButtonRevealed)
+                    .onAppear { scheduleWindowButtonFade() }
+                    .onReceive(NotificationCenter.default.publisher(for: .andBiblePaneButtonsRevealed)) { _ in
+                        revealWindowButtonAndScheduleFade()
+                        if isWindowMenuPresented {
+                            isWindowMenuPresented = false
+                        }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .andBiblePaneMenuOpened)) { note in
+                        if let openedID = note.object as? UUID, openedID != window.id, isWindowMenuPresented {
+                            isWindowMenuPresented = false
+                        }
+                    }
             }
         }
         .overlay {
@@ -280,6 +306,15 @@ struct BibleWindowPane: View {
                 windowMenuOverlay
             }
         }
+        .onChange(of: isWindowMenuPresented) { _, presented in
+            if presented {
+                isWindowButtonRevealed = true
+                windowButtonFadeToken = UUID()
+            } else {
+                revealWindowButtonAndScheduleFade()
+            }
+        }
+        .zIndex(isWindowMenuPresented ? 10 : 0)
     .overlay {
       if let readerHelpPresentation {
         AIReaderHelpDialog(
@@ -358,6 +393,35 @@ struct BibleWindowPane: View {
                 .padding(.top, 2)
                 .padding(.trailing, 2)
             }
+
+            if isPaneWindowSyncable && window.isSynchronized {
+                HStack(alignment: .top, spacing: AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding) {
+                    ToolbarAssetIcon(
+                        name: AndroidWindowButtonMetrics.paneSyncIconName,
+                        size: AndroidWindowButtonMetrics.paneStatusIconSize
+                    )
+                    .foregroundStyle(buttonPalette.statusIconColor)
+
+                    Text("\(window.syncGroup + 1)")
+                        .font(.system(size: AndroidWindowButtonMetrics.paneSyncGroupTextSize))
+                        .foregroundStyle(buttonPalette.paneButtonTextColor)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, AndroidWindowButtonMetrics.paneStatusIconInset)
+                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
+            }
+
+            if paneShowsPinOverlay {
+                ToolbarAssetIcon(
+                    name: AndroidWindowButtonMetrics.panePinIconName,
+                    size: AndroidWindowButtonMetrics.paneStatusIconSize
+                )
+                .foregroundStyle(buttonPalette.statusIconColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, AndroidWindowButtonMetrics.panePinIconTopInset)
+                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
+            }
         }
             .frame(
                 width: AndroidWindowButtonMetrics.buttonSize,
@@ -389,6 +453,50 @@ struct BibleWindowPane: View {
             .accessibilityAction {
                 performPaneWindowButtonAction(.openMenu)
             }
+    }
+
+    /**
+     Resolves Android page-level syncability for this pane's current document.
+
+     Android's `WindowButtonWidget.updateSettings` shows the sync overlay only when
+     `window.isSyncable`, which delegates to `pageManager.currentPage.isSyncable`. Attached
+     controllers are authoritative because transient links-window content may render before
+     persisted `PageManager` fields settle; restored windows fall back to the persisted category,
+     where general-book and EPUB pages are non-syncable.
+
+     - Returns: `true` when the sync status overlay may appear for this pane.
+     - Side effects: None.
+     - Failure modes: A missing controller and page manager defaults to syncable, matching the
+       Bible-page default.
+     */
+    private var isPaneWindowSyncable: Bool {
+        if let ctrl = resolvedWindowMenuController {
+            return ctrl.isCurrentPageSyncable
+        }
+        guard let pm = window.pageManager else { return true }
+        let categoryName = pm.currentCategoryName
+        return categoryName != DocumentCategory.generalBook.pageManagerKey
+            && categoryName != DocumentCategory.epub.pageManagerKey
+    }
+
+    /**
+     Resolves Android's pane pin-overlay visibility rule.
+
+     Android's `WindowButtonWidget.updateSettings` shows the non-restore pin icon only when
+     workspace auto-pin is off and `window.isPinMode` still resolves pinned; with auto-pin off,
+     that getter reduces to the raw per-window pin flag and always hides links windows, which
+     `Window.effectivePinMode(autoPin: false)` mirrors exactly.
+
+     - Returns: `true` when the pin status overlay should render on this pane's window button.
+     - Side effects: None.
+     - Failure modes: Detached windows fall back to the active workspace and then Android's
+       enabled auto-pin default, hiding the overlay.
+     */
+    private var paneShowsPinOverlay: Bool {
+        let autoPin = window.workspace?.workspaceSettings?.autoPin
+            ?? windowManager.activeWorkspace?.workspaceSettings?.autoPin
+            ?? WorkspaceSettings.defaultAutoPin
+        return !autoPin && window.effectivePinMode(autoPin: false)
     }
 
     /**
@@ -433,6 +541,36 @@ struct BibleWindowPane: View {
      - Side effects: Marks this pane active, opens the popup menu, or mutates window layout.
      - Failure modes: `.none` is ignored; layout actions rely on `WindowManager` guards.
      */
+    /**
+     Reveals the pane window button and restarts Android's idle fade timer.
+
+     Android's `SplitBibleArea.resetTouchTimer` shows every pane button on any touch and hides
+     them again 2000 ms later. The reveal animates alongside the fade so repeated interaction
+     keeps the button steady instead of flickering.
+     */
+    private func revealWindowButtonAndScheduleFade() {
+        if !isWindowButtonRevealed {
+            isWindowButtonRevealed = true
+        }
+        scheduleWindowButtonFade()
+    }
+
+    /**
+     Schedules Android's two-second window-button fade unless the pane menu holds it visible.
+
+     The fade is disabled under the deterministic UI-test harness because XCUITest workflows tap
+     the button at arbitrary times and Android's timing behavior would make them flaky.
+     */
+    private func scheduleWindowButtonFade() {
+        guard !UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return }
+        let token = UUID()
+        windowButtonFadeToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            guard windowButtonFadeToken == token, !isWindowMenuPresented else { return }
+            isWindowButtonRevealed = false
+        }
+    }
+
     private func performPaneWindowButtonAction(_ action: AndroidPaneWindowButtonGestureAction) {
         guard action != .none else { return }
         windowManager.activateWindow(window)
@@ -440,6 +578,12 @@ struct BibleWindowPane: View {
         case .openMenu:
             withAnimation(.easeOut(duration: 0.12)) {
                 isWindowMenuPresented.toggle()
+            }
+            if isWindowMenuPresented {
+                NotificationCenter.default.post(
+                    name: .andBiblePaneMenuOpened,
+                    object: window.id
+                )
             }
         case .minimize:
             isWindowMenuPresented = false
@@ -461,8 +605,35 @@ struct BibleWindowPane: View {
      */
     private var windowMenuOverlay: some View {
         GeometryReader { proxy in
-            let width = min(max(proxy.size.width - 12, 220), 320)
-            let maximumHeight = max(proxy.size.height - 52, 120)
+            let items = BibleWindowPaneMenuModel(snapshot: windowMenuSnapshot).items
+            let maximumWidth = max(proxy.size.width - 12, 112)
+            let width = min(max(windowMenuIdealWidth > 0 ? windowMenuIdealWidth : 220, 112), maximumWidth)
+            // Android's PopupMenu floats at window level, so available height runs from the
+            // pane's anchor to the bottom of the screen rather than the pane's own bounds.
+            let anchorGlobalTop = proxy.frame(in: .global).minY + 42
+            #if os(iOS)
+            let screenHeight = UIScreen.main.bounds.height
+            #else
+            let screenHeight = NSScreen.main?.frame.height ?? (proxy.size.height + anchorGlobalTop)
+            #endif
+            let paneGlobalTop = proxy.frame(in: .global).minY
+            let maximumHeight = max(screenHeight - 48, 120)
+            let menuHeight = min(windowMenuIdealHeight > 0 ? windowMenuIdealHeight : 300, maximumHeight)
+            let tabBarReservedHeight = WindowTabBarLayout.reservedHeight(
+                restoreButtonsVisible: true,
+                isSingleWindowFooterMode: false
+            )
+            #if os(iOS)
+            let safeAreaBottomInset = UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.keyWindow?.safeAreaInsets.bottom }
+                .first ?? 0
+            #else
+            let safeAreaBottomInset: CGFloat = 0
+            #endif
+            let bottomLimit = screenHeight - safeAreaBottomInset - tabBarReservedHeight - 16
+            let fitsBelowAnchor = bottomLimit - anchorGlobalTop >= menuHeight
+            let desiredGlobalTop = fitsBelowAnchor ? anchorGlobalTop : max(32, bottomLimit - menuHeight)
+            let menuTopInset = desiredGlobalTop - paneGlobalTop
             ZStack(alignment: .topTrailing) {
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
@@ -475,7 +646,7 @@ struct BibleWindowPane: View {
                     .accessibilityIdentifier("windowPaneMenuDismissArea::\(window.orderNumber)")
 
                 BibleWindowPaneMenuPopup(
-                    items: BibleWindowPaneMenuModel(snapshot: windowMenuSnapshot).items,
+                    items: items,
                     colorScheme: colorScheme,
                     surfacePalette: surfacePalette,
                     maximumHeight: maximumHeight
@@ -486,7 +657,39 @@ struct BibleWindowPane: View {
                     performWindowMenuAction(action)
                 }
                 .frame(width: width, alignment: .topLeading)
-                .padding(.top, 42)
+                .background(alignment: .topLeading) {
+                    // Android's PopupMenu wraps the widest row; the hidden fixed-size copy
+                    // measures that intrinsic width so the visible popup can adopt it.
+                    BibleWindowPaneMenuPopup(
+                        items: items,
+                        colorScheme: colorScheme,
+                        surfacePalette: surfacePalette,
+                        maximumHeight: maximumHeight
+                    ) { _ in }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .background(
+                            GeometryReader { measured in
+                                Color.clear
+                                    .preference(
+                                        key: WindowMenuIdealWidthPreferenceKey.self,
+                                        value: measured.size.width
+                                    )
+                                    .preference(
+                                        key: WindowMenuIdealHeightPreferenceKey.self,
+                                        value: measured.size.height
+                                    )
+                            }
+                        )
+                        .hidden()
+                        .allowsHitTesting(false)
+                }
+                .onPreferenceChange(WindowMenuIdealWidthPreferenceKey.self) { ideal in
+                    windowMenuIdealWidth = ideal
+                }
+                .onPreferenceChange(WindowMenuIdealHeightPreferenceKey.self) { ideal in
+                    windowMenuIdealHeight = ideal
+                }
+                .padding(.top, menuTopInset)
                 .padding(.trailing, 6)
                 .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
             }
@@ -709,6 +912,7 @@ struct BibleWindowPane: View {
         }
         ctrl.bridge.onNativeUserInteraction = { [weak ctrl] in
             ctrl?.handleUserInteraction()
+            NotificationCenter.default.post(name: .andBiblePaneButtonsRevealed, object: nil)
         }
         ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl, weak windowManager] deltaY in
             guard let ctrl else { return }
@@ -1492,5 +1696,42 @@ struct BibleWindowPane: View {
                 controller?.bookmarkSelection(wholeVerse: true)
             }
         }
+    }
+}
+
+/**
+ Reports the widest intrinsic width measured for the hidden pane-menu sizing pass.
+
+ Android's `PopupMenu` measures each row and wraps the popup to the widest one. The reduce keeps
+ the maximum so nested measurement passes cannot shrink an already measured popup width.
+ */
+private struct WindowMenuIdealWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Workspace-wide reveal signal matching Android's shared window-button touch timer.
+extension Notification.Name {
+    /// Posted on any pane touch so every visible pane restores full button opacity together.
+    static let andBiblePaneButtonsRevealed = Notification.Name("andBiblePaneButtonsRevealed")
+
+    /// Posted when one pane opens its menu so every other pane closes its own single popup.
+    static let andBiblePaneMenuOpened = Notification.Name("andBiblePaneMenuOpened")
+}
+
+/**
+ Reports the intrinsic pane-menu height for Android's flip-up popup placement.
+
+ Android's `PopupMenu` shifts upward past pane boundaries when the anchored position lacks
+ room below; the maximum keeps the tallest measurement across passes.
+ */
+private struct WindowMenuIdealHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
