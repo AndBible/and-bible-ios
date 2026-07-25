@@ -29,6 +29,45 @@ final class AndroidWindowControlStyleTests: XCTestCase {
     }
 
     /**
+     Verifies the pane sync/pin status overlays mirror Android's `window_button.xml` anatomy.
+
+     Android overlays a 12dip `ic_sync_white_24dp` ImageView with 2.5dip start/top padding in the
+     button's top-left corner, a 10sp sync-group number 1dip after it, and a 12dip `ic_pin`
+     ImageView directly below the sync box. A failure means the pane button lost the Android
+     status-overlay geometry or drifted to different assets.
+     */
+    func testPaneStatusOverlayMetricsMatchAndroidWindowButtonLayout() {
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneSyncIconName, "WindowSyncStatus")
+        XCTAssertEqual(AndroidWindowButtonMetrics.panePinIconName, "WindowPinStatus")
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneStatusIconBoxSize, 12)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneStatusIconInset, 2.5)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneStatusIconSize, 9.5)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneSyncGroupTextSize, 10)
+        XCTAssertEqual(AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding, 1)
+        XCTAssertEqual(AndroidWindowButtonMetrics.panePinIconTopInset, 13.25)
+    }
+
+    /**
+     Verifies the pane status-overlay tint matches Android's `bar_window_button_icon_tint`.
+
+     Android tints both mini overlays with `bar_window_button_icon_tint` (#E8E8E8 day, #939393
+     night) and rewrites them to black in monochrome mode. A failure means the pane sync/pin
+     overlays no longer track Android's day/night/e-ink resources.
+     */
+    func testPaneStatusOverlayTintMatchesAndroidBarWindowButtonIconTint() {
+        let day = AndroidWindowButtonPalette.resolved(for: .standard)
+        XCTAssertEqual(day.statusIconColor.argbInt, Int(Int32(bitPattern: 0xFFE8E8E8)))
+
+        let night = AndroidWindowButtonPalette.resolved(
+            for: ReaderThemeSurfacePalette(settings: .appDefaults, nightMode: true)
+        )
+        XCTAssertEqual(night.statusIconColor.argbInt, Int(Int32(bitPattern: 0xFF939393)))
+
+        let monochrome = AndroidWindowButtonPalette.resolved(for: .standard, monochromeMode: true)
+        XCTAssertEqual(monochrome.statusIconColor.argbInt, Int(Int32(bitPattern: 0xFF000000)))
+    }
+
+    /**
      Verifies day-mode pane button colors match Android resource values.
 
      Android non-restore pane buttons use `window_button_active` for the active pane and
