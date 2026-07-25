@@ -415,7 +415,7 @@ public struct BookChooserView: View {
         )
     }
 
-    /// Scrollable container for the Android-aligned book grid.
+    /// Non-scrolling fill-the-screen container for the Android-aligned book grid.
     private var bookGrid: some View {
         GeometryReader { proxy in
             let orientation = PassageGridOrientation(size: proxy.size)
@@ -436,62 +436,62 @@ public struct BookChooserView: View {
                 ),
                 1
             )
-            let metrics = PassageGridMetrics.squareCells(
-                availableWidth: proxy.size.width,
+            let metrics = PassageGridMetrics.fittedCells(
+                availableSize: proxy.size,
+                rows: PassageGridMetrics.rowCount(slotCount: slots.count, columns: columnCount),
                 columns: columnCount
             )
             let columns = Array(
-                repeating: GridItem(.fixed(metrics.cellSide), spacing: PassageGridMetrics.spacing),
+                repeating: GridItem(.fixed(metrics.cellWidth), spacing: PassageGridMetrics.spacing),
                 count: columnCount
             )
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
-                    ForEach(Array(slots.enumerated()), id: \.offset) { _, book in
-                        if let book {
-                            PassageGridButton(
-                                title: PassageBookDisplayName.title(
-                                    for: book,
-                                    showLongName: chooserOptions.showLongBookName
-                                ),
-                                accessibilityLabel: book.name,
-                                accessibilityIdentifier: "passageBookCell.\(book.osisId)",
-                                palette: PassageGridCellPalette.bookPalette(
-                                    for: book,
-                                    currentOsisId: currentOsisBookId
-                                ),
-                                font: .subheadline.weight(.semibold),
-                                progress: chooserOptions.showProgressBars
-                                    ? bookProgressProvider(book)
-                                    : .none,
-                                cellSide: metrics.cellSide
+            LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { _, book in
+                    if let book {
+                        PassageGridButton(
+                            title: PassageBookDisplayName.title(
+                                for: book,
+                                showLongName: chooserOptions.showLongBookName
+                            ),
+                            accessibilityLabel: book.name,
+                            accessibilityIdentifier: "passageBookCell.\(book.osisId)",
+                            palette: PassageGridCellPalette.bookPalette(
+                                for: book,
+                                currentOsisId: currentOsisBookId
+                            ),
+                            font: .subheadline.weight(.semibold),
+                            progress: chooserOptions.showProgressBars
+                                ? bookProgressProvider(book)
+                                : .none,
+                            cellWidth: metrics.cellWidth,
+                            cellHeight: metrics.cellHeight
+                        ) {
+                            isChooserMenuPresented = false
+                            switch PassageBookSelectionDestination.resolve(
+                                book: book,
+                                navigateToVerse: navigateToVerse
                             ) {
-                                isChooserMenuPresented = false
-                                switch PassageBookSelectionDestination.resolve(
-                                    book: book,
-                                    navigateToVerse: navigateToVerse
-                                ) {
-                                case .chapterChooser:
-                                    selectedBook = book
-                                    selectedChapter = nil
-                                case .verseChooser(let chapter):
-                                    selectedBook = book
-                                    selectedChapter = chapter
-                                case .selection(let chapter, let verse):
-                                    onSelect(book.name, chapter, verse)
-                                }
+                            case .chapterChooser:
+                                selectedBook = book
+                                selectedChapter = nil
+                            case .verseChooser(let chapter):
+                                selectedBook = book
+                                selectedChapter = chapter
+                            case .selection(let chapter, let verse):
+                                onSelect(book.name, chapter, verse)
                             }
-                        } else {
-                            Color.clear
-                                .frame(width: metrics.cellSide, height: metrics.cellSide)
-                                .accessibilityHidden(true)
                         }
+                    } else {
+                        Color.clear
+                            .frame(width: metrics.cellWidth, height: metrics.cellHeight)
+                            .accessibilityHidden(true)
                     }
                 }
-                .frame(width: metrics.gridWidth)
-                .padding(.horizontal, PassageGridMetrics.horizontalPadding)
-                .frame(maxWidth: .infinity)
             }
+            .frame(width: metrics.gridWidth)
+            .padding(.horizontal, PassageGridMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -658,7 +658,18 @@ private struct PassageChooserOverflowMenuPopup: View {
             secondaryTextColor: .white.opacity(0.82),
             accentColor: AndroidDialogSurfacePalette.accent(for: .dark)
         ) {
-            ForEach(PassageChooserMenuEntry.androidBookChooserOrder) { entry in
+            VStack(spacing: 0) {
+                ForEach(PassageChooserMenuEntry.androidBookChooserOrder) { entry in
+                    menuRow(for: entry)
+                }
+            }
+        }
+    }
+
+    /**
+     Renders one Android chooser menu row with its checkbox state.
+     */
+    private func menuRow(for entry: PassageChooserMenuEntry) -> some View {
                 AndroidPopupMenuRow(
                     title: localizedTitle(for: entry),
                     accessory: .checkbox(isOn: isChecked(entry.option)),
@@ -667,8 +678,6 @@ private struct PassageChooserOverflowMenuPopup: View {
                 ) {
                     onSelect(entry.option)
                 }
-            }
-        }
     }
 
     /**

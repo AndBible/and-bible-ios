@@ -75,46 +75,46 @@ public struct ChapterChooserView: View {
             )
             let slots = layout.displaySlots(for: chapters)
             let columnCount = max(layout.columns, 1)
-            let metrics = PassageGridMetrics.squareCells(
-                availableWidth: proxy.size.width,
+            let metrics = PassageGridMetrics.fittedCells(
+                availableSize: proxy.size,
+                rows: PassageGridMetrics.rowCount(slotCount: slots.count, columns: columnCount),
                 columns: columnCount
             )
             let columns = Array(
-                repeating: GridItem(.fixed(metrics.cellSide), spacing: PassageGridMetrics.spacing),
+                repeating: GridItem(.fixed(metrics.cellWidth), spacing: PassageGridMetrics.spacing),
                 count: columnCount
             )
             let categoryColor = PassageBookCategory.category(forOsisId: resolvedOsisBookId).color
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
-                    ForEach(Array(slots.enumerated()), id: \.offset) { _, chapter in
-                        if let chapter {
-                            PassageGridButton(
-                                title: "\(chapter)",
-                                accessibilityLabel: "\(bookName) \(chapter)",
-                                accessibilityIdentifier: "passageChapterCell.\(chapter)",
-                                palette: PassageGridCellPalette.numberPalette(
-                                    number: chapter,
-                                    currentNumber: currentChapter,
-                                    categoryColor: categoryColor
-                                ),
-                                font: .body.monospacedDigit().weight(.semibold),
-                                progress: progressProvider(chapter),
-                                cellSide: metrics.cellSide
-                            ) {
-                                onSelect(chapter)
-                            }
-                        } else {
-                            Color.clear
-                                .frame(width: metrics.cellSide, height: metrics.cellSide)
-                                .accessibilityHidden(true)
+            LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { _, chapter in
+                    if let chapter {
+                        PassageGridButton(
+                            title: "\(chapter)",
+                            accessibilityLabel: "\(bookName) \(chapter)",
+                            accessibilityIdentifier: "passageChapterCell.\(chapter)",
+                            palette: PassageGridCellPalette.numberPalette(
+                                number: chapter,
+                                currentNumber: currentChapter,
+                                categoryColor: categoryColor
+                            ),
+                            font: .body.monospacedDigit().weight(.semibold),
+                            progress: progressProvider(chapter),
+                            cellWidth: metrics.cellWidth,
+                            cellHeight: metrics.cellHeight
+                        ) {
+                            onSelect(chapter)
                         }
+                    } else {
+                        Color.clear
+                            .frame(width: metrics.cellWidth, height: metrics.cellHeight)
+                            .accessibilityHidden(true)
                     }
                 }
-                .frame(width: metrics.gridWidth)
-                .padding(.horizontal, PassageGridMetrics.horizontalPadding)
-                .frame(maxWidth: .infinity)
             }
+            .frame(width: metrics.gridWidth)
+            .padding(.horizontal, PassageGridMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }

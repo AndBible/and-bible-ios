@@ -80,46 +80,46 @@ public struct VerseChooserView: View {
             )
             let slots = layout.displaySlots(for: verses)
             let columnCount = max(layout.columns, 1)
-            let metrics = PassageGridMetrics.squareCells(
-                availableWidth: proxy.size.width,
+            let metrics = PassageGridMetrics.fittedCells(
+                availableSize: proxy.size,
+                rows: PassageGridMetrics.rowCount(slotCount: slots.count, columns: columnCount),
                 columns: columnCount
             )
             let columns = Array(
-                repeating: GridItem(.fixed(metrics.cellSide), spacing: PassageGridMetrics.spacing),
+                repeating: GridItem(.fixed(metrics.cellWidth), spacing: PassageGridMetrics.spacing),
                 count: columnCount
             )
             let categoryColor = PassageBookCategory.category(forOsisId: resolvedOsisBookId).color
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
-                    ForEach(Array(slots.enumerated()), id: \.offset) { _, verse in
-                        if let verse {
-                            PassageGridButton(
-                                title: "\(verse)",
-                                accessibilityLabel: "\(bookName) \(chapter):\(verse)",
-                                accessibilityIdentifier: "passageVerseCell.\(verse)",
-                                palette: PassageGridCellPalette.numberPalette(
-                                    number: verse,
-                                    currentNumber: currentVerse,
-                                    categoryColor: categoryColor
-                                ),
-                                font: .callout.monospacedDigit().weight(.semibold),
-                                progress: progressProvider(verse),
-                                cellSide: metrics.cellSide
-                            ) {
-                                onSelect(verse)
-                            }
-                        } else {
-                            Color.clear
-                                .frame(width: metrics.cellSide, height: metrics.cellSide)
-                                .accessibilityHidden(true)
+            LazyVGrid(columns: columns, spacing: PassageGridMetrics.spacing) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { _, verse in
+                    if let verse {
+                        PassageGridButton(
+                            title: "\(verse)",
+                            accessibilityLabel: "\(bookName) \(chapter):\(verse)",
+                            accessibilityIdentifier: "passageVerseCell.\(verse)",
+                            palette: PassageGridCellPalette.numberPalette(
+                                number: verse,
+                                currentNumber: currentVerse,
+                                categoryColor: categoryColor
+                            ),
+                            font: .callout.monospacedDigit().weight(.semibold),
+                            progress: progressProvider(verse),
+                            cellWidth: metrics.cellWidth,
+                            cellHeight: metrics.cellHeight
+                        ) {
+                            onSelect(verse)
                         }
+                    } else {
+                        Color.clear
+                            .frame(width: metrics.cellWidth, height: metrics.cellHeight)
+                            .accessibilityHidden(true)
                     }
                 }
-                .frame(width: metrics.gridWidth)
-                .padding(.horizontal, PassageGridMetrics.horizontalPadding)
-                .frame(maxWidth: .infinity)
             }
+            .frame(width: metrics.gridWidth)
+            .padding(.horizontal, PassageGridMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(PassageChooserSurfacePalette.background.swiftUIColor.ignoresSafeArea())
     }
