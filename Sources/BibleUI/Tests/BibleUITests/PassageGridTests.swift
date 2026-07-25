@@ -365,8 +365,24 @@ final class PassageGridTests: XCTestCase {
             options: groupedOptions,
             orientation: .portrait
         )
-        XCTAssertEqual(groupedSlots.prefix(6).map { $0?.osisId }, ["Gen", "Exod", "Lev", "Num", "Deut", nil])
-        XCTAssertEqual(groupedSlots[6]?.osisId, "Josh")
+        // Android grouped rows hold up to seven cells because `maxColumns = 6` is a zero-based
+        // column-index bound (`ButtonGrid.kt:129-145`): the Pentateuch row is five books plus two
+        // spacers, and the twelve History books split into a full seven-book row followed by a
+        // five-book row padded with two spacers (`ButtonGrid.kt:152-160`).
+        XCTAssertEqual(
+            groupedSlots.prefix(7).map { $0?.osisId },
+            ["Gen", "Exod", "Lev", "Num", "Deut", nil, nil]
+        )
+        XCTAssertEqual(
+            groupedSlots[7...13].map { $0?.osisId },
+            ["Josh", "Judg", "Ruth", "1Sam", "2Sam", "1Kgs", "2Kgs"]
+        )
+        XCTAssertEqual(
+            groupedSlots[14...20].map { $0?.osisId },
+            ["1Chr", "2Chr", "Ezra", "Neh", "Esth", nil, nil]
+        )
+        // Twelve seven-cell rows cover the full grouped 66-book canon on Android.
+        XCTAssertEqual(groupedSlots.count, 84)
 
         var alphabeticalOptions = PassageChooserOptions.androidDefault
         alphabeticalOptions.apply(.alphabeticalOrder)
@@ -498,22 +514,118 @@ final class PassageGridTests: XCTestCase {
     }
 
     /**
-     Verifies iOS derives square cell dimensions from Android's matrix columns.
+     Verifies iOS derives cell dimensions from Android's weighted full-screen table sizing.
 
-     Android gives every `TableRow` and every cell the same weighted width/height within the
-     calculated matrix. The SwiftUI grid should therefore size each button with the same width and
-     height instead of keeping Android rows/columns but rendering wide rectangular buttons.
+     Android `ButtonGrid` is a `MATCH_PARENT` `TableLayout` with stretched columns
+     (`ButtonGrid.kt:498-503`) whose rows and cells each carry layout weight `1.0`
+     (`ButtonGrid.kt:184-185`), so every button measures `availableWidth / cols` by
+     `availableHeight / rows` and the whole matrix always fills the screen exactly. Failure means
+     iOS is sizing chooser buttons from only one axis, which reintroduces scrolling or dead space
+     that Android never shows.
      */
-    func testPassageGridMetricsDeriveSquareCellSideFromAvailableWidth() {
-        let metrics = PassageGridMetrics.squareCells(
-            availableWidth: 393,
+    func testPassageGridMetricsFillAvailableSizeLikeAndroidWeightedTable() {
+        let metrics = PassageGridMetrics.fittedCells(
+            availableSize: CGSize(width: 393, height: 700),
+            rows: 11,
             columns: 6,
             spacing: 4,
             horizontalPadding: 12
         )
 
-        XCTAssertEqual(metrics.cellSide, 58.166, accuracy: 0.001)
+        XCTAssertEqual(metrics.cellWidth, 58.166, accuracy: 0.001)
+        XCTAssertEqual(metrics.cellHeight, 60, accuracy: 0.001)
         XCTAssertEqual(metrics.gridWidth, 369, accuracy: 0.001)
+        XCTAssertEqual((metrics.cellHeight * 11) + (4 * 10), 700, accuracy: 0.001)
+    }
+
+    /**
+     Verifies iPad-sized book and verse grids fit their container height without scrolling.
+
+     Android's chooser activities install `ButtonGrid` as the whole content view without a scroll
+     container (`GridChoosePassageBook.kt:153`, `GridChoosePassageChapter.kt:89`,
+     `GridChoosePassageVerse.kt:82`), so on any screen size the calculated matrix compresses to fit.
+     This test locks the same contract for iPad portrait books (11 rows, `LayoutDesigner.kt:46-47`)
+     and a Psalm 119 portrait verse grid (176 verses, 15 rows, `LayoutDesigner.kt:76-77`).
+     */
+    func testPassageGridMetricsFitIpadContainersWithoutScrolling() {
+        let bookLayout = PassageGridLayout.androidDefault(itemCount: 66, kind: .book, orientation: .portrait)
+        let bookMetrics = PassageGridMetrics.fittedCells(
+            availableSize: CGSize(width: 1024, height: 1250),
+            rows: bookLayout.rows,
+            columns: bookLayout.columns
+        )
+        let bookGridHeight = (bookMetrics.cellHeight * CGFloat(bookLayout.rows))
+            + (PassageGridMetrics.spacing * CGFloat(bookLayout.rows - 1))
+        XCTAssertEqual(bookGridHeight, 1250, accuracy: 0.001)
+
+        let verseLayout = PassageGridLayout.androidDefault(itemCount: 176, kind: .number, orientation: .portrait)
+        XCTAssertEqual(verseLayout.rows, 15)
+        XCTAssertEqual(verseLayout.columns, 12)
+        let verseSlots = verseLayout.displaySlots(for: Array(1...176))
+        let verseRows = PassageGridMetrics.rowCount(slotCount: verseSlots.count, columns: verseLayout.columns)
+        XCTAssertEqual(verseRows, verseLayout.rows)
+        let verseMetrics = PassageGridMetrics.fittedCells(
+            availableSize: CGSize(width: 1024, height: 1250),
+            rows: verseRows,
+            columns: verseLayout.columns
+        )
+        let verseGridHeight = (verseMetrics.cellHeight * CGFloat(verseRows))
+            + (PassageGridMetrics.spacing * CGFloat(verseRows - 1))
+        XCTAssertEqual(verseGridHeight, 1250, accuracy: 0.001)
+    }
+
+    /**
+     Verifies grouped book grids divide the screen by their actual seven-cell row count.
+
+     Android's grouped mode builds a variable number of seven-cell rows
+     (`ButtonGrid.addGroupedButtons`, `ButtonGrid.kt:117-160`, where `maxColumns = 6` bounds the
+     zero-based column index) inside the same equal-weight `TableLayout`, so those rows also
+     compress to fit the screen. Failure means grouped mode would regain scrolling or reuse the
+     fixed 11-row divisor.
+     */
+    func testPassageGridRowCountFollowsGroupedSlotEmission() {
+        let groupedOptions: PassageChooserOptions = {
+            var options = PassageChooserOptions.androidDefault
+            options.apply(.groupByCategory)
+            return options
+        }()
+        let slots = PassageBookOrdering.displaySlots(
+            for: BibleReaderController.defaultBooks,
+            options: groupedOptions,
+            orientation: .portrait
+        )
+
+        XCTAssertEqual(slots.count % PassageBookOrdering.groupedColumnCount, 0)
+        XCTAssertEqual(
+            PassageGridMetrics.rowCount(slotCount: slots.count, columns: PassageBookOrdering.groupedColumnCount),
+            slots.count / PassageBookOrdering.groupedColumnCount
+        )
+        XCTAssertEqual(PassageGridMetrics.rowCount(slotCount: 0, columns: 6), 1)
+        XCTAssertEqual(PassageGridMetrics.rowCount(slotCount: 67, columns: 7), 10)
+    }
+
+    /**
+     Verifies chooser grids are not wrapped in scrolling containers.
+
+     Android sets the `ButtonGrid` as the entire activity content view with no `ScrollView`
+     (`GridChoosePassageBook.kt:153`, `GridChoosePassageChapter.kt:89`,
+     `GridChoosePassageVerse.kt:82`); buttons compress so every book, chapter, and verse is always
+     visible on one screen. Failure means an iOS chooser reintroduced scrolling and diverged from
+     Android's fit-to-screen selector.
+     */
+    func testPassageGridViewsDoNotScroll() throws {
+        let relativePaths = [
+            "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Navigation/ChapterChooserView.swift",
+            "Sources/BibleUI/Sources/BibleUI/Navigation/VerseChooserView.swift"
+        ]
+
+        for relativePath in relativePaths {
+            let source = try BibleUITestSourceLocator.source(at: relativePath)
+
+            XCTAssertFalse(source.contains("ScrollView"), relativePath)
+            XCTAssertTrue(source.contains("PassageGridMetrics.fittedCells("), relativePath)
+        }
     }
 
     /**
@@ -767,5 +879,28 @@ final class PassageGridTests: XCTestCase {
             }
         }
         return MemorizationProgressSnapshot(memorizedVerses: verses)
+    }
+
+    /**
+     Guards the chooser overflow popup against silently overlapping menu rows.
+
+     `AndroidPopupMenuSurface` delegates stacking to its caller, so a bare `ForEach` renders every
+     row at the same origin and only the last row stays visible. The popup must keep its rows in
+     an explicit vertical stack.
+     */
+    func testChooserOverflowPopupStacksMenuRowsVertically() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Navigation/BookChooserView.swift"
+        )
+        let popupRange = try XCTUnwrap(source.range(of: "struct PassageChooserOverflowMenuPopup"))
+        let popupSource = String(source[popupRange.lowerBound...])
+        let forEachRange = try XCTUnwrap(
+            popupSource.range(of: "ForEach(PassageChooserMenuEntry.androidBookChooserOrder)")
+        )
+        let beforeForEach = String(popupSource[..<forEachRange.lowerBound])
+        XCTAssertTrue(
+            beforeForEach.contains("VStack(spacing: 0) {"),
+            "Chooser overflow rows must render inside a vertical stack."
+        )
     }
 }

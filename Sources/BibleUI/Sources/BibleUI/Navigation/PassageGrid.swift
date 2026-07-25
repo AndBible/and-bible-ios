@@ -551,8 +551,14 @@ enum PassageBookDisplayName {
  grouping with spacer cells at group boundaries.
  */
 enum PassageBookOrdering {
-    /// Android grouped-grid maximum column count.
-    static let groupedColumnCount = 6
+    /**
+     Android grouped-grid column count.
+
+     `ButtonGrid.addGroupedButtons` treats `maxColumns = 6` as a zero-based column-index bound
+     (`ButtonGrid.kt:129` with the `iCol > maxColumns` overflow check at `ButtonGrid.kt:140`), so
+     grouped rows carry up to seven cells.
+     */
+    static let groupedColumnCount = 7
 
     /**
      Produces visual slots for the book grid under the active Android chooser options.
@@ -627,8 +633,9 @@ enum PassageBookOrdering {
      Groups canonical books by Android `GroupB`, inserting spacer cells between groups.
 
      Android's `ButtonGrid.addGroupedButtons` fills rows left-to-right, starts a new row when the
-     broad category changes, and pads the current row with empty cells before beginning the next
-     group.
+     broad category changes or when a row already holds seven cells (`ButtonGrid.kt:132-145`), and
+     pads a group's final row with empty spacer cells before beginning the next group
+     (`ButtonGrid.kt:152-160`).
      */
     private static func groupedSlots(for books: [BookInfo]) -> [BookInfo?] {
         var slots: [BookInfo?] = []
@@ -816,14 +823,21 @@ struct PassageGridLayout: Equatable, Sendable {
 /**
  Android-compatible sizing metrics for passage selector cells.
 
- Android `ButtonGrid` gives each table row and each cell equal weight, so a visible cell occupies
- the same width and height inside the calculated matrix. SwiftUI grids do not infer that contract
- from row/column counts, so callers use this value object to derive a fixed square side from the
- available drawer or sheet width.
+ Android `ButtonGrid` is a full-screen `TableLayout` (`ButtonGrid.kt:498-503` sets `MATCH_PARENT`
+ layout params with stretched columns) whose rows and cells all carry weight `1.0`
+ (`ButtonGrid.kt:184-185`), and the chooser activities install the grid as the entire content view
+ with no scroll container (`GridChoosePassageBook.kt:153`, `GridChoosePassageChapter.kt:89`,
+ `GridChoosePassageVerse.kt:82`). Every button therefore measures `availableWidth / columns` by
+ `availableHeight / rows`, and the grid always fits the screen by compressing buttons instead of
+ scrolling. SwiftUI grids do not infer that contract from row/column counts, so callers use this
+ value object to derive fixed cell dimensions from the available chooser size.
  */
 struct PassageGridMetrics: Equatable, Sendable {
-    /// Width and height for every rendered grid cell.
-    let cellSide: CGFloat
+    /// Width for every rendered grid cell.
+    let cellWidth: CGFloat
+
+    /// Height for every rendered grid cell.
+    let cellHeight: CGFloat
 
     /// Total width occupied by all fixed-width columns and inter-column spacing.
     let gridWidth: CGFloat
@@ -835,29 +849,52 @@ struct PassageGridMetrics: Equatable, Sendable {
     static let horizontalPadding: CGFloat = 12
 
     /**
-     Derives fixed square cell dimensions from an available container width.
+     Derives fixed cell dimensions that fill the available container like Android's weighted table.
 
      - Parameters:
-       - availableWidth: Width available to the selector content before grid padding is applied.
+       - availableSize: Size available to the selector content before grid padding is applied.
+       - rows: Android layout row count. Values below one are clamped to one.
        - columns: Android layout column count. Values below one are clamped to one.
        - spacing: Space between neighboring cells.
        - horizontalPadding: Leading and trailing padding reserved around the grid.
-     - Returns: Square cell side and total grid width. Widths clamp at zero when the container is
-       too small, so SwiftUI never receives negative frame dimensions.
+     - Returns: Cell width/height and total grid width. Dimensions clamp at zero when the container
+       is too small, so SwiftUI never receives negative frame dimensions.
      */
-    static func squareCells(
-        availableWidth: CGFloat,
+    static func fittedCells(
+        availableSize: CGSize,
+        rows: Int,
         columns: Int,
         spacing: CGFloat = Self.spacing,
         horizontalPadding: CGFloat = Self.horizontalPadding
     ) -> PassageGridMetrics {
         let columnCount = max(columns, 1)
-        let availableGridWidth = max(0, availableWidth - (horizontalPadding * 2))
-        let totalSpacing = spacing * CGFloat(max(columnCount - 1, 0))
-        let cellSide = max(0, (availableGridWidth - totalSpacing) / CGFloat(columnCount))
-        let gridWidth = (cellSide * CGFloat(columnCount)) + totalSpacing
+        let rowCount = max(rows, 1)
+        let availableGridWidth = max(0, availableSize.width - (horizontalPadding * 2))
+        let horizontalSpacing = spacing * CGFloat(columnCount - 1)
+        let verticalSpacing = spacing * CGFloat(rowCount - 1)
+        let cellWidth = max(0, (availableGridWidth - horizontalSpacing) / CGFloat(columnCount))
+        let cellHeight = max(0, (availableSize.height - verticalSpacing) / CGFloat(rowCount))
+        let gridWidth = (cellWidth * CGFloat(columnCount)) + horizontalSpacing
 
-        return PassageGridMetrics(cellSide: cellSide, gridWidth: gridWidth)
+        return PassageGridMetrics(cellWidth: cellWidth, cellHeight: cellHeight, gridWidth: gridWidth)
+    }
+
+    /**
+     Counts the visual rows represented by precomputed display slots.
+
+     Matrix layouts always supply `rows * columns` slots, while Android's grouped book mode emits a
+     variable number of seven-cell rows. Android compresses both cases into the fixed screen height
+     through equal row weights, so iOS derives the divisor from the actual slot count.
+
+     - Parameters:
+       - slotCount: Number of visual slots, including `nil` spacers.
+       - columns: Column count used to render the slots.
+     - Returns: Number of rendered rows, never below one.
+     */
+    static func rowCount(slotCount: Int, columns: Int) -> Int {
+        let columnCount = max(columns, 1)
+        let rows = Int(ceil(Double(max(slotCount, 0)) / Double(columnCount)))
+        return max(rows, 1)
     }
 }
 
@@ -1217,8 +1254,9 @@ enum PassageChooserTitle {
  Shared passage-grid button with Android colors and stable accessibility metadata.
 
  The view is deliberately plain like Android's selector buttons; it avoids platform-specific card
- styling while using a fixed square frame derived from Android's row/column matrix so book,
- chapter, and verse cells do not drift into iOS-specific rectangular controls.
+ styling while using a fixed frame derived from Android's row/column matrix and weighted
+ full-screen table sizing, so book, chapter, and verse cells match Android's compress-to-fit
+ buttons instead of drifting into iOS-specific scrolling controls.
  */
 struct PassageGridButton: View {
     /// Visible label rendered in the button.
@@ -1239,8 +1277,11 @@ struct PassageGridButton: View {
     /// Android reading/memorization progress fractions for this cell.
     let progress: PassageGridProgress
 
-    /// Fixed square width and height for the button.
-    let cellSide: CGFloat
+    /// Fixed width for the button, derived from Android's stretched table columns.
+    let cellWidth: CGFloat
+
+    /// Fixed height for the button, derived from Android's equal-weight table rows.
+    let cellHeight: CGFloat
 
     /// Action invoked when the button is tapped.
     let action: () -> Void
@@ -1255,7 +1296,8 @@ struct PassageGridButton: View {
        - palette: Android foreground/background colors.
        - font: Text style for the selector type.
        - progress: Optional Android reading/memorization progress overlays.
-       - cellSide: Fixed square side derived from the Android grid matrix.
+       - cellWidth: Fixed cell width derived from the Android grid matrix columns.
+       - cellHeight: Fixed cell height derived from Android's fill-the-screen row weights.
        - action: Tap handler.
      - Side effects: none; the action is invoked only when the button is tapped.
      - Failure modes: none.
@@ -1267,7 +1309,8 @@ struct PassageGridButton: View {
         palette: PassageGridCellPalette,
         font: Font,
         progress: PassageGridProgress = .none,
-        cellSide: CGFloat,
+        cellWidth: CGFloat,
+        cellHeight: CGFloat,
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -1276,7 +1319,8 @@ struct PassageGridButton: View {
         self.palette = palette
         self.font = font
         self.progress = progress
-        self.cellSide = cellSide
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
         self.action = action
     }
 
@@ -1297,10 +1341,10 @@ struct PassageGridButton: View {
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.55)
                     .padding(.horizontal, 2)
-                    .frame(width: cellSide, height: cellSide)
+                    .frame(width: cellWidth, height: cellHeight)
                     .foregroundStyle(palette.foreground.swiftUIColor)
             }
-            .frame(width: cellSide, height: cellSide)
+            .frame(width: cellWidth, height: cellHeight)
             .clipShape(RoundedRectangle(cornerRadius: 3))
         }
         .buttonStyle(.plain)
@@ -1317,13 +1361,13 @@ struct PassageGridButton: View {
         if progress.memorizationFraction > 0 {
             Rectangle()
                 .fill(PassageGridProgress.memorizationColor.swiftUIColor.opacity(0.8))
-                .frame(width: cellSide * progress.memorizationFraction, height: barHeight)
+                .frame(width: cellWidth * progress.memorizationFraction, height: barHeight)
         }
 
         if progress.readingFraction > 0 {
             Rectangle()
                 .fill(PassageGridProgress.readingColor.swiftUIColor.opacity(0.8))
-                .frame(width: cellSide * progress.readingFraction, height: barHeight)
+                .frame(width: cellWidth * progress.readingFraction, height: barHeight)
                 .padding(.bottom, progress.memorizationFraction > 0 ? barHeight + gap : 0)
         }
     }
