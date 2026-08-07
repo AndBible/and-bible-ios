@@ -27,6 +27,17 @@ INFOPLIST="AndBible/Info.plist"
 # shellcheck source=scripts/lib-asc-api-key.sh
 . "$SCRIPT_DIR/lib-asc-api-key.sh"
 
+# asc_prepare_api_key installs its own `trap ... EXIT` for the RAM disk while it
+# runs (protecting it even if a later line in this function fails). Only AFTER
+# it returns do we install `cleanup` as the EXIT trap: `trap` registrations are
+# last-one-wins, so registering `cleanup` here — after, not before,
+# asc_prepare_api_key — is what makes it the trap that is actually live for the
+# rest of the script. `cleanup` calls asc_cleanup_api_key itself, so the RAM
+# disk is still ejected either way; registering in the other order would mean
+# asc_prepare_api_key's own trap silently wins instead and the Info.plist
+# restore below would never run.
+asc_prepare_api_key
+
 INFOPLIST_BAK=""
 cleanup() {
 	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
@@ -37,7 +48,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-asc_prepare_api_key
 KEYFILE="$ASC_KEY_FILE"
 KEYDIR="$(dirname "$KEYFILE")"
 TEAM_ID="$ASC_TEAM_ID"
