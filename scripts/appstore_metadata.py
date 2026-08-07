@@ -183,6 +183,48 @@ FIELD_LIMITS = {
 FORBIDDEN_SUBSTRINGS = ("android", "google play", "play store")
 
 
+def _is_cjk_character(char: str) -> bool:
+    """True for a Han ideograph, kana, or CJK punctuation character.
+
+    Deliberately EXCLUDES Hangul (Jamo U+1100-U+11FF, Compatibility Jamo
+    U+3130-U+318F, Syllables U+AC00-U+D7A3): Korean uses spaces between words
+    like other space-delimited languages, so a space between two Hangul
+    syllables is a normal word space, not a folding artifact, and must not be
+    treated as CJK for this rule.
+    """
+    code = ord(char)
+    return (
+        0x3040 <= code <= 0x30FF  # Hiragana, Katakana
+        or 0x3400 <= code <= 0x4DBF  # CJK Unified Ideographs Extension A
+        or 0x4E00 <= code <= 0x9FFF  # CJK Unified Ideographs
+        or 0xF900 <= code <= 0xFAFF  # CJK Compatibility Ideographs
+        or 0x3000 <= code <= 0x303F  # CJK Symbols and Punctuation (、。「」etc.)
+    )
+
+
+def find_cjk_adjacent_spaces(text: str) -> list[int]:
+    """Return the index of every space with a CJK character on both sides.
+
+    A YAML folded scalar (`key: >`) turns every internal line break into a
+    single space. That is an invisible, correct word space in space-delimited
+    languages - it lands exactly where a word space belongs - but Japanese and
+    Chinese have no inter-word spaces, so a space with CJK on both sides is
+    always a folding artifact, never intentional text. A space next to a
+    Latin character (e.g. "AI 探索", a recommended Chinese typographic
+    convention at a Latin/CJK boundary) has a non-CJK neighbour and does not
+    match; neither does a space between two Thai or Hangul characters, since
+    neither script is treated as CJK by `_is_cjk_character`.
+    """
+    return [
+        index
+        for index, char in enumerate(text)
+        if char == " "
+        and 0 < index < len(text) - 1
+        and _is_cjk_character(text[index - 1])
+        and _is_cjk_character(text[index + 1])
+    ]
+
+
 def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
     """Return every problem found in one locale's fields.
 
@@ -207,6 +249,11 @@ def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
         if "{{" in value or "}}" in value:
             problems.append(
                 f"{apple_locale}/{field}: unresolved template placeholder"
+            )
+        for index in find_cjk_adjacent_spaces(value):
+            problems.append(
+                f"{apple_locale}/{field}: space between CJK characters at "
+                f"index {index} (likely a YAML fold artifact - see Defect 1)"
             )
     return problems
 

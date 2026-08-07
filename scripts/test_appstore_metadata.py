@@ -647,6 +647,57 @@ class SourceShaExclusionTests(unittest.TestCase):
             self.assertNotIn("deadbeef", value)
 
 
+class CjkAdjacentSpaceTests(unittest.TestCase):
+    """Guard against Defect 1: a YAML folded scalar (`key: >`) turns every
+    internal line break into a single space. That's an invisible, correct word
+    space in space-delimited languages, but Japanese/Chinese have no
+    inter-word spaces, so a space landing between two CJK characters is always
+    a folding artifact, never intentional text.
+    """
+
+    def test_space_between_two_han_characters_is_rejected(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces("你好 吗"), [2])
+
+    def test_space_between_two_kana_characters_is_rejected(self) -> None:
+        # と (hiragana) / ノ (katakana) - the exact ja promotional_text defect.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("ブックマークと ノート"), [7])
+
+    def test_space_between_latin_and_han_is_accepted(self) -> None:
+        # zh-Hans feature_11's "AI 探索" - Chinese typographic convention
+        # recommends a space at a Latin/CJK boundary; it must not be flagged.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("借助 AI 探索"), [])
+
+    def test_space_between_two_hangul_syllables_is_accepted(self) -> None:
+        # Korean uses inter-word spaces like other space-delimited languages,
+        # so Hangul is deliberately excluded from the CJK definition here.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("안녕 하세요"), [])
+
+    def test_space_between_two_thai_characters_is_accepted(self) -> None:
+        # Thai uses spaces as phrase/list separators, not between every word;
+        # Thai is not CJK at all, so it must never match this rule.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("และ นี้"), [])
+
+    def test_normal_latin_text_is_unaffected(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces("hello world"), [])
+
+    def test_a_leading_or_trailing_space_is_not_flagged(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces(" 你好 "), [])
+
+    def test_validate_fields_reports_a_cjk_fold_space(self) -> None:
+        problems = meta.validate_fields(
+            "ja", {"promotional_text": "ブックマークと ノートを完備"}
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ja", problems[0])
+        self.assertIn("promotional_text", problems[0])
+
+    def test_validate_fields_accepts_clean_cjk_text(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("ja", {"promotional_text": "ブックマークとノートを完備"}),
+            [],
+        )
+
+
 class TranslationKeyTests(unittest.TestCase):
     def test_a_key_absent_from_the_english_source_is_rejected(self) -> None:
         sources = build_fixture_sources()
