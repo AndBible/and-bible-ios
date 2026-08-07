@@ -165,3 +165,44 @@ def resolve_variables(raw: Mapping[str, str]) -> dict[str, str]:
     return {
         key: expand_placeholders(value, stripped) for key, value in stripped.items()
     }
+
+
+FIELD_LIMITS = {
+    "name": 30,
+    "subtitle": 30,
+    "keywords": 100,
+    "promotional_text": 170,
+    "description": 4000,
+    "release_notes": 4000,
+}
+
+# App Store Review Guideline 2.3.10: no other-platform names in metadata.
+FORBIDDEN_SUBSTRINGS = ("android", "google play", "play store")
+
+
+def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
+    """Return every problem found in one locale's fields.
+
+    Lengths are character counts, not byte counts: a Telugu description is
+    roughly three bytes per character and a byte-based limit would reject
+    perfectly valid copy.
+    """
+    problems: list[str] = []
+    for field, value in sorted(fields.items()):
+        limit = FIELD_LIMITS.get(field)
+        if limit is not None and len(value) > limit:
+            problems.append(
+                f"{apple_locale}/{field}: {len(value)} characters, limit {limit}"
+            )
+        lowered = value.lower()
+        for forbidden in FORBIDDEN_SUBSTRINGS:
+            if forbidden in lowered:
+                problems.append(
+                    f"{apple_locale}/{field}: forbidden platform reference "
+                    f"{forbidden!r}"
+                )
+        if "{{" in value or "}}" in value:
+            problems.append(
+                f"{apple_locale}/{field}: unresolved template placeholder"
+            )
+    return problems

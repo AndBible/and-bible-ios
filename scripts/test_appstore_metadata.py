@@ -193,5 +193,56 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(resolved["k"], "text")
 
 
+class ValidationTests(unittest.TestCase):
+    def test_clean_fields_produce_no_problems(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fi", {"name": "AndBible", "subtitle": "Study"}),
+            [],
+        )
+
+    def test_a_field_at_its_limit_is_accepted(self) -> None:
+        self.assertEqual(meta.validate_fields("fi", {"subtitle": "x" * 30}), [])
+
+    def test_a_field_one_over_its_limit_is_rejected(self) -> None:
+        problems = meta.validate_fields("fi", {"subtitle": "x" * 31})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("subtitle", problems[0])
+
+    def test_length_is_counted_in_characters_not_bytes(self) -> None:
+        # Telugu characters are three bytes each in UTF-8. 200 of them are well
+        # inside the 4000-character description limit but would blow a 4000-byte
+        # one, which is exactly the mistake this guards against.
+        telugu = "అ" * 200
+        self.assertGreater(len(telugu.encode("utf-8")), 500)
+        self.assertEqual(meta.validate_fields("te", {"description": telugu}), [])
+
+    def test_platform_name_is_rejected_in_any_field(self) -> None:
+        problems = meta.validate_fields("fi", {"description": "built for Android"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("android", problems[0].lower())
+
+    def test_platform_check_is_case_insensitive(self) -> None:
+        self.assertTrue(meta.validate_fields("fi", {"description": "ANDROID"}))
+
+    def test_store_name_is_rejected(self) -> None:
+        self.assertTrue(
+            meta.validate_fields("fi", {"promotional_text": "on Google Play now"})
+        )
+
+    def test_unresolved_placeholder_is_rejected(self) -> None:
+        problems = meta.validate_fields("fi", {"description": "{{ missing }}"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("placeholder", problems[0])
+
+    def test_problems_name_the_locale(self) -> None:
+        problems = meta.validate_fields("pt-BR", {"subtitle": "x" * 99})
+        self.assertIn("pt-BR", problems[0])
+
+    def test_an_unlimited_field_is_not_length_checked(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fi", {"support_url": "https://" + "x" * 500}), []
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
