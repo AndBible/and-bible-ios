@@ -376,7 +376,7 @@ def _existing_files(output_root: Path) -> set[str]:
         return set()
     return {
         str(path.relative_to(output_root))
-        for path in output_root.rglob("*.txt")
+        for path in output_root.rglob("*")
         if path.is_file()
     }
 

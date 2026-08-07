@@ -1,10 +1,16 @@
 """Unit tests for the App Store metadata assembler."""
 
+import contextlib
+import io
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import appstore_metadata as meta
+import assemble_appstore_metadata as cli
 
 
 def write(directory: Path, name: str, content: str) -> Path:
@@ -472,6 +478,112 @@ class TreeIOTests(unittest.TestCase):
         meta.write_tree({"fi/name.txt": "x\n"}, self.out)
         self.assertFalse((self.out / "fi" / "old.txt").exists())
         self.assertTrue((self.out / "fi" / "name.txt").exists())
+
+    def test_a_non_txt_stale_file_is_reported_and_removed(self) -> None:
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        (self.out / "fi" / "ratings_config.json").write_text("{}", encoding="utf-8")
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("ratings_config.json" in problem for problem in problems))
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertFalse((self.out / "fi" / "ratings_config.json").exists())
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.output_root = self.tmp / "fastlane" / "metadata"
+        self.lock_file = self.tmp / "android_source.lock"
+        self._patch_output_root = mock.patch.object(cli, "OUTPUT_ROOT", self.output_root)
+        self._patch_lock_file = mock.patch.object(cli, "LOCK_FILE", self.lock_file)
+        self._patch_output_root.start()
+        self._patch_lock_file.start()
+        self.addCleanup(self._patch_output_root.stop)
+        self.addCleanup(self._patch_lock_file.stop)
+
+    def run_cli(self, *args: str) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        argv = ["assemble_appstore_metadata.py", *args]
+        with mock.patch.object(sys, "argv", argv):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = cli.main()
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def test_read_lock_skips_comments_and_blanks(self) -> None:
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("# a comment\n\nabc123\n", encoding="utf-8")
+        self.assertEqual(cli.read_lock(), "abc123")
+
+    def test_read_lock_returns_none_when_the_file_is_absent(self) -> None:
+        self.assertIsNone(cli.read_lock())
+
+    def test_head_sha_returns_none_for_a_non_repository(self) -> None:
+        self.assertIsNone(cli.head_sha(self.tmp))
+
+    def test_is_dirty_returns_false_for_a_non_repository(self) -> None:
+        self.assertFalse(cli.is_dirty(self.tmp))
+
+    def test_is_dirty_detects_uncommitted_changes(self) -> None:
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        (repo / "file.txt").write_text("a\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, capture_output=True,
+        )
+        self.assertFalse(cli.is_dirty(repo))
+        (repo / "file.txt").write_text("b\n", encoding="utf-8")
+        self.assertTrue(cli.is_dirty(repo))
+
+    def test_check_writes_nothing(self) -> None:
+        android_root = android_root_or_skip(self)
+        exit_code, _stdout, _stderr = self.run_cli(
+            "--check", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(self.output_root.exists())
+        self.assertFalse(self.lock_file.exists())
+
+    def test_lock_mismatch_warns_and_continues_by_default(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("deadbeef\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--android-root", str(android_root)
+        )
+        self.assertIn("warning:", stderr)
+        self.assertIn("android_source.lock says deadbeef", stderr)
+        self.assertNotEqual(exit_code, 2)
+
+    def test_lock_mismatch_fails_under_require_pinned(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("deadbeef\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("android_source.lock says deadbeef", stderr)
+
+    def test_dirty_checkout_leaves_the_lock_file_untouched(self) -> None:
+        android_root = android_root_or_skip(self)
+        with mock.patch.object(cli, "is_dirty", return_value=True):
+            exit_code, _stdout, stderr = self.run_cli(
+                "--android-root", str(android_root)
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(self.lock_file.exists())
+        self.assertIn("uncommitted changes", stderr)
 
 
 if __name__ == "__main__":

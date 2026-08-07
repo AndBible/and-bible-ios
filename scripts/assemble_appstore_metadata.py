@@ -44,6 +44,19 @@ def head_sha(repository: Path) -> str | None:
     return result.stdout.strip()
 
 
+def is_dirty(repository: Path) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return bool(result.stdout.strip())
+
+
 def read_lock() -> str | None:
     if not LOCK_FILE.is_file():
         return None
@@ -132,12 +145,20 @@ def main() -> int:
 
     meta.write_tree(tree, OUTPUT_ROOT)
     if actual:
-        LOCK_FILE.write_text(
-            "# Commit in AndBible/and-bible that the committed App Store metadata\n"
-            "# was generated from. CI checks out exactly this SHA.\n"
-            f"{actual}\n",
-            encoding="utf-8",
-        )
+        if is_dirty(android_root):
+            print(
+                "warning: android_source.lock left unchanged - the Android "
+                "checkout has uncommitted changes, so the SHA would not "
+                "describe what was just rendered.",
+                file=sys.stderr,
+            )
+        else:
+            LOCK_FILE.write_text(
+                "# Commit in AndBible/and-bible that the committed App Store metadata\n"
+                "# was generated from. CI checks out exactly this SHA.\n"
+                f"{actual}\n",
+                encoding="utf-8",
+            )
     print(f"Wrote {len(tree)} files to {OUTPUT_ROOT}")
     return 0
 
