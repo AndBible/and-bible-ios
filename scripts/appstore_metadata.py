@@ -369,3 +369,38 @@ def missing_translation_locales(sources: LoadedSources) -> list[str]:
         for _, apple_locale in sources.locale_config.mappings
         if apple_locale not in sources.ios_translations
     )
+
+
+def _existing_files(output_root: Path) -> set[str]:
+    if not output_root.is_dir():
+        return set()
+    return {
+        str(path.relative_to(output_root))
+        for path in output_root.rglob("*.txt")
+        if path.is_file()
+    }
+
+
+def compare_tree(tree: Mapping[str, str], output_root: Path) -> list[str]:
+    """Describe every difference between the rendered tree and the one on disk."""
+    problems: list[str] = []
+    existing = _existing_files(output_root)
+    for relative_path in sorted(set(tree) - existing):
+        problems.append(f"missing: {relative_path}")
+    for relative_path in sorted(existing - set(tree)):
+        problems.append(f"stale: {relative_path}")
+    for relative_path in sorted(set(tree) & existing):
+        on_disk = (output_root / relative_path).read_text(encoding="utf-8")
+        if on_disk != tree[relative_path]:
+            problems.append(f"changed: {relative_path}")
+    return problems
+
+
+def write_tree(tree: Mapping[str, str], output_root: Path) -> None:
+    """Write the rendered tree, deleting files it no longer contains."""
+    for relative_path in sorted(_existing_files(output_root) - set(tree)):
+        (output_root / relative_path).unlink()
+    for relative_path, content in sorted(tree.items()):
+        target = output_root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")

@@ -441,5 +441,38 @@ class RealSourcesTests(unittest.TestCase):
         self.assertIn("off by default", fields["description"])
 
 
+class TreeIOTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_write_then_compare_is_clean(self) -> None:
+        tree = {"fi/name.txt": "AndBible\n", "copyright.txt": "2026\n"}
+        meta.write_tree(tree, self.out)
+        self.assertEqual(meta.compare_tree(tree, self.out), [])
+
+    def test_compare_reports_a_changed_file(self) -> None:
+        meta.write_tree({"fi/name.txt": "old\n"}, self.out)
+        problems = meta.compare_tree({"fi/name.txt": "new\n"}, self.out)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("fi/name.txt", problems[0])
+
+    def test_compare_reports_a_missing_file(self) -> None:
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("fi/name.txt" in problem for problem in problems))
+
+    def test_compare_reports_a_stale_file(self) -> None:
+        meta.write_tree({"fi/name.txt": "x\n", "fi/old.txt": "y\n"}, self.out)
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("fi/old.txt" in problem for problem in problems))
+
+    def test_write_removes_a_stale_file(self) -> None:
+        meta.write_tree({"fi/old.txt": "y\n"}, self.out)
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertFalse((self.out / "fi" / "old.txt").exists())
+        self.assertTrue((self.out / "fi" / "name.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
