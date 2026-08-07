@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -119,10 +120,32 @@ class AndroidRootTests(unittest.TestCase):
 
 
 def android_root_or_skip(test: unittest.TestCase) -> Path:
-    """Locate the Android checkout, skipping the test when it is absent."""
+    """Locate the Android checkout, skipping when it's absent or unpinned.
+
+    The real-source tests assert against the specific translations pinned in
+    `appstore/android_source.lock` (e.g. Finnish's exact description-headroom
+    figure) - they are only meaningful against that exact Android commit.
+    `.github/workflows/ios-ci.yml`'s `repo-standards` job checks out a
+    DIFFERENT, independently-bumped commit (`ANDBIBLE_ANDROID_REF`, used for
+    unrelated Android-parity checks) at the SAME path this resolver finds, so
+    without this guard a routine Android bump could red-light an unrelated PR
+    with a description-length failure that has nothing to do with it. Only
+    the `appstore-metadata` CI job (which checks out exactly the locked SHA)
+    - or a local checkout that happens to be at that SHA, as in this
+    container - actually runs these assertions.
+    """
     root = meta.resolve_android_root(REPO_ROOT)
     if root is None:
         test.skipTest("Android reference checkout not available")
+    locked = cli.read_lock()
+    if locked is not None:
+        actual = cli.head_sha(root)
+        if actual != locked:
+            test.skipTest(
+                f"Android checkout at {actual!r} is not at the commit pinned "
+                f"in android_source.lock ({locked!r}); real-source "
+                "assertions only run against that exact commit"
+            )
     return root
 
 
@@ -149,6 +172,53 @@ class RealLocaleMapTests(unittest.TestCase):
         available = {path.stem for path in android.glob("*.yml")}
         for play, _ in self.config.mappings:
             self.assertIn(play, available)
+
+
+# Apple locales where the DEFAULT platform_substitutions rule ("Android" ->
+# "iOS") is known to already produce a correct inflected form when applied
+# inside a language's own suffix, and a locale-specific rule was deliberately
+# NOT added. Today that is only Czech: it attaches a case ending directly to
+# an initialism with no separator, so the default rule's "iOSu" is correct.
+DEFAULT_RULE_PRODUCES_CORRECT_INFLECTION = {"cs"}
+
+INFLECTED_ANDROID_FORM_PATTERN = re.compile(r"Android[A-Za-z]")
+
+
+class InflectedAndroidFormsTests(unittest.TestCase):
+    """Guard against the Finnish "iOSille" defect recurring for another locale.
+
+    That defect was: an Android translation inflects "Android" (e.g. Finnish
+    "Androidille"), no `platform_substitutions` rule existed for that locale,
+    and nobody noticed the resulting "iOSille" was ungrammatical. This scans
+    every mapped locale's real Android translation for an inflected form and
+    requires each one to either have its own rule, or be explicitly listed
+    above as a case where the default rule is already correct.
+    """
+
+    def test_every_inflected_android_form_is_covered_by_a_rule_or_accepted(
+        self,
+    ) -> None:
+        android_root = android_root_or_skip(self)
+        translations_dir = android_root / "play" / "description-translations"
+        config = meta.load_locale_config(REPO_ROOT / "appstore" / "locales.yml")
+        uncovered: list[str] = []
+        for play_locale, apple_locale in config.mappings:
+            text = (translations_dir / f"{play_locale}.yml").read_text(
+                encoding="utf-8"
+            )
+            if not INFLECTED_ANDROID_FORM_PATTERN.search(text):
+                continue
+            has_rule = apple_locale in config.locale_substitutions
+            is_accepted = apple_locale in DEFAULT_RULE_PRODUCES_CORRECT_INFLECTION
+            if not has_rule and not is_accepted:
+                uncovered.append(apple_locale)
+        self.assertEqual(
+            uncovered,
+            [],
+            "these locales inflect 'Android' but have neither a "
+            "platform_substitutions rule nor a documented reason the default "
+            "rule is correct for them",
+        )
 
 
 class PlaceholderTests(unittest.TestCase):
@@ -400,6 +470,44 @@ class TreeValidationTests(unittest.TestCase):
         self.assertEqual(
             meta.missing_translation_locales(build_fixture_sources()), ["en-US"]
         )
+
+    def test_an_unknown_review_information_key_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources, review_information={"notes": "public", "email": "typo@x.org"}
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("email" in problem for problem in problems))
+
+    def test_a_known_review_information_key_is_not_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources,
+            review_information={"notes": "public", "email_address": "a@b.org"},
+        )
+        self.assertEqual(meta.validate_tree(sources), [])
+
+    def test_a_forbidden_word_in_copyright_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.app_info, copyright="Built for Android, 2026")
+        sources = meta.replace_sources(sources, app_info=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("android" in problem.lower() for problem in problems))
+
+    def test_a_forbidden_word_in_review_notes_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources, review_information={"notes": "Also on Google Play."}
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("google play" in problem.lower() for problem in problems))
+
+    def test_an_unresolved_placeholder_in_copyright_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.app_info, copyright="{{ year }} The Contributors")
+        sources = meta.replace_sources(sources, app_info=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("placeholder" in problem for problem in problems))
 
 
 class ReviewInformationTests(unittest.TestCase):

@@ -5,7 +5,7 @@
 #
 # Keys that are NOT here come from the Android store copy unchanged; the
 # description is deliberately the same text as the Play listing apart from the
-# four overrides below.
+# three overrides below.
 #
 # Until ios_translations/<apple-locale>.yml exists for a given locale, these
 # English values render as-is inside that locale's otherwise fully translated

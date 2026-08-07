@@ -5,7 +5,11 @@
 #   ASC_KEY_FILE  path to AuthKey_<id>.p8   (xcodebuild / Transporter)
 #   ASC_KEY_JSON  path to asc_api_key.json  (fastlane --api_key_path)
 #   ASC_TEAM_ID   the resolved Apple Developer team
-# and registers an EXIT trap that ejects the volume.
+# and registers an EXIT trap that ejects the volume. That trap call REPLACES
+# any EXIT trap already registered in the calling shell (bash allows only one
+# `trap ... EXIT` at a time) - a caller with its own cleanup must register it
+# AFTER calling asc_prepare_api_key, not before, or the earlier trap is
+# silently discarded and never runs.
 #
 # The key is GPG-encrypted to the developer's YubiKey. Apple's tooling requires
 # it as a file on disk, so it is decrypted onto a RAM disk rather than the normal

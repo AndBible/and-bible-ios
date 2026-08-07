@@ -1,6 +1,6 @@
 Tehokas työkalu Raamatun tutkimiseen
 
-”AndBible: Raamattu” on tehokas, helppokäyttöinen ja offline-tilassa toimiva raamatuntutkimussovellus iOSille — monipuolinen työkalupakki rennosta lukemisesta syvälliseen tutkimukseen. Enemmän kuin lukuohjelma — väline vakavaan Raamatun tutkimiseen.
+”AndBible: Raamattu” on tehokas, helppokäyttöinen ja offline-tilassa toimiva raamatuntutkimussovellus iOS:lle — monipuolinen työkalupakki rennosta lukemisesta syvälliseen tutkimukseen. Enemmän kuin lukuohjelma — väline vakavaan Raamatun tutkimiseen.
 
 Sovelluksen ovat kehittäneet Raamatun lukijat Raamatun lukijoille — voittoa tavoittelematon, avoimen lähdekoodin yhteisöprojekti, joka on täysin ilmainen eikä sisällä mainoksia.
 

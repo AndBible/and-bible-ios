@@ -80,6 +80,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python dependencies
+        run: python3 -m pip install --requirement scripts/requirements-appstore.txt
+
       - name: Checkout Android reference
         run: scripts/ensure_android_reference_checkout.sh
 

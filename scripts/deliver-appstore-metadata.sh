@@ -12,7 +12,10 @@
 # currently has fewer locales enabled than this tree carries, the run
 # creates/enables the rest with no separate warning beyond what this script
 # prints below. Run `make appstore-precheck` (Apple's own metadata rules
-# against the live listing) before the first real `make appstore-deliver`.
+# against the live listing) AFTER the first real `make appstore-deliver`, not
+# before: `fastlane precheck` inspects the metadata App Store Connect
+# currently holds, so before an upload it can only check the OLD listing —
+# and for a first release there is nothing there at all.
 #
 #   ./scripts/deliver-appstore-metadata.sh            # upload
 #   ./scripts/deliver-appstore-metadata.sh precheck   # Apple's metadata rules

@@ -56,10 +56,30 @@ feature_08: >
   (`feature_08`, `feature_09`, `feature_11`); replacing an English override
   sentence with a translated one that is merely "correct" can push the total
   over the limit, because translated text is typically longer than English.
-  Today's tightest locales, English-source length included, are fr-FR (3988 of
-  4000), then fi, ru, el and es-ES — each has well under 100 characters of
-  headroom. **Write each translated feature override at or under the English
-  source's character length.** This is a constraint on the writing itself, not
+  Headroom shifts every time a translation changes, so don't rely on a number
+  written in this file — compute it fresh before you start:
+
+  ```bash
+  python3 - <<'PY'
+  import sys
+  sys.path.insert(0, "scripts")
+  import appstore_metadata as meta
+  from pathlib import Path
+
+  sources = meta.load_sources(meta.resolve_android_root(Path(".")), Path("appstore"))
+  rows = sorted(
+      (4000 - len(fields["description"]), apple, len(fields["description"]))
+      for play, apple in sources.locale_config.mappings
+      for fields in [meta.build_locale_fields(sources, play, apple)]
+  )
+  for headroom, apple, length in rows[:8]:
+      print(f"{apple}: {length}/4000 ({headroom} headroom)")
+  PY
+  ```
+
+  The tightest locales are the ones with the smallest headroom in that output.
+  **Write each translated feature override at or under the English source's
+  character length.** This is a constraint on the writing itself, not
   something to fix by truncating afterwards. `make appstore-validate` is what
   enforces the 4000-character total; if it fails on a locale you touched,
   shorten the override's wording, don't cut it off.

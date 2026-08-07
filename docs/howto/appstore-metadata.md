@@ -228,6 +228,15 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
    immediately. There is no dry-run mode and `fastlane/Deliverfile` sets
    `force true`, which skips `deliver`'s interactive HTML-preview
    confirmation. Read the printed summary before running it, not after.
+   **Known risk, unverified:** App Store Connect has historically rejected
+   release notes on an app's very first version (there is no prior version
+   for "what's new" to describe), and `appstore/release_notes.txt` is
+   currently rendered into all 34 locales. If this one live, irreversible
+   step fails on `release_notes`, that is the expected, already-known cause,
+   not a new bug to debug from scratch — dropping release notes for the 1.0
+   submission is a small change (drop `release_notes` from
+   `LOCALE_FIELD_FILES` in `scripts/appstore_metadata.py`, or just skip
+   uploading that field this one time) and safe to make on the spot.
 5. `make appstore-precheck` — Apple's own metadata rules against the live
    listing, run **after** step 4, not before: `precheck` inspects whatever
    App Store Connect currently holds, so running it before the new text is

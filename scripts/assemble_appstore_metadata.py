@@ -16,7 +16,6 @@ dirty tree - fine for CI, destructive for a developer's working copy.
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path

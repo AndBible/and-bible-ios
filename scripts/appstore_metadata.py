@@ -278,6 +278,23 @@ APP_LEVEL_FILES = {
 
 IOS_ONLY_FIELDS = ("subtitle", "keywords", "promotional_text")
 
+# The review_information keys `deliver` actually recognises. render_tree emits
+# review_information/{name}.txt for ANY key present in review_information.yml
+# (public) or review_information.local.yml (gitignored, personal data), with
+# no allowlist of its own - a typo like `email` instead of `email_address`
+# would otherwise render a file deliver silently ignores, so the reviewer
+# never gets that contact detail and nothing reports the mistake.
+REVIEW_INFORMATION_KEYS = (
+    "first_name",
+    "last_name",
+    "phone_number",
+    "email_address",
+    "demo_user",
+    "demo_password",
+    "demo_required",
+    "notes",
+)
+
 
 @dataclass(frozen=True)
 class LoadedSources:
@@ -408,9 +425,40 @@ def render_tree(sources: LoadedSources) -> dict[str, str]:
     return tree
 
 
+def validate_review_information_keys(sources: LoadedSources) -> list[str]:
+    """Reject review_information keys that `deliver` does not recognise.
+
+    Mirrors validate_translation_keys: a misspelt key (e.g. `email` for
+    `email_address`) would otherwise render into the tree and be silently
+    dropped by `deliver`, with nothing to notice.
+    """
+    unknown = sorted(set(sources.review_information) - set(REVIEW_INFORMATION_KEYS))
+    return [
+        f"review_information: unknown key {key!r} (deliver does not recognise it)"
+        for key in unknown
+    ]
+
+
+def validate_app_level_fields(sources: LoadedSources) -> list[str]:
+    """Validate the app-level rendered output the same way a locale field is.
+
+    `copyright.txt` (public listing metadata) and `review_information/notes.txt`
+    (reviewer-facing prose) are the only free-text app-level output; both can
+    carry a forbidden platform reference or an unresolved template placeholder
+    just as easily as a translated locale field can, but validate_tree never
+    looked at them before this.
+    """
+    fields = {"copyright": sources.app_info["copyright"]}
+    if "notes" in sources.review_information:
+        fields["notes"] = sources.review_information["notes"]
+    return validate_fields("app-level", fields)
+
+
 def validate_tree(sources: LoadedSources) -> list[str]:
     """Validate every locale. Returns every problem, not just the first."""
     problems: list[str] = validate_translation_keys(sources)
+    problems.extend(validate_review_information_keys(sources))
+    problems.extend(validate_app_level_fields(sources))
     for play_locale, apple_locale in sources.locale_config.mappings:
         fields = build_locale_fields(sources, play_locale, apple_locale)
         problems.extend(validate_fields(apple_locale, fields))
