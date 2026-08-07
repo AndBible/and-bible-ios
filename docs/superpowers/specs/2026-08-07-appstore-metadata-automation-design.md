@@ -126,7 +126,7 @@ in `locales.yml`, so adding them later is a data change.
 ## iOS divergences from the Android copy
 
 The description is otherwise identical to Android's, by decision — no
-iOS-specific marketing paragraph. Five keys need to change, for correctness or to
+iOS-specific marketing paragraph. Four keys need to change, for correctness or to
 satisfy Apple.
 
 ### 1. The platform name
@@ -153,14 +153,20 @@ hyphenated spelling the language actually uses for an invariant foreign noun. Th
 substitution is applied to the **rendered** description, not to the source YAML,
 so `and-bible` is never modified.
 
-### 2–5. Key overrides in `ios_source.yml`
+### 2–4. Key overrides in `ios_source.yml`
 
 | Key | Why | iOS text (English source) |
 |---|---|---|
 | `feature_08` | Android's sync includes Google Drive; iOS deliberately does not (`RemoteSyncBackend` is `iCloud`/`nextCloud` only, `CLAUDE.md` "Google Drive is intentionally removed from the iOS sync surface") | Cross-device sync over iCloud or NextCloud/WebDAV: workspaces, bookmarks, notes and reading progress stay in sync |
 | `feature_09` | "set reading goals" has no iOS counterpart; what exists is `ReadingPlanService` plus `ReadingProgressStore` (chapters read, active days, cycles) | Reading plans and progress tracking, plus verse memorization with Word Scramble, Word Order, Word Blur and Type It modes |
 | `feature_11` | Apple review risk: the AI agent must be described as opt-in and bring-your-own-key | Optional AI study agent — off by default, and requires your own API key from a third-party provider. Explore your installed commentaries and dictionaries with AI assistance in your chosen language. A built-in permission system keeps you in full control of what the agent can do. |
-| `feature_12` | The app ships with no preinstalled modules; a bare "works offline" claim overpromises | Works offline: once you have downloaded or imported your documents, no internet connection is needed |
+
+A fourth override, `feature_12` (an offline clarification), was specified and
+then dropped: the key is unused in both Android templates — most likely cut for
+Play's length limit — so it renders nowhere and an iOS override of it would be
+dead text. The offline claim survives in `paragraph_1_1`, which is true, and the
+reviewer is told separately that no modules ship with the app (see App Review
+Information).
 
 The exact English wording above is the starting point; it is authored in
 `ios_source.yml` and may be refined during implementation. What is fixed is the

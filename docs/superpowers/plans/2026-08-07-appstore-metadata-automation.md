@@ -1176,9 +1176,11 @@ cp "$ANDROID_ROOT/play/full_description_template_plaintext.txt" \
    appstore/description_template.txt
 ```
 
-Then fix the one stray space inside a placeholder so the expander matches it — open `appstore/description_template.txt` and change `{{paragraph_4_1 }}` to `{{ paragraph_4_1 }}`.
+Leave the template's contents alone otherwise — including the stray space in
+`{{paragraph_4_1 }}`, which `PLACEHOLDER_PATTERN` already tolerates.
 
-Verify the template has no control structures and lists the expected keys:
+Verify the template has no control structures, and record which feature keys it
+actually renders (it does **not** render `feature_12`):
 
 ```bash
 grep -c '{%' appstore/description_template.txt    # expect 0 matches -> grep exits 1
@@ -1235,12 +1237,6 @@ feature_11: >
   third-party provider. Explore your installed commentaries and dictionaries with
   AI assistance in your chosen language. A built-in permission system keeps you in
   full control of what the agent can do.
-
-# The app ships with no preinstalled modules, so a bare "works offline" claim
-# would overpromise.
-feature_12: >
-  Works offline: once you have downloaded or imported your documents, no internet
-  connection is needed.
 ```
 
 - [ ] **Step 3: Write the app-level metadata**
@@ -1414,15 +1410,14 @@ git commit -F - <<'EOF'
 feat(appstore): add the iOS store copy sources
 
 Why:
-Four Android description keys are wrong for iOS: sync lists Google Drive,
-reading "goals" do not exist, the AI agent must be described as opt-in
-and bring-your-own-key, and a bare offline claim overpromises because no
-modules ship with the app. Three App Store fields have no Android
+Three Android description keys are wrong for iOS: sync lists Google Drive,
+reading "goals" do not exist, and the AI agent must be described as
+opt-in and bring-your-own-key. Three App Store fields have no Android
 counterpart at all.
 
 What Changed:
 Adds the description template (the Android plain-text template verbatim),
-ios_source.yml with the four overrides plus subtitle, keywords and
+ios_source.yml with the three overrides plus subtitle, keywords and
 promotional text, app_info.yml with categories, copyright and URLs,
 English release notes, and reviewer notes covering discrete mode, the AI
 agent, the ATS exceptions and the absence of preinstalled modules. The
