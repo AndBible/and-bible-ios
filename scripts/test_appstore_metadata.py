@@ -605,5 +605,58 @@ class CliTests(unittest.TestCase):
         self.assertIn("uncommitted changes", stderr)
 
 
+class DigestTests(unittest.TestCase):
+    def test_digest_is_stable_across_key_order(self) -> None:
+        first = meta.ios_source_digest({"a": "1", "b": "2"})
+        second = meta.ios_source_digest({"b": "2", "a": "1"})
+        self.assertEqual(first, second)
+
+    def test_digest_changes_when_a_value_changes(self) -> None:
+        self.assertNotEqual(
+            meta.ios_source_digest({"a": "1"}), meta.ios_source_digest({"a": "2"})
+        )
+
+    def test_digest_ignores_the_source_sha_key(self) -> None:
+        self.assertEqual(
+            meta.ios_source_digest({"a": "1"}),
+            meta.ios_source_digest({"a": "1", "source_sha": "deadbeef"}),
+        )
+
+    def test_stale_translations_are_reported(self) -> None:
+        sources = build_fixture_sources()
+        digest = meta.ios_source_digest(sources.ios_source)
+        fresh = {"fi": {"subtitle": "x", "source_sha": digest}}
+        self.assertEqual(meta.stale_translation_locales(
+            meta.replace_sources(sources, ios_translations=fresh)
+        ), [])
+        stale = {"fi": {"subtitle": "x", "source_sha": "old"}}
+        self.assertEqual(meta.stale_translation_locales(
+            meta.replace_sources(sources, ios_translations=stale)
+        ), ["fi"])
+
+
+class SourceShaExclusionTests(unittest.TestCase):
+    def test_source_sha_is_not_rendered_into_any_field(self) -> None:
+        sources = build_fixture_sources()
+        translations = {
+            "fi": {"subtitle": "Raamattu", "source_sha": "deadbeef"},
+        }
+        sources = meta.replace_sources(sources, ios_translations=translations)
+        fields = meta.build_locale_fields(sources, "fi-FI", "fi")
+        for value in fields.values():
+            self.assertNotIn("deadbeef", value)
+
+
+class TranslationKeyTests(unittest.TestCase):
+    def test_a_key_absent_from_the_english_source_is_rejected(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources,
+            ios_translations={"fi": {"subtitle": "x", "sbutitle": "typo"}},
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("sbutitle" in problem for problem in problems))
+
+
 if __name__ == "__main__":
     unittest.main()

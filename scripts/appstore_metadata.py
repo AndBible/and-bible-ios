@@ -13,6 +13,8 @@ only part that touches the output tree.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -318,7 +320,13 @@ def build_locale_fields(
             sources.android_master,
             sources.android_translations.get(play_locale, {}),
             sources.ios_source,
-            sources.ios_translations.get(apple_locale, {}),
+            {
+                key: value
+                for key, value in sources.ios_translations.get(
+                    apple_locale, {}
+                ).items()
+                if key != SOURCE_SHA_KEY
+            },
         )
     )
     fields = {
@@ -355,7 +363,7 @@ def render_tree(sources: LoadedSources) -> dict[str, str]:
 
 def validate_tree(sources: LoadedSources) -> list[str]:
     """Validate every locale. Returns every problem, not just the first."""
-    problems: list[str] = []
+    problems: list[str] = validate_translation_keys(sources)
     for play_locale, apple_locale in sources.locale_config.mappings:
         fields = build_locale_fields(sources, play_locale, apple_locale)
         problems.extend(validate_fields(apple_locale, fields))
@@ -404,3 +412,50 @@ def write_tree(tree: Mapping[str, str], output_root: Path) -> None:
         target = output_root / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+
+SOURCE_SHA_KEY = "source_sha"
+
+
+def ios_source_digest(ios_source: Mapping[str, str]) -> str:
+    """A stable digest of the English iOS copy, used to detect stale translations.
+
+    Serialized as sorted JSON so the digest is independent of key order and
+    cannot be confused by a value that happens to contain the separator.
+    """
+    payload = json.dumps(
+        {
+            key: value.strip()
+            for key, value in ios_source.items()
+            if key != SOURCE_SHA_KEY
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def stale_translation_locales(sources: LoadedSources) -> list[str]:
+    """Locales whose translation was made against an older English source."""
+    digest = ios_source_digest(sources.ios_source)
+    return sorted(
+        apple_locale
+        for apple_locale, translation in sources.ios_translations.items()
+        if translation.get(SOURCE_SHA_KEY) != digest
+    )
+
+
+def validate_translation_keys(sources: LoadedSources) -> list[str]:
+    """Reject translation keys that do not exist in the English iOS source.
+
+    A misspelt key is otherwise invisible: it never reaches the listing and the
+    English text ships in its place, with nothing to notice.
+    """
+    known = set(sources.ios_source) | {SOURCE_SHA_KEY}
+    problems: list[str] = []
+    for apple_locale, translation in sorted(sources.ios_translations.items()):
+        for key in sorted(set(translation) - known):
+            problems.append(
+                f"{apple_locale}: unknown key {key!r} (not in ios_source.yml)"
+            )
+    return problems

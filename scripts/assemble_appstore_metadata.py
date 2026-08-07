@@ -134,6 +134,14 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    stale = meta.stale_translation_locales(sources)
+    if stale:
+        print(
+            f"note: {len(stale)} locale(s) were translated against an older "
+            "English source: " + ", ".join(stale),
+            file=sys.stderr,
+        )
+
     tree = meta.render_tree(sources)
 
     if args.check:
