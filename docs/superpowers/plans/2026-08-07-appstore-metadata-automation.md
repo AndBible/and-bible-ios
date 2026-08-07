@@ -1199,7 +1199,7 @@ Create `appstore/ios_source.yml`:
 #
 # Keys that are NOT here come from the Android store copy unchanged; the
 # description is deliberately the same text as the Play listing apart from the
-# four overrides below.
+# three overrides below.
 
 # --- iOS-only fields (no Android counterpart) ---
 
@@ -1272,8 +1272,7 @@ Create `appstore/review_information.yml`:
 #
 # The reviewer CONTACT DETAILS (name, phone, email) are personal data and must
 # never be committed to this public repository. They come from a gitignored
-# appstore/review_information.local.yml, or from ASC_REVIEW_* environment
-# variables; see docs/howto/appstore-metadata.md.
+# appstore/review_information.local.yml; see docs/howto/appstore-metadata.md.
 notes: |
   The app ships with no Bible texts. On first launch it prompts you to download
   a document from a SWORD repository or import a file; until you do, the reader
