@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Apple's required-reason API declarations. Every category listed here is one
+	  the app's own code actually reaches; adding a new one to the code without a
+	  matching entry here fails
+	  AndBibleTests/testPrivacyManifestDeclaresAReasonForEveryRequiredReasonAPI
+	  rather than the upload (ITMS-91053).
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- Settings, workspace state and sync bookkeeping, all app-private. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!--
+			  85F4.1: SwordKit checks free capacity before installing a downloaded
+			  module (ModuleInstallationContracts) and before writing an Android-
+			  compatible backup archive (ZipArchiveWriter+AndroidModuleBackup).
+			  E174.1: the bug-report preparation shows free storage to the user.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>85F4.1</string>
+				<string>E174.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!--
+			  C617.1: BibleSearchIndexSource compares a file's modification date
+			  against the search index to decide whether the index is stale. The
+			  file is inside the app container.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+
+	<!--
+	  AndBible collects nothing. Bookmarks, notes and reading progress sync to
+	  storage the user owns (iCloud or their own NextCloud/WebDAV server); the AI
+	  study agent is off by default and talks to a third-party provider under the
+	  user's own API key. In neither case does this project receive or retain any
+	  of it, so there is no collected data type to declare and no tracking.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+</dict>
+</plist>
