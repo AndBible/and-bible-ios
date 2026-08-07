@@ -36,9 +36,11 @@ make appstore-deliver     # upload the text metadata, live (macOS, YubiKey)
 
 Generation and validation need nothing but Python (`PyYAML`, see
 `scripts/requirements-appstore.txt`) and a checkout of the Android
-repository. Only the two upload targets need macOS and an App Store Connect
-API key (see `docs/howto/testflight-cli-upload.md` for the one-time key setup
-— `deliver-appstore-metadata.sh` reuses the same `lib-asc-api-key.sh` decrypt
+repository. On a fresh machine that means network access at least once, to
+clone that checkout (below) — after that, both targets run fully offline.
+Only the two upload targets need macOS and an App Store Connect API key (see
+`docs/howto/testflight-cli-upload.md` for the one-time key setup —
+`deliver-appstore-metadata.sh` reuses the same `lib-asc-api-key.sh` decrypt
 step and `~/.appstoreconnect/asc-api.env`).
 
 ### Getting the Android checkout
@@ -62,10 +64,20 @@ resolver exists instead of a single hardcoded location:
 git clone https://github.com/AndBible/and-bible.git .and-bible-android
 ```
 
-CI does not use this resolver at all: `.github/workflows/ios-ci.yml`'s
-`appstore-metadata` job fetches the exact commit pinned in
-`appstore/android_source.lock` into `../and-bible` itself, so a CI run is
-reproducible independent of whatever a developer has checked out.
+On a machine where you haven't done this yet, the very first
+`make appstore-metadata` or `make appstore-validate` you run will fail with
+exit code 2 and a "No Android store copy found" message. That's expected,
+not a broken pipeline — run the clone above and re-run the command.
+
+CI goes through this exact same resolver — there is no separate code path —
+but it doesn't rely on any of the developer-local fallbacks above.
+`.github/workflows/ios-ci.yml` sets `ANDBIBLE_ANDROID_ROOT: ../and-bible` at
+the workflow level (so it wins as rung 2) and its `appstore-metadata` job
+checks out precisely the commit pinned in `appstore/android_source.lock`
+into that path before running the script. Same resolver, same code — CI just
+controls which candidate exists and what it contains, so the render is
+reproducible regardless of what a developer happens to have checked out
+locally.
 
 ## Changing the copy
 
@@ -121,8 +133,10 @@ substitution rules for the languages that inflect it (e.g. Polish "Androida"
 → "iOS-a", not the default rule's ungrammatical "iOSa").
 
 `scripts/appstore_metadata.py`'s validator also rejects the literal words
-"android", "google play" and "play store" (case-insensitively) in any
-rendered field, as a backstop against a substitution rule missing a locale.
+"android", "google play" and "play store" (case-insensitively) in **every**
+rendered field — not just `description`. It applies equally to `subtitle`,
+`keywords`, `promotional_text` and the rest, as a backstop against a
+substitution rule missing a locale.
 
 ## Writing Japanese/Chinese translations: the CJK space guard
 
@@ -215,7 +229,10 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
    `force true`, which skips `deliver`'s interactive HTML-preview
    confirmation. Read the printed summary before running it, not after.
 5. `make appstore-precheck` — Apple's own metadata rules against the live
-   listing. Run this after delivering text, before submitting for review.
+   listing, run **after** step 4, not before: `precheck` inspects whatever
+   App Store Connect currently holds, so running it before the new text is
+   uploaded would only tell you about the *old* listing. It's meaningful
+   here, once the new text is live and before you submit for review.
 6. Upload screenshots by hand (this pipeline deliberately never touches
    them).
 7. Bootstrap and commit the age rating (`appstore/app_rating.json`, above) —
