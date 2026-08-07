@@ -285,6 +285,16 @@ cd libsword
 ./build-ios.sh
 ```
 
+### App Store metadata
+
+Listing text for 34 locales is generated from the Android store copy plus an
+iOS override layer and uploaded with `fastlane deliver`: `make
+appstore-metadata` / `appstore-validate` / `appstore-precheck` /
+`appstore-deliver`. Sources live in `appstore/`; `fastlane/metadata/` is
+generated and must never be hand-edited. Screenshots are uploaded by hand and
+`deliver` is configured not to touch them. See
+`docs/howto/appstore-metadata.md`.
+
 ## Troubleshooting
 
 ### Xcode / Package Resolution
