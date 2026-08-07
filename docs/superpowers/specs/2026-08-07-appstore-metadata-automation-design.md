@@ -308,7 +308,8 @@ without touching the renderer.
 - `primary_category: REFERENCE`, `secondary_category: BOOKS` — AndBible is
   primarily a study tool (search, commentaries, Strong's, cross-references);
   Reference describes it more accurately than Books and is less crowded.
-- `copyright: 2026 Martin Denham, Tuomas Airaksinen and the AndBible contributors`
+- `copyright: 2026 Tuomas Airaksinen, Jared Murrell and the AndBible contributors`
+  — the iOS app's own authorship, which differs from the Android app's.
 - `marketing_url: https://andbible.org`
 - `support_url: https://github.com/AndBible/and-bible/wiki/Support`
 - `privacy_url: https://andbible.org/privacy.html`
