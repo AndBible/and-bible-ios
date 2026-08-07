@@ -29,5 +29,5 @@ appstore-precheck: ## Run Apple's own metadata rules against the live listing (m
 	@scripts/deliver-appstore-metadata.sh precheck
 
 .PHONY: appstore-deliver
-appstore-deliver: ## Upload App Store text metadata (macOS, YubiKey)
+appstore-deliver: ## Upload App Store text metadata, live, no dry run - run appstore-precheck first (macOS, YubiKey)
 	@scripts/deliver-appstore-metadata.sh

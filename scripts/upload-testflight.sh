@@ -40,11 +40,19 @@ asc_prepare_api_key
 
 INFOPLIST_BAK=""
 cleanup() {
-	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
-	# write, so restoring a saved copy (not re-setting the version) keeps the tree
-	# clean.
-	[ -n "$INFOPLIST_BAK" ] && [ -f "$INFOPLIST_BAK" ] && mv -f "$INFOPLIST_BAK" "$INFOPLIST"
+	# Eject the RAM disk FIRST and unconditionally. It holds the decrypted key,
+	# so ejecting it must never be skipped by a failure below - under this
+	# script's `set -e`, a failing command anywhere in this function body would
+	# otherwise abort the function and leave the volume mounted.
 	asc_cleanup_api_key
+	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
+	# write, so restoring a saved copy (not re-setting the version) keeps the
+	# tree clean. A failed restore is reported (mv's own stderr is not
+	# suppressed) but must not be fatal - the `||` keeps `set -e` from treating
+	# it as a reason to skip anything that might follow.
+	if [ -n "$INFOPLIST_BAK" ] && [ -f "$INFOPLIST_BAK" ]; then
+		mv -f "$INFOPLIST_BAK" "$INFOPLIST" || echo ">> WARNING: failed to restore $INFOPLIST from $INFOPLIST_BAK - the stamped build number is still in your working tree." >&2
+	fi
 }
 trap cleanup EXIT
 
