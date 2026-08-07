@@ -198,30 +198,28 @@ email_address: "..."
 When the file is absent, those fields are simply omitted from the rendered
 tree and `deliver` leaves whatever App Store Connect already has.
 
-## Age rating
+## Age rating: set it by hand, this pipeline does not own it
 
-`appstore/app_rating.json` does not exist in this repository yet, and cannot
-be created from anywhere but a live App Store Connect listing — its key set
-is defined by the installed fastlane version, so it must not be hand-written.
-Bootstrap it once, on macOS, after the app record exists in App Store Connect
-(see the first-release checklist):
+The age rating is **not** part of this pipeline. Set it in the App Store
+Connect UI; a submission cannot go out until it is answered.
 
-```bash
-fastlane deliver download_metadata --api_key_path "$ASC_KEY_JSON"
-cp fastlane/metadata/app_rating_config.json appstore/app_rating.json
-```
+An earlier revision of this document described bootstrapping
+`appstore/app_rating.json` from the live listing with `fastlane deliver
+download_metadata` and then pointing `app_rating_config_path` at it. That was
+tried on 2026-08-07 against fastlane 2.236.1 and **does not work**:
+`download_metadata` wrote every locale directory, the app-level
+category/copyright files and `review_information/`, but no
+`app_rating_config.json` at all. `deliver`'s `--app_rating_config_path` upload
+option still exists, so a hand-written file would be uploaded — but its key
+set is defined by fastlane, it cannot be derived from the live listing with
+this version, and guessing it is exactly the failure mode the option's
+documentation warns about. Answer the questionnaire in the UI instead.
 
-`download_metadata` writes into `fastlane/metadata/`, which this pipeline
-otherwise owns entirely — copy the file out to `appstore/` (as above) *before*
-running `make appstore-metadata` again, or it is deleted as stale.
-
-Then add to `fastlane/Deliverfile`:
-
-```ruby
-app_rating_config_path "./appstore/app_rating.json"
-```
-
-and commit both the config path change and `appstore/app_rating.json`.
+If you do run `download_metadata` for some other reason, remember it writes
+into `fastlane/metadata/`, which this pipeline otherwise owns entirely: it
+overwrites the rendered tree with whatever App Store Connect currently holds.
+Run `make appstore-metadata` afterwards to restore the tree, and check
+`git status` is clean before moving on.
 
 ## Verifying without uploading anything
 
@@ -256,11 +254,26 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
    listing, run **after** step 4, not before: `precheck` inspects whatever
    App Store Connect currently holds, so running it before the new text is
    uploaded would only tell you about the *old* listing. It's meaningful
-   here, once the new text is live and before you submit for review.
+   here, once the new text is live and before you submit for review. Note
+   that `deliver` runs `precheck` itself at the end of a successful upload
+   (`run_precheck_before_submit` defaults to true), so step 4 usually covers
+   this already.
 6. Upload screenshots by hand (this pipeline deliberately never touches
    them).
-7. Bootstrap and commit the age rating (`appstore/app_rating.json`, above) —
-   App Store Connect requires it before a submission can go out, and it can
-   only be created once the app record from step 1 exists.
+7. Answer the age-rating questionnaire in the App Store Connect UI — required
+   before a submission can go out, and not something this pipeline owns (see
+   "Age rating" above).
 8. Attach the build (`docs/howto/testflight-cli-upload.md`) and submit for
    review.
+
+### Two harmless messages a first `deliver` prints
+
+- `Error fetching app store review detail - No data` — `deliver` failing to
+  *read* a review-detail record that does not exist yet, immediately before
+  writing one. Verified on 2026-08-07: a subsequent `download_metadata` showed
+  the contact name, phone and email had in fact been stored.
+- `😵 Failed: No words indicating test content -> found: testing` — `precheck`
+  matching the word "testing" in the shared "contribute to the project by ...
+  testing not-yet-released features" sentence, which is Android-sourced copy
+  present in 20 locales. It is a `warn`-level rule about the app being test
+  content, and does not apply here.
