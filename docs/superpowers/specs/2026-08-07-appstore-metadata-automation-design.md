@@ -188,8 +188,14 @@ authored in `ios_source.yml` in English and translated per locale.
   - default: write the whole `fastlane/metadata/` tree
   - `--check`: render in memory, compare against the committed tree, exit 1 on
     drift, write nothing
-  - `--android-root PATH`: override, default `ANDBIBLE_ANDROID_ROOT` then
-    `../and-bible`
+  - `--android-root PATH`: override. Resolution order is the flag, then
+    `ANDBIBLE_ANDROID_ROOT` (which `ios-ci.yml` already sets), then the
+    gitignored `.and-bible-android/` that `CLAUDE.md` documents as the local
+    reference location, then `../and-bible` (the fallback
+    `scripts/ensure_android_reference_checkout.sh` already uses). A candidate
+    counts only if it actually contains `play/constants.yml`, so an empty
+    directory cannot shadow a real checkout. `CLAUDE.md` forbids hard-coding a
+    sibling path, which is why this is a resolver and not a constant.
 
 The script **reads** the Android checkout and never mutates it. In particular it
 does not invoke `scripts/ensure_android_reference_checkout.sh`, which detaches
@@ -346,10 +352,11 @@ that genuinely helps a reviewer, and the part worth versioning:
 
 Reviewer **contact details** (name, phone, email) are personal data and must not
 be committed to a public repository. They come from a gitignored
-`appstore/review_information.local.yml`, or from `ASC_REVIEW_*` environment
-variables in `~/.appstoreconnect/asc-api.env` alongside the other local App Store
-Connect config. `appstore/*.local.yml` is added to `.gitignore`. When absent, the
-generator omits the contact files and deliver leaves those fields untouched.
+`appstore/review_information.local.yml`, overlaid on the public notes at load
+time; `appstore/*.local.yml` is added to `.gitignore`. When the file is absent
+the generator omits those fields entirely and deliver leaves whatever App Store
+Connect already holds. One mechanism, not two — no environment-variable
+alternative.
 
 `appstore/app_rating.json` holds the age-rating questionnaire answers in
 deliver's `app_rating_config_path` format, so the rating is versioned and
