@@ -19,60 +19,30 @@ cd "$REPO_ROOT"
 
 PROJECT="AndBible.xcodeproj"
 SCHEME="AndBible"
-KEY_ID="${ASC_KEY_ID:?Set ASC_KEY_ID to the App Store Connect API key ID}"
-ISSUER_ID="${ASC_ISSUER_ID:?Set ASC_ISSUER_ID to the App Store Connect API issuer UUID}"
-ENC_KEY="${ASC_KEY_GPG:-$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8.gpg}"
 ARCHIVE="build/AndBible.xcarchive"
 EXPORT_DIR="build/export"
 EXPORT_OPTS="build/ExportOptions.plist"
 INFOPLIST="AndBible/Info.plist"
-SIGNING_XCCONFIG="Config/Secrets.xcconfig.local"
 
-[ -f "$ENC_KEY" ] || { echo "Encrypted key not found: $ENC_KEY" >&2; exit 1; }
+# shellcheck source=scripts/lib-asc-api-key.sh
+. "$SCRIPT_DIR/lib-asc-api-key.sh"
 
-# Resolve the Apple Developer team. Kept out of the repo to match the signing
-# setup (DEVELOPMENT_TEAM lives in the gitignored local xcconfig): prefer an
-# explicit env override, otherwise read it from the local signing xcconfig.
-TEAM_ID="${ASC_TEAM_ID:-${DEVELOPMENT_TEAM:-}}"
-if [ -z "$TEAM_ID" ] && [ -f "$SIGNING_XCCONFIG" ]; then
-	TEAM_ID="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*//p' "$SIGNING_XCCONFIG" | tr -d '[:space:]')"
-fi
-[ -n "$TEAM_ID" ] || {
-	echo "Could not resolve the Apple Developer team. Set ASC_TEAM_ID or DEVELOPMENT_TEAM in $SIGNING_XCCONFIG." >&2
-	exit 1
-}
-
-# 1) RAM-backed volume for the decrypted key (auto-ejected on exit). hdiutil pads
-#    the device node with trailing spaces/tabs — trim it, or diskutil can't find
-#    the disk. Register cleanup immediately after attaching so a later failure
-#    never leaves the RAM disk mounted.
-RAM_DEV="$(hdiutil attach -nomount ram://40960 | tr -d '[:space:]')"   # ~20 MB
 INFOPLIST_BAK=""
 cleanup() {
 	# Restore the original Info.plist byte-for-byte. PlistBuddy reorders keys on
 	# write, so restoring a saved copy (not re-setting the version) keeps the tree
 	# clean.
 	[ -n "$INFOPLIST_BAK" ] && [ -f "$INFOPLIST_BAK" ] && mv -f "$INFOPLIST_BAK" "$INFOPLIST"
-	if [ -n "${RAM_DEV:-}" ]; then
-		hdiutil detach "$RAM_DEV" >/dev/null 2>&1 || diskutil eject "$RAM_DEV" >/dev/null 2>&1 || true
-	fi
+	asc_cleanup_api_key
 }
 trap cleanup EXIT
 
-# Unique mount point so concurrent runs (or a stale /Volumes/asckey) can't collide.
-VOLUME_NAME="asckey-$$"
-diskutil erasevolume HFS+ "$VOLUME_NAME" "$RAM_DEV" >/dev/null
-KEYDIR="/Volumes/$VOLUME_NAME"
-[ -d "$KEYDIR" ] || { echo "RAM disk mount not found: $KEYDIR" >&2; exit 1; }
-
-KEYFILE="$KEYDIR/AuthKey_${KEY_ID}.p8"
-# Create the file and lock its permissions BEFORE any plaintext is written, so the
-# decrypted key is never even momentarily readable by other users. The `>` redirect
-# truncates the existing file without changing its mode, so 600 is preserved.
-touch "$KEYFILE"
-chmod 600 "$KEYFILE"
-echo ">> Decrypting API key onto RAM disk (YubiKey PIN + touch may be required)…"
-gpg --quiet --decrypt "$ENC_KEY" > "$KEYFILE"
+asc_prepare_api_key
+KEYFILE="$ASC_KEY_FILE"
+KEYDIR="$(dirname "$KEYFILE")"
+TEAM_ID="$ASC_TEAM_ID"
+KEY_ID="$ASC_KEY_ID"
+ISSUER_ID="$ASC_ISSUER_ID"
 
 # 2) Generate export options with the locally resolved team (kept out of the repo).
 mkdir -p "$(dirname "$EXPORT_OPTS")"

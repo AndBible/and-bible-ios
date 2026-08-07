@@ -76,6 +76,12 @@ appstore/*.local.yml
 # (encrypted *.p8.gpg blobs are kept outside the repo entirely).
 *.p8
 
+# fastlane run artefacts (fastlane/metadata/ is generated-but-committed and must
+# stay tracked - these are only the report/preview/API-key files a run leaves behind).
+/fastlane/report.xml
+/fastlane/Preview.html
+/fastlane/*.json
+
 # Archives
 *.zip
 *.tar.gz

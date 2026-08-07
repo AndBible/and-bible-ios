@@ -1,0 +1,14 @@
+# Text metadata only. The binary goes through scripts/upload-testflight.sh, and
+# screenshots are uploaded by hand - skip_screenshots keeps deliver from
+# deleting or reordering them.
+app_identifier "org.andbible.ios"
+metadata_path "./fastlane/metadata"
+
+skip_binary_upload true
+skip_screenshots true
+submit_for_review false
+
+# Skip the interactive HTML preview confirmation; this runs non-interactively.
+force true
+
+precheck_include_in_app_purchases false
