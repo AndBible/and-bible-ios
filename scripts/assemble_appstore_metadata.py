@@ -99,6 +99,13 @@ def main() -> int:
 
     locked = read_lock()
     actual = head_sha(android_root)
+    if args.require_pinned and locked is None:
+        print(
+            f"{LOCK_FILE} is missing or has no commit SHA; --require-pinned "
+            "has nothing to pin against.",
+            file=sys.stderr,
+        )
+        return 2
     pinned = locked is not None and actual is not None and locked == actual
     if not pinned and locked is not None:
         message = (

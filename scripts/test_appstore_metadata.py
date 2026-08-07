@@ -575,6 +575,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertIn("android_source.lock says deadbeef", stderr)
 
+    def test_require_pinned_fails_when_the_lock_file_is_absent(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.assertFalse(self.lock_file.exists())
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn(str(self.lock_file), stderr)
+
+    def test_require_pinned_fails_when_the_lock_file_has_no_sha(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("# just a comment\n\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn(str(self.lock_file), stderr)
+
     def test_dirty_checkout_leaves_the_lock_file_untouched(self) -> None:
         android_root = android_root_or_skip(self)
         with mock.patch.object(cli, "is_dirty", return_value=True):

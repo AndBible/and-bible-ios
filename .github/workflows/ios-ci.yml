@@ -143,10 +143,10 @@ jobs:
     name: App Store metadata
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -157,7 +157,18 @@ jobs:
       - name: Check out the Android store copy at the pinned commit
         run: |
           set -euo pipefail
-          sha="$(grep -v '^#' appstore/android_source.lock | head -n 1 | tr -d '[:space:]')"
+          sha="$(python3 - <<'PY'
+          import sys
+          sys.path.insert(0, "scripts")
+          from assemble_appstore_metadata import read_lock
+
+          sha = read_lock()
+          if not sha:
+              print("appstore/android_source.lock is missing or has no commit SHA", file=sys.stderr)
+              raise SystemExit(1)
+          print(sha)
+          PY
+          )"
           git init ../and-bible
           git -C ../and-bible fetch --depth 1 https://github.com/AndBible/and-bible.git "$sha"
           git -C ../and-bible checkout --detach FETCH_HEAD
