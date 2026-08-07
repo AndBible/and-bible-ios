@@ -1,0 +1,50 @@
+Güçlü Kutsal Kitap çalışma aracı
+
+"AndBible: İncil Çalışması", iOS için güçlü, kullanımı kolay ve çevrimdışı çalışan bir Kutsal Kitap çalışma uygulamasıdır — gündelik okumadan derinlemesine araştırmaya kadar pek çok çalışma tarzına hizmet eden, yüksek kaliteli özelliklerden oluşan çok yönlü bir araç setidir. Yalnızca bir okuyucudan çok daha fazlası: ciddi bireysel çalışma için bir araçtır.
+
+Kutsal Kitap okuyucuları tarafından, Kutsal Kitap okuyucuları için geliştirildi — kâr amacı gütmeyen, açık kaynaklı bir topluluk projesi; tamamen ücretsiz ve reklam içermez.
+
+KJV, NASB, NET gibi birkaç popüler İncil versiyonu (mevcut birçok versiyon arasından) ve ayrıca Matthew Henry ve John Gill gibi popüler yorumları.
+
+Güçlü İncil Çalışma özellikleri
+
+Uygulama, karmaşık ve derin bir Kutsal Kitap çalışma deneyimini daha sorunsuz hale getiren birçok aydınlatıcı, orijinal özelliğe sahiptir. En dikkat çekici özellikler aşağıdaki gibidir:
+
+ * Çevirileri karşılaştırmayı ve yorumlara başvurmayı sağlayan bölünmüş metin görünümleri
+ * Çalışma alanları, kendi ayarlarına sahip birden fazla Kutsal Kitap çalışma kurulumuna izin verir
+ * Strong’un sözlüğü entegrasyonla birlikte Grekçe ve İbranice kelime analizine olanak sağlar
+ * Bağlantılı çapraz referansları, dipnotları ve yorumları (Gill, Matthew Henry vb.) veya çapraz referans koleksiyonlarını (Kutsal Kitap Bilgisinin Hazinesi, TSKe) takip etmek için herhangi bir bağlantıya dokunun.
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Bir veya birden çok Kutsal Kitap çevirisinde aynı anda esnek tam metin araması
+ * Gelişmiş yer imi
+ * Vaazları dinlerken notlar ve Kutsal Kitap referansları eklemek için Çalışma Pedleri.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Konuşma imleri ile gelişmiş metin okuma özelliği, sorunsuz bir Kutsal Kitap dinleme deneyimi sağlar
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Geniş belge kütüphanesi: Crosswire ve diğer SWORD depoları tarafından yasal olarak dağıtılan 700 üzerinde dilde 1500 belgeden oluşan Kutsal Kitap çevirileri, teolojik yorumlar, sözlükler, haritalar ve Hristiyan kitapları.
+ * MyBible, MySword ve EPUB dosyaları için yerel destek, kitaplığınızı daha da genişletmenizi sağlar.
+
+Birlikte en iyi Kutsal Kitap uygulamasını yapalım!
+
+AndBible açık kaynaklı bir topluluk projesidir. Pratikte bu, uygun becerilere sahip herkesin
+
+ * yeni özellikler geliştirerek,
+ * henüz yayımlanmamış özellikleri test ederek,
+ * kullanıcı arayüzü çevirilerini güncel tutarak, ve
+ * telif hakkı sahiplerinden izinler alarak veya belgeleri SWORD formatına dönüştürerek modül kitaplığının genişletilmesine yardımcı olarak.
+
+Profesyonel bir yazılım mühendisi ya da testçi iseniz lütfen projeye katkıda bulunmayı düşünün. Nasıl katkıda bulunacağınız hakkında daha fazla bilgi sahibi olmak için lütfen bakınız https://git.io/JUnaj.
+
+Geliştirme süresine sponsor ederek destek olun!
+
+Projeye katkıda bulunmak için zamanınız veya beceriniz yoksa, profesyonel geliştirici çalışma süresine sponsor ederek da projeyi destekleyebilirsiniz.
+
+Seçenekleri görün: https://shop.andbible.org/
+
+Bağlantılar
+
+ * Ana Sayfa: https://andbible.org
+ * AndBible’ı Facebook’ta Beğen: https://www.facebook.com/AndBible/
+ * Youtube Kanalımız: https://www.youtube.com/c/AndBible
+ * Sıkça Sorulan Sorular: https://git.io/JJm8E
+ * Github üzerindeki proje sayfası: https://github.com/AndBible/and-bible

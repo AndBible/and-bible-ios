@@ -1,0 +1,50 @@
+Bibliatanulmányozó alkalmazás
+
+A „AndBible: Biblia" egy hatékony, könnyen használható, offline bibliatanulmányozó alkalmazás iOS-ra — sokoldalú eszköztár az alkalmi olvasástól a részletes kutatásig. Több mint olvasó: komoly személyes tanulmányozás eszköze.
+
+Bibliaolvasók fejlesztették bibliaolvasóknak — non-profit, nyílt forráskódú közösségi projekt, teljesen ingyenes és reklámmentes.
+
+Az applikációban magyarul több fordítás érhető el: többek közt a Károli Biblia 1908-as revíziója, a Magyar Bibliatársulat Újfordítású Bibliájának 1990 és 2014-es változata és a Káldi Neovulgáta modern változata is. Angolul a népszerű KJV, NASB, NET fordítások és az ugyancsak népszerű Matthew Henry és John Gill kommentárok is elérhetőek, a több száz egyéb nyelvű bibliafordítással  és kommentárral együtt.
+
+Bibliatanulmányozó funkciók
+
+Az app számos különleges funkcióval rendelkezik, amelyek az öszetett és alapos bibliatanulmányozást még egyszerűbbé teszik. A elismerésre legméltóbb funkciók:
+
+ * Megosztott képernyős mód, amely lehetővé teszi a különböző forditások összehasonlítását, vagy a kommentárok a Bibilia szövegével párhuzamos olvasását
+ * A Munkaasztalok segítségével több kölönböző saját beállításokkal rendelkező bibliatanulmányozási konfiguráció létrehozására van lehetőség
+ * A Strong-konkordancia (szómutató) integráció lehetővé teszi a görög és héber szóanalízist.
+ * Bármely hivatkozásra koppintva követheti a kapcsolt kereszthivatkozásokat, lábjegyzeteket és kommentárokat (Gill, Matthew Henry stb.), valamint a kereszthivatkozás-gyűjteményeket (Treasury of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Rugalmas teljes szöveges keresés egy vagy több bibliafordításban
+ * Fejlett könyvjelző és kijelölési lehetőségek, személyes jegyzetek
+ * Jegyzetlapok jegyzetekkel és biblia hivatkozásokkal: igehirdetésre készülve vagy igehirdetés hallgatása közben.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Fejlett felolvasási képességek (a támogatott nyelveken), beszéd könyvjelzők, hogy tényleg akadálymentesen hallgathassa a Bibliát.
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Modulkönyvtár: bibliafordítások, teológiai kommentárok, szótárak, térképek és keresztény irodalom, összesen 1500 mű, 700 nyelven,  jogtisztán letölthetően a Crosswire és egyéb SWORD modulkönyvtárakból.
+ * A MyBible, MySword és EPUB fájltípusok natívan támogatottak, így még teljesebb lehet a könyvtárad.
+
+Segítsen az alkalmazás jobbá tételében!
+
+Az And Bible nyílt forráskódú közösségi projekt. Bárkit, aki megfelelő képességekkel rendelkezik, bátorítunk a közreműködésre:
+
+ * új funkciók kifejlesztésével
+ * újonnan fejlesztett funkciók tesztelésével
+ * a felhasználói felület fordításainak karbantartásával és
+ * a modulkönyvtár fejlesztésével: dokumentumok SWORD formátumba konvertálásával vagy a jogtulajdonosoktól a megfelelő engedélyek beszerzésével.
+
+Ha hivatásos szoftverfejlesztő vagy tesztelő, kérjük vegyen részt az alkalmazás feljlesztésében! Bővebb információ: https://git.io/JUnaj.
+
+Támogasd as projektet fejlesztőidő vásárlásával!
+
+Ha nem rendelkezik megfelelő képességekkel, támogathatja a projektet fejlesztőidő vásárlásával.
+
+Lehetőségek: https://shop.andbible.org/
+
+Hivatkozások
+
+ * Internetcím: https://andbible.org
+ * Kövesd az AndBible-t Facbookon: https://www.facebook.com/AndBible/
+ * YouTube csatornánk: https://www.youtube.com/c/AndBible
+ * Gyakori kérdések (FAQ): https://git.io/JJm8E
+ * A projekt GitHub oldala: https://github.com/AndBible/and-bible

@@ -1,0 +1,50 @@
+Powerful Bible Study tool
+
+"AndBible: Bible Study" is a powerful, easy-to-use, offline Bible study app for iOS — a versatile toolkit of high-quality features serving many study styles, from casual reading to in-depth research. More than a reader, it's a tool for serious personal study.
+
+Developed by Bible readers, for Bible readers — a non-profit, open-source community project that is completely free and contains no ads.
+
+Many popular Bible versions are available including KJV, NASB, NET, and others. Popular commentaries like Matthew Henry and John Gill are also available.
+
+Powerful Bible Study features
+
+The application has many insightful and original features that makes a complex and deep Bible study experience smoother than ever. The most notable features are:
+
+ * Split text views that enable comparing translations and consulting commentaries
+ * Workspaces allow multiple Bible study setups with their own settings
+ * Strong's integration allows Greek and Hebrew word analysis
+ * Tap any link to follow hyperlinked cross-references, footnotes, and commentaries (Gill, Matthew Henry etc.) or cross-reference collections (Treasure of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Flexible full-text search across one or many Bible translations simultaneously
+ * Advanced bookmarking & highlighting features with personal study notes
+ * Study Pads for adding notes and Bible references while listening to sermons
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Advanced text to speech with speak bookmarks, enabling a smooth Bible listening experience
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Vast library of documents: Bible translations, theological commentaries, dictionaries, maps, and christian books, totaling over 1500 documents in over 700 languages, legally distributed by Crosswire and other SWORD repositories
+ * Native support for MyBible, MySword and EPUB files enables you to extend your library even more
+
+Let’s make the best Bible app together!
+
+AndBible is an open-source community project. In practice, this means that anyone with suitable skills can, and is encouraged to, contribute to the project by:
+
+ * developing new features,
+ * testing not-yet-released features,
+ * keeping user interface translations up-to-date, and
+ * helping to extend the module library by obtaining permissions from copyright holders, or by converting documents to SWORD format.
+
+If you are a professional software engineer or tester, please consider contributing to the project. For more information on how to contribute, please see https://git.io/JUnaj.
+
+Support by sponsoring development time!
+
+If you don't have time or skills for code contribution, you can support AndBible by sponsoring development time.
+
+See sponsorship options here:: https://shop.andbible.org/
+
+Links
+
+ * Homepage: https://andbible.org
+ * Like AndBible on Facebook: https://www.facebook.com/AndBible/
+ * Our Youtube Channel: https://www.youtube.com/c/AndBible
+ * Frequently Asked Questions: https://git.io/JJm8E
+ * Project page on Github: https://github.com/AndBible/and-bible

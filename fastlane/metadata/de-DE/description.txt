@@ -1,0 +1,50 @@
+Ein mächtiges Werkzeug für das Bibelstudium
+
+„AndBible: Bibel+“ ist eine leistungsstarke, einfache Offline-Bibelstudium-App für iOS — ein vielseitiges Toolkit für viele Studienstile, vom gelegentlichen Lesen bis zur tiefgehenden Forschung. Mehr als nur ein Lesegerät: ein Werkzeug für ernsthaftes persönliches Studium.
+
+Entwickelt von Bibellesern für Bibelleser — ein gemeinnütziges Open-Source-Gemeinschaftsprojekt, vollständig kostenlos und werbefrei.
+
+Einige der erhältlichen beliebten Bibelversionen sind Schlachter 1955, NeUE, Luther 1912, sowie englische Kommentare wie Matthew Henry und John Gill.
+
+Umfangreiche Funktionen für das Bibelstudium
+
+Das Programm hat viele originelle und aufschlussreiche Funktionen, die ein komplexes und tiefgehendes Bibelstudium einfacher als je machen. Die herausragendsten Funktionen sind:
+
+ * Geteilte Textansicht zum Vergleichen von Übersetzungen und Anzeigen von Kommentaren
+ * Arbeitsbereiche erlauben mehrere Konfigurationen für Bibelstudien mit jeweils eigenen Einstellungen
+ * Die Integration der Strong-Codes erlaubt das Nachschlagen und Analysieren von griechischen und hebräischen Vokabeln
+ * Tippe auf einen Link, um Querverweisen, Fußnoten und Kommentaren (Gill, Matthew Henry, etc.) oder Querverweissammlungen (Treasure of Scripture Knowledge, TSKe) zu folgen.
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Flexible Volltextsuche in einer oder mehreren Bibelübersetzungen gleichzeitig
+ * Fortgeschrittene Lesezeichen- & Hervorhebungsfunktionen mit persönlichen Studiennotizen
+ * Studienmappen für Notizen und Querverweise während Predigten.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Fortgeschrittene Sprachausgabe von Text mit Lesezeichen, für ein reibungsfreies Hörerlebnis
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Große Sammlung von Dokumenten: Bibelübersetzungen, theologische Kommentare, Wörterbücher, Landkarten und christliche Bücher, insgesamt über  1500 Dokumente in über 700 Sprachen, gesetzeskonform zur Verfügung gestellt von Crosswire und anderen SWORD Quellen.
+ * Dank der nativen Unterstützung für MyBible-, MySword- und EPUB-Dateien kannst du deine Bibliothek noch weiter erweitern.
+
+Lasst uns gemeinsam die beste Bibelleseapp entwickeln!
+
+Bibel+ (AndBibel) ist ein Opensource Gemeinschaftprojekt. Das bedeutet in der Praxis, das jeder, der die entsprechenden Fähigkeiten hat, zu diesem Projekt beitragen kann, ja dazu sogar herzlich eingeladen ist. Man kann beitragen durch:
+
+ * Entwickeln neuer Funktionen,
+ * Testen noch nicht freigegebener Funktionen,
+ * Aktuell Halten der Übersetzungen der Benutzeroberflächen, und
+ * Hilfe beim Erweitern der Dokumentbibliothek durch das Beschaffen von Genehmigungen bei den Rechteinhabern, oder durch das Konvertieren freier Dokumente in das SWORD Format.
+
+Wenn du professioneller Softwareingenieur oder -tester bist, überlege dir bitte, ob du zu dem Projekt beitragen willst. Für mehr Informationen dazu, bitte lies https://git.io/JUnaj.
+
+Unterstütze uns, indem du Entwicklungszeit kaufst!
+
+Wenn Du keine Zeit oder Fähigkeiten für Projektbeiträge hast, kannst du das Projekt auch durch den Kauf von professioneller Entwicklerarbeitszeit unterstützen.
+
+Optionen anzeigen: https://shop.andbible.org/
+
+Links
+
+ * Homepage: https://andbible.org
+ * Like AndBible on Facebook: https://www.facebook.com/AndBible/
+ * Unser Youtube Kanal: https://www.youtube.com/c/AndBible
+ * Häufig gestellte Fragen: https://git.io/JJm8E
+ * Projektseite auf Github: https://github.com/AndBible/and-bible

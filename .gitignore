@@ -68,6 +68,10 @@ libsword/libsword.xcframework/
 .env.local
 *.xcconfig.local
 
+# App Store reviewer contact details are personal data; the public notes live in
+# appstore/review_information.yml.
+appstore/*.local.yml
+
 # Signing secrets — plaintext App Store Connect API keys must never be committed
 # (encrypted *.p8.gpg blobs are kept outside the repo entirely).
 *.p8
@@ -78,7 +82,3 @@ libsword/libsword.xcframework/
 
 # Android parity
 .and-bible-android/
-
-# App Store reviewer contact details are personal data and must never be
-# committed to this public repository.
-appstore/review_information.local.yml

@@ -1,0 +1,50 @@
+Poderoso Instrumento para Estudiar la Biblia
+
+"AndBible: Estudio de la Biblia" es una potente aplicación de estudio bíblico sin conexión para iOS, fácil de usar y con herramientas de calidad para todo tipo de estudio: desde la lectura ocasional hasta la investigación profunda. Más que un lector, es una herramienta para el estudio personal serio.
+
+Desarrollada por lectores de la Biblia, para lectores de la Biblia: un proyecto comunitario sin fines de lucro y de código abierto, completamente gratuito y sin anuncios.
+
+Algunas traducciones populares de la Biblia disponibles son RV1909, NBLA, LBLA.
+
+Potentes Funciones de Estudio Bíblico
+
+La aplicación tiene muchas características interesantes y originales que hacen que una experiencia de estudio bíblico compleja y profunda sea más fluida que nunca. Las características más notables son las siguientes:
+
+ * Vistas de texto dividido que permiten comparar traducciones y consultar comentarios
+ * Los espacios permiten múltiples configuraciones de estudio bíblico con sus propias configuraciones
+ * La integración de Strong permite el análisis de palabras Griegas y Hebreas
+ * Toque cualquier enlace para seguir referencias cruzadas, notas al pie y comentarios (Ninguno en español todavía, pero en inglés; Gill, Matthew Henry, y más) o colecciones de referencias cruzadas (Ninguno en español todavía, pero en inglés; Treasure of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Búsqueda flexible de texto completo en una o varias traducciones bíblicas a la vez
+ * Funciones avanzadas de marcado y resaltado con notas de estudio personales
+ * Pizarras de estudio para agregar notas y referencias Bíblicas mientras escucha sermones.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Texto a voz avanzado con marcadores de voz, lo que permite una experiencia de escucha Bíblica fluida
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Amplia biblioteca de documentos: traducciones de la Biblia, comentarios teológicos, diccionarios, mapas y libros cristianos, con un total de más de 1500 documentos en más de 700 idiomas, distribuidos legalmente por Crosswire y otros repositorios de SWORD.
+ * Soporte nativo para archivos de MyBible, MySword y EPUB posibilita extender la biblioteca aún más.
+
+¡Hagamos juntos la mejor aplicación de la Biblia!
+
+AndBible es un proyecto comunitario de código abierto. En la práctica, esto significa que cualquier persona con las habilidades adecuadas puede, y se le anima a, contribuir al proyecto mediante:
+
+ * desarrollando nuevas funciones,
+ * probando funciones que aún no se han lanzado,
+ * mantiene actualizadas las traducciones de la interfaz de usuario, y
+ * ayudando a ampliar la biblioteca de módulos obteniendo permisos de los titulares de derechos de autor o convirtiendo documentos al formato SWORD.
+
+Si es un probador o ingeniero de software profesional, considere contribuir al proyecto. Para obtener más información sobre cómo contribuir, consulte https://git.io/JUnaj.
+
+¡Apoye comprando tiempo de desarrollo!
+
+Si no tiene tiempo o habilidades para hacer contribuciones al proyecto, también puede apoyarlo comprando tiempo de trabajo de desarrollo profesional.
+
+Vea las opciones: https://shop.andbible.org/
+
+Enlaces
+
+ * Página de inicio: https://andbible.org
+ * Dé Me Gusta a AndBible en Facebook: https://www.facebook.com/AndBible/
+ * Nuestro canal de YouTube: https://www.youtube.com/c/AndBible
+ * Preguntas frecuentes: https://git.io/JJm8E
+ * Página del proyecto en Github: https://github.com/AndBible/and-bible

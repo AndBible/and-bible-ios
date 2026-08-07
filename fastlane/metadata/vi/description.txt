@@ -1,0 +1,50 @@
+Công cụ nghiên cứu Kinh Thánh mạnh mẽ
+
+"AndBible: Học Kinh Thánh" là một ứng dụng nghiên cứu Kinh Thánh ngoại tuyến mạnh mẽ, dễ sử dụng dành cho iOS — một bộ công cụ đa năng với các tính năng chất lượng cao, phục vụ nhiều phong cách nghiên cứu khác nhau, từ đọc thông thường đến nghiên cứu chuyên sâu. Hơn cả một trình đọc, đây là công cụ dành cho việc nghiên cứu cá nhân nghiêm túc.
+
+Được phát triển bởi những người đọc Kinh Thánh, dành cho những người đọc Kinh Thánh — một dự án cộng đồng phi lợi nhuận, mã nguồn mở, hoàn toàn miễn phí và không có quảng cáo.
+
+Một số bản dịch Kinh Thánh phổ biến (trong số nhiều bản có sẵn) là KJV, NASB, NET, cùng các chú giải nổi tiếng như Matthew Henry và John Gill.
+
+Các tính năng nghiên cứu Kinh Thánh mạnh mẽ
+
+Ứng dụng có nhiều tính năng độc đáo và sâu sắc, giúp trải nghiệm nghiên cứu Kinh Thánh phức tạp và chuyên sâu trở nên mượt mà hơn bao giờ hết. Các tính năng nổi bật nhất bao gồm:
+
+ * Chế độ xem văn bản chia đôi cho phép so sánh các bản dịch và tra cứu chú giải
+ * Không gian làm việc cho phép nhiều cấu hình nghiên cứu Kinh Thánh với cài đặt riêng
+ * Tích hợp Strong's cho phép phân tích từ ngữ tiếng Hy Lạp và tiếng Hê-bơ-rơ
+ * Nhấn vào bất kỳ liên kết nào để theo dõi các tham chiếu chéo, chú thích và chú giải được liên kết (Gill, Matthew Henry v.v.) hoặc các bộ sưu tập tham chiếu chéo (Treasure of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Tìm kiếm toàn văn linh hoạt trên một hoặc nhiều bản dịch Kinh Thánh cùng lúc
+ * Tính năng đánh dấu & tô sáng nâng cao với ghi chú nghiên cứu cá nhân
+ * Bảng ghi chú để thêm ghi chú và tham chiếu Kinh Thánh khi nghe bài giảng.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Chuyển văn bản thành giọng nói nâng cao với dấu trang phát âm, mang lại trải nghiệm nghe Kinh Thánh mượt mà
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Thư viện tài liệu phong phú: bản dịch Kinh Thánh, chú giải thần học, từ điển, bản đồ và sách Cơ Đốc giáo, với tổng cộng hơn 1500 tài liệu trong hơn 700 ngôn ngữ, được phân phối hợp pháp bởi Crosswire và các kho SWORD khác.
+ * Hỗ trợ gốc cho các tệp MyBible, MySword và EPUB giúp bạn mở rộng thư viện của mình hơn nữa.
+
+Hãy cùng nhau tạo ra ứng dụng Kinh Thánh tốt nhất!
+
+AndBible là một dự án cộng đồng mã nguồn mở. Trên thực tế, điều này có nghĩa là bất kỳ ai có kỹ năng phù hợp đều có thể và được khuyến khích đóng góp cho dự án bằng cách:
+
+ * phát triển các tính năng mới,
+ * kiểm thử các tính năng chưa được phát hành,
+ * cập nhật bản dịch giao diện người dùng, và
+ * giúp mở rộng thư viện mô-đun bằng cách xin phép từ người giữ bản quyền hoặc chuyển đổi tài liệu sang định dạng SWORD.
+
+Nếu bạn là kỹ sư phần mềm hoặc người kiểm thử chuyên nghiệp, hãy cân nhắc đóng góp cho dự án. Để biết thêm thông tin về cách đóng góp, vui lòng xem https://git.io/JUnaj.
+
+Hỗ trợ bằng cách mua thời gian phát triển!
+
+Nếu bạn không có thời gian hoặc kỹ năng để đóng góp cho dự án, bạn cũng có thể hỗ trợ dự án bằng cách mua thời gian làm việc của nhà phát triển chuyên nghiệp.
+
+Xem các tùy chọn: https://shop.andbible.org/
+
+Liên kết
+
+ * Trang chủ: https://andbible.org
+ * Thích AndBible trên Facebook: https://www.facebook.com/AndBible/
+ * Kênh Youtube của chúng tôi: https://www.youtube.com/c/AndBible
+ * Câu hỏi thường gặp: https://git.io/JJm8E
+ * Trang dự án trên Github: https://github.com/AndBible/and-bible

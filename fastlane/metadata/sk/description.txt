@@ -1,0 +1,50 @@
+Účinný nástroj na štúdium Biblie
+
+„AndBible: Bible Study" je výkonná, ľahko použiteľná offline aplikácia na štúdium Biblie pre iOS — všestranný nástroj s kvalitnými funkciami pre rôzne spôsoby štúdia, od príležitostného čítania až po hlboký výskum. Nie je to iba čítačka, ale nástroj na skutočne vážne osobné štúdium.
+
+Vyvinuté čitateľmi Biblie pre čitateľov Biblie — neziskový komunitný projekt s otvoreným kódom, ktorý je úplne zadarmo a neobsahuje žiadne reklamy.
+
+Niekoľko populárnych verzií Biblie (z mnohých dostupných) je KJV, NASB, NET a tiež obľúbené komentáre ako Matthew Henry a John Gill.
+
+Výkonné funkcie pre štúdium Biblie
+
+Aplikácia má mnoho podnetných a originálnych funkcií, vďaka ktorým je komplexná a hlboká skúsenosť so štúdiom Biblie hladšia ako kedykoľvek predtým. Najvýznamnejšie funkcie sú nasledujúce:
+
+ * Oddelené zobrazenia textu, ktoré umožňujú porovnávať preklady a konzultovať komentáre
+ * Pracovné prostredia umožňujúce vlastné nastavenia pre štúdium Biblie
+ * Integrácia Strongových čísel umožňuje rozbor gréckych a hebrejských slov
+ * Klepnutím na ľubovoľný odkaz zobrazíte prepojené krížové odkazy, poznámky pod čiarou a komentáre (Gill, Matthew Henry atď.) alebo zbierky krížových odkazov (Konkordancia Treasure of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Flexibilné fulltextové vyhľadávanie v jednom alebo vo viacerých prekladoch Biblie súčasne
+ * Pokročilý systém záložiek a zvýraznenia textu s osobnými poznámkami.
+ * Študijné zložky pre pridávanie poznámok a referencií na Bibliu pri počúvaní kázní.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Pokročilé čítanie so záložkami umožňujúcimi plynulé počúvanie Biblie
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Rozsiahla knižnica dokumentov: preklady Biblie, teologické komentáre, slovníky, mapy a kresťanské knihy v celkovom počte viac ako 1500 dokumentov vo viac ako 700 jazykoch, legálne distribuované spoločnosťou Crosswire a inými archívmi SWORD.
+ * Natívna podpora súborov MyBible, MySword a EPUB vám umožní rozšíriť vašu knižnicu ešte viac.
+
+Urobme spolu najlepšiu aplikáciu pre Bibliu!
+
+AndBible je komunitný projekt s otvoreným kódom. V praxi to znamená, že ktokoľvek s vhodnými zručnosťami môže prispieť (povzbudzujeme k tomu) k projektu:
+
+ * vyvinie nové vlastnosti/funkcie
+ * testovaním ešte nezverejnených vlastností,
+ * udržiavaním aktuálneho prekladu používateľského rozhrania, a
+ * pomocou pri rozširovaní knižnice modulov získavaním povolení od držiteľov autorských práv alebo konvertovaní dokumentov do formátu SWORD.
+
+Ak ste profesionálny softvérový inžinier alebo tester, zvážte zapojenie sa do projektu. Ďalšie informácie o tom, ako prispieť, nájdete na stránke https://git.io/JUnaj.
+
+Podporte aplikáciu nákupom času vývoja!
+
+Ak nemáte čas alebo zručnosti na prispievanie do projektu, môžete projekt podporiť aj zakúpením pracovného času profesionálneho vývojára.
+
+Pozrite si možnosti: https://shop.andbible.org/
+
+Odkazy
+
+ * Domovská stránka: https://andbible.org
+ * Like AndBible na Facebook-u: https://www.facebook.com/AndBible/
+ * Náš Youtube kanál: https://www.youtube.com/c/AndBible
+ * Často kladené otázky: https://git.io/JJm8E
+ * Projekt na Githube: https://github.com/AndBible/and-bible

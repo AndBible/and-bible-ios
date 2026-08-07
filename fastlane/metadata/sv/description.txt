@@ -1,0 +1,50 @@
+Kraftfullt bibelstudieverktyg
+
+"AndBible: Studera Bibeln" är en kraftfull, lättanvänd och offline bibelstudieapp för iOS — en mångsidig verktygslåda med högkvalitativa funktioner som passar många studiestilar, från lättsam läsning till djupgående forskning. Mer än bara en läsare — det är ett verktyg för seriöst personligt studium.
+
+Utvecklad av bibelläsare, för bibelläsare — ett ideellt projekt med öppen källkod som drivs av en gemenskap, helt gratis och utan reklam.
+
+Några populära bibelöversättningar (av många som finns) är Svenska folkbibeln 2015/1998, Svenska kärnbibeln och 1917 års kyrkobibel. På engelska finns t.ex. KJV, NASB, NET och även populära kommentarer såsom dem av Matthew Henry och John Gill.
+
+Kraftfulla bibelstudiefunktioner
+
+Appen har många insiktsfulla och unika funktioner som gör komplicerade och djupa bibelstudier behagliga. De mest betydande funktionerna är följande:
+
+ * Delade textvyer som låter dig jämföra översättningar och använda bibelkommentarer.
+ * Arbetsytor låter dig skapa olika anpassade vyer med separata inställningar för bibelstudier.
+ * Integration med Strongs nummer möjliggör analys av grekiska och hebreiska ord.
+ * Tryck på en länk för att följa parallellhänvisningar, fotnoter och kommentarer (Gill, Matthew Henry m.fl.) eller samlingar av parallellhänvisningar (Treasure of Scripture Knowledge, TSKe).
+ * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Flexibel fritextsökning över en eller flera bibelöversättningar samtidigt
+ * Avancerade funktioner för bokmärken och färgmarkeringar med personliga anteckningar
+ * Studieblock för att lägga till anteckningar och bibelhänvisningar medan du lyssnar till predikningar.
+ * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Avancerat text-till-tal med uppläsningsbokmärken som gör lyssningsupplevelsen bekvämare
+ * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Omfattande bibliotek av dokument: Bibelöversättningar, teologiska kommentarer, lexikon, kartor och kristna böcker. Totalt över 1500 dokument på fler än än 700 språk, lagligt distribuerade av Crosswire och andra SWORD-kataloger.
+ * Det inbyggda stödet för MyBible-, MySword- och EPUB-filer gör att du också kan utöka ditt bibliotek.
+
+Låt oss bygga den bästa bibelappen tillsammans!
+
+AndBible är ett projekt med öppen källkod som utvecklas av en nätgemenskap. I praktiken innebär det här att vem som helst med lämpliga kunskaper kan – och uppmuntras till att – bidra till projektet genom att:
+
+ * utveckla nya funktioner,
+ * testa funktioner som inte lanserats ännu,
+ * hålla gränssnittets översättningar uppdaterade, och
+ * hjälpa till att utöka modulbiblioteket genom att erhålla tillstånd från upphovsrättsinnehavare, eller genom att konvertera dokument till SWORD-formatet.
+
+Om du är en professionell mjukvaruingenjör eller testare, överväg gärna att bidra till projektet. Mer information om hur man bidrar finns här: https://git.io/JUnaj.
+
+Understöd genom att köpa apputvecklingstid!
+
+Om du inte har tid eller kunskap för att bidra till projektet kan du också understöda det genom att köpa arbetstid av en professionell utvecklare.
+
+Se alternativ: https://shop.andbible.org/
+
+Länkar
+
+ * Webbplats: https://andbible.org
+ * Gilla AndBible på Facebook: https://www.facebook.com/AndBible/
+ * Vår Youtubekanal: https://www.youtube.com/c/AndBible
+ * Frågor och svar: https://git.io/JJm8E
+ * Projektsida på Github: https://github.com/AndBible/and-bible
