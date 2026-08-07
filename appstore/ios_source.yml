@@ -6,6 +6,13 @@
 # Keys that are NOT here come from the Android store copy unchanged; the
 # description is deliberately the same text as the Play listing apart from the
 # four overrides below.
+#
+# Until ios_translations/<apple-locale>.yml exists for a given locale, these
+# English values render as-is inside that locale's otherwise fully translated
+# description - three abrupt English sentences dropped into native-language
+# prose. This is an interim state, not finished localization: translating
+# subtitle, keywords, promotional_text, and the three feature overrides for
+# each locale is required work, not optional polish.
 
 # --- iOS-only fields (no Android counterpart) ---
 
