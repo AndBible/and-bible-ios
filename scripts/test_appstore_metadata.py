@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import os
 import re
 import subprocess
 import sys
@@ -89,6 +90,15 @@ class AndroidRootTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        # $ANDBIBLE_ANDROID_ROOT outranks every candidate this class exercises,
+        # and .github/workflows/ios-ci.yml sets it at the workflow level - so on
+        # CI these tests asserted the ambient environment rather than the
+        # candidate order they are written to pin down. Snapshot and clear it;
+        # the variable's own rung is covered explicitly below.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("ANDBIBLE_ANDROID_ROOT", None)
 
     def make_checkout(self, relative: str) -> Path:
         checkout = self.root / "repo" / relative
@@ -113,6 +123,28 @@ class AndroidRootTests(unittest.TestCase):
         expected = self.make_checkout("../elsewhere")
         self.assertEqual(
             meta.resolve_android_root(self.root / "repo", str(expected)), expected
+        )
+
+    def test_the_environment_variable_outranks_the_local_checkout(self) -> None:
+        self.make_checkout(".and-bible-android")
+        expected = self.make_checkout("../elsewhere")
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(expected)
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
+        )
+
+    def test_an_explicit_path_beats_the_environment_variable(self) -> None:
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(self.make_checkout("../env"))
+        expected = self.make_checkout("../explicit")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo", str(expected)), expected
+        )
+
+    def test_an_environment_variable_pointing_nowhere_is_ignored(self) -> None:
+        expected = self.make_checkout(".and-bible-android")
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(self.root / "does-not-exist")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
         )
 
     def test_returns_none_when_nothing_is_available(self) -> None:
