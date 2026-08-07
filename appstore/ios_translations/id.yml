@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Toolkit studi Alkitab offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "tafsiran,strong,yunani,ibrani,sword,catatan,penanda buku,menyorot,hafalan,rencana baca,pencarian"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Tanpa iklan dan open source. Tampilan terpisah, tafsiran, Strong's,
+  pencarian andal, penanda buku dan catatan - semua offline setelah dokumen
+  terpasang.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sinkronisasi lintas perangkat via iCloud atau NextCloud/WebDAV: jaga ruang
+  kerja, penanda buku, catatan, dan kemajuan bacaan Anda tetap selaras di
+  semua perangkat
+
+feature_09: >
+  Rencana bacaan dan pelacakan kemajuan - bab yang dibaca, hari aktif dan
+  siklus bacaan - plus hafalan ayat dengan mode Acak Kata, Urutan Kata, Kata
+  Buram, dan Ketik Sendiri
+
+feature_11: >
+  Agen studi AI opsional - nonaktif secara default, memerlukan kunci API
+  pihak ketiga Anda sendiri. Jelajahi tafsiran dan kamus dengan bantuan AI
+  dalam bahasa Anda; sistem izin menjaga Anda tetap mengendalikan.

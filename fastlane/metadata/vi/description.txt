@@ -14,13 +14,13 @@ Các tính năng nghiên cứu Kinh Thánh mạnh mẽ
  * Không gian làm việc cho phép nhiều cấu hình nghiên cứu Kinh Thánh với cài đặt riêng
  * Tích hợp Strong's cho phép phân tích từ ngữ tiếng Hy Lạp và tiếng Hê-bơ-rơ
  * Nhấn vào bất kỳ liên kết nào để theo dõi các tham chiếu chéo, chú thích và chú giải được liên kết (Gill, Matthew Henry v.v.) hoặc các bộ sưu tập tham chiếu chéo (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Trợ lý nghiên cứu AI tùy chọn - tắt theo mặc định, cần khóa API riêng của bạn từ một nhà cung cấp bên thứ ba. Khám phá chú giải và từ điển đã cài đặt với sự hỗ trợ của AI; hệ thống quyền giữ quyền kiểm soát cho bạn.
  * Tìm kiếm toàn văn linh hoạt trên một hoặc nhiều bản dịch Kinh Thánh cùng lúc
  * Tính năng đánh dấu & tô sáng nâng cao với ghi chú nghiên cứu cá nhân
  * Bảng ghi chú để thêm ghi chú và tham chiếu Kinh Thánh khi nghe bài giảng.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Kế hoạch đọc và theo dõi tiến trình - số chương đã đọc, số ngày hoạt động và chu kỳ đọc - cùng học thuộc câu Kinh Thánh với các chế độ Xáo Trộn Từ, Sắp Xếp Từ, Làm Mờ Từ và Gõ Lại
  * Chuyển văn bản thành giọng nói nâng cao với dấu trang phát âm, mang lại trải nghiệm nghe Kinh Thánh mượt mà
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Đồng bộ giữa các thiết bị qua iCloud hoặc NextCloud/WebDAV: giữ không gian làm việc, dấu trang, ghi chú và tiến trình đọc đồng bộ trên mọi thiết bị của bạn
  * Thư viện tài liệu phong phú: bản dịch Kinh Thánh, chú giải thần học, từ điển, bản đồ và sách Cơ Đốc giáo, với tổng cộng hơn 1500 tài liệu trong hơn 700 ngôn ngữ, được phân phối hợp pháp bởi Crosswire và các kho SWORD khác.
  * Hỗ trợ gốc cho các tệp MyBible, MySword và EPUB giúp bạn mở rộng thư viện của mình hơn nữa.
 

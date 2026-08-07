@@ -14,13 +14,13 @@
  * พื้นที่ทำงานรองรับการตั้งค่าศึกษาพระคัมภีร์หลายรูปแบบพร้อมการตั้งค่าของตนเอง
  * การผสาน Strong's ช่วยวิเคราะห์คำภาษากรีกและฮีบรู
  * แตะที่ลิงก์ใดก็ได้เพื่อติดตามข้อพระคัมภีร์อ้างอิง เชิงอรรถ และคำอธิบาย (Gill, Matthew Henry ฯลฯ) หรือชุดข้อพระคัมภีร์อ้างอิง (Treasure of Scripture Knowledge, TSKe) ที่เชื่อมโยงไว้
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * ผู้ช่วยศึกษาพระคัมภีร์ AI ที่เป็นทางเลือก - ปิดอยู่โดยค่าเริ่มต้น ต้องใช้ API key ของคุณเองสำหรับบริการภายนอก สำรวจคำอธิบายและพจนานุกรมด้วยความช่วยเหลือจาก AI ในภาษาของคุณ พร้อมระบบสิทธิ์ที่ให้คุณควบคุมได้อย่างเต็มที่
  * การค้นหาแบบเต็มข้อความที่ยืดหยุ่น ครอบคลุมการแปลพระคัมภีร์หนึ่งฉบับหรือหลายฉบับพร้อมกัน
  * คุณสมบัติบุ๊กมาร์กและการไฮไลต์ขั้นสูงพร้อมบันทึกการศึกษาส่วนตัว
  * Study Pads สำหรับเพิ่มบันทึกและข้อพระคัมภีร์ขณะฟังการเทศนา
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * แผนการอ่านและการติดตามความคืบหน้า - บทที่อ่านแล้ว วันที่มีการอ่าน และรอบการอ่าน - พร้อมการท่องจำข้อพระคัมภีร์ด้วยโหมด สลับคำ เรียงคำ เบลอคำ และพิมพ์ตาม
  * การแปลงข้อความเป็นเสียงขั้นสูงพร้อมบุ๊กมาร์กเสียง เพื่อประสบการณ์ฟังพระคัมภีร์ที่ราบรื่น
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * การซิงค์ข้ามอุปกรณ์ผ่าน iCloud หรือ NextCloud/WebDAV: รักษาพื้นที่ทำงาน ที่คั่นหน้า บันทึก และความคืบหน้าในการอ่านของคุณให้ตรงกันบนทุกอุปกรณ์
  * คลังเอกสารขนาดใหญ่: การแปลพระคัมภีร์ คำอธิบายเทววิทยา พจนานุกรม แผนที่ และหนังสือคริสเตียน รวมกว่า 1500 รายการในกว่า 700 ภาษา แจกจ่ายโดยชอบด้วยกฎหมายผ่าน Crosswire และคลังข้อมูล SWORD อื่น ๆ
  * รองรับไฟล์ MyBible, MySword และ EPUB โดยตรง ช่วยให้คุณขยายคลังได้มากยิ่งขึ้น
 

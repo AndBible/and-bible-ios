@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Eina d'estudi bíblic offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "comentaris,strongs,grec,hebreu,sword,notes,ressaltar,memoritzar,pla de lectura,marcadors"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Sense anuncis i de codi obert. Vistes dividides, comentaris, Strong's,
+  cerca potent, marcadors i notes - tot sense connexió un cop instal·lats
+  els documents.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sincronització mitjançant iCloud o NextCloud/WebDAV: mantingueu
+  sincronitzats espais de treball, marcadors, notes i progrés de lectura a
+  tots els dispositius
+
+feature_09: >
+  Plans de lectura i seguiment del progrés - capítols llegits, dies actius
+  i cicles de lectura - més memorització de versets amb els modes Paraules
+  Barrejades, Ordre de Paraules, Paraules Difuminades i Escriu-ho
+
+feature_11: >
+  Agent d'estudi amb IA opcional - desactivat per defecte, requereix la
+  vostra clau API pròpia d'un tercer. Exploreu comentaris i diccionaris amb
+  ajuda d'IA en el vostre idioma; un sistema de permisos manté el control.

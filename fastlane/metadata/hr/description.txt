@@ -14,13 +14,13 @@ Aplikacija ima mnoge originalne funkcije koje čine detaljno proučavanje Biblij
  * Radne površine omogućavaju više postavki za proučavanje Biblije sa odvojenim podešavanjima
  * Integracija Strongovog rječnika omogućava analizu grčkih i hebrejskih riječi
  * Dodirnite bilo koju poveznicu kako biste pratili unakrsne reference, fusnote i tumačenja (Gill, Matthew Henry itd.) ili zbirke unakrsnih referenci (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Neobavezni AI pomoćnik za proučavanje - isključen po zadanome, treba vlastiti API ključ vanjskog davatelja usluge. Istražujte instalirana tumačenja i rječnike uz pomoć AI-ja; sustav dopuštenja ostavlja kontrolu vama.
  * Fleksibilno cjelovito pretraživanje teksta u jednom ili više biblijskih prijevoda istovremeno
  * Napredno straničnikanje i isticanja značajki sa osobnim bilješkama za učenje
  * Radne bilježnice za dodavanje bilješki i biblijskih referenci za vrijeme slušanja propovijedi
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Planovi čitanja i praćenje napretka - pročitana poglavlja, aktivni dani i ciklusi čitanja - te pamćenje stihova u načinima Miješanje riječi, Redoslijed riječi, Zamućenje riječi i Upisivanje
  * Napredni tekst - u - govor sa izgovorom straničnika, koje omogućava glatki doživljaj slušanja Svetoga pisma
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Sinkronizacija među uređajima putem iCloud-a ili NextCloud/WebDAV-a: držite svoje radne površine, straničnike, bilješke i napredak čitanja usklađenima na svim uređajima
  * Ogromna biblioteka dokumenata: biblijskih prijevoda, teoloških tumačenja, rječnika, karata i kršćanskih knjiga, čiji ukupan broj izlazi na preko  1500 dokumenata na više od  700 jezika, legalno distribuiranih od strane Crosswire i drugih SWORD repozitorija
  * Izvorna podrška za MyBible, MySword i EPUB datoteke pruža mogućnosti da još više proširite Vašu biblioteku
 

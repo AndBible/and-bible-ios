@@ -1,0 +1,32 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Kit de estudo bíblico offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "comentários,strong,grego,hebraico,sword,notas,marcadores,destaque,memorização,plano de leitura"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Sem anúncios e código aberto. Telas divididas, comentários, Strong's,
+  pesquisa poderosa, marcadores e notas - tudo offline após instalar os
+  documentos.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sincronização entre dispositivos via iCloud ou NextCloud/WebDAV: mantenha
+  suas áreas de trabalho, marcadores, notas e progresso de leitura
+  sincronizados em todos os seus dispositivos
+
+feature_09: >
+  Planos de leitura e acompanhamento de progresso - capítulos lidos, dias
+  ativos e ciclos de leitura - além de memorização de versículos com os
+  modos Palavras Embaralhadas, Ordem das Palavras, Palavras Borradas e
+  Digite Você
+
+feature_11: >
+  Agente de estudo com IA opcional - desativado por padrão, exige sua
+  própria chave de API de terceiros. Explore comentários e dicionários com
+  a IA no seu idioma; um sistema de permissões mantém você no controle.

@@ -14,13 +14,13 @@ Applikasjonen har mange innsiktsfulle og originale finesser som gjør komplekse 
  * Arbeidsområder tillater flere bibelstudieoppsett med egne innstillinger
  * Integrasjon med Strong's bibelordbøker åpner for greske og hebraiske ordanalyser
  * Trykk på en hvilken som helst lenke for å følge kryssreferanser, fotnoter og bibelkommentarer (Gill, Matthew Henry osv.) eller samlinger av kryssreferanser (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Valgfri AI-studieassistent - avslått som standard, krever din egen API-nøkkel fra en tredjepartstjeneste. Utforsk kommentarer og ordbøker med AI-hjelp på ditt språk; et tillatelsessystem gir deg kontrollen.
  * Fleksibelt fulltekstsøk i én eller flere bibeloversettelser samtidig
  * Avansert bokmerking og fokusmuligheter med personlige studienotater
  * Studiebrett for å skrive notater og bibelreferanser samtidig som man lytter til undervisning.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Leseplaner og fremdriftssporing - leste kapitler, aktive dager og lesesykluser - pluss versmemorering med Bokstavkrøll, Ordrekkefølge, Ordutydning og Skriv selv
  * Avansert tekst-til-tale med bokmerke-tale åpner for en strømlinjet bibellytte-opplevelse
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Synkronisering mellom enheter via iCloud eller NextCloud/WebDAV: hold arbeidsområder, bokmerker, notater og lesefremgang synkronisert på alle enhetene dine
  * Et stort bibliotek av moduler: Bibeloversettelser, teologiske bibelkommentarer, bibelordbøker, kart og kristne bøker som teller over 1500 moduler på over 700 språk, fritt distribuert av Crosswire og andre SWORD pakkebrønner (repositories).
  * Innebygd støtte for MyBible-, MySword- og EPUB-filer gjør at du kan utvide biblioteket ditt enda mer.
 

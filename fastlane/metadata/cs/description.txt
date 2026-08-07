@@ -14,13 +14,13 @@ Aplikace obsahuje mnohé podnětné, originální funkce, které složitý a hlu
  * Pracovní plochy, ve kterých si můžete vytvořit vlastní sady nastavení
  * Integrace Strongových čísel umožňuje rozbor řeckých a hebrejských slov
  * Klepnutím na libovolný odkaz zobrazíte propojené křížové odkazy, poznámky pod čarou a komentáře (Gill, Matthew Henry a další.) nebo sbírky křížových odkazů (Konkordance Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Volitelný AI studijní asistent - vypnutý ve výchozím nastavení, vyžaduje vlastní API klíč od externí služby. Prozkoumejte komentáře a slovníky s AI pomocí ve vašem jazyce; systém oprávnění vám zachovává kontrolu.
  * Flexibilní fulltextové vyhledávání v jednom či více překladech Bible současně
  * Pokročilý systém záložek a zvýraznění textu s osobními poznámkami
  * Studijní složky pro psaní poznámek a biblických odkazů při poslechu kázání.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Plány čtení a sledování pokroku - přečtené kapitoly, aktivní dny a cykly čtení - plus memorování veršů v režimech Zpřeházená slova, Pořadí slov, Rozmazaná slova a Napiš to
  * Pokročilé předčítání se záložkami poskytující snadný poslech Bible
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Synchronizace přes iCloud nebo NextCloud/WebDAV: udržujte své pracovní plochy, záložky, poznámky a postup čtení synchronizované na všech svých zařízeních
  * Obsáhlá knihovna dokumentů: biblické překlady, teologické komentáře, slovníky, mapy, křesťanská literatura čítající přes 1500 dokumentů ve více než 700 jazycích, poskytovaných legálně Crosswire a dalšími repozitáři SWORD.
  * Nativní podpora souborů MyBible, MySword a EPUB Vám umožní rozšířit Vaši knihovnu ještě více.
 

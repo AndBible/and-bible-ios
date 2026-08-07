@@ -14,13 +14,13 @@ Az app számos különleges funkcióval rendelkezik, amelyek az öszetett és al
  * A Munkaasztalok segítségével több kölönböző saját beállításokkal rendelkező bibliatanulmányozási konfiguráció létrehozására van lehetőség
  * A Strong-konkordancia (szómutató) integráció lehetővé teszi a görög és héber szóanalízist.
  * Bármely hivatkozásra koppintva követheti a kapcsolt kereszthivatkozásokat, lábjegyzeteket és kommentárokat (Gill, Matthew Henry stb.), valamint a kereszthivatkozás-gyűjteményeket (Treasury of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Választható MI-tanulmányozó ügynök - alapértelmezésben kikapcsolva, saját API-kulcs szükséges külső szolgáltatótól. Fedezze fel a kommentárokat és szótárakat MI segítségével az Ön nyelvén; a beépített engedélyrendszer mindent az Ön kezében tart.
  * Rugalmas teljes szöveges keresés egy vagy több bibliafordításban
  * Fejlett könyvjelző és kijelölési lehetőségek, személyes jegyzetek
  * Jegyzetlapok jegyzetekkel és biblia hivatkozásokkal: igehirdetésre készülve vagy igehirdetés hallgatása közben.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Olvasási tervek és előrehaladás-követés - elolvasott fejezetek, aktív napok, olvasási ciklusok - valamint versek memorizálása Szókeverő, Szósorrend, Szóhomály és Begépelés módokkal.
  * Fejlett felolvasási képességek (a támogatott nyelveken), beszéd könyvjelzők, hogy tényleg akadálymentesen hallgathassa a Bibliát.
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Eszközök közötti szinkronizáció iCloudon vagy NextCloud/WebDAV-on keresztül: munkaterületek, könyvjelzők, jegyzetek és olvasási előrehaladás szinkronizálása minden eszközön.
  * Modulkönyvtár: bibliafordítások, teológiai kommentárok, szótárak, térképek és keresztény irodalom, összesen 1500 mű, 700 nyelven,  jogtisztán letölthetően a Crosswire és egyéb SWORD modulkönyvtárakból.
  * A MyBible, MySword és EPUB fájltípusok natívan támogatottak, így még teljesebb lehet a könyvtárad.
 

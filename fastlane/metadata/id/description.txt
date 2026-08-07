@@ -14,13 +14,13 @@ Aplikasi ini memiliki banyak fitur orisinal yang berwawasan luas, membuat pengal
  * Ruang kerja memungkinkan beberapa pengaturan studi alkitab dengan pengaturan masing-masing
  * Integrasi Strong memungkinkan analisis kata bahasa Yunani dan Ibrani
  * Ketuk tautan apa pun untuk mengikuti referensi silang, catatan kaki, dan tafsiran (Gill, Matthew Henry, dll.) atau koleksi referensi silang (Treasure of Scripture Knowledge, TSKe) yang terhubung.
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Agen studi AI opsional - nonaktif secara default, memerlukan kunci API pihak ketiga Anda sendiri. Jelajahi tafsiran dan kamus dengan bantuan AI dalam bahasa Anda; sistem izin menjaga Anda tetap mengendalikan.
  * Pencarian teks lengkap yang fleksibel pada satu atau beberapa terjemahan Alkitab sekaligus
  * Fitur penanda buku & penyorotan canggih dengan catatan studi pribadi
  * Lembar studi untuk menambahkan catatan dan referensi alkitab saat mendengarkan khotbah.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Rencana bacaan dan pelacakan kemajuan - bab yang dibaca, hari aktif dan siklus bacaan - plus hafalan ayat dengan mode Acak Kata, Urutan Kata, Kata Buram, dan Ketik Sendiri
  * Teks ke ucapan canggih dengan penanda buku berbicara, menghadirkan pengalaman mendengarkan alkitab yang nyaman
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Sinkronisasi lintas perangkat via iCloud atau NextCloud/WebDAV: jaga ruang kerja, penanda buku, catatan, dan kemajuan bacaan Anda tetap selaras di semua perangkat
  * Perpustakaan dokumen yang luas: terjemahan alkitab, tafsiran teologi, kamus, peta, dan buku-buku Kristen, dengan total lebih dari 1500 dokumen dalam lebih dari 700 bahasa, didistribusikan secara legal oleh Crosswire dan repositori SWORD lainnya.
  * Dukungan asli untuk file MyBible, MySword, dan EPUB memungkinkan Anda memperluas perpustakaan lebih jauh.
 

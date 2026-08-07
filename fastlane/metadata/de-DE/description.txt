@@ -14,13 +14,13 @@ Das Programm hat viele originelle und aufschlussreiche Funktionen, die ein kompl
  * Arbeitsbereiche erlauben mehrere Konfigurationen für Bibelstudien mit jeweils eigenen Einstellungen
  * Die Integration der Strong-Codes erlaubt das Nachschlagen und Analysieren von griechischen und hebräischen Vokabeln
  * Tippe auf einen Link, um Querverweisen, Fußnoten und Kommentaren (Gill, Matthew Henry, etc.) oder Querverweissammlungen (Treasure of Scripture Knowledge, TSKe) zu folgen.
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Optionaler KI-Studienassistent – standardmäßig deaktiviert, eigener API-Schlüssel eines Drittanbieters nötig. Erkunde Kommentare und Wörterbücher mit KI in deiner Sprache; ein Berechtigungssystem hält dich in Kontrolle.
  * Flexible Volltextsuche in einer oder mehreren Bibelübersetzungen gleichzeitig
  * Fortgeschrittene Lesezeichen- & Hervorhebungsfunktionen mit persönlichen Studiennotizen
  * Studienmappen für Notizen und Querverweise während Predigten.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Lesepläne mit Fortschrittsverfolgung – gelesene Kapitel, aktive Tage, Lesezyklen – plus Verse auswendig lernen mit Wortwirrwarr, Wortreihenfolge, Wortschleier und Eintippen
  * Fortgeschrittene Sprachausgabe von Text mit Lesezeichen, für ein reibungsfreies Hörerlebnis
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Geräteübergreifende Synchronisierung über iCloud oder NextCloud/WebDAV: Arbeitsbereiche, Lesezeichen, Notizen und Lesefortschritt stets synchron
  * Große Sammlung von Dokumenten: Bibelübersetzungen, theologische Kommentare, Wörterbücher, Landkarten und christliche Bücher, insgesamt über  1500 Dokumente in über 700 Sprachen, gesetzeskonform zur Verfügung gestellt von Crosswire und anderen SWORD Quellen.
  * Dank der nativen Unterstützung für MyBible-, MySword- und EPUB-Dateien kannst du deine Bibliothek noch weiter erweitern.
 

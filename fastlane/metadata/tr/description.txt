@@ -14,13 +14,13 @@ Uygulama, karmaşık ve derin bir Kutsal Kitap çalışma deneyimini daha soruns
  * Çalışma alanları, kendi ayarlarına sahip birden fazla Kutsal Kitap çalışma kurulumuna izin verir
  * Strong’un sözlüğü entegrasyonla birlikte Grekçe ve İbranice kelime analizine olanak sağlar
  * Bağlantılı çapraz referansları, dipnotları ve yorumları (Gill, Matthew Henry vb.) veya çapraz referans koleksiyonlarını (Kutsal Kitap Bilgisinin Hazinesi, TSKe) takip etmek için herhangi bir bağlantıya dokunun.
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * İsteğe bağlı YZ çalışma asistanı - varsayılan olarak kapalı, üçüncü taraf bir sağlayıcıdan kendi API anahtarınızı gerektirir. Yüklü yorumları ve sözlükleri YZ yardımıyla kendi dilinizde keşfedin; izin sistemi kontrolü sizde tutar.
  * Bir veya birden çok Kutsal Kitap çevirisinde aynı anda esnek tam metin araması
  * Gelişmiş yer imi
  * Vaazları dinlerken notlar ve Kutsal Kitap referansları eklemek için Çalışma Pedleri.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Okuma planları ve ilerleme takibi - okunan bölümler, aktif günler ve okuma döngüleri - ayrıca etkileşimli Kelime Karıştırma, Kelime Sıralama, Kelime Bulanıklaştırma ve Yazarak Ezberleme modlarıyla ayet ezberleme
  * Konuşma imleri ile gelişmiş metin okuma özelliği, sorunsuz bir Kutsal Kitap dinleme deneyimi sağlar
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * iCloud veya NextCloud/WebDAV üzerinden cihazlar arası senkronizasyon: çalışma alanlarınızı, yer imlerinizi, notlarınızı ve okuma ilerlemenizi tüm cihazlarınızda eşitleyin
  * Geniş belge kütüphanesi: Crosswire ve diğer SWORD depoları tarafından yasal olarak dağıtılan 700 üzerinde dilde 1500 belgeden oluşan Kutsal Kitap çevirileri, teolojik yorumlar, sözlükler, haritalar ve Hristiyan kitapları.
  * MyBible, MySword ve EPUB dosyaları için yerel destek, kitaplığınızı daha da genişletmenizi sağlar.
 

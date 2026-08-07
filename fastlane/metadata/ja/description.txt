@@ -14,13 +14,13 @@
  * ワークスペースで複数の聖書研究環境をそれぞれの設定で管理
  * ストロングのコンコーダンスでギリシャ語・ヘブライ語の単語分析
  * リンクをタップするだけで、ハイパーリンク化された相互参照、脚注、注解書（Gill、Matthew Henry など）や相互参照集（Treasure of Scripture Knowledge、TSKe）をたどれます。
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * オプションのAI研究エージェント - デフォルトでオフ、外部サービスのご自身のAPIキーが 必要です。お好みの言語でインストール済みの注解書や辞書をAIの支援を受けて探索できます。 権限システムにより、常に完全にコントロールできます。
  * 1つまたは複数の聖書翻訳を同時に検索できる柔軟な全文検索機能
  * 個人の学習ノート付きの高度なブックマークとハイライト機能
  * 説教を聴きながらノートや聖書の参照を追加できるスタディパッド。
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * 通読プランと進捗トラッキング - 読んだ章数、活動日数、通読サイクル - に加え、 ワードスクランブル、ワードオーダー、ワードブラー、タイプイットモードによる聖句の暗唱
  * スピークブックマーク付きの高度なテキスト読み上げで、快適な聖書リスニング体験
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * iCloudまたはNextCloud/WebDAVによるデバイス間同期：ワークスペース、ブックマーク、ノート、 読書進捗をすべてのデバイスで同期した状態に保てます
  * 充実した文書ライブラリ：聖書翻訳、神学注解書、辞書、地図、キリスト教書籍など、700以上の言語で1500以上の文書をCrosswireおよび他のSWORDリポジトリから合法的に配布。
  * MyBible、MySword、EPUBファイルのネイティブサポートにより、ライブラリをさらに拡張できます。
 

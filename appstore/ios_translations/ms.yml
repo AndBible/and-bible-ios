@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Kit kajian Alkitab luar talian"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "kajian,ulasan,strongs,greek,ibrani,sword,nota,serlah,hafal,pelan bacaan,luar talian"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Tanpa iklan dan sumber terbuka. Paparan pisah, ulasan, Strong's, carian
+  berkuasa, penanda buku dan nota - semuanya luar talian selepas dokumen
+  dipasang.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Penyegerakan melalui iCloud atau NextCloud/WebDAV: pastikan ruang kerja,
+  penanda buku, nota, dan kemajuan bacaan anda diselaraskan pada semua
+  peranti anda
+
+feature_09: >
+  Pelan bacaan dan penjejakan kemajuan - bab dibaca, hari aktif dan kitaran
+  bacaan - serta hafalan ayat dengan mod Susun Perkataan, Tertib Perkataan,
+  Kabur Perkataan, dan Taipkan
+
+feature_11: >
+  Ejen kajian AI pilihan - dimatikan secara lalai, memerlukan kunci API
+  pihak ketiga anda sendiri. Jelajahi ulasan dan kamus dengan bantuan AI
+  dalam bahasa anda; sistem kebenaran mengekalkan kawalan anda.

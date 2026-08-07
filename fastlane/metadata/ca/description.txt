@@ -14,13 +14,13 @@ L'aplicació té moltes funcions originals i reveladores que fan que una experi�
  * Els espais de treball permeten múltiples configuracions d'estudi bíblic amb els seus propis ajustos
  * La integració dels Números de Strong permet l'anàlisi de paraules gregues i hebrees
  * Toqueu qualsevol enllaç per consultar referències creuades, notes a peu de pàgina i comentaris (Gill, Matthew Henry, etc.) o col·leccions de referències creuades (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Agent d'estudi amb IA opcional - desactivat per defecte, requereix la vostra clau API pròpia d'un tercer. Exploreu comentaris i diccionaris amb ajuda d'IA en el vostre idioma; un sistema de permisos manté el control.
  * Cerca flexible de text complet en una o diverses traduccions de la Bíblia simultàniament
  * Funcions avançades de marcadors i destacats amb notes d'estudi personals
  * Blocs d'estudi per afegir notes i referències bíbliques mentre escolteu sermons.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Plans de lectura i seguiment del progrés - capítols llegits, dies actius i cicles de lectura - més memorització de versets amb els modes Paraules Barrejades, Ordre de Paraules, Paraules Difuminades i Escriu-ho
  * Text a veu avançat amb marcadors de lectura, que permet una experiència d'escolta bíblica fluida
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Sincronització mitjançant iCloud o NextCloud/WebDAV: mantingueu sincronitzats espais de treball, marcadors, notes i progrés de lectura a tots els dispositius
  * Àmplia biblioteca de documents: traduccions de la Bíblia, comentaris teològics, diccionaris, mapes i llibres cristians, amb un total de més de 1500 documents en més de 700 idiomes, distribuïts legalment per Crosswire i altres repositoris SWORD.
  * El suport natiu per a fitxers MyBible, MySword i EPUB us permet ampliar encara més la vostra biblioteca.
 

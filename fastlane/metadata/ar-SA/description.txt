@@ -14,13 +14,13 @@
  * تسمح مساحات العمل بإعدادات متعددة لدراسة الكتاب المقدس بإعداداتها الخاصة
  * يسمح تكامل Strong بتحليل الكلمات اليونانية والعبرية
  * انقر على أي رابط لمتابعة المراجع المتقاطعة والحواشي والتفاسير (Gill, Matthew Henry etc.) أو مجموعات المراجع المتقاطعة (كنز المعرفة الكتابية، TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * وكيل دراسة بالذكاء الاصطناعي اختياري - معطّل بشكل افتراضي، ويتطلب مفتاح API خاصًا بك من مزوّد خارجي. استكشف التفاسير والقواميس بمساعدة الذكاء الاصطناعي بلغتك؛ ونظام الأذونات يبقيك متحكمًا بالكامل.
  * بحث مرن في النص الكامل عبر ترجمة واحدة أو عدة ترجمات للكتاب المقدس في الوقت نفسه
  * ميزات متقدمة لوضع إشارة مرجعية وإبراز مع ملاحظات الدراسة الشخصية
  * وسادات دراسية لإضافة الملاحظات ومراجع الكتاب المقدس أثناء الاستماع إلى الخطب.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * خطط القراءة وتتبع التقدّم - الفصول المقروءة، الأيام النشطة، ودورات القراءة - بالإضافة إلى حفظ الآيات بأوضاع ترتيب الحروف، ترتيب الكلمات، ضبابية الكلمات، والكتابة.
  * تحويل النص إلى كلام متقدم مع نطق الإشارات المرجعية، مما يتيح تجربة استماع سلسة للكتاب المقدس
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * المزامنة بين الأجهزة عبر iCloud أو NextCloud/WebDAV: حافظ على تزامن مساحات العمل والإشارات المرجعية والملاحظات وتقدّم القراءة عبر جميع أجهزتك.
  * مكتبة كبيرة من الوثائق: ترجمات الكتاب المقدس، والتعليقات اللاهوتية، والقواميس، والخرائط، والكتب المسيحية، بإجمالي أكثر من 1500 من الوثائق بأكثر من 700 لغة، موزعة بشكل قانوني بواسطة Crosswire ومستودعات SWORD الأخرى.
  * دعم مضمن لملفات MyBible، MySword، EPUB مما يمكنك من توسيع مكتبتك أكثر حتى.
 

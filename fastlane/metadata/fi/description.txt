@@ -14,13 +14,13 @@ Sovelluksessa on monia oivaltavia ja alkuperäisiä ominaisuuksia, jotka tekevä
  * Työtilojen avulla voit tallentaa erilaisia asetelmia erilaisiin raamatuntutkimistilanteisiin, siten että kussakin työtilassa on omat asetukset.
  * Strongin sanakirjan integraatio mahdollistaa kreikan ja heprean sanojen analysoinnin
  * Napauta mitä tahansa linkkiä siirtyäksesi rinnakkaisviitteisiin, alaviitteisiin ja kommentaareihin (Gill, Matthew Henry jne.) tai rinnakkaisviitekokoelmiin (Treasure of Scripture Knowledge, Quoting Passsages jne.).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Valinnainen tekoälyavustaja, pois käytöstä oletuksena – vaatii oman API-avaimen ulkoiselta palveluntarjoajalta. Tutki kommentaareja ja sanakirjoja tekoälyn avulla; lupajärjestelmä pitää sinut hallinnassa.
  * Joustava kokotekstihaku yhdestä tai useammasta raamatunkäännöksestä samanaikaisesti
  * Monipuoliset kirjanmerkkaus- ja korostusominaisuudet, mahdollisuudella omiin kommenttimerkintöihin
  * Opintoalustat joihin voi kirjoittaa merkintöjä ja raamattuviitteitä saarnoja kuunnellessa.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Lukusuunnitelmat ja edistymisen seuranta – luetut luvut, aktiiviset päivät, lukukierrokset – sekä jakeiden ulkoa opettelu: Sanasekoitus, Sanajärjestys, Sanasumutu ja Sanatyyppi
  * Edistynyt tekstin lukutoiminto ja puheen kirjanmerkit tekevät Raamatun kuuntelemisesta kätevää
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Synkronointi iCloudin tai NextCloud/WebDAVin kautta: pidä työtilat, kirjanmerkit, muistiinpanot ja lukuedistymä ajan tasalla kaikilla laitteillasi
  * Kattava kirjasto erilaisia teoksia: Raamatun käännöksiä, teologisia kommentaareja, sanakirjoja, karttoja ja kristillisiä kirjoja, yhteensä yli 1500 teosta yli  700 kielellä, laillisesti Crosswirelta ja muista SWORD repositorioista .
  * Voit laajentaa kirjastoasi entisestään sovelluksen tukemien MyBible- MySword- ja EPUB-tiedostojen avulla.
 

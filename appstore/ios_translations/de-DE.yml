@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline-Bibelstudium-Toolkit"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "kommentare,strong-codes,griechisch,hebräisch,sword,notizen,markieren,memorieren,leseplan,verweise"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Werbefrei und Open Source. Splitansicht, Kommentare, Strong-Codes, starke
+  Suche, Lesezeichen und Notizen – alles offline, sobald die Dokumente
+  installiert sind.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Geräteübergreifende Synchronisierung über iCloud oder NextCloud/WebDAV:
+  Arbeitsbereiche, Lesezeichen, Notizen und Lesefortschritt stets synchron
+
+feature_09: >
+  Lesepläne mit Fortschrittsverfolgung – gelesene Kapitel, aktive Tage,
+  Lesezyklen – plus Verse auswendig lernen mit Wortwirrwarr, Wortreihenfolge,
+  Wortschleier und Eintippen
+
+feature_11: >
+  Optionaler KI-Studienassistent – standardmäßig deaktiviert, eigener
+  API-Schlüssel eines Drittanbieters nötig. Erkunde Kommentare und
+  Wörterbücher mit KI in deiner Sprache; ein Berechtigungssystem hält dich in
+  Kontrolle.

@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+kajian,ulasan,strongs,greek,ibrani,sword,nota,serlah,hafal,pelan bacaan,luar talian

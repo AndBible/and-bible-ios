@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+comentaris,strongs,grec,hebreu,sword,notes,ressaltar,memoritzar,pla de lectura,marcadors

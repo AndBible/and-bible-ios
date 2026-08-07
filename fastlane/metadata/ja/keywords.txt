@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+注解書,ストロング,ギリシャ語,ヘブライ語,sword,ノート,ハイライト,暗唱,通読プラン,ワークスペース

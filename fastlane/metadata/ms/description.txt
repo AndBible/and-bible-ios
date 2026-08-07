@@ -14,13 +14,13 @@ Aplikasi ini mempunyai banyak ciri asli yang berwawasan, yang menjadikan pengala
  * Ruang kerja membolehkan pelbagai persediaan kajian Alkitab dengan tetapan mereka sendiri
  * Integrasi Strong's membolehkan analisis perkataan Greek dan Ibrani
  * Ketik mana-mana pautan untuk mengikuti rujukan silang, nota kaki, dan ulasan (Gill, Matthew Henry dll.) atau koleksi rujukan silang (Treasure of Scripture Knowledge, TSKe) yang berhiperpautan.
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Ejen kajian AI pilihan - dimatikan secara lalai, memerlukan kunci API pihak ketiga anda sendiri. Jelajahi ulasan dan kamus dengan bantuan AI dalam bahasa anda; sistem kebenaran mengekalkan kawalan anda.
  * Carian teks penuh yang fleksibel merentasi satu atau banyak terjemahan Alkitab secara serentak
  * Ciri penanda buku &amp; penyerlahan lanjutan dengan nota kajian peribadi
  * Pad Kajian untuk menambah nota dan rujukan Alkitab semasa mendengar khotbah.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Pelan bacaan dan penjejakan kemajuan - bab dibaca, hari aktif dan kitaran bacaan - serta hafalan ayat dengan mod Susun Perkataan, Tertib Perkataan, Kabur Perkataan, dan Taipkan
  * Teks ke pertuturan lanjutan dengan penanda buku baca, membolehkan pengalaman mendengar Alkitab yang lancar
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Penyegerakan melalui iCloud atau NextCloud/WebDAV: pastikan ruang kerja, penanda buku, nota, dan kemajuan bacaan anda diselaraskan pada semua peranti anda
  * Perpustakaan dokumen yang luas: terjemahan Alkitab, ulasan teologi, kamus, peta, dan buku Kristian, berjumlah lebih 1500 dokumen dalam lebih 700 bahasa, diedarkan secara sah oleh Crosswire dan repositori SWORD lain.
  * Sokongan asli untuk fail MyBible, MySword dan EPUB membolehkan anda meluaskan perpustakaan anda lebih lagi.
 

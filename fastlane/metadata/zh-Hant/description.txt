@@ -14,13 +14,13 @@
  * 工作區可以自定研經的環境
  * Strong's 參考方便查找希臘文及希伯來文分析
  * 輕點任何連結即可跟隨超連結的交叉參考、注腳和註釋（Gill、Matthew Henry之類）或交叉參考集（Treasure of Scripture Knowledge, TSKe）。
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * 可選的 AI 研經代理 - 預設關閉，需使用你自己的外部服務 API 金鑰。以你選擇的語言，藉助 AI 探索你已安裝的註釋及字典。內建的權限系統讓你完全掌控代理可執行的操作。
  * 靈活的全文搜尋功能，可同時於一個或多個聖經譯本中搜尋
  * 包括個人筆記的書籤及醒目提示
  * 研習筆記可以讓你在聆聽講道時新增筆記及參考。
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * 閱讀計劃與進度追蹤 - 已讀章數、活躍天數及閱讀週期 - 並透過「打亂單字」、「排列單字」、 「模糊單字」及「輸入單字」模式記憶經文
  * 進階的文字轉語音功能及語音書籤，以提供一個流暢的聆聽聖經體驗。
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * 透過 iCloud 或 NextCloud/WebDAV 跨裝置同步：讓你的工作區、書籤、筆記及閱讀進度於所有 裝置間保持同步
  * 龐大的文件庫：700種語言、超過1500份聖經譯本、神學註釋、字典、地點及基督教書籍。全部均由Crosswire及其他SWORD資料庫授權分發。
  * 原生支援MyBible、MySword及EPUB檔案，讓你可以豐富你的收藏。
 

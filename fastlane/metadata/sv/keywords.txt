@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+studier,kommentar,strongs,grekiska,hebreiska,sword,anteckningar,markera,memorera,läsplan

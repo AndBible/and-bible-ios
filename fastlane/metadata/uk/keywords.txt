@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+вивчення,коментарі,стронг,грецька,єврейська,sword,примітки,виділення,завчання,плани читання,теологія

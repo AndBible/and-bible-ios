@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Narzędzia biblijne offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "komentarz,grecki,hebrajski,sword,notatki,zakładki,wyróżnianie,zapamiętywanie,plan czytania,słowniki"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Bez reklam i z otwartym kodem. Podzielony widok, komentarze, numeracja
+  Stronga, potężne wyszukiwanie, zakładki i notatki - wszystko offline po
+  zainstalowaniu dokumentów.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synchronizacja między urządzeniami przez iCloud lub NextCloud/WebDAV:
+  obszary robocze, zakładki, notatki i postęp czytania zawsze
+  zsynchronizowane na wszystkich urządzeniach
+
+feature_09: >
+  Plany czytania i śledzenie postępów - przeczytane rozdziały, aktywne dni i
+  cykle - a także zapamiętywanie wersetów w trybach Pomieszaj słowa,
+  Kolejność słów, Zasłoń słowa i Wpisz tekst
+
+feature_11: >
+  Opcjonalny asystent AI do studium - wyłączony domyślnie, wymaga własnego
+  klucza API do zewnętrznej usługi. Przeglądaj komentarze i słowniki z
+  pomocą AI w swoim języku; system uprawnień zapewnia Ci kontrolę.

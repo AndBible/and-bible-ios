@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+คำอธิบาย,สตรอง,กรีก,ฮีบรู,SWORD,บันทึก,ไฮไลต์,จดจำ,แผนการอ่าน,ค้นหา,ซิงค์

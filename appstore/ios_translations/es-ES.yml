@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Estudio bíblico sin conexión"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "comentarios,concordancia,strong,griego,hebreo,notas,subrayado,memorizar,diccionario,mapas,teología"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Sin anuncios y de código abierto. Vistas divididas, comentarios, Strong's,
+  búsqueda potente, marcadores y notas - todo sin conexión una vez instalados
+  tus documentos.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sincronización vía iCloud o NextCloud/WebDAV: mantén espacios, marcadores,
+  notas y progreso de lectura al día en todos tus dispositivos.
+
+feature_09: >
+  Planes de lectura y seguimiento de progreso (capítulos leídos, días activos,
+  ciclos de lectura) y memorización de versículos: Letras Revueltas, Orden de
+  Palabras, Palabras Borrosas y Escríbelo.
+
+feature_11: >
+  Agente de estudio con IA opcional, desactivado por defecto: requiere tu
+  propia clave API de terceros. Explora comentarios y diccionarios con ayuda
+  de IA en tu idioma; un sistema de permisos te mantiene siempre en control.

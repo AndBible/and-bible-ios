@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Outils bibliques hors ligne"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "commentaire,strong,grec,hébreu,sword,notes,surlignage,mémorisation,plan de lecture,signets"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Sans publicité et open source. Vues divisées, commentaires, Strong's,
+  recherche puissante, signets et notes - tout hors ligne une fois vos
+  documents installés.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synchronisation via iCloud ou NextCloud/WebDAV : espaces de travail,
+  signets, notes et progression de lecture sur tous vos appareils
+
+feature_09: >
+  Plans de lecture et suivi de progression - chapitres lus, jours actifs et
+  cycles - plus mémorisation des versets avec les modes Mots mêlés, Ordre des
+  mots, Mots flous et Saisie
+
+feature_11: >
+  Agent d'étude IA optionnel, désactivé par défaut, nécessitant votre propre
+  clé API tierce. Explorez commentaires et dictionnaires avec l'IA dans votre
+  langue ; un système d'autorisations garde le contrôle.

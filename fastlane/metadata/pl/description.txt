@@ -14,13 +14,13 @@ Aplikacja wyróżnia się wieloma zmyślnymi, oryginalnymi cechami, które to u�
  * obszary robocze umożliwiające posiadanie kilku oddzielnych środowisk do studiowania Biblii, każde z własnymi ustawieniami
  * numeracja Stronga, aby móc analizować słowa w grece i hebrajskim
  * Dotknij dowolnego odsyłacza, aby przejść do powiązanych odnośników wewnętrznych, przypisów i komentarzy (niedostępne w j. polskim) lub zbiorów odsyłaczy (niedostępne w j. polskim).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Opcjonalny asystent AI do studium - wyłączony domyślnie, wymaga własnego klucza API do zewnętrznej usługi. Przeglądaj komentarze i słowniki z pomocą AI w swoim języku; system uprawnień zapewnia Ci kontrolę.
  * elastyczne wyszukiwanie pełnotekstowe w jednym lub wielu przekładach Biblii jednocześnie
  * zaawansowane możliwości tworzenia zakładek, wyróżniania tekstu i pisania własnych notatek
  * „bloczki notatek” umożliwiające dodawanie notatek i odnośników do Biblii podczas słuchania kazań
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Plany czytania i śledzenie postępów - przeczytane rozdziały, aktywne dni i cykle - a także zapamiętywanie wersetów w trybach Pomieszaj słowa, Kolejność słów, Zasłoń słowa i Wpisz tekst
  * możliwość odczytu na głos z zakładkami, aby płynnie słuchać Biblii
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Synchronizacja między urządzeniami przez iCloud lub NextCloud/WebDAV: obszary robocze, zakładki, notatki i postęp czytania zawsze zsynchronizowane na wszystkich urządzeniach
  * obszerna biblioteka dokumentów: tłumaczenia, komentarze teologiczne, słowniki, mapy, książki chrześcijańskie, w sumie ponad 1500 dokumentów w 700 językach legalnie rozpowszechnianych przez CrossWire i inne repozytoria SWORD
  * wsparcie dla plików MyBible, MySword i EPUB pozwalające na dalsze rozszerzenie Twojej biblioteki
 

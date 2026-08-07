@@ -14,13 +14,13 @@ L'application comporte de nombreuses fonctionnalités originales et petinentes, 
  * Les espaces de travail permettent de mettre en place plusieurs études bibliques avec leurs propres paramètres.
  * L'intégration de Strongs permet l'analyse des mots grecs et hébreux.
  * Touchez un lien pour suivre les références croisées, notes de bas de page et commentaires (Gill, Matthew Henry etc.) ou collections de références croisées (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Agent d'étude IA optionnel, désactivé par défaut, nécessitant votre propre clé API tierce. Explorez commentaires et dictionnaires avec l'IA dans votre langue ; un système d'autorisations garde le contrôle.
  * Recherche plein texte dans une ou plusieurs traductions simultanément
  * Fonctions avancées des signets et de surlignage avec des notes d'étude personnelles
  * Des bloc-notes pour ajouter des notes et des références bibliques tout en écoutant les sermons.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Plans de lecture et suivi de progression - chapitres lus, jours actifs et cycles - plus mémorisation des versets avec les modes Mots mêlés, Ordre des mots, Mots flous et Saisie
  * Une synthèse vocale avancée avec des signets vocaux, pour une écoute fluide de la Bible.
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Synchronisation via iCloud ou NextCloud/WebDAV : espaces de travail, signets, notes et progression de lecture sur tous vos appareils
  * Vaste bibliothèque de documents : Traductions de la Bible, commentaires théologiques, dictionnaires, cartes et livres chrétiens, totalisant plus de 1500 documents dans plus de 700 langues, distribués légalement par Crosswire et d'autres dépôts SWORD.
  * La prise en charge native de MyBible, MySword et des fichiers EPUB vous permet d'élargir encore davantage votre bibliothèque.
 

@@ -14,13 +14,13 @@
  * 여러 개의 성경 공부 세팅을 활용할 수 있는 워크스페이스
  * 헬라어와 히브리어 단어 분석을 위한 스트롱 통합
  * 하이퍼링크된 교차 참조, 각주, 주석(Gill, Matthew Henry 등) 또는 교차 참조 모음(Treasure of Scripture Knowledge, TSKe)을 따라가려면 링크를 누르세요.
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * 선택 사항인 AI 공부 도우미 - 기본적으로 꺼져 있으며, 외부 서비스의 본인 API 키가 필요합니다. 원하는 언어로 설치된 주석과 사전을 AI의 도움을 받아 탐색하세요. 권한 시스템으로 항상 완전히 통제할 수 있습니다.
  * 한 개 또는 여러 성경 번역본을 동시에 검색할 수 있는 유연한 전체 본문 검색
  * 개인 연구 노트 기능과 함께 우수한 북마크와 하이라이트 기능
  * 설교를 들으면서 노트를 적거나 성경 참조를 넣을 수 있는 스터디 패드.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * 읽기 계획과 진행 상황 추적 - 읽은 장, 활동한 날, 읽기 주기 - 그리고 단어 뒤섞기, 단어 순서 맞추기, 단어 흐림, 직접 입력하기 모드로 구절 암송까지
  * 부드러운 성경 듣기 경험을 가능하게 하는 발전된 텍스트 읽기 기능
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * iCloud 또는 NextCloud/WebDAV를 통한 기기 간 동기화: 워크스페이스, 북마크, 노트, 읽기 진행 상황을 모든 기기에서 동기화된 상태로 유지하세요
  * 방대한 문서 라이브러리: 성경 번역본, 신학 주석, 사전, 지도, 기독교 서적, 모두 (700) 개 이상의 언어로 된 (1500) 이상의 자료들이 Crosswire와 다른 SWORD 저장소로부터 합법적으로 제공됨.
  * MyBible, MySword 및 EPUB 파일에 대한 기본 지원으로 라이브러리를 더욱 확장할 수 있습니다.
 

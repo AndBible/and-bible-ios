@@ -1,0 +1,5 @@
+# en-US needs no translation: appstore/ios_source.yml is already the English
+# master. This file exists only so find_stale.py does not report en-US as a
+# locale awaiting work, and so a change to the English source marks en-US stale
+# alongside every other locale.
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146

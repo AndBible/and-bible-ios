@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline bibelstudieverktyg"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "studier,kommentar,strongs,grekiska,hebreiska,sword,anteckningar,markera,memorera,läsplan"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Reklamfritt och öppen källkod. Delade vyer, kommentarer, Strongs nummer,
+  kraftfull sökning, bokmärken och anteckningar - allt offline när dina
+  dokument är installerade.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synkronisering via iCloud eller NextCloud/WebDAV: håll arbetsytor,
+  bokmärken, anteckningar och läsningsförlopp synkade på alla dina enheter
+
+feature_09: >
+  Läsplaner och förloppsspårning - lästa kapitel, aktiva dagar och
+  läscykler - samt versminne med lägena Bokstavspussel, Ordföljd, Suddade
+  ord och Skriv själv
+
+feature_11: >
+  Valfri AI-studieassistent - inaktiverad som standard, kräver din egen
+  API-nyckel från tredje part. Utforska kommentarer och lexikon med
+  AI-hjälp på ditt språk; ett behörighetssystem håller dig i kontroll.

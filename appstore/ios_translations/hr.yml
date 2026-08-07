@@ -1,0 +1,32 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Izvanmrežni alat za Bibliju"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "tumačenje,strong,grčki,hebrejski,sword,bilješke,isticanje,pamćenje,plan čitanja,stihovi"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Bez oglasa i otvorenog koda. Podijeljeni prikazi, tumačenja, Strong's,
+  moćno pretraživanje, straničnici i bilješke - izvanmrežno kad su
+  dokumenti instalirani.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sinkronizacija među uređajima putem iCloud-a ili NextCloud/WebDAV-a:
+  držite svoje radne površine, straničnike, bilješke i napredak čitanja
+  usklađenima na svim uređajima
+
+feature_09: >
+  Planovi čitanja i praćenje napretka - pročitana poglavlja, aktivni dani i
+  ciklusi čitanja - te pamćenje stihova u načinima Miješanje riječi,
+  Redoslijed riječi, Zamućenje riječi i Upisivanje
+
+feature_11: >
+  Neobavezni AI pomoćnik za proučavanje - isključen po zadanome, treba
+  vlastiti API ključ vanjskog davatelja usluge. Istražujte instalirana
+  tumačenja i rječnike uz pomoć AI-ja; sustav dopuštenja ostavlja kontrolu
+  vama.

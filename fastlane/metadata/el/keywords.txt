@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+σχόλια,strongs,ελληνικά,εβραϊκά,sword,σημειώσεις,υπογράμμιση,απομνημόνευση,σχέδιο ανάγνωσης,λεξικά

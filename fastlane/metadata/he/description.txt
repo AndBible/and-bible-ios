@@ -14,13 +14,13 @@
  * סביבות עבודה המאפשרות הגדרות שונות אחת מהשניה
  * שילוב של STRONG ללימוד וניתוח של יוונית ועברית מקראית
  * לחיצה על כל קישור עוקבת אחר מראי מקום, הערות שוליים ופרשנויות (Gill, Matthew Henry ועוד.) או אוספי מראי מקום (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * סוכן לימוד בינה מלאכותית אופציונלי - כבוי כברירת מחדל, ודורש מפתח API משלך לשירות חיצוני. חקור פרשנויות ומילונים בעזרת בינה מלאכותית בשפה שלך; מערכת הרשאות מבטיחה לך שליטה מלאה.
  * חיפוש טקסט מלא וגמיש בתרגום אחד או במספר תרגומי תנ"ך במקביל
  * שימוש מתקדם בסימניות ואפשרויות הדגשה עם הערות לימוד אישיות
  * פנקסי לימוד להוספת רשימות ומראי מקום בזמן האזנה לדרשות.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * תוכניות קריאה ומעקב התקדמות - פרקים שנקראו, ימי קריאה פעילים ומחזורי קריאה - וכן שינון פסוקים במצבי ערבוב מילים, סדר מילים, טשטוש מילים והקלדה.
  * הקראה קולית מתקדמת, כולל סימניות, המאפשרות האזנה חלקה לתנ"ך
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * סנכרון בין מכשירים באמצעות iCloud או NextCloud/WebDAV: סביבות העבודה, הסימניות, ההערות וההתקדמות בקריאה שלך נשמרים מסונכרנים בין כל המכשירים שלך.
  * ספרייה עצומה של מסמכים: תרגומי תנ"ך, פרשנויות, מילונים, מפות, ספרים נוצריים - 1500 מסמכים ב- 700 שפות, המופצים באופן חוקי ע"י Crosswire ומאגרי SWORD אחרים.
  * תמיכה מובנית בקבצי MyBible, MySword ו-EPUB מאפשרת לך להרחיב את הספרייה שלך עוד יותר.
 

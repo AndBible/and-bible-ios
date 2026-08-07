@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+주석,스트롱코드,헬라어,히브리어,sword,노트,하이라이트,암송,읽기계획,워크스페이스

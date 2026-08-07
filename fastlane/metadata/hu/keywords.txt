@@ -1,1 +1,1 @@
-study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan
+tanulmányozás,kommentár,strong-számok,görög,héber,sword,jegyzet,kiemelés,memorizálás,olvasási terv

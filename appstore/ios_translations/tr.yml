@@ -1,0 +1,31 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Çevrimdışı Kutsal Kitap aracı"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "incil,yorum,strong,grekçe,ibranice,sword,not,vurgulama,ezberleme,okuma planı,ayet"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Reklamsız ve açık kaynaklı. Bölünmüş görünümler, yorumlar, Strong's, güçlü
+  arama, yer imleri ve notlar - belgeleriniz yüklendiğinde tamamen çevrimdışı.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  iCloud veya NextCloud/WebDAV üzerinden cihazlar arası senkronizasyon:
+  çalışma alanlarınızı, yer imlerinizi, notlarınızı ve okuma ilerlemenizi
+  tüm cihazlarınızda eşitleyin
+
+feature_09: >
+  Okuma planları ve ilerleme takibi - okunan bölümler, aktif günler ve okuma
+  döngüleri - ayrıca etkileşimli Kelime Karıştırma, Kelime Sıralama, Kelime
+  Bulanıklaştırma ve Yazarak Ezberleme modlarıyla ayet ezberleme
+
+feature_11: >
+  İsteğe bağlı YZ çalışma asistanı - varsayılan olarak kapalı, üçüncü taraf
+  bir sağlayıcıdan kendi API anahtarınızı gerektirir. Yüklü yorumları ve
+  sözlükleri YZ yardımıyla kendi dilinizde keşfedin; izin sistemi kontrolü
+  sizde tutar.

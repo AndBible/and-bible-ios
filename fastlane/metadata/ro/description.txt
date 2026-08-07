@@ -14,13 +14,13 @@ Aplicația are multe caracteristici originale și interesante, care fac ca exper
  * Spațiile de studiu permit organizarea mai multor studii biblice cu propriile reglări
  * Integrarea Strong permite analiza cuvintelor grecești și ebraice
  * Apasă pe orice legătură pentru a urmări trimiteri, note de subsol, comentarii (Gill, Matthew Henry etc.) sau colecții de trimiteri (Treasure of Scripture Knowledge, TSKe).
- * Optional AI study agent - off by default, requires your own third-party API key. Explore commentaries and dictionaries with AI assistance in your language; a permission system keeps you in control.
+ * Agent AI opțional pentru studiu, dezactivat implicit, care necesită propria cheie API de la un furnizor terț. Explorează comentarii și dicționare cu ajutorul AI în limba ta; un sistem de permisiuni îți păstrează controlul.
  * Căutare flexibilă în text complet, în una sau mai multe traduceri simultan
  * Semne de carte și evidențiere avansată cu notițe de studiu personale
  * Notițe de studiu pentru a adăuga comentarii și trimiteri biblice în timp ce asculți predicile.
- * Reading plans and progress tracking - chapters read, active days and reading cycles - plus verse memorization with Word Scramble, Word Order, Word Blur, and Type It modes
+ * Planuri de citire și urmărirea progresului - capitole citite, zile active și cicluri de citire - plus memorarea versetelor cu modurile Cuvinte amestecate, Ordinea cuvintelor, Cuvinte estompate și Scrie tu.
  * Pronunțarea avansată a textului cu marcaje de vorbire, permițînd o experiență de ascultare ușoară a Bibliei
- * Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces, bookmarks, notes, and reading progress in sync across all your devices
+ * Sincronizare între dispozitive prin iCloud sau NextCloud/WebDAV: spațiile de studiu, semnele de carte, notițele și progresul citirii rămân sincronizate.
  * O vastă bibliotecă de documente: Traduceri ale Bibliei, comentarii teologice, dicționare, hărți și cărți creștine, totalizînd peste 1500 documente în peste 700 limbi, distribuite legal de Crosswire și alte depozite SWORD.
  * Compatibilitatea nativă cu fișierele MyBible, MySword și EPUB permite o extindere și mai mare a bibliotecii tale.
 

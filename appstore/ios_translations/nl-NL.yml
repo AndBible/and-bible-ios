@@ -1,0 +1,32 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline bijbelstudietool"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "commentaren,strong,grieks,hebreeuws,sword,notities,bladwijzers,markeren,memoriseren,leesplan"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Advertentievrij en open source. Gesplitste vensters, commentaren, Strong's,
+  krachtig zoeken, bladwijzers en notities - alles offline na installatie
+  van documenten.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synchronisatie tussen apparaten via iCloud of NextCloud/WebDAV: houd je
+  werkbladen, bladwijzers, notities en leesvoortgang gesynchroniseerd op al
+  je apparaten
+
+feature_09: >
+  Leesplannen en voortgangsbijhouden - gelezen hoofdstukken, actieve dagen
+  en leescycli - plus versmemorisatie met de modi Woordpuzzel, Woordvolgorde,
+  Woordvervaging en Typmodus
+
+feature_11: >
+  Optionele AI-studieassistent - standaard uitgeschakeld, vereist je eigen
+  API-sleutel van een externe aanbieder. Verken commentaren en woordenboeken
+  met AI-ondersteuning in jouw taal; een machtigingensysteem houdt jou in
+  controle.
