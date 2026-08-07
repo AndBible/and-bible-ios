@@ -145,5 +145,53 @@ class RealLocaleMapTests(unittest.TestCase):
             self.assertIn(play, available)
 
 
+class PlaceholderTests(unittest.TestCase):
+    def test_substitutes_a_variable(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("Hello {{ name }}", {"name": "World"}),
+            "Hello World",
+        )
+
+    def test_tolerates_missing_whitespace(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("{{name}}", {"name": "X"}), "X"
+        )
+
+    def test_expands_nested_references(self) -> None:
+        variables = {"outer": "{{ inner }}!", "inner": "deep"}
+        self.assertEqual(
+            meta.expand_placeholders("{{ outer }}", variables), "deep!"
+        )
+
+    def test_leaves_an_unknown_placeholder_in_place(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("{{ missing }}", {}), "{{ missing }}"
+        )
+
+    def test_raises_on_a_self_referential_loop(self) -> None:
+        with self.assertRaises(ValueError):
+            meta.expand_placeholders("{{ a }}", {"a": "{{ b }}", "b": "{{ a }}"})
+
+
+class MergeTests(unittest.TestCase):
+    def test_later_layers_win(self) -> None:
+        merged = meta.merge_layers({"k": "base"}, {"k": "override"})
+        self.assertEqual(merged["k"], "override")
+
+    def test_blank_values_do_not_override(self) -> None:
+        merged = meta.merge_layers({"k": "base"}, {"k": "   "})
+        self.assertEqual(merged["k"], "base")
+
+    def test_resolve_expands_values_against_each_other(self) -> None:
+        resolved = meta.resolve_variables(
+            {"title": "AndBible", "line": '"{{ title }}" is free'}
+        )
+        self.assertEqual(resolved["line"], '"AndBible" is free')
+
+    def test_resolve_strips_folded_block_trailing_newlines(self) -> None:
+        resolved = meta.resolve_variables({"k": "text\n"})
+        self.assertEqual(resolved["k"], "text")
+
+
 if __name__ == "__main__":
     unittest.main()

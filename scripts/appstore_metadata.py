@@ -13,11 +13,15 @@ only part that touches the output tree.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
 import yaml
+
+PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+MAX_EXPANSION_PASSES = 8
 
 # Where the Android store copy might be. CLAUDE.md forbids hard-coding a sibling
 # path, and names `.and-bible-android/` as the documented local location; the
@@ -114,3 +118,50 @@ def apply_platform_substitutions(
     for substitution in config.default_substitutions:
         result = result.replace(substitution.source, substitution.target)
     return result
+
+
+def expand_placeholders(text: str, variables: Mapping[str, str]) -> str:
+    """Replace `{{ name }}` references, repeatedly, until the text settles.
+
+    An unknown name is left verbatim rather than blanked, so the validator can
+    report it as an unresolved placeholder instead of silently shipping a gap.
+    """
+    current = text
+    for _ in range(MAX_EXPANSION_PASSES):
+        expanded = PLACEHOLDER_PATTERN.sub(
+            lambda match: variables.get(match.group(1), match.group(0)), current
+        )
+        if expanded == current:
+            return current
+        current = expanded
+    raise ValueError(f"Placeholder expansion did not converge: {text!r}")
+
+
+def load_yaml_mapping(path: Path) -> dict[str, str]:
+    """Read a flat `key: value` YAML file into a string mapping."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a mapping")
+    return {str(key): str(value) for key, value in raw.items() if value is not None}
+
+
+def merge_layers(*layers: Mapping[str, str]) -> dict[str, str]:
+    """Overlay mappings, later layers winning. Blank values do not override.
+
+    A translator who leaves a key empty should fall back to English rather than
+    blank the line, which is how the Android renderer behaves too.
+    """
+    merged: dict[str, str] = {}
+    for layer in layers:
+        merged.update(
+            {key: value for key, value in layer.items() if value.strip()}
+        )
+    return merged
+
+
+def resolve_variables(raw: Mapping[str, str]) -> dict[str, str]:
+    """Expand every value against every other value."""
+    stripped = {key: value.strip() for key, value in raw.items()}
+    return {
+        key: expand_placeholders(value, stripped) for key, value in stripped.items()
+    }
