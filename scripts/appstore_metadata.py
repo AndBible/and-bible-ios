@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -225,6 +226,67 @@ def find_cjk_adjacent_spaces(text: str) -> list[int]:
     ]
 
 
+# Zero-width characters that are always an artifact in store copy, never
+# meaningful. Deliberately NOT including U+200C/U+200D (ZWNJ/ZWJ): those are
+# real letters-joining controls in Persian, Hindi and Arabic script, and
+# stripping them would corrupt words rather than clean them up.
+ZERO_WIDTH_CHARACTERS = "\u200b\ufeff"
+
+# Whitespace App Store Connect accepts. Newlines are only ever meaningful in
+# `description`, but no field is harmed by allowing them here.
+PLAIN_WHITESPACE = " \n"
+
+
+def normalize_whitespace(text: str) -> str:
+    """Fold every exotic space into a plain one and drop zero-width characters.
+
+    App Store Connect rejects an upload outright when a field carries anything
+    but ordinary whitespace ("'name' must not contain invalid whitespace
+    characters"), and `deliver` is not atomic - a rejection part-way through
+    leaves the live listing half-written. Both sources of this are upstream, in
+    the Android translations that this pipeline only reads: French typography
+    puts U+202F NARROW NO-BREAK SPACE before a colon ("AndBible : Bible
+    Study"), and machine-assisted Portuguese carries stray U+200B ZERO WIDTH
+    SPACE mid-sentence. A plain space reads identically in every storefront, so
+    normalising is preferable to failing the render and blocking a release on a
+    translation nobody here maintains.
+
+    U+3000 IDEOGRAPHIC SPACE is folded too. It is legitimate CJK typography in
+    prose, but in a store field it is far more often an artifact - and folding
+    it means `find_cjk_adjacent_spaces` sees it and reports it, rather than it
+    shipping unexamined.
+    """
+    characters = []
+    for char in text:
+        if char in PLAIN_WHITESPACE:
+            characters.append(char)
+        elif char in ZERO_WIDTH_CHARACTERS:
+            continue
+        elif char.isspace() or unicodedata.category(char) == "Zs":
+            characters.append(" ")
+        else:
+            characters.append(char)
+    return "".join(characters)
+
+
+def find_invalid_whitespace(text: str) -> list[tuple[int, str]]:
+    """Return every (index, character) Apple would reject as whitespace.
+
+    A backstop behind `normalize_whitespace`: if a future exotic character slips
+    past the fold, this fails the offline render rather than the live upload.
+    """
+    return [
+        (index, char)
+        for index, char in enumerate(text)
+        if char not in PLAIN_WHITESPACE
+        and (
+            char.isspace()
+            or char in ZERO_WIDTH_CHARACTERS
+            or unicodedata.category(char) == "Zs"
+        )
+    ]
+
+
 def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
     """Return every problem found in one locale's fields.
 
@@ -254,6 +316,11 @@ def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
             problems.append(
                 f"{apple_locale}/{field}: space between CJK characters at "
                 f"index {index} (likely a YAML fold artifact - see Defect 1)"
+            )
+        for index, char in find_invalid_whitespace(value):
+            problems.append(
+                f"{apple_locale}/{field}: U+{ord(char):04X} at index {index} "
+                "(App Store Connect rejects non-plain whitespace)"
             )
     return problems
 
@@ -420,8 +487,8 @@ def build_locale_fields(
     if apple_locale == RELEASE_NOTES_LOCALE and sources.release_notes.strip():
         fields["release_notes"] = sources.release_notes.strip()
     return {
-        field: apply_platform_substitutions(
-            value, apple_locale, sources.locale_config
+        field: normalize_whitespace(
+            apply_platform_substitutions(value, apple_locale, sources.locale_config)
         )
         for field, value in fields.items()
     }

@@ -365,9 +365,56 @@ def build_fixture_sources() -> meta.LoadedSources:
     )
 
 
+class WhitespaceNormalizationTests(unittest.TestCase):
+    """App Store Connect rejects `name` containing exotic whitespace."""
+
+    def test_narrow_no_break_space_becomes_a_plain_space(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("AndBible\u202f: Bible Study"),
+            "AndBible : Bible Study",
+        )
+
+    def test_no_break_space_becomes_a_plain_space(self) -> None:
+        self.assertEqual(meta.normalize_whitespace("100\u00a0%"), "100 %")
+
+    def test_zero_width_space_is_removed_entirely(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("notáveis \u200b\u200bsão"),
+            "notáveis são",
+        )
+
+    def test_newlines_and_plain_spaces_survive(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("first line\n\n * bullet"),
+            "first line\n\n * bullet",
+        )
+
+    def test_validator_reports_exotic_whitespace(self) -> None:
+        problems = meta.validate_fields("fr-FR", {"name": "AndBible\u202f: X"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("fr-FR/name", problems[0])
+        self.assertIn("U+202F", problems[0])
+
+    def test_validator_accepts_plain_spaces_and_newlines(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fr-FR", {"description": "a b\n\nc"}), []
+        )
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sources = build_fixture_sources()
+
+    def test_rendered_fields_are_whitespace_normalized(self) -> None:
+        sources = meta.replace_sources(
+            self.sources,
+            android_translations={
+                "en-US": {},
+                "fi-FI": {"title": "AndBible\u202f: Raamattu"},
+            },
+        )
+        fields = meta.build_locale_fields(sources, "fi-FI", "fi")
+        self.assertEqual(fields["name"], "AndBible : Raamattu")
 
     def test_name_comes_from_the_translated_title(self) -> None:
         fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")

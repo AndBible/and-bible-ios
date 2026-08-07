@@ -8,7 +8,7 @@ Algumas versões populares da Bíblia (das muitas disponíveis): Bíblia dos Cap
 
 Recursos poderosos de estudo da Bíblia
 
-A aplicação tem muitos recursos perspicazes e originais, que tornam uma experiência de estudo bíblica complexa e profunda mais suave do que nunca. Os recursos mais notáveis ​​são os seguintes:
+A aplicação tem muitos recursos perspicazes e originais, que tornam uma experiência de estudo bíblica complexa e profunda mais suave do que nunca. Os recursos mais notáveis são os seguintes:
 
  * Visualização em várias janelas de texto que permitem comparar traduções e consultar comentários
  * Os espaços de trabalho permitem várias configurações de estudo da Bíblia com as suas próprias configurações
