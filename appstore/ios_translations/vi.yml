@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Công cụ Kinh Thánh ngoại tuyến"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "chú giải,strong,hy lạp,hê-bơ-rơ,sword,ghi chú,tô sáng,học thuộc,kế hoạch đọc,câu"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Không quảng cáo, mã nguồn mở. Xem chia đôi, chú giải, Strong's, tìm kiếm
+  mạnh mẽ, dấu trang và ghi chú - ngoại tuyến khi tài liệu đã được cài đặt.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Đồng bộ giữa các thiết bị qua iCloud hoặc NextCloud/WebDAV: giữ không gian
+  làm việc, dấu trang, ghi chú và tiến trình đọc đồng bộ trên mọi thiết bị
+  của bạn
+
+feature_09: >
+  Kế hoạch đọc và theo dõi tiến trình - số chương đã đọc, số ngày hoạt động
+  và chu kỳ đọc - cùng học thuộc câu Kinh Thánh với các chế độ Xáo Trộn Từ,
+  Sắp Xếp Từ, Làm Mờ Từ và Gõ Lại
+
+feature_11: >
+  Trợ lý nghiên cứu AI tùy chọn - tắt theo mặc định, cần khóa API riêng của
+  bạn từ một nhà cung cấp bên thứ ba. Khám phá chú giải và từ điển đã cài đặt
+  với sự hỗ trợ của AI; hệ thống quyền giữ quyền kiểm soát cho bạn.

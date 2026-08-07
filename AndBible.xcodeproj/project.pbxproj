@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		15CEC5F063F925DDA0084CDF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */; };
+		CA1C01A1D3E74B1F00A1E004 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = CA1C01A1D3E74B1F00A1E003 /* PrivacyInfo.xcprivacy */; };
 		1A2B3C4D5E6F708192A3B4C5 /* BibleUI in Frameworks */ = {isa = PBXBuildFile; productRef = 28DDAC55D2C87E9CB1F31A12 /* BibleUI */; };
 		1A2B3C4D5E6F708192A3B4C6 /* SwordKit in Frameworks */ = {isa = PBXBuildFile; productRef = 020BEFE49A96B4F15548630F /* SwordKit */; };
 		2107085A8D114A50F42310B0 /* BibleCore in Frameworks */ = {isa = PBXBuildFile; productRef = FDFDEF929B7A5ACE42C2B819 /* BibleCore */; };
@@ -58,6 +59,7 @@
 		AA0B1C2D3E4F506172839407 /* AndBible-Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "AndBible-Release.xcconfig"; sourceTree = "<group>"; };
 		AA0B1C2D3E4F506172839408 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Secrets.example.xcconfig"; sourceTree = "<group>"; };
 		6AC3AEB9ADE0BA981610EA58 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CA1C01A1D3E74B1F00A1E003 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6F16572A9AD36BA967BA4C23 /* AndBibleTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AndBibleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D4E5F60718293A4B5D /* AndBibleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AndBibleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D4E5F60718293A4B5E /* AndBibleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AndBibleUITests.swift; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 				0ABFA8AEBF4A6CA89CDD4AF5 /* ContentView.swift */,
 				451FFBBE453EACF1547FF4B6 /* Localizable.strings */,
 				F57750A41A385FA784921EB2 /* Info.plist */,
+				CA1C01A1D3E74B1F00A1E003 /* PrivacyInfo.xcprivacy */,
 				1CA144AB77AEE518F1465DCC /* SwordSetup.swift */,
 			);
 			path = AndBible;
@@ -425,6 +428,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				15CEC5F063F925DDA0084CDF /* Assets.xcassets in Resources */,
+				CA1C01A1D3E74B1F00A1E004 /* PrivacyInfo.xcprivacy in Resources */,
 				CA1C01A1D3E74B1F00A1B001 /* CalculatorIcon.png in Resources */,
 				CA1C01A1D3E74B1F00A1B002 /* CalculatorIcon@2x.png in Resources */,
 				CA1C01A1D3E74B1F00A1B003 /* CalculatorIcon@3x.png in Resources */,

@@ -1,0 +1,50 @@
+Tehokas työkalu Raamatun tutkimiseen
+
+”AndBible: Raamattu” on tehokas, helppokäyttöinen ja offline-tilassa toimiva raamatuntutkimussovellus iOS:lle — monipuolinen työkalupakki rennosta lukemisesta syvälliseen tutkimukseen. Enemmän kuin lukuohjelma — väline vakavaan Raamatun tutkimiseen.
+
+Sovelluksen ovat kehittäneet Raamatun lukijat Raamatun lukijoille — voittoa tavoittelematon, avoimen lähdekoodin yhteisöprojekti, joka on täysin ilmainen eikä sisällä mainoksia.
+
+Useista tarjolla olevista raamatunkäännöksistä muutamia suosituimpia ovat Raamattu Kansalle, -92, -33/38 -käännökset, ja englanninkielisistä KJV, NASB, NET. Sisältää myös kattavia Raamattukommentaareja, kuten Matthew Henryn ja John Gillin kommentaarit.
+
+Tehokkaita ominaisuuksia Raamatun tutkimiseen
+
+Sovelluksessa on monia oivaltavia ja alkuperäisiä ominaisuuksia, jotka tekevät monipuolisesta ja syvällisestä Raamatun tutkiskelusta sujuvan kokemuksen. Seuraavat ovat sen merkittävimpiä ominaisuuksia:
+
+ * Jaetut tekstinäkymät jotka mahdollistavat raamatunkäännösten vertailun ja kommentaarien selailun
+ * Työtilojen avulla voit tallentaa erilaisia asetelmia erilaisiin raamatuntutkimistilanteisiin, siten että kussakin työtilassa on omat asetukset.
+ * Strongin sanakirjan integraatio mahdollistaa kreikan ja heprean sanojen analysoinnin
+ * Napauta mitä tahansa linkkiä siirtyäksesi rinnakkaisviitteisiin, alaviitteisiin ja kommentaareihin (Gill, Matthew Henry jne.) tai rinnakkaisviitekokoelmiin (Treasure of Scripture Knowledge, Quoting Passsages jne.).
+ * Valinnainen tekoälyavustaja, pois käytöstä oletuksena – vaatii oman API-avaimen ulkoiselta palveluntarjoajalta. Tutki kommentaareja ja sanakirjoja tekoälyn avulla; lupajärjestelmä pitää sinut hallinnassa.
+ * Joustava kokotekstihaku yhdestä tai useammasta raamatunkäännöksestä samanaikaisesti
+ * Monipuoliset kirjanmerkkaus- ja korostusominaisuudet, mahdollisuudella omiin kommenttimerkintöihin
+ * Opintoalustat joihin voi kirjoittaa merkintöjä ja raamattuviitteitä saarnoja kuunnellessa.
+ * Lukusuunnitelmat ja edistymisen seuranta – luetut luvut, aktiiviset päivät, lukukierrokset – sekä jakeiden ulkoa opettelu: Sanasekoitus, Sanajärjestys, Sanasumutu ja Sanatyyppi
+ * Edistynyt tekstin lukutoiminto ja puheen kirjanmerkit tekevät Raamatun kuuntelemisesta kätevää
+ * Synkronointi iCloudin tai NextCloud/WebDAVin kautta: pidä työtilat, kirjanmerkit, muistiinpanot ja lukuedistymä ajan tasalla kaikilla laitteillasi
+ * Kattava kirjasto erilaisia teoksia: Raamatun käännöksiä, teologisia kommentaareja, sanakirjoja, karttoja ja kristillisiä kirjoja, yhteensä yli 1500 teosta yli  700 kielellä, laillisesti Crosswirelta ja muista SWORD repositorioista .
+ * Voit laajentaa kirjastoasi entisestään sovelluksen tukemien MyBible- MySword- ja EPUB-tiedostojen avulla.
+
+Tehdään yhdessä paras Raamattusovellus!
+
+AndBible on yhteisöllinen avoimen lähdekoodin projekti. Käytännössä se tarkoittaa että rohkaisemme kaikkia, jolla on tarvittava osaaminen, antamaan panoksensa projektiin:
+
+ * kehittämällä uusia ominaisuuksia,
+ * testaamalla ominaisuuksia joita ei ole vielä julkaistu,
+ * pitämällä käyttöliittymän käännökset ajan tasalla, ja
+ * auttamalla moduulikirjaston laajentamisessa; hankkimalla lupia tekijänoikeusten haltijoilta ja muuntamalla dokumentteja SWORD-muotoon.
+
+Jos olet ohjelmistoalan ammattilainen (kehittäjä tai testaaja), pyydämme sinua harkistemaan aikasi antamista tälle projektille. Lue lisää tietoa siitä kuinka voit osallistua:  https://git.io/JUnaj.
+
+Tue ostamalla kehitysaikaa!
+
+Jos sinulla ei ole aikaa tai taitoja olla mukana projektissa, voit myös tukea projektia ostamalla sovelluskehittäjän työaikaa.
+
+Katso vaihtoehdot: https://shop.andbible.org/
+
+Linkkejä
+
+ * Kotisivu: https://andbible.org
+ * Tykkää AndBiblesta Facebookissa: https://www.facebook.com/AndBible/
+ * Meidän Youtube-kanava: https://www.youtube.com/c/AndBible
+ * Usein kysytyt kysymykset (FAQ): https://git.io/JJm8E
+ * Projektin sivu Githubissa: https://github.com/AndBible/and-bible

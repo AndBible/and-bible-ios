@@ -1,0 +1,50 @@
+Alat Studi Alkitab yang Canggih
+
+"AndBible: Studi Alkitab" adalah aplikasi studi Alkitab offline untuk iOS yang canggih dan mudah digunakan — toolkit serbaguna dengan fitur-fitur berkualitas tinggi yang melayani berbagai gaya studi, mulai dari pembacaan santai hingga riset mendalam. Lebih dari sekadar pembaca, aplikasi ini adalah alat untuk studi pribadi yang serius.
+
+Dikembangkan oleh pembaca Alkitab, untuk pembaca Alkitab — proyek komunitas open-source nirlaba yang sepenuhnya gratis dan tanpa iklan.
+
+Beberapa versi alkitab populer (dari banyak yang tersedia) adalah KJV, NASB, NET, serta tafsiran populer seperti Matthew Henry dan John Gill.
+
+Fitur Studi Alkitab yang Canggih
+
+Aplikasi ini memiliki banyak fitur orisinal yang berwawasan luas, membuat pengalaman studi alkitab yang kompleks dan mendalam menjadi lebih mudah dari sebelumnya. Fitur-fitur yang paling menonjol adalah sebagai berikut:
+
+ * Tampilan teks terpisah yang memungkinkan perbandingan terjemahan dan konsultasi tafsiran
+ * Ruang kerja memungkinkan beberapa pengaturan studi alkitab dengan pengaturan masing-masing
+ * Integrasi Strong memungkinkan analisis kata bahasa Yunani dan Ibrani
+ * Ketuk tautan apa pun untuk mengikuti referensi silang, catatan kaki, dan tafsiran (Gill, Matthew Henry, dll.) atau koleksi referensi silang (Treasure of Scripture Knowledge, TSKe) yang terhubung.
+ * Agen studi AI opsional - nonaktif secara default, memerlukan kunci API pihak ketiga Anda sendiri. Jelajahi tafsiran dan kamus dengan bantuan AI dalam bahasa Anda; sistem izin menjaga Anda tetap mengendalikan.
+ * Pencarian teks lengkap yang fleksibel pada satu atau beberapa terjemahan Alkitab sekaligus
+ * Fitur penanda buku & penyorotan canggih dengan catatan studi pribadi
+ * Lembar studi untuk menambahkan catatan dan referensi alkitab saat mendengarkan khotbah.
+ * Rencana bacaan dan pelacakan kemajuan - bab yang dibaca, hari aktif dan siklus bacaan - plus hafalan ayat dengan mode Acak Kata, Urutan Kata, Kata Buram, dan Ketik Sendiri
+ * Teks ke ucapan canggih dengan penanda buku berbicara, menghadirkan pengalaman mendengarkan alkitab yang nyaman
+ * Sinkronisasi lintas perangkat via iCloud atau NextCloud/WebDAV: jaga ruang kerja, penanda buku, catatan, dan kemajuan bacaan Anda tetap selaras di semua perangkat
+ * Perpustakaan dokumen yang luas: terjemahan alkitab, tafsiran teologi, kamus, peta, dan buku-buku Kristen, dengan total lebih dari 1500 dokumen dalam lebih dari 700 bahasa, didistribusikan secara legal oleh Crosswire dan repositori SWORD lainnya.
+ * Dukungan asli untuk file MyBible, MySword, dan EPUB memungkinkan Anda memperluas perpustakaan lebih jauh.
+
+Mari buat aplikasi alkitab terbaik bersama-sama!
+
+AndBible adalah proyek komunitas open-source. Dalam praktiknya, ini berarti siapa saja dengan keahlian yang sesuai dapat, dan didorong untuk, berkontribusi pada proyek dengan cara:
+
+ * mengembangkan fitur baru,
+ * menguji fitur yang belum dirilis,
+ * menjaga terjemahan antarmuka pengguna tetap terkini, dan
+ * membantu memperluas perpustakaan modul dengan memperoleh izin dari pemegang hak cipta, atau dengan mengonversi dokumen ke format SWORD.
+
+Jika Anda adalah insinyur perangkat lunak atau penguji profesional, pertimbangkanlah untuk berkontribusi pada proyek ini. Untuk informasi lebih lanjut tentang cara berkontribusi, silakan lihat https://git.io/JUnaj.
+
+Dukung dengan membeli waktu pengembangan!
+
+Jika Anda tidak memiliki waktu atau keahlian untuk kontribusi proyek, Anda juga dapat mendukung proyek dengan membeli waktu kerja pengembang profesional.
+
+Lihat pilihan: https://shop.andbible.org/
+
+Tautan
+
+ * Beranda: https://andbible.org
+ * Sukai AndBible di Facebook: https://www.facebook.com/AndBible/
+ * Saluran Youtube Kami: https://www.youtube.com/c/AndBible
+ * Pertanyaan yang Sering Diajukan: https://git.io/JJm8E
+ * Halaman proyek di Github: https://github.com/AndBible/and-bible

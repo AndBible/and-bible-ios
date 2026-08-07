@@ -1,0 +1,50 @@
+Potent eina d'estudi bíblic
+
+«AndBible: Estudi Bíblic» és una aplicació potent, fàcil d'utilitzar i fora de línia per a l'estudi bíblic a iOS, que s'adapta a molts estils d'estudi, des de la lectura ocasional fins a la recerca en profunditat. Més que un lector, és una eina per a l'estudi personal seriós.
+
+Desenvolupada per lectors de la Bíblia, per a lectors de la Bíblia — un projecte comunitari sense ànim de lucre i de codi obert, totalment gratuït i sense anuncis.
+
+Algunes versions populars de la Bíblia (de les moltes disponibles) són KJV, NASB, NET, i també comentaris populars com Matthew Henry i John Gill.
+
+Potents funcions d'estudi bíblic
+
+L'aplicació té moltes funcions originals i reveladores que fan que una experiència d'estudi bíblic complex i profund sigui més fluida que mai. Les funcions més destacades són les següents:
+
+ * Vistes de text dividides que permeten comparar traduccions i consultar comentaris
+ * Els espais de treball permeten múltiples configuracions d'estudi bíblic amb els seus propis ajustos
+ * La integració dels Números de Strong permet l'anàlisi de paraules gregues i hebrees
+ * Toqueu qualsevol enllaç per consultar referències creuades, notes a peu de pàgina i comentaris (Gill, Matthew Henry, etc.) o col·leccions de referències creuades (Treasure of Scripture Knowledge, TSKe).
+ * Agent d'estudi amb IA opcional - desactivat per defecte, requereix la vostra clau API pròpia d'un tercer. Exploreu comentaris i diccionaris amb ajuda d'IA en el vostre idioma; un sistema de permisos manté el control.
+ * Cerca flexible de text complet en una o diverses traduccions de la Bíblia simultàniament
+ * Funcions avançades de marcadors i destacats amb notes d'estudi personals
+ * Blocs d'estudi per afegir notes i referències bíbliques mentre escolteu sermons.
+ * Plans de lectura i seguiment del progrés - capítols llegits, dies actius i cicles de lectura - més memorització de versets amb els modes Paraules Barrejades, Ordre de Paraules, Paraules Difuminades i Escriu-ho
+ * Text a veu avançat amb marcadors de lectura, que permet una experiència d'escolta bíblica fluida
+ * Sincronització mitjançant iCloud o NextCloud/WebDAV: mantingueu sincronitzats espais de treball, marcadors, notes i progrés de lectura a tots els dispositius
+ * Àmplia biblioteca de documents: traduccions de la Bíblia, comentaris teològics, diccionaris, mapes i llibres cristians, amb un total de més de 1500 documents en més de 700 idiomes, distribuïts legalment per Crosswire i altres repositoris SWORD.
+ * El suport natiu per a fitxers MyBible, MySword i EPUB us permet ampliar encara més la vostra biblioteca.
+
+Fem junts la millor aplicació bíblica!
+
+AndBible és un projecte comunitari de codi obert. En la pràctica, això significa que qualsevol persona amb les habilitats adequades pot, i és animada a, contribuir al projecte:
+
+ * desenvolupant noves funcions,
+ * provant funcions encara no publicades,
+ * mantenint les traduccions de la interfície d'usuari actualitzades, i
+ * ajudant a ampliar la biblioteca de mòduls obtenint permisos dels titulars dels drets d'autor o convertint documents al format SWORD.
+
+Si sou un enginyer de programari o provador professional, considereu contribuir al projecte. Per a més informació sobre com col·laborar, consulteu https://git.io/JUnaj.
+
+Doneu suport comprant temps de desenvolupament!
+
+Si no teniu temps ni habilitats per contribuir al projecte, també podeu donar suport al projecte comprant temps de treball de desenvolupadors professionals.
+
+Vegeu les opcions: https://shop.andbible.org/
+
+Enllaços
+
+ * Pàgina web: https://andbible.org
+ * Seguiu AndBible a Facebook: https://www.facebook.com/AndBible/
+ * El nostre canal de YouTube: https://www.youtube.com/c/AndBible
+ * Preguntes freqüents: https://git.io/JJm8E
+ * Pàgina del projecte a Github: https://github.com/AndBible/and-bible

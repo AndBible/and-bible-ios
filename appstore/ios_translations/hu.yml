@@ -1,0 +1,20 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+subtitle: "Offline bibliai eszköztár"
+keywords: "tanulmányozás,kommentár,strong-számok,görög,héber,sword,jegyzet,kiemelés,memorizálás,olvasási terv"
+promotional_text: >
+  Reklámmentes és nyílt forráskódú. Osztott nézet, kommentárok, Strong-számok,
+  erős keresés, könyvjelzők és jegyzetek - mind offline, a dokumentumok
+  telepítése után.
+feature_08: >
+  Eszközök közötti szinkronizáció iCloudon vagy NextCloud/WebDAV-on keresztül:
+  munkaterületek, könyvjelzők, jegyzetek és olvasási előrehaladás
+  szinkronizálása minden eszközön.
+feature_09: >
+  Olvasási tervek és előrehaladás-követés - elolvasott fejezetek, aktív napok,
+  olvasási ciklusok - valamint versek memorizálása Szókeverő, Szósorrend,
+  Szóhomály és Begépelés módokkal.
+feature_11: >
+  Választható MI-tanulmányozó ügynök - alapértelmezésben kikapcsolva, saját
+  API-kulcs szükséges külső szolgáltatótól. Fedezze fel a kommentárokat és
+  szótárakat MI segítségével az Ön nyelvén; a beépített engedélyrendszer
+  mindent az Ön kezében tart.

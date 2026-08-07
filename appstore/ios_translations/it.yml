@@ -1,0 +1,32 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Studio biblico offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "commentario,strong,greco,ebraico,sword,note,evidenziazione,memorizzazione,piano di lettura,bibbia"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Senza pubblicità e open source. Finestre multiple, commentari, numeri di
+  Strong, ricerca avanzata, segnalibri e note - tutto offline dopo aver
+  scaricato i documenti.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sincronizzazione via iCloud o NextCloud/WebDAV: spazi di lavoro,
+  segnalibri, note e progressi di lettura sincronizzati su tutti i tuoi
+  dispositivi
+
+feature_09: >
+  Piani di lettura e monitoraggio dei progressi - capitoli letti, giorni
+  attivi, cicli di lettura - più memorizzazione dei versetti con Parole
+  Mescolate, Ordine delle Parole, Parole Sfocate e Digita Tu
+
+feature_11: >
+  Agente di studio IA opzionale, disattivato per impostazione predefinita:
+  richiede una tua chiave API di terze parti. Esplora commentari e dizionari
+  con l'IA nella tua lingua; un sistema di autorizzazioni ti garantisce il
+  pieno controllo.

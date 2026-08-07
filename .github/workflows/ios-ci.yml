@@ -80,6 +80,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python dependencies
+        run: python3 -m pip install --requirement scripts/requirements-appstore.txt
+
       - name: Checkout Android reference
         run: scripts/ensure_android_reference_checkout.sh
 
@@ -138,6 +141,46 @@ jobs:
 
       - name: Run SETPAR-603 guardrails
         run: python3 scripts/check_settings_localization_guardrails.py
+
+  appstore-metadata:
+    name: App Store metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --requirement scripts/requirements-appstore.txt
+
+      - name: Check out the Android store copy at the pinned commit
+        run: |
+          set -euo pipefail
+          sha="$(python3 - <<'PY'
+          import sys
+          sys.path.insert(0, "scripts")
+          from assemble_appstore_metadata import read_lock
+
+          sha = read_lock()
+          if not sha:
+              print("appstore/android_source.lock is missing or has no commit SHA", file=sys.stderr)
+              raise SystemExit(1)
+          print(sha)
+          PY
+          )"
+          git init ../and-bible
+          git -C ../and-bible fetch --depth 1 https://github.com/AndBible/and-bible.git "$sha"
+          git -C ../and-bible checkout --detach FETCH_HEAD
+
+      - name: Run the metadata unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_appstore_metadata.py' -v
+
+      - name: Check the metadata tree for drift
+        run: python3 scripts/assemble_appstore_metadata.py --check --require-pinned
 
   ios-swordkit-package-tests:
     name: SwordKit Package Tests (Simulator)

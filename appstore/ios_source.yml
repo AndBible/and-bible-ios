@@ -1,0 +1,57 @@
+# iOS-only App Store fields, and overrides of Android description keys.
+#
+# This file is the English master. Per-locale translations live in
+# ios_translations/<apple-locale>.yml and use the same keys.
+#
+# Keys that are NOT here come from the Android store copy unchanged; the
+# description is deliberately the same text as the Play listing apart from the
+# three overrides below.
+#
+# Until ios_translations/<apple-locale>.yml exists for a given locale, these
+# English values render as-is inside that locale's otherwise fully translated
+# description - three abrupt English sentences dropped into native-language
+# prose. This is an interim state, not finished localization: translating
+# subtitle, keywords, promotional_text, and the three feature overrides for
+# each locale is required work, not optional polish.
+
+# --- iOS-only fields (no Android counterpart) ---
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline Bible study toolkit"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas (they count against the limit).
+keywords: "study,offline,commentary,strongs,greek,hebrew,sword,notes,highlight,memorize,reading plan"
+
+# App Store promotional text, max 170 characters. Can be changed without
+# submitting a new build.
+promotional_text: >
+  Ad-free and open source. Split views, commentaries, Strong's, powerful search,
+  bookmarks and notes - all offline once your documents are installed.
+
+# --- Overrides of Android description keys ---
+
+# Android's sync includes Google Drive. iOS deliberately does not: the backends
+# are iCloud and NextCloud/WebDAV only (RemoteSyncBackend).
+feature_08: >
+  Cross-device sync over iCloud or NextCloud/WebDAV: keep your workspaces,
+  bookmarks, notes, and reading progress in sync across all your devices
+
+# Android's wording promises "reading goals", which has no iOS counterpart.
+# What exists is reading plans plus progress tracking.
+#
+# Shortened from the original draft to keep the five longest translated
+# descriptions (el, es-ES, fi, fr-FR, ru) under the 4000-character App Store
+# limit once these English overrides replace their translated text; see
+# task-5-report.md for the measured overage this fixes.
+feature_09: >
+  Reading plans and progress tracking - chapters read, active days and reading
+  cycles - plus verse memorization with Word Scramble, Word Order, Word Blur,
+  and Type It modes
+
+# The AI agent must be described as opt-in and bring-your-own-key. Shortened
+# for the same length-limit reason as feature_09 above.
+feature_11: >
+  Optional AI study agent - off by default, requires your own third-party API
+  key. Explore commentaries and dictionaries with AI assistance in your
+  language; a permission system keeps you in control.

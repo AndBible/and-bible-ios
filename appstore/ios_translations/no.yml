@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline bibelstudieverktøy"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "kommentar,strongs,gresk,hebraisk,sword,notater,bokmerker,memorering,leseplan,ordbok,teologi,vers"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Reklamefri og åpen kildekode. Delt visning, kommentarer, Strong's, kraftig
+  søk, bokmerker og notater - alt frakoblet når dokumentene er installert.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synkronisering mellom enheter via iCloud eller NextCloud/WebDAV: hold
+  arbeidsområder, bokmerker, notater og lesefremgang synkronisert på alle
+  enhetene dine
+
+feature_09: >
+  Leseplaner og fremdriftssporing - leste kapitler, aktive dager og
+  lesesykluser - pluss versmemorering med Bokstavkrøll, Ordrekkefølge,
+  Ordutydning og Skriv selv
+
+feature_11: >
+  Valgfri AI-studieassistent - avslått som standard, krever din egen
+  API-nøkkel fra en tredjepartstjeneste. Utforsk kommentarer og ordbøker med
+  AI-hjelp på ditt språk; et tillatelsessystem gir deg kontrollen.

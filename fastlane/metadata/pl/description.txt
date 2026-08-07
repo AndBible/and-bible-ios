@@ -1,0 +1,50 @@
+Zaawansowane narzędzie do studiowania Pisma Świętego
+
+„AndBible: Studium Biblii" to potężna, łatwa w obsłudze aplikacja do studiowania Biblii na iOS-a, działająca offline — wszechstronne narzędzie z wysokiej jakości funkcjami obsługującymi wiele stylów studium, od swobodnej lektury po pogłębioną pracę badawczą. To znacznie więcej niż czytnik — to narzędzie do prawdziwie poważnego, osobistego studium Pisma.
+
+Stworzona przez czytelników Biblii dla czytelników Biblii — niekomercyjny projekt społecznościowy o otwartym kodzie, w pełni darmowy i pozbawiony reklam.
+
+Z polskich wersji Biblii dostępna jest Biblia gdańska (z roku 1881), Uwspółcześniona Biblia gdańska (2018) i Przekład toruński (2017).
+
+Możliwości aplikacji Studium Biblii
+
+Aplikacja wyróżnia się wieloma zmyślnymi, oryginalnymi cechami, które to ułatwiają głębokie studiowanie Pisma Świętego. Najważniejsze z nich to:
+
+ * podzielny widok tekstu umożliwiający porównywanie tłumaczeń i czytanie komentarza
+ * obszary robocze umożliwiające posiadanie kilku oddzielnych środowisk do studiowania Biblii, każde z własnymi ustawieniami
+ * numeracja Stronga, aby móc analizować słowa w grece i hebrajskim
+ * Dotknij dowolnego odsyłacza, aby przejść do powiązanych odnośników wewnętrznych, przypisów i komentarzy (niedostępne w j. polskim) lub zbiorów odsyłaczy (niedostępne w j. polskim).
+ * Opcjonalny asystent AI do studium - wyłączony domyślnie, wymaga własnego klucza API do zewnętrznej usługi. Przeglądaj komentarze i słowniki z pomocą AI w swoim języku; system uprawnień zapewnia Ci kontrolę.
+ * elastyczne wyszukiwanie pełnotekstowe w jednym lub wielu przekładach Biblii jednocześnie
+ * zaawansowane możliwości tworzenia zakładek, wyróżniania tekstu i pisania własnych notatek
+ * „bloczki notatek” umożliwiające dodawanie notatek i odnośników do Biblii podczas słuchania kazań
+ * Plany czytania i śledzenie postępów - przeczytane rozdziały, aktywne dni i cykle - a także zapamiętywanie wersetów w trybach Pomieszaj słowa, Kolejność słów, Zasłoń słowa i Wpisz tekst
+ * możliwość odczytu na głos z zakładkami, aby płynnie słuchać Biblii
+ * Synchronizacja między urządzeniami przez iCloud lub NextCloud/WebDAV: obszary robocze, zakładki, notatki i postęp czytania zawsze zsynchronizowane na wszystkich urządzeniach
+ * obszerna biblioteka dokumentów: tłumaczenia, komentarze teologiczne, słowniki, mapy, książki chrześcijańskie, w sumie ponad 1500 dokumentów w 700 językach legalnie rozpowszechnianych przez CrossWire i inne repozytoria SWORD
+ * wsparcie dla plików MyBible, MySword i EPUB pozwalające na dalsze rozszerzenie Twojej biblioteki
+
+Razem stwórzmy najlepszą apkę do czytania Biblii!
+
+AndBible jest otwartoźródłowym projektem społecznościowym. Oznacza to, że każdy posiadający odpowiednie umiejętności może – i jest zachęcany – do uczestnictwa w rozwoju projektu poprzez:
+
+ * programowanie nowych funkcji;
+ * testowanie funkcji próbnych;
+ * tłumaczenie interfejsu programu;
+ * oraz rozszerzanie biblioteki modułów poprzez otrzymanie pozwoleń od właścicieli praw autorskich lub konwertując dokumenty do formatu SWORD.
+
+Jeżeli jesteś zawodowym programistą lub testerem, prosimy rozważyć włączenie się w rozwój aplikacji. Więcej informacji znajduje się na stronie https://git.io/JUnaj
+
+Wspomóż poprzez opłacenie czasu programisty!
+
+Jeżeli nie masz czasu lub zdolności programistycznych, wciąż możesz wspomóc projekt wykupując czas pracy profesjonalnego programisty.
+
+Czytaj więcej: https://shop.andbible.org/
+
+Odnośniki
+
+ * strona programu: https://andbible.org
+ * polub nas na Facebooku: https://www.facebook.com/AndBible/
+ * nasz kanał na YouTube: https://www.youtube.com/c/AndBible
+ * często zadawane pytania (w j. angielskim): https://git.io/JJm8E
+ * strona projektu na GitHubie: https://github.com/AndBible/and-bible

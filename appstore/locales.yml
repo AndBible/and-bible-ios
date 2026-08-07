@@ -1,0 +1,73 @@
+# Play Store locale -> App Store Connect locale.
+#
+# Only locales App Store Connect actually supports appear here. The 17 Android
+# translations with no App Store equivalent (af, bg, bn-BD, eo, et, fil, kk, lt,
+# my-MM, ne-NP, sl, sr, sw, ta-IN, te-IN, ur, yue) are simply absent.
+#
+# en-GB, en-AU, en-CA, es-MX and fr-CA are deliberately not generated: the App
+# Store falls back to en-US / es-ES / fr-FR in those storefronts, so generating
+# them would add five identical copies to maintain and nothing else.
+mappings:
+  ar: ar-SA
+  ca: ca
+  cs-CZ: cs
+  da-DK: da
+  de-DE: de-DE
+  el-GR: el
+  en-US: en-US
+  es-ES: es-ES
+  fi-FI: fi
+  fr-FR: fr-FR
+  hi-IN: hi
+  hr: hr
+  hu-HU: hu
+  id: id
+  it-IT: it
+  iw-IL: he
+  ja-JP: ja
+  ko-KR: ko
+  ms-MY: ms
+  nl-NL: nl-NL
+  no-NO: "no"
+  pl-PL: pl
+  pt-BR: pt-BR
+  pt-PT: pt-PT
+  ro: ro
+  ru-RU: ru
+  sk: sk
+  sv-SE: sv
+  th: th
+  tr-TR: tr
+  uk: uk
+  vi: vi
+  zh-CN: zh-Hans
+  zh-TW: zh-Hant
+
+# App Store Review Guideline 2.3.10 forbids other-platform names in metadata.
+# The word occurs exactly once per translation, in paragraph_1_1, and is an
+# invariant proper noun in most languages. Locales that inflect it get an
+# explicit rule so the result is the hyphenated/colon spelling they actually
+# use. Rules exist only for locales that are actually generated (present in
+# `mappings` above) — a rule for a locale that can never appear there (e.g.
+# the former `sl` entry, removed 2026-08-07: Slovenian is not an App Store
+# locale) can never fire and only looks like coverage it isn't.
+platform_substitutions:
+  default:
+    - from: Android
+      to: iOS
+  hu:
+    - from: Androidra
+      to: iOS-ra
+  pl:
+    - from: Androida
+      to: iOS-a
+  hr:
+    - from: Androidu
+      to: iOS-u
+  fi:
+    - from: Androidille
+      to: "iOS:lle"
+  # cs (Androidu) intentionally has NO rule here: Czech attaches a case
+  # ending directly to an initialism, with no separator, so the default
+  # rule's "iOSu" is already the grammatically correct spelling. This is a
+  # deliberate decision, not an oversight — do not add a hyphen/colon rule.

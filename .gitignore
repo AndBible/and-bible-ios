@@ -68,9 +68,28 @@ libsword/libsword.xcframework/
 .env.local
 *.xcconfig.local
 
+# App Store reviewer contact details are personal data; the public notes live in
+# appstore/review_information.yml.
+appstore/*.local.yml
+
+# ...and `make appstore-metadata` renders every key of that gitignored source
+# into fastlane/metadata/review_information/, which is otherwise a tracked tree.
+# Allowlist the public notes so no `git add -A` can ever publish a reviewer's
+# phone number or address to this public repository. CI has no local.yml and so
+# renders notes.txt alone; --check compares against the working tree, not git,
+# so the ignored files stay validated locally.
+/fastlane/metadata/review_information/*
+!/fastlane/metadata/review_information/notes.txt
+
 # Signing secrets — plaintext App Store Connect API keys must never be committed
 # (encrypted *.p8.gpg blobs are kept outside the repo entirely).
 *.p8
+
+# fastlane run artefacts (fastlane/metadata/ is generated-but-committed and must
+# stay tracked - these are only the report/preview/API-key files a run leaves behind).
+/fastlane/report.xml
+/fastlane/Preview.html
+/fastlane/*.json
 
 # Archives
 *.zip

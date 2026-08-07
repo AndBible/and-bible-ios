@@ -1,0 +1,30 @@
+# Notes shown to the App Store reviewer. Public information only.
+#
+# The reviewer CONTACT DETAILS (name, phone, email) are personal data and must
+# never be committed to this public repository. They come from a gitignored
+# appstore/review_information.local.yml; see docs/howto/appstore-metadata.md.
+notes: |
+  The app ships with no Bible texts. On first launch it prompts you to download
+  a document from a SWORD repository or import a file; until you do, the reader
+  is empty by design. Any module from the default CrossWire repository is enough
+  to exercise the app.
+
+  Discrete mode (Settings > Discrete mode) replaces the launcher icon with a
+  calculator and gates entry behind a PIN. It exists so that users in countries
+  where possessing religious material is dangerous can keep the app
+  inconspicuous. It hides nothing from you: it is documented in the app's own
+  settings and every feature stays reachable. It is not encryption and is not
+  marketed as security.
+
+  The AI study agent is off by default. It requires the user's own API key from
+  a third-party provider, stores that key only in the device Keychain, and asks
+  permission before each tool call. No AI feature works without a key the user
+  supplies.
+
+  The app declares App Transport Security exceptions for crosswire.org,
+  ebible.org, ibtrussia.org, stepbible.org and github.io because several SWORD
+  module repositories are still HTTP-only. They are document download endpoints;
+  no user data is sent to them.
+
+  AndBible is a non-profit, open-source project distributed under the GPL. It
+  contains no advertising and no in-app purchases.

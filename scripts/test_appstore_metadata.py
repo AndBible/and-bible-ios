@@ -1,0 +1,918 @@
+"""Unit tests for the App Store metadata assembler."""
+
+import contextlib
+import io
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import appstore_metadata as meta
+import assemble_appstore_metadata as cli
+
+
+def write(directory: Path, name: str, content: str) -> Path:
+    path = directory / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+APPLE_SUPPORTED_LOCALES = {
+    "ar-SA", "ca", "cs", "da", "de-DE", "el", "en-AU", "en-CA", "en-GB",
+    "en-US", "es-ES", "es-MX", "fi", "fr-CA", "fr-FR", "he", "hi", "hr",
+    "hu", "id", "it", "ja", "ko", "ms", "nl-NL", "no", "pl", "pt-BR",
+    "pt-PT", "ro", "ru", "sk", "sv", "th", "tr", "uk", "vi", "zh-Hans",
+    "zh-Hant",
+}
+
+
+class LocaleConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def config(self) -> meta.LocaleConfig:
+        path = write(
+            self.root,
+            "locales.yml",
+            """
+mappings:
+  en-US: en-US
+  fi-FI: fi
+  pl-PL: pl
+platform_substitutions:
+  default:
+    - from: Android
+      to: iOS
+  pl:
+    - from: Androida
+      to: iOS-a
+""",
+        )
+        return meta.load_locale_config(path)
+
+    def test_mappings_are_loaded_as_play_apple_pairs(self) -> None:
+        config = self.config()
+        self.assertIn(("fi-FI", "fi"), config.mappings)
+
+    def test_default_substitution_applies_to_an_unlisted_locale(self) -> None:
+        config = self.config()
+        result = meta.apply_platform_substitutions(
+            "an app for Android", "fi", config
+        )
+        self.assertEqual(result, "an app for iOS")
+
+    def test_locale_rule_wins_over_the_default_rule(self) -> None:
+        config = self.config()
+        result = meta.apply_platform_substitutions(
+            "aplikacja na Androida", "pl", config
+        )
+        self.assertEqual(result, "aplikacja na iOS-a")
+
+    def test_substitution_leaves_other_text_untouched(self) -> None:
+        config = self.config()
+        self.assertEqual(
+            meta.apply_platform_substitutions("no platform here", "fi", config),
+            "no platform here",
+        )
+
+
+class AndroidRootTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        # $ANDBIBLE_ANDROID_ROOT outranks every candidate this class exercises,
+        # and .github/workflows/ios-ci.yml sets it at the workflow level - so on
+        # CI these tests asserted the ambient environment rather than the
+        # candidate order they are written to pin down. Snapshot and clear it;
+        # the variable's own rung is covered explicitly below.
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("ANDBIBLE_ANDROID_ROOT", None)
+
+    def make_checkout(self, relative: str) -> Path:
+        checkout = self.root / "repo" / relative
+        write(checkout / "play", "constants.yml", "homepage_url: https://x\n")
+        return checkout.resolve()
+
+    def test_prefers_the_gitignored_local_checkout(self) -> None:
+        expected = self.make_checkout(".and-bible-android")
+        self.make_checkout("../and-bible")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
+        )
+
+    def test_falls_back_to_the_sibling_checkout(self) -> None:
+        expected = self.make_checkout("../and-bible")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
+        )
+
+    def test_an_explicit_path_wins(self) -> None:
+        self.make_checkout(".and-bible-android")
+        expected = self.make_checkout("../elsewhere")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo", str(expected)), expected
+        )
+
+    def test_the_environment_variable_outranks_the_local_checkout(self) -> None:
+        self.make_checkout(".and-bible-android")
+        expected = self.make_checkout("../elsewhere")
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(expected)
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
+        )
+
+    def test_an_explicit_path_beats_the_environment_variable(self) -> None:
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(self.make_checkout("../env"))
+        expected = self.make_checkout("../explicit")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo", str(expected)), expected
+        )
+
+    def test_an_environment_variable_pointing_nowhere_is_ignored(self) -> None:
+        expected = self.make_checkout(".and-bible-android")
+        os.environ["ANDBIBLE_ANDROID_ROOT"] = str(self.root / "does-not-exist")
+        self.assertEqual(
+            meta.resolve_android_root(self.root / "repo"), expected
+        )
+
+    def test_returns_none_when_nothing_is_available(self) -> None:
+        self.assertIsNone(meta.resolve_android_root(self.root / "repo"))
+
+
+def android_root_or_skip(test: unittest.TestCase) -> Path:
+    """Locate the Android checkout, skipping when it's absent or unpinned.
+
+    The real-source tests assert against the specific translations pinned in
+    `appstore/android_source.lock` (e.g. Finnish's exact description-headroom
+    figure) - they are only meaningful against that exact Android commit.
+    `.github/workflows/ios-ci.yml`'s `repo-standards` job checks out a
+    DIFFERENT, independently-bumped commit (`ANDBIBLE_ANDROID_REF`, used for
+    unrelated Android-parity checks) at the SAME path this resolver finds, so
+    without this guard a routine Android bump could red-light an unrelated PR
+    with a description-length failure that has nothing to do with it. Only
+    the `appstore-metadata` CI job (which checks out exactly the locked SHA)
+    - or a local checkout that happens to be at that SHA, as in this
+    container - actually runs these assertions.
+    """
+    root = meta.resolve_android_root(REPO_ROOT)
+    if root is None:
+        test.skipTest("Android reference checkout not available")
+    locked = cli.read_lock()
+    if locked is not None:
+        actual = cli.head_sha(root)
+        if actual != locked:
+            test.skipTest(
+                f"Android checkout at {actual!r} is not at the commit pinned "
+                f"in android_source.lock ({locked!r}); real-source "
+                "assertions only run against that exact commit"
+            )
+    return root
+
+
+class RealLocaleMapTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = meta.load_locale_config(REPO_ROOT / "appstore" / "locales.yml")
+
+    def test_generates_thirty_four_locales(self) -> None:
+        self.assertEqual(len(self.config.mappings), 34)
+
+    def test_every_target_is_an_app_store_locale(self) -> None:
+        for _, apple in self.config.mappings:
+            self.assertIn(apple, APPLE_SUPPORTED_LOCALES)
+
+    def test_apple_locales_are_unique(self) -> None:
+        apple = [apple for _, apple in self.config.mappings]
+        self.assertEqual(len(apple), len(set(apple)))
+
+    def test_norwegian_is_a_string_not_a_boolean(self) -> None:
+        self.assertIn(("no-NO", "no"), self.config.mappings)
+
+    def test_every_play_locale_has_an_android_translation(self) -> None:
+        android = android_root_or_skip(self) / "play" / "description-translations"
+        available = {path.stem for path in android.glob("*.yml")}
+        for play, _ in self.config.mappings:
+            self.assertIn(play, available)
+
+
+# Apple locales where the DEFAULT platform_substitutions rule ("Android" ->
+# "iOS") is known to already produce a correct inflected form when applied
+# inside a language's own suffix, and a locale-specific rule was deliberately
+# NOT added. Today that is only Czech: it attaches a case ending directly to
+# an initialism with no separator, so the default rule's "iOSu" is correct.
+DEFAULT_RULE_PRODUCES_CORRECT_INFLECTION = {"cs"}
+
+INFLECTED_ANDROID_FORM_PATTERN = re.compile(r"Android[A-Za-z]")
+
+
+class InflectedAndroidFormsTests(unittest.TestCase):
+    """Guard against the Finnish "iOSille" defect recurring for another locale.
+
+    That defect was: an Android translation inflects "Android" (e.g. Finnish
+    "Androidille"), no `platform_substitutions` rule existed for that locale,
+    and nobody noticed the resulting "iOSille" was ungrammatical. This scans
+    every mapped locale's real Android translation for an inflected form and
+    requires each one to either have its own rule, or be explicitly listed
+    above as a case where the default rule is already correct.
+    """
+
+    def test_every_inflected_android_form_is_covered_by_a_rule_or_accepted(
+        self,
+    ) -> None:
+        android_root = android_root_or_skip(self)
+        translations_dir = android_root / "play" / "description-translations"
+        config = meta.load_locale_config(REPO_ROOT / "appstore" / "locales.yml")
+        uncovered: list[str] = []
+        for play_locale, apple_locale in config.mappings:
+            text = (translations_dir / f"{play_locale}.yml").read_text(
+                encoding="utf-8"
+            )
+            if not INFLECTED_ANDROID_FORM_PATTERN.search(text):
+                continue
+            has_rule = apple_locale in config.locale_substitutions
+            is_accepted = apple_locale in DEFAULT_RULE_PRODUCES_CORRECT_INFLECTION
+            if not has_rule and not is_accepted:
+                uncovered.append(apple_locale)
+        self.assertEqual(
+            uncovered,
+            [],
+            "these locales inflect 'Android' but have neither a "
+            "platform_substitutions rule nor a documented reason the default "
+            "rule is correct for them",
+        )
+
+
+class PlaceholderTests(unittest.TestCase):
+    def test_substitutes_a_variable(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("Hello {{ name }}", {"name": "World"}),
+            "Hello World",
+        )
+
+    def test_tolerates_missing_whitespace(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("{{name}}", {"name": "X"}), "X"
+        )
+
+    def test_expands_nested_references(self) -> None:
+        variables = {"outer": "{{ inner }}!", "inner": "deep"}
+        self.assertEqual(
+            meta.expand_placeholders("{{ outer }}", variables), "deep!"
+        )
+
+    def test_leaves_an_unknown_placeholder_in_place(self) -> None:
+        self.assertEqual(
+            meta.expand_placeholders("{{ missing }}", {}), "{{ missing }}"
+        )
+
+    def test_raises_on_a_self_referential_loop(self) -> None:
+        with self.assertRaises(ValueError):
+            meta.expand_placeholders("{{ a }}", {"a": "{{ b }}", "b": "{{ a }}"})
+
+
+class MergeTests(unittest.TestCase):
+    def test_later_layers_win(self) -> None:
+        merged = meta.merge_layers({"k": "base"}, {"k": "override"})
+        self.assertEqual(merged["k"], "override")
+
+    def test_blank_values_do_not_override(self) -> None:
+        merged = meta.merge_layers({"k": "base"}, {"k": "   "})
+        self.assertEqual(merged["k"], "base")
+
+    def test_resolve_expands_values_against_each_other(self) -> None:
+        resolved = meta.resolve_variables(
+            {"title": "AndBible", "line": '"{{ title }}" is free'}
+        )
+        self.assertEqual(resolved["line"], '"AndBible" is free')
+
+    def test_resolve_strips_folded_block_trailing_newlines(self) -> None:
+        resolved = meta.resolve_variables({"k": "text\n"})
+        self.assertEqual(resolved["k"], "text")
+
+
+class ValidationTests(unittest.TestCase):
+    def test_clean_fields_produce_no_problems(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fi", {"name": "AndBible", "subtitle": "Study"}),
+            [],
+        )
+
+    def test_a_field_at_its_limit_is_accepted(self) -> None:
+        self.assertEqual(meta.validate_fields("fi", {"subtitle": "x" * 30}), [])
+
+    def test_a_field_one_over_its_limit_is_rejected(self) -> None:
+        problems = meta.validate_fields("fi", {"subtitle": "x" * 31})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("subtitle", problems[0])
+
+    def test_length_is_counted_in_characters_not_bytes(self) -> None:
+        # Telugu characters are three bytes each in UTF-8. 200 of them are well
+        # inside the 4000-character description limit but would blow a 4000-byte
+        # one, which is exactly the mistake this guards against.
+        telugu = "అ" * 200
+        self.assertGreater(len(telugu.encode("utf-8")), 500)
+        self.assertEqual(meta.validate_fields("te", {"description": telugu}), [])
+
+    def test_platform_name_is_rejected_in_any_field(self) -> None:
+        problems = meta.validate_fields("fi", {"description": "built for Android"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("android", problems[0].lower())
+
+    def test_platform_check_is_case_insensitive(self) -> None:
+        self.assertTrue(meta.validate_fields("fi", {"description": "ANDROID"}))
+
+    def test_store_name_is_rejected(self) -> None:
+        self.assertTrue(
+            meta.validate_fields("fi", {"promotional_text": "on Google Play now"})
+        )
+
+    def test_unresolved_placeholder_is_rejected(self) -> None:
+        problems = meta.validate_fields("fi", {"description": "{{ missing }}"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("placeholder", problems[0])
+
+    def test_problems_name_the_locale(self) -> None:
+        problems = meta.validate_fields("pt-BR", {"subtitle": "x" * 99})
+        self.assertIn("pt-BR", problems[0])
+
+    def test_an_unlimited_field_is_not_length_checked(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fi", {"support_url": "https://" + "x" * 500}), []
+        )
+
+
+def build_fixture_sources() -> meta.LoadedSources:
+    config = meta.LocaleConfig(
+        mappings=(("en-US", "en-US"), ("fi-FI", "fi")),
+        default_substitutions=(meta.Substitution("Android", "iOS"),),
+        locale_substitutions={},
+    )
+    return meta.LoadedSources(
+        locale_config=config,
+        constants={"homepage_url": "https://andbible.org"},
+        android_master={
+            "title": "AndBible: Bible Study",
+            "paragraph_1_1": '"{{ title }}" is an app for Android.',
+            "feature_08": "Sync across devices",
+        },
+        android_translations={
+            "en-US": {},
+            "fi-FI": {
+                "title": "AndBible: Raamattu",
+                "paragraph_1_1": '"{{ title }}" on sovellus Androidille.',
+                "feature_08": "",
+            },
+        },
+        ios_source={
+            "subtitle": "Offline Bible study",
+            "keywords": "bible,study",
+            "promotional_text": "Ad-free and open source.",
+            "feature_08": "Sync over iCloud or NextCloud/WebDAV",
+        },
+        ios_translations={
+            "fi": {"subtitle": "Raamatun tutkimista"},
+        },
+        template="{{ paragraph_1_1 }}\n\n * {{ feature_08 }}\n * {{ homepage_url }}",
+        app_info={
+            "primary_category": "REFERENCE",
+            "secondary_category": "BOOKS",
+            "copyright": "2026 The Contributors",
+            "marketing_url": "https://andbible.org",
+            "support_url": "https://example.org/support",
+            "privacy_url": "https://andbible.org/privacy.html",
+        },
+        release_notes="Initial release.",
+        review_information={"notes": "No account is required."},
+    )
+
+
+class WhitespaceNormalizationTests(unittest.TestCase):
+    """App Store Connect rejects `name` containing exotic whitespace."""
+
+    def test_narrow_no_break_space_becomes_a_plain_space(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("AndBible\u202f: Bible Study"),
+            "AndBible : Bible Study",
+        )
+
+    def test_no_break_space_becomes_a_plain_space(self) -> None:
+        self.assertEqual(meta.normalize_whitespace("100\u00a0%"), "100 %")
+
+    def test_zero_width_space_is_removed_entirely(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("notáveis \u200b\u200bsão"),
+            "notáveis são",
+        )
+
+    def test_newlines_and_plain_spaces_survive(self) -> None:
+        self.assertEqual(
+            meta.normalize_whitespace("first line\n\n * bullet"),
+            "first line\n\n * bullet",
+        )
+
+    def test_validator_reports_exotic_whitespace(self) -> None:
+        problems = meta.validate_fields("fr-FR", {"name": "AndBible\u202f: X"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("fr-FR/name", problems[0])
+        self.assertIn("U+202F", problems[0])
+
+    def test_validator_accepts_plain_spaces_and_newlines(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("fr-FR", {"description": "a b\n\nc"}), []
+        )
+
+
+class RenderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sources = build_fixture_sources()
+
+    def test_rendered_fields_are_whitespace_normalized(self) -> None:
+        sources = meta.replace_sources(
+            self.sources,
+            android_translations={
+                "en-US": {},
+                "fi-FI": {"title": "AndBible\u202f: Raamattu"},
+            },
+        )
+        fields = meta.build_locale_fields(sources, "fi-FI", "fi")
+        self.assertEqual(fields["name"], "AndBible : Raamattu")
+
+    def test_name_comes_from_the_translated_title(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["name"], "AndBible: Raamattu")
+
+    def test_description_uses_the_translation(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("on sovellus", fields["description"])
+
+    def test_platform_name_is_substituted_in_the_description(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("iOSille", fields["description"])
+        self.assertNotIn("Android", fields["description"])
+
+    def test_ios_override_beats_the_android_key(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+        self.assertNotIn("Sync across devices", fields["description"])
+
+    def test_blank_translation_value_falls_back_to_the_ios_override(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+
+    def test_ios_translation_beats_the_ios_source(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["subtitle"], "Raamatun tutkimista")
+
+    def test_missing_ios_translation_falls_back_to_english(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertEqual(fields["subtitle"], "Offline Bible study")
+
+    def test_constants_are_available_to_the_template(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("https://andbible.org", fields["description"])
+
+    def test_urls_come_from_app_info(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["support_url"], "https://example.org/support")
+
+    def test_release_notes_reach_english_only(self) -> None:
+        english = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        finnish = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(english["release_notes"], "Initial release.")
+        self.assertNotIn("release_notes", finnish)
+
+    def test_blank_release_notes_reach_no_locale_at_all(self) -> None:
+        sources = meta.replace_sources(self.sources, release_notes="  \n")
+        fields = meta.build_locale_fields(sources, "en-US", "en-US")
+        self.assertNotIn("release_notes", fields)
+
+
+class TreeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tree = meta.render_tree(build_fixture_sources())
+
+    def test_emits_one_directory_per_locale(self) -> None:
+        self.assertIn("fi/name.txt", self.tree)
+        self.assertIn("en-US/name.txt", self.tree)
+
+    def test_emits_every_localized_field_file(self) -> None:
+        for filename in meta.LOCALE_FIELD_FILES.values():
+            self.assertIn(f"fi/{filename}", self.tree)
+
+    def test_emits_the_release_notes_file_for_english_only(self) -> None:
+        self.assertEqual(self.tree["en-US/release_notes.txt"], "Initial release.\n")
+        self.assertNotIn("fi/release_notes.txt", self.tree)
+
+    def test_blank_release_notes_emit_no_release_notes_file(self) -> None:
+        tree = meta.render_tree(
+            meta.replace_sources(build_fixture_sources(), release_notes="")
+        )
+        self.assertEqual(
+            [path for path in tree if path.endswith("release_notes.txt")], []
+        )
+
+    def test_emits_app_level_files(self) -> None:
+        self.assertEqual(self.tree["copyright.txt"], "2026 The Contributors\n")
+        self.assertEqual(self.tree["primary_category.txt"], "REFERENCE\n")
+        self.assertEqual(self.tree["secondary_category.txt"], "BOOKS\n")
+
+    def test_emits_review_information(self) -> None:
+        self.assertEqual(
+            self.tree["review_information/notes.txt"], "No account is required.\n"
+        )
+
+    def test_every_file_ends_with_a_newline(self) -> None:
+        for path, content in self.tree.items():
+            self.assertTrue(content.endswith("\n"), path)
+
+    def test_no_unmapped_locale_is_emitted(self) -> None:
+        directories = {path.split("/")[0] for path in self.tree if "/" in path}
+        self.assertEqual(directories, {"en-US", "fi", "review_information"})
+
+
+class TreeValidationTests(unittest.TestCase):
+    def test_a_clean_tree_reports_no_problems(self) -> None:
+        self.assertEqual(meta.validate_tree(build_fixture_sources()), [])
+
+    def test_an_over_long_subtitle_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.ios_source, subtitle="x" * 31)
+        sources = meta.replace_sources(sources, ios_source=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("subtitle" in problem for problem in problems))
+
+    def test_a_surviving_platform_name_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        config = meta.LocaleConfig(
+            mappings=sources.locale_config.mappings,
+            default_substitutions=(),
+            locale_substitutions={},
+        )
+        sources = meta.replace_sources(sources, locale_config=config)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("android" in problem.lower() for problem in problems))
+
+    def test_missing_translations_are_listed(self) -> None:
+        self.assertEqual(
+            meta.missing_translation_locales(build_fixture_sources()), ["en-US"]
+        )
+
+    def test_an_unknown_review_information_key_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources, review_information={"notes": "public", "email": "typo@x.org"}
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("email" in problem for problem in problems))
+
+    def test_a_known_review_information_key_is_not_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources,
+            review_information={"notes": "public", "email_address": "a@b.org"},
+        )
+        self.assertEqual(meta.validate_tree(sources), [])
+
+    def test_a_forbidden_word_in_copyright_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.app_info, copyright="Built for Android, 2026")
+        sources = meta.replace_sources(sources, app_info=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("android" in problem.lower() for problem in problems))
+
+    def test_a_forbidden_word_in_review_notes_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources, review_information={"notes": "Also on Google Play."}
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("google play" in problem.lower() for problem in problems))
+
+    def test_an_unresolved_placeholder_in_copyright_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.app_info, copyright="{{ year }} The Contributors")
+        sources = meta.replace_sources(sources, app_info=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("placeholder" in problem for problem in problems))
+
+
+class ReviewInformationTests(unittest.TestCase):
+    def test_without_a_local_file_only_the_public_notes_remain(self) -> None:
+        merged = meta.merge_review_information({"notes": "public"}, {})
+        self.assertEqual(merged, {"notes": "public"})
+
+    def test_local_contact_details_are_added(self) -> None:
+        merged = meta.merge_review_information(
+            {"notes": "public"},
+            {"first_name": "Ada", "email_address": "ada@example.org"},
+        )
+        self.assertEqual(merged["first_name"], "Ada")
+        self.assertEqual(merged["notes"], "public")
+
+    def test_local_values_win(self) -> None:
+        merged = meta.merge_review_information(
+            {"notes": "public"}, {"notes": "local"}
+        )
+        self.assertEqual(merged["notes"], "local")
+
+
+class RealSourcesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sources = meta.load_sources(
+            android_root_or_skip(self), REPO_ROOT / "appstore"
+        )
+
+    def test_the_real_tree_validates(self) -> None:
+        self.assertEqual(meta.validate_tree(self.sources), [])
+
+    def test_the_real_tree_covers_every_locale(self) -> None:
+        tree = meta.render_tree(self.sources)
+        directories = {path.split("/")[0] for path in tree if "/" in path}
+        directories.discard("review_information")
+        self.assertEqual(len(directories), 34)
+
+    def test_english_description_is_within_the_limit(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertLessEqual(len(fields["description"]), 4000)
+
+    def test_the_ios_overrides_reach_the_description(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+        self.assertIn("off by default", fields["description"])
+
+
+class TreeIOTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_write_then_compare_is_clean(self) -> None:
+        tree = {"fi/name.txt": "AndBible\n", "copyright.txt": "2026\n"}
+        meta.write_tree(tree, self.out)
+        self.assertEqual(meta.compare_tree(tree, self.out), [])
+
+    def test_compare_reports_a_changed_file(self) -> None:
+        meta.write_tree({"fi/name.txt": "old\n"}, self.out)
+        problems = meta.compare_tree({"fi/name.txt": "new\n"}, self.out)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("fi/name.txt", problems[0])
+
+    def test_compare_reports_a_missing_file(self) -> None:
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("fi/name.txt" in problem for problem in problems))
+
+    def test_compare_reports_a_stale_file(self) -> None:
+        meta.write_tree({"fi/name.txt": "x\n", "fi/old.txt": "y\n"}, self.out)
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("fi/old.txt" in problem for problem in problems))
+
+    def test_write_removes_a_stale_file(self) -> None:
+        meta.write_tree({"fi/old.txt": "y\n"}, self.out)
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertFalse((self.out / "fi" / "old.txt").exists())
+        self.assertTrue((self.out / "fi" / "name.txt").exists())
+
+    def test_a_non_txt_stale_file_is_reported_and_removed(self) -> None:
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        (self.out / "fi" / "ratings_config.json").write_text("{}", encoding="utf-8")
+        problems = meta.compare_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertTrue(any("ratings_config.json" in problem for problem in problems))
+        meta.write_tree({"fi/name.txt": "x\n"}, self.out)
+        self.assertFalse((self.out / "fi" / "ratings_config.json").exists())
+
+
+class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.output_root = self.tmp / "fastlane" / "metadata"
+        self.lock_file = self.tmp / "android_source.lock"
+        self._patch_output_root = mock.patch.object(cli, "OUTPUT_ROOT", self.output_root)
+        self._patch_lock_file = mock.patch.object(cli, "LOCK_FILE", self.lock_file)
+        self._patch_output_root.start()
+        self._patch_lock_file.start()
+        self.addCleanup(self._patch_output_root.stop)
+        self.addCleanup(self._patch_lock_file.stop)
+
+    def run_cli(self, *args: str) -> tuple[int, str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        argv = ["assemble_appstore_metadata.py", *args]
+        with mock.patch.object(sys, "argv", argv):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = cli.main()
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def test_read_lock_skips_comments_and_blanks(self) -> None:
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("# a comment\n\nabc123\n", encoding="utf-8")
+        self.assertEqual(cli.read_lock(), "abc123")
+
+    def test_read_lock_returns_none_when_the_file_is_absent(self) -> None:
+        self.assertIsNone(cli.read_lock())
+
+    def test_head_sha_returns_none_for_a_non_repository(self) -> None:
+        self.assertIsNone(cli.head_sha(self.tmp))
+
+    def test_is_dirty_returns_false_for_a_non_repository(self) -> None:
+        self.assertFalse(cli.is_dirty(self.tmp))
+
+    def test_is_dirty_detects_uncommitted_changes(self) -> None:
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        (repo / "file.txt").write_text("a\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"], cwd=repo, check=True, capture_output=True,
+        )
+        self.assertFalse(cli.is_dirty(repo))
+        (repo / "file.txt").write_text("b\n", encoding="utf-8")
+        self.assertTrue(cli.is_dirty(repo))
+
+    def test_check_writes_nothing(self) -> None:
+        android_root = android_root_or_skip(self)
+        exit_code, _stdout, _stderr = self.run_cli(
+            "--check", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(self.output_root.exists())
+        self.assertFalse(self.lock_file.exists())
+
+    def test_lock_mismatch_warns_and_continues_by_default(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("deadbeef\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--android-root", str(android_root)
+        )
+        self.assertIn("warning:", stderr)
+        self.assertIn("android_source.lock says deadbeef", stderr)
+        self.assertNotEqual(exit_code, 2)
+
+    def test_lock_mismatch_fails_under_require_pinned(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("deadbeef\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("android_source.lock says deadbeef", stderr)
+
+    def test_require_pinned_fails_when_the_lock_file_is_absent(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.assertFalse(self.lock_file.exists())
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn(str(self.lock_file), stderr)
+
+    def test_require_pinned_fails_when_the_lock_file_has_no_sha(self) -> None:
+        android_root = android_root_or_skip(self)
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_file.write_text("# just a comment\n\n", encoding="utf-8")
+        exit_code, _stdout, stderr = self.run_cli(
+            "--require-pinned", "--android-root", str(android_root)
+        )
+        self.assertEqual(exit_code, 2)
+        self.assertIn(str(self.lock_file), stderr)
+
+    def test_dirty_checkout_leaves_the_lock_file_untouched(self) -> None:
+        android_root = android_root_or_skip(self)
+        with mock.patch.object(cli, "is_dirty", return_value=True):
+            exit_code, _stdout, stderr = self.run_cli(
+                "--android-root", str(android_root)
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(self.lock_file.exists())
+        self.assertIn("uncommitted changes", stderr)
+
+
+class DigestTests(unittest.TestCase):
+    def test_digest_is_stable_across_key_order(self) -> None:
+        first = meta.ios_source_digest({"a": "1", "b": "2"})
+        second = meta.ios_source_digest({"b": "2", "a": "1"})
+        self.assertEqual(first, second)
+
+    def test_digest_changes_when_a_value_changes(self) -> None:
+        self.assertNotEqual(
+            meta.ios_source_digest({"a": "1"}), meta.ios_source_digest({"a": "2"})
+        )
+
+    def test_digest_ignores_the_source_sha_key(self) -> None:
+        self.assertEqual(
+            meta.ios_source_digest({"a": "1"}),
+            meta.ios_source_digest({"a": "1", "source_sha": "deadbeef"}),
+        )
+
+    def test_stale_translations_are_reported(self) -> None:
+        sources = build_fixture_sources()
+        digest = meta.ios_source_digest(sources.ios_source)
+        fresh = {"fi": {"subtitle": "x", "source_sha": digest}}
+        self.assertEqual(meta.stale_translation_locales(
+            meta.replace_sources(sources, ios_translations=fresh)
+        ), [])
+        stale = {"fi": {"subtitle": "x", "source_sha": "old"}}
+        self.assertEqual(meta.stale_translation_locales(
+            meta.replace_sources(sources, ios_translations=stale)
+        ), ["fi"])
+
+
+class SourceShaExclusionTests(unittest.TestCase):
+    def test_source_sha_is_not_rendered_into_any_field(self) -> None:
+        sources = build_fixture_sources()
+        translations = {
+            "fi": {"subtitle": "Raamattu", "source_sha": "deadbeef"},
+        }
+        sources = meta.replace_sources(sources, ios_translations=translations)
+        fields = meta.build_locale_fields(sources, "fi-FI", "fi")
+        for value in fields.values():
+            self.assertNotIn("deadbeef", value)
+
+
+class CjkAdjacentSpaceTests(unittest.TestCase):
+    """Guard against Defect 1: a YAML folded scalar (`key: >`) turns every
+    internal line break into a single space. That's an invisible, correct word
+    space in space-delimited languages, but Japanese/Chinese have no
+    inter-word spaces, so a space landing between two CJK characters is always
+    a folding artifact, never intentional text.
+    """
+
+    def test_space_between_two_han_characters_is_rejected(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces("你好 吗"), [2])
+
+    def test_space_between_two_kana_characters_is_rejected(self) -> None:
+        # と (hiragana) / ノ (katakana) - the exact ja promotional_text defect.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("ブックマークと ノート"), [7])
+
+    def test_space_between_latin_and_han_is_accepted(self) -> None:
+        # zh-Hans feature_11's "AI 探索" - Chinese typographic convention
+        # recommends a space at a Latin/CJK boundary; it must not be flagged.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("借助 AI 探索"), [])
+
+    def test_space_between_two_hangul_syllables_is_accepted(self) -> None:
+        # Korean uses inter-word spaces like other space-delimited languages,
+        # so Hangul is deliberately excluded from the CJK definition here.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("안녕 하세요"), [])
+
+    def test_space_between_two_thai_characters_is_accepted(self) -> None:
+        # Thai uses spaces as phrase/list separators, not between every word;
+        # Thai is not CJK at all, so it must never match this rule.
+        self.assertEqual(meta.find_cjk_adjacent_spaces("และ นี้"), [])
+
+    def test_normal_latin_text_is_unaffected(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces("hello world"), [])
+
+    def test_a_leading_or_trailing_space_is_not_flagged(self) -> None:
+        self.assertEqual(meta.find_cjk_adjacent_spaces(" 你好 "), [])
+
+    def test_validate_fields_reports_a_cjk_fold_space(self) -> None:
+        problems = meta.validate_fields(
+            "ja", {"promotional_text": "ブックマークと ノートを完備"}
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ja", problems[0])
+        self.assertIn("promotional_text", problems[0])
+
+    def test_validate_fields_accepts_clean_cjk_text(self) -> None:
+        self.assertEqual(
+            meta.validate_fields("ja", {"promotional_text": "ブックマークとノートを完備"}),
+            [],
+        )
+
+
+class TranslationKeyTests(unittest.TestCase):
+    def test_a_key_absent_from_the_english_source_is_rejected(self) -> None:
+        sources = build_fixture_sources()
+        sources = meta.replace_sources(
+            sources,
+            ios_translations={"fi": {"subtitle": "x", "sbutitle": "typo"}},
+        )
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("sbutitle" in problem for problem in problems))
+
+
+if __name__ == "__main__":
+    unittest.main()

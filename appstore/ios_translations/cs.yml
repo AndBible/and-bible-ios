@@ -1,0 +1,30 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Offline nástroj studia Bible"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "studium,offline,komentář,strong,řečtina,hebrejština,sword,poznámky,zvýraznění,memorování,plán čtení"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Bez reklam a open source. Rozdělené zobrazení, komentáře, Strongova čísla,
+  výkonné vyhledávání, záložky a poznámky - vše offline po instalaci dokumentů.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Synchronizace přes iCloud nebo NextCloud/WebDAV: udržujte své pracovní
+  plochy, záložky, poznámky a postup čtení synchronizované na všech svých
+  zařízeních
+
+feature_09: >
+  Plány čtení a sledování pokroku - přečtené kapitoly, aktivní dny a cykly
+  čtení - plus memorování veršů v režimech Zpřeházená slova, Pořadí slov,
+  Rozmazaná slova a Napiš to
+
+feature_11: >
+  Volitelný AI studijní asistent - vypnutý ve výchozím nastavení, vyžaduje
+  vlastní API klíč od externí služby. Prozkoumejte komentáře a slovníky s AI
+  pomocí ve vašem jazyce; systém oprávnění vám zachovává kontrolu.

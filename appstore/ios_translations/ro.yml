@@ -1,0 +1,32 @@
+source_sha: 7850713027f82e0e51273ee6d85dfe04146d2c90020e87f0e2492f3e1f65a146
+
+# App Store subtitle, max 30 characters.
+subtitle: "Trusă biblică offline"
+
+# App Store keywords, max 100 characters, comma separated, no spaces after
+# commas.
+keywords: "comentarii,strong,greacă,ebraică,sword,notițe,evidențiere,memorare,plan de citire,semne de carte"
+
+# App Store promotional text, max 170 characters.
+promotional_text: >
+  Fără reclame, cu sursă deschisă. Vizualizări separate, comentarii,
+  Strong's, căutare puternică, semne de carte și notițe - toate offline,
+  odată instalate documentele.
+
+# --- Overrides of Android description keys ---
+
+feature_08: >
+  Sincronizare între dispozitive prin iCloud sau NextCloud/WebDAV:
+  spațiile de studiu, semnele de carte, notițele și progresul citirii
+  rămân sincronizate.
+
+feature_09: >
+  Planuri de citire și urmărirea progresului - capitole citite, zile
+  active și cicluri de citire - plus memorarea versetelor cu modurile
+  Cuvinte amestecate, Ordinea cuvintelor, Cuvinte estompate și Scrie tu.
+
+feature_11: >
+  Agent AI opțional pentru studiu, dezactivat implicit, care necesită
+  propria cheie API de la un furnizor terț. Explorează comentarii și
+  dicționare cu ajutorul AI în limba ta; un sistem de permisiuni îți
+  păstrează controlul.

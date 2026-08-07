@@ -1,0 +1,1 @@
+Reklámmentes és nyílt forráskódú. Osztott nézet, kommentárok, Strong-számok, erős keresés, könyvjelzők és jegyzetek - mind offline, a dokumentumok telepítése után.
