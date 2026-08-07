@@ -78,3 +78,7 @@ libsword/libsword.xcframework/
 
 # Android parity
 .and-bible-android/
+
+# App Store reviewer contact details are personal data and must never be
+# committed to this public repository.
+appstore/review_information.local.yml

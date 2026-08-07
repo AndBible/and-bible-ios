@@ -396,5 +396,50 @@ class TreeValidationTests(unittest.TestCase):
         )
 
 
+class ReviewInformationTests(unittest.TestCase):
+    def test_without_a_local_file_only_the_public_notes_remain(self) -> None:
+        merged = meta.merge_review_information({"notes": "public"}, {})
+        self.assertEqual(merged, {"notes": "public"})
+
+    def test_local_contact_details_are_added(self) -> None:
+        merged = meta.merge_review_information(
+            {"notes": "public"},
+            {"first_name": "Ada", "email_address": "ada@example.org"},
+        )
+        self.assertEqual(merged["first_name"], "Ada")
+        self.assertEqual(merged["notes"], "public")
+
+    def test_local_values_win(self) -> None:
+        merged = meta.merge_review_information(
+            {"notes": "public"}, {"notes": "local"}
+        )
+        self.assertEqual(merged["notes"], "local")
+
+
+class RealSourcesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sources = meta.load_sources(
+            android_root_or_skip(self), REPO_ROOT / "appstore"
+        )
+
+    def test_the_real_tree_validates(self) -> None:
+        self.assertEqual(meta.validate_tree(self.sources), [])
+
+    def test_the_real_tree_covers_every_locale(self) -> None:
+        tree = meta.render_tree(self.sources)
+        directories = {path.split("/")[0] for path in tree if "/" in path}
+        directories.discard("review_information")
+        self.assertEqual(len(directories), 34)
+
+    def test_english_description_is_within_the_limit(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertLessEqual(len(fields["description"]), 4000)
+
+    def test_the_ios_overrides_reach_the_description(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+        self.assertIn("off by default", fields["description"])
+
+
 if __name__ == "__main__":
     unittest.main()

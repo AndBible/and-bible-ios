@@ -251,6 +251,21 @@ def replace_sources(sources: LoadedSources, **changes: object) -> LoadedSources:
     return dataclasses.replace(sources, **changes)
 
 
+REVIEW_INFORMATION_LOCAL_FILE = "review_information.local.yml"
+
+
+def merge_review_information(
+    public: Mapping[str, str], local: Mapping[str, str]
+) -> dict[str, str]:
+    """Overlay local reviewer contact details on the committed public notes.
+
+    The contact details are personal data and live in a gitignored file. When it
+    is absent the contact fields are simply not emitted, and deliver leaves
+    whatever App Store Connect already holds.
+    """
+    return merge_layers(public, local)
+
+
 def load_sources(android_root: Path, appstore_root: Path) -> LoadedSources:
     """Read every source file. The Android checkout is only ever read."""
     play = android_root / "play"
@@ -280,8 +295,11 @@ def load_sources(android_root: Path, appstore_root: Path) -> LoadedSources:
         release_notes=(appstore_root / "release_notes.txt").read_text(
             encoding="utf-8"
         ),
-        review_information=load_yaml_mapping(
-            appstore_root / "review_information.yml"
+        review_information=merge_review_information(
+            load_yaml_mapping(appstore_root / "review_information.yml"),
+            load_yaml_mapping(appstore_root / REVIEW_INFORMATION_LOCAL_FILE)
+            if (appstore_root / REVIEW_INFORMATION_LOCAL_FILE).is_file()
+            else {},
         ),
     )
 

@@ -1,0 +1,9 @@
+# App-level App Store Connect metadata. These values are the same in every
+# locale; deliver reads the categories and copyright from the metadata root and
+# the three URLs from each locale directory.
+primary_category: REFERENCE
+secondary_category: BOOKS
+copyright: "2026 Tuomas Airaksinen, Jared Murrell and the AndBible contributors"
+marketing_url: "https://andbible.org"
+support_url: "https://github.com/AndBible/and-bible/wiki/Support"
+privacy_url: "https://andbible.org/privacy.html"
