@@ -139,6 +139,35 @@ jobs:
       - name: Run SETPAR-603 guardrails
         run: python3 scripts/check_settings_localization_guardrails.py
 
+  appstore-metadata:
+    name: App Store metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --requirement scripts/requirements-appstore.txt
+
+      - name: Check out the Android store copy at the pinned commit
+        run: |
+          set -euo pipefail
+          sha="$(grep -v '^#' appstore/android_source.lock | head -n 1 | tr -d '[:space:]')"
+          git init ../and-bible
+          git -C ../and-bible fetch --depth 1 https://github.com/AndBible/and-bible.git "$sha"
+          git -C ../and-bible checkout --detach FETCH_HEAD
+
+      - name: Run the metadata unit tests
+        run: python3 -m unittest discover -s scripts -p 'test_appstore_metadata.py' -v
+
+      - name: Check the metadata tree for drift
+        run: python3 scripts/assemble_appstore_metadata.py --check --require-pinned
+
   ios-swordkit-package-tests:
     name: SwordKit Package Tests (Simulator)
     runs-on: ${{ needs.repo-standards.outputs.required_checks_only == 'true' && 'ubuntu-latest' || 'macos-15' }}
