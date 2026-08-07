@@ -407,10 +407,16 @@ class RenderTests(unittest.TestCase):
         fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
         self.assertEqual(fields["support_url"], "https://example.org/support")
 
-    def test_release_notes_are_the_same_in_every_locale(self) -> None:
+    def test_release_notes_reach_english_only(self) -> None:
         english = meta.build_locale_fields(self.sources, "en-US", "en-US")
         finnish = meta.build_locale_fields(self.sources, "fi-FI", "fi")
-        self.assertEqual(english["release_notes"], finnish["release_notes"])
+        self.assertEqual(english["release_notes"], "Initial release.")
+        self.assertNotIn("release_notes", finnish)
+
+    def test_blank_release_notes_reach_no_locale_at_all(self) -> None:
+        sources = meta.replace_sources(self.sources, release_notes="  \n")
+        fields = meta.build_locale_fields(sources, "en-US", "en-US")
+        self.assertNotIn("release_notes", fields)
 
 
 class TreeTests(unittest.TestCase):
@@ -424,6 +430,18 @@ class TreeTests(unittest.TestCase):
     def test_emits_every_localized_field_file(self) -> None:
         for filename in meta.LOCALE_FIELD_FILES.values():
             self.assertIn(f"fi/{filename}", self.tree)
+
+    def test_emits_the_release_notes_file_for_english_only(self) -> None:
+        self.assertEqual(self.tree["en-US/release_notes.txt"], "Initial release.\n")
+        self.assertNotIn("fi/release_notes.txt", self.tree)
+
+    def test_blank_release_notes_emit_no_release_notes_file(self) -> None:
+        tree = meta.render_tree(
+            meta.replace_sources(build_fixture_sources(), release_notes="")
+        )
+        self.assertEqual(
+            [path for path in tree if path.endswith("release_notes.txt")], []
+        )
 
     def test_emits_app_level_files(self) -> None:
         self.assertEqual(self.tree["copyright.txt"], "2026 The Contributors\n")

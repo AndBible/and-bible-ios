@@ -264,10 +264,25 @@ LOCALE_FIELD_FILES = {
     "description": "description.txt",
     "keywords": "keywords.txt",
     "promotional_text": "promotional_text.txt",
-    "release_notes": "release_notes.txt",
     "support_url": "support_url.txt",
     "marketing_url": "marketing_url.txt",
     "privacy_url": "privacy_url.txt",
+}
+
+# The App Store locale that release notes are written in. "What's New" is
+# deliberately NOT localised: it describes one release, is rewritten for the
+# next one, and would sit stale in the other 33 locales long before a
+# translator saw it. App Store Connect shows the primary locale's text in a
+# storefront whose localisation has none, so English-only degrades cleanly.
+RELEASE_NOTES_LOCALE = "en-US"
+
+# Rendered into RELEASE_NOTES_LOCALE only, and only when there is text to
+# render: a blank appstore/release_notes.txt emits no release_notes file
+# anywhere, which is what a first release wants - there is no previous version
+# for "What's New" to describe, and App Store Connect rejects release notes on
+# an app's very first version.
+ENGLISH_ONLY_FIELD_FILES = {
+    "release_notes": "release_notes.txt",
 }
 
 APP_LEVEL_FILES = {
@@ -396,13 +411,14 @@ def build_locale_fields(
     fields = {
         "name": variables["title"],
         "description": expand_placeholders(sources.template, variables).strip(),
-        "release_notes": sources.release_notes.strip(),
         "support_url": sources.app_info["support_url"],
         "marketing_url": sources.app_info["marketing_url"],
         "privacy_url": sources.app_info["privacy_url"],
     }
     for field in IOS_ONLY_FIELDS:
         fields[field] = variables[field]
+    if apple_locale == RELEASE_NOTES_LOCALE and sources.release_notes.strip():
+        fields["release_notes"] = sources.release_notes.strip()
     return {
         field: apply_platform_substitutions(
             value, apple_locale, sources.locale_config
@@ -418,6 +434,9 @@ def render_tree(sources: LoadedSources) -> dict[str, str]:
         fields = build_locale_fields(sources, play_locale, apple_locale)
         for field, filename in LOCALE_FIELD_FILES.items():
             tree[f"{apple_locale}/{filename}"] = fields[field] + "\n"
+        for field, filename in ENGLISH_ONLY_FIELD_FILES.items():
+            if field in fields:
+                tree[f"{apple_locale}/{filename}"] = fields[field] + "\n"
     for key, filename in APP_LEVEL_FILES.items():
         tree[filename] = sources.app_info[key].strip() + "\n"
     for name, value in sources.review_information.items():

@@ -13,7 +13,7 @@ this pipeline — they are uploaded by hand, and `fastlane/Deliverfile` sets
 | iOS overrides + subtitle/keywords/promotional text | `appstore/ios_source.yml` | here, English |
 | Translations of the iOS-only layer | `appstore/ios_translations/*.yml` | the `appstore-copy` skill |
 | Categories, URLs, copyright | `appstore/app_info.yml` | here |
-| Release notes | `appstore/release_notes.txt` | here, English only |
+| Release notes | `appstore/release_notes.txt` | here, English only (see below) |
 | Reviewer notes (public) | `appstore/review_information.yml` | here |
 | Reviewer contact details (personal data) | `appstore/review_information.local.yml`, gitignored | you, locally |
 | The uploaded tree | `fastlane/metadata/` | **generated — never edit by hand** |
@@ -119,6 +119,26 @@ against an unpinned or ahead-of-lock checkout while iterating. CI runs the
 same script with `--require-pinned`, which turns both a mismatch **and** a
 missing/SHA-less lock file into a hard failure — a render that can't be tied
 to a specific Android commit is not allowed to reach `main`.
+
+## Release notes are English-only, and optional
+
+Unlike every other locale field, "What's New" is rendered into `en-US` alone
+(`RELEASE_NOTES_LOCALE` in `scripts/appstore_metadata.py`). It describes one
+release and is rewritten for the next, so a translated copy would sit stale in
+the other 33 locales long before a translator saw it; App Store Connect shows
+the primary locale's text in any storefront whose localisation has none, so
+English-only degrades cleanly rather than leaving a gap.
+
+An **empty** `appstore/release_notes.txt` renders no `release_notes.txt`
+anywhere at all, and `deliver` then leaves the field untouched. That is the
+correct state for a first release — there is no previous version for "What's
+New" to describe, and App Store Connect rejects release notes on an app's very
+first version. It is also why the tree is 276 files rather than 310: 34 locales
+× 8 fields, plus the three app-level files and the reviewer notes.
+
+Before shipping an update, put the English text in `appstore/release_notes.txt`
+and re-run `make appstore-metadata`; `en-US/release_notes.txt` reappears and no
+other locale gains one.
 
 ## Why the description differs from Play's
 
@@ -228,15 +248,10 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
    immediately. There is no dry-run mode and `fastlane/Deliverfile` sets
    `force true`, which skips `deliver`'s interactive HTML-preview
    confirmation. Read the printed summary before running it, not after.
-   **Known risk, unverified:** App Store Connect has historically rejected
-   release notes on an app's very first version (there is no prior version
-   for "what's new" to describe), and `appstore/release_notes.txt` is
-   currently rendered into all 34 locales. If this one live, irreversible
-   step fails on `release_notes`, that is the expected, already-known cause,
-   not a new bug to debug from scratch — dropping release notes for the 1.0
-   submission is a small change (drop `release_notes` from
-   `LOCALE_FIELD_FILES` in `scripts/appstore_metadata.py`, or just skip
-   uploading that field this one time) and safe to make on the spot.
+   `appstore/release_notes.txt` is empty for the 1.0 submission, so no
+   `release_notes` field is uploaded at all — see "Release notes are
+   English-only, and optional" above for why that avoids App Store Connect's
+   rejection of release notes on a first version.
 5. `make appstore-precheck` — Apple's own metadata rules against the live
    listing, run **after** step 4, not before: `precheck` inspects whatever
    App Store Connect currently holds, so running it before the new text is
