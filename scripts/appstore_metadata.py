@@ -12,6 +12,7 @@ only part that touches the output tree.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from dataclasses import dataclass
@@ -206,3 +207,147 @@ def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
                 f"{apple_locale}/{field}: unresolved template placeholder"
             )
     return problems
+
+
+LOCALE_FIELD_FILES = {
+    "name": "name.txt",
+    "subtitle": "subtitle.txt",
+    "description": "description.txt",
+    "keywords": "keywords.txt",
+    "promotional_text": "promotional_text.txt",
+    "release_notes": "release_notes.txt",
+    "support_url": "support_url.txt",
+    "marketing_url": "marketing_url.txt",
+    "privacy_url": "privacy_url.txt",
+}
+
+APP_LEVEL_FILES = {
+    "copyright": "copyright.txt",
+    "primary_category": "primary_category.txt",
+    "secondary_category": "secondary_category.txt",
+}
+
+IOS_ONLY_FIELDS = ("subtitle", "keywords", "promotional_text")
+
+
+@dataclass(frozen=True)
+class LoadedSources:
+    """Every input the renderer needs, already read from disk."""
+
+    locale_config: LocaleConfig
+    constants: Mapping[str, str]
+    android_master: Mapping[str, str]
+    android_translations: Mapping[str, Mapping[str, str]]
+    ios_source: Mapping[str, str]
+    ios_translations: Mapping[str, Mapping[str, str]]
+    template: str
+    app_info: Mapping[str, str]
+    release_notes: str
+    review_information: Mapping[str, str]
+
+
+def replace_sources(sources: LoadedSources, **changes: object) -> LoadedSources:
+    """Return a copy of `sources` with the named fields replaced (test helper)."""
+    return dataclasses.replace(sources, **changes)
+
+
+def load_sources(android_root: Path, appstore_root: Path) -> LoadedSources:
+    """Read every source file. The Android checkout is only ever read."""
+    play = android_root / "play"
+    locale_config = load_locale_config(appstore_root / "locales.yml")
+    translations_dir = play / "description-translations"
+    android_translations = {
+        play_locale: load_yaml_mapping(translations_dir / f"{play_locale}.yml")
+        for play_locale, _ in locale_config.mappings
+    }
+    ios_translations_dir = appstore_root / "ios_translations"
+    ios_translations = {
+        apple_locale: load_yaml_mapping(ios_translations_dir / f"{apple_locale}.yml")
+        for _, apple_locale in locale_config.mappings
+        if (ios_translations_dir / f"{apple_locale}.yml").is_file()
+    }
+    return LoadedSources(
+        locale_config=locale_config,
+        constants=load_yaml_mapping(play / "constants.yml"),
+        android_master=load_yaml_mapping(play / "playstore-description.yml"),
+        android_translations=android_translations,
+        ios_source=load_yaml_mapping(appstore_root / "ios_source.yml"),
+        ios_translations=ios_translations,
+        template=(appstore_root / "description_template.txt").read_text(
+            encoding="utf-8"
+        ),
+        app_info=load_yaml_mapping(appstore_root / "app_info.yml"),
+        release_notes=(appstore_root / "release_notes.txt").read_text(
+            encoding="utf-8"
+        ),
+        review_information=load_yaml_mapping(
+            appstore_root / "review_information.yml"
+        ),
+    )
+
+
+def build_locale_fields(
+    sources: LoadedSources, play_locale: str, apple_locale: str
+) -> dict[str, str]:
+    """Render one locale's App Store fields.
+
+    Merge order, later winning: constants, Android master, Android translation,
+    iOS source, iOS translation.
+    """
+    variables = resolve_variables(
+        merge_layers(
+            sources.constants,
+            sources.android_master,
+            sources.android_translations.get(play_locale, {}),
+            sources.ios_source,
+            sources.ios_translations.get(apple_locale, {}),
+        )
+    )
+    fields = {
+        "name": variables["title"],
+        "description": expand_placeholders(sources.template, variables).strip(),
+        "release_notes": sources.release_notes.strip(),
+        "support_url": sources.app_info["support_url"],
+        "marketing_url": sources.app_info["marketing_url"],
+        "privacy_url": sources.app_info["privacy_url"],
+    }
+    for field in IOS_ONLY_FIELDS:
+        fields[field] = variables[field]
+    return {
+        field: apply_platform_substitutions(
+            value, apple_locale, sources.locale_config
+        )
+        for field, value in fields.items()
+    }
+
+
+def render_tree(sources: LoadedSources) -> dict[str, str]:
+    """Render the whole `fastlane/metadata` tree as relative path to content."""
+    tree: dict[str, str] = {}
+    for play_locale, apple_locale in sources.locale_config.mappings:
+        fields = build_locale_fields(sources, play_locale, apple_locale)
+        for field, filename in LOCALE_FIELD_FILES.items():
+            tree[f"{apple_locale}/{filename}"] = fields[field] + "\n"
+    for key, filename in APP_LEVEL_FILES.items():
+        tree[filename] = sources.app_info[key].strip() + "\n"
+    for name, value in sources.review_information.items():
+        tree[f"review_information/{name}.txt"] = value.strip() + "\n"
+    return tree
+
+
+def validate_tree(sources: LoadedSources) -> list[str]:
+    """Validate every locale. Returns every problem, not just the first."""
+    problems: list[str] = []
+    for play_locale, apple_locale in sources.locale_config.mappings:
+        fields = build_locale_fields(sources, play_locale, apple_locale)
+        problems.extend(validate_fields(apple_locale, fields))
+    return problems
+
+
+def missing_translation_locales(sources: LoadedSources) -> list[str]:
+    """Apple locales with no iOS translation file, which fall back to English."""
+    return sorted(
+        apple_locale
+        for _, apple_locale in sources.locale_config.mappings
+        if apple_locale not in sources.ios_translations
+    )

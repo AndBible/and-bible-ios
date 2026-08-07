@@ -244,5 +244,157 @@ class ValidationTests(unittest.TestCase):
         )
 
 
+def build_fixture_sources() -> meta.LoadedSources:
+    config = meta.LocaleConfig(
+        mappings=(("en-US", "en-US"), ("fi-FI", "fi")),
+        default_substitutions=(meta.Substitution("Android", "iOS"),),
+        locale_substitutions={},
+    )
+    return meta.LoadedSources(
+        locale_config=config,
+        constants={"homepage_url": "https://andbible.org"},
+        android_master={
+            "title": "AndBible: Bible Study",
+            "paragraph_1_1": '"{{ title }}" is an app for Android.',
+            "feature_08": "Sync across devices",
+        },
+        android_translations={
+            "en-US": {},
+            "fi-FI": {
+                "title": "AndBible: Raamattu",
+                "paragraph_1_1": '"{{ title }}" on sovellus Androidille.',
+                "feature_08": "",
+            },
+        },
+        ios_source={
+            "subtitle": "Offline Bible study",
+            "keywords": "bible,study",
+            "promotional_text": "Ad-free and open source.",
+            "feature_08": "Sync over iCloud or NextCloud/WebDAV",
+        },
+        ios_translations={
+            "fi": {"subtitle": "Raamatun tutkimista"},
+        },
+        template="{{ paragraph_1_1 }}\n\n * {{ feature_08 }}\n * {{ homepage_url }}",
+        app_info={
+            "primary_category": "REFERENCE",
+            "secondary_category": "BOOKS",
+            "copyright": "2026 The Contributors",
+            "marketing_url": "https://andbible.org",
+            "support_url": "https://example.org/support",
+            "privacy_url": "https://andbible.org/privacy.html",
+        },
+        release_notes="Initial release.",
+        review_information={"notes": "No account is required."},
+    )
+
+
+class RenderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sources = build_fixture_sources()
+
+    def test_name_comes_from_the_translated_title(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["name"], "AndBible: Raamattu")
+
+    def test_description_uses_the_translation(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("on sovellus", fields["description"])
+
+    def test_platform_name_is_substituted_in_the_description(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("iOSille", fields["description"])
+        self.assertNotIn("Android", fields["description"])
+
+    def test_ios_override_beats_the_android_key(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+        self.assertNotIn("Sync across devices", fields["description"])
+
+    def test_blank_translation_value_falls_back_to_the_ios_override(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertIn("iCloud or NextCloud/WebDAV", fields["description"])
+
+    def test_ios_translation_beats_the_ios_source(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["subtitle"], "Raamatun tutkimista")
+
+    def test_missing_ios_translation_falls_back_to_english(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertEqual(fields["subtitle"], "Offline Bible study")
+
+    def test_constants_are_available_to_the_template(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        self.assertIn("https://andbible.org", fields["description"])
+
+    def test_urls_come_from_app_info(self) -> None:
+        fields = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(fields["support_url"], "https://example.org/support")
+
+    def test_release_notes_are_the_same_in_every_locale(self) -> None:
+        english = meta.build_locale_fields(self.sources, "en-US", "en-US")
+        finnish = meta.build_locale_fields(self.sources, "fi-FI", "fi")
+        self.assertEqual(english["release_notes"], finnish["release_notes"])
+
+
+class TreeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tree = meta.render_tree(build_fixture_sources())
+
+    def test_emits_one_directory_per_locale(self) -> None:
+        self.assertIn("fi/name.txt", self.tree)
+        self.assertIn("en-US/name.txt", self.tree)
+
+    def test_emits_every_localized_field_file(self) -> None:
+        for filename in meta.LOCALE_FIELD_FILES.values():
+            self.assertIn(f"fi/{filename}", self.tree)
+
+    def test_emits_app_level_files(self) -> None:
+        self.assertEqual(self.tree["copyright.txt"], "2026 The Contributors\n")
+        self.assertEqual(self.tree["primary_category.txt"], "REFERENCE\n")
+        self.assertEqual(self.tree["secondary_category.txt"], "BOOKS\n")
+
+    def test_emits_review_information(self) -> None:
+        self.assertEqual(
+            self.tree["review_information/notes.txt"], "No account is required.\n"
+        )
+
+    def test_every_file_ends_with_a_newline(self) -> None:
+        for path, content in self.tree.items():
+            self.assertTrue(content.endswith("\n"), path)
+
+    def test_no_unmapped_locale_is_emitted(self) -> None:
+        directories = {path.split("/")[0] for path in self.tree if "/" in path}
+        self.assertEqual(directories, {"en-US", "fi", "review_information"})
+
+
+class TreeValidationTests(unittest.TestCase):
+    def test_a_clean_tree_reports_no_problems(self) -> None:
+        self.assertEqual(meta.validate_tree(build_fixture_sources()), [])
+
+    def test_an_over_long_subtitle_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        broken = dict(sources.ios_source, subtitle="x" * 31)
+        sources = meta.replace_sources(sources, ios_source=broken)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("subtitle" in problem for problem in problems))
+
+    def test_a_surviving_platform_name_is_reported(self) -> None:
+        sources = build_fixture_sources()
+        config = meta.LocaleConfig(
+            mappings=sources.locale_config.mappings,
+            default_substitutions=(),
+            locale_substitutions={},
+        )
+        sources = meta.replace_sources(sources, locale_config=config)
+        problems = meta.validate_tree(sources)
+        self.assertTrue(any("android" in problem.lower() for problem in problems))
+
+    def test_missing_translations_are_listed(self) -> None:
+        self.assertEqual(
+            meta.missing_translation_locales(build_fixture_sources()), ["en-US"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
