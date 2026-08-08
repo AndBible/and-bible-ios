@@ -342,40 +342,44 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
         _ consume: (BibleSearchIndexEntry) throws -> Bool
     ) throws {
         guard info.category == .bible else { return }
+        // Drained per chapter: whole-Bible streaming otherwise accumulates every XML-projection
+        // temporary until the indexing dispatch block finishes.
         try reader.forEachBibleChapter { sourceBook, chapter in
-            guard let osisBookId = osisId(forSourceBookNumber: sourceBook) else {
+            try autoreleasepool {
+                guard let osisBookId = osisId(forSourceBookNumber: sourceBook) else {
+                    return true
+                }
+                for row in try reader.chapterContent(book: sourceBook, chapter: chapter) {
+                    guard let ordinal = JSwordKJVAVersification.verseOrdinal(
+                        osisId: osisBookId,
+                        chapter: chapter,
+                        verse: row.verse
+                    ) else {
+                        continue
+                    }
+                    let visibleText = try SQLiteSearchTextProjection.visibleText(
+                        row.text,
+                        metadata: reader.metadata,
+                        moduleInitials: info.name
+                    )
+                    let key = "\(osisBookId) \(chapter):\(row.verse)"
+                    let shouldContinue = try consume(BibleSearchIndexEntry(
+                        displayKey: key,
+                        visibleText: visibleText,
+                        sourceMarkup: row.text,
+                        taggedText: row.text,
+                        entryOrder: ordinal,
+                        sourcePosition: ordinal,
+                        osisBookId: osisBookId,
+                        displayBook: osisBookId,
+                        chapter: chapter,
+                        verse: row.verse,
+                        bookNamePresentation: .localizedCanonical
+                    ))
+                    guard shouldContinue else { return false }
+                }
                 return true
             }
-            for row in try reader.chapterContent(book: sourceBook, chapter: chapter) {
-                guard let ordinal = JSwordKJVAVersification.verseOrdinal(
-                    osisId: osisBookId,
-                    chapter: chapter,
-                    verse: row.verse
-                ) else {
-                    continue
-                }
-                let visibleText = try SQLiteSearchTextProjection.visibleText(
-                    row.text,
-                    metadata: reader.metadata,
-                    moduleInitials: info.name
-                )
-                let key = "\(osisBookId) \(chapter):\(row.verse)"
-                let shouldContinue = try consume(BibleSearchIndexEntry(
-                    displayKey: key,
-                    visibleText: visibleText,
-                    sourceMarkup: row.text,
-                    taggedText: row.text,
-                    entryOrder: ordinal,
-                    sourcePosition: ordinal,
-                    osisBookId: osisBookId,
-                    displayBook: osisBookId,
-                    chapter: chapter,
-                    verse: row.verse,
-                    bookNamePresentation: .localizedCanonical
-                ))
-                guard shouldContinue else { return false }
-            }
-            return true
         }
     }
 }

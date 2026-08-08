@@ -39,6 +39,26 @@ public struct NormalizedStrongsQueryOptions: Equatable, Sendable {
  same token rules for iOS FTS indexing, Search UI routing, and SWORD fallback validation.
  */
 public enum StrongsTokenNormalizer {
+    /// Compiled once because token extraction runs for every verse of a full-Bible index build.
+    private static let taggedTextTokenRegex = try? NSRegularExpression(
+        pattern: #"<\s*([GgHh][0-9]+!?[A-Za-z]*)\s*>"#
+    )
+
+    /// Compiled once because token extraction runs for every verse of a full-Bible index build.
+    private static let rawOSISTokenRegex = try? NSRegularExpression(
+        pattern: #"strong:([GgHh][0-9]+!?[A-Za-z]*)"#
+    )
+
+    /// Compiled once because token extraction runs for every verse of a full-Bible index build.
+    private static let renderedTextTokenRegex = try? NSRegularExpression(
+        pattern: #"showStrong=([0-9]+!?[A-Za-z]*)#cv"#
+    )
+
+    /// Compiled once because number parsing runs for every extracted token of every verse.
+    private static let strongNumberRegex = try? NSRegularExpression(
+        pattern: #"^([GgHh])([0-9]+)!?([A-Za-z]+)?"#
+    )
+
     /**
      Normalizes a user-entered Strong's query into JSword canonical tokens and SWORD fallback
      entry-attribute queries.
@@ -131,8 +151,7 @@ public enum StrongsTokenNormalizer {
      - Failure modes: Malformed or out-of-range Strong's values are ignored.
      */
     public static func canonicalTokens(taggedText: String) -> [String] {
-        let pattern = #"<\s*([GgHh][0-9]+!?[A-Za-z]*)\s*>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = taggedTextTokenRegex else { return [] }
 
         let matches = regex.matches(in: taggedText, range: NSRange(taggedText.startIndex..., in: taggedText))
         return orderedUnique(matches.flatMap { match -> [String] in
@@ -176,8 +195,7 @@ public enum StrongsTokenNormalizer {
     }
 
     private static func canonicalTokensFromRawOSIS(_ rawEntry: String) -> [String] {
-        let pattern = #"strong:([GgHh][0-9]+!?[A-Za-z]*)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = rawOSISTokenRegex else { return [] }
 
         let matches = regex.matches(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry))
         return matches.flatMap { match -> [String] in
@@ -193,8 +211,7 @@ public enum StrongsTokenNormalizer {
         _ renderedText: String,
         isNewTestamentBook: Bool
     ) -> [String] {
-        let pattern = #"showStrong=([0-9]+!?[A-Za-z]*)#cv"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = renderedTextTokenRegex else { return [] }
         let prefix = isNewTestamentBook ? "G" : "H"
 
         let matches = regex.matches(in: renderedText, range: NSRange(renderedText.startIndex..., in: renderedText))
@@ -208,8 +225,7 @@ public enum StrongsTokenNormalizer {
     }
 
     private static func parseStrongNumber(_ text: String) -> ParsedStrongNumber? {
-        let pattern = #"^([GgHh])([0-9]+)!?([A-Za-z]+)?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
+        guard let regex = strongNumberRegex,
               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let languageRange = Range(match.range(at: 1), in: text),
               let digitsRange = Range(match.range(at: 2), in: text) else {

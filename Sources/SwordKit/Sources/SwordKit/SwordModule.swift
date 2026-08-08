@@ -1424,7 +1424,9 @@ public final class SwordModule: @unchecked Sendable {
        entry. Native rendering failures surface as empty strings from SWORD and are left for the
        caller to filter.
      - Important: Callback work runs while holding `SwordRuntime`; keep it bounded and do not wait
-       on work that also needs SWORD access from another thread.
+       on work that also needs SWORD access from another thread. Each entry runs inside its own
+       autorelease pool because a full-Bible traversal otherwise accumulates every temporary
+       Foundation object until the surrounding dispatch block ends.
      */
     public func iterateAllEntriesWithRaw(_ callback: (String, String, String, Int) -> Bool) {
         SwordRuntime.sync {
@@ -1435,13 +1437,19 @@ public final class SwordModule: @unchecked Sendable {
             guard SWModule_popError(handle) == 0 else { return }
 
             var index = 0
-            while true {
-                let key = String(cString: SWModule_getKeyText(handle))
-                let text = String(cString: SWModule_getStripText(handle))
-                let rawEntry = String(cString: SWModule_getRawEntry(handle))
-                if !callback(key, text, rawEntry, index) { break }
-                index += 1
-                if SWModule_next(handle) != 0 { break }
+            var shouldContinue = true
+            while shouldContinue {
+                autoreleasepool {
+                    let key = String(cString: SWModule_getKeyText(handle))
+                    let text = String(cString: SWModule_getStripText(handle))
+                    let rawEntry = String(cString: SWModule_getRawEntry(handle))
+                    guard callback(key, text, rawEntry, index) else {
+                        shouldContinue = false
+                        return
+                    }
+                    index += 1
+                    if SWModule_next(handle) != 0 { shouldContinue = false }
+                }
             }
         }
     }
