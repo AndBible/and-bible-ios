@@ -713,68 +713,73 @@ public final class SearchIndexService: @unchecked Sendable {
         )
 
         var insertedVerseCount = 0
+        // Drained per entry: one Bible streams tens of thousands of verses through regex and
+        // analyzer calls inside a single dispatch block, and undrained autoreleased temporaries
+        // grow until iOS terminates the app mid-build.
         try source.forEachSearchIndexEntry { entry in
-            try cancellationProbe.checkCancellation()
-            let cleaned = entry.visibleText.trimmingCharacters(in: .whitespacesAndNewlines)
-            let analyzed = cleaned.isEmpty
-                ? ""
-                : try SearchTextAnalyzer.analyzedText(cleaned, profile: analyzer)
-            guard source.searchIndexIncludesEmptyVisibleText
-                    || (!cleaned.isEmpty && !analyzed.isEmpty) else {
+            try autoreleasepool {
+                try cancellationProbe.checkCancellation()
+                let cleaned = entry.visibleText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let analyzed = cleaned.isEmpty
+                    ? ""
+                    : try SearchTextAnalyzer.analyzedText(cleaned, profile: analyzer)
+                guard source.searchIndexIncludesEmptyVisibleText
+                        || (!cleaned.isEmpty && !analyzed.isEmpty) else {
+                    return true
+                }
+                guard let verseStatement, let strongsStatement else {
+                    throw SearchIndexError.databaseUnavailable(operation: "indexing \(moduleName)")
+                }
+
+                sqlite3_reset(verseStatement)
+                sqlite3_clear_bindings(verseStatement)
+                bind(analyzed, to: verseStatement, at: 1)
+                bind(entry.displayKey, to: verseStatement, at: 2)
+                bind(cleaned, to: verseStatement, at: 3)
+                bind(moduleName, to: verseStatement, at: 4)
+                sqlite3_bind_int64(verseStatement, 5, sqlite3_int64(entry.entryOrder))
+                bind(entry.osisBookId, to: verseStatement, at: 6)
+                bind(entry.displayBook, to: verseStatement, at: 7)
+                bind(entry.bookNamePresentation.rawValue, to: verseStatement, at: 8)
+                sqlite3_bind_int(verseStatement, 9, Int32(entry.chapter))
+                sqlite3_bind_int(verseStatement, 10, Int32(entry.verse))
+                sqlite3_bind_int64(
+                    verseStatement,
+                    11,
+                    sqlite3_int64(SearchCanonicalBookCatalog.order(of: entry.osisBookId))
+                )
+                let canonSection = SearchCanonicalBookCatalog.section(of: entry.osisBookId)
+                bind(canonSection.rawValue, to: verseStatement, at: 12)
+                try stepDone(db: db, statement: verseStatement, operation: "inserting \(entry.displayKey)")
+
+                let rawTokens = StrongsTokenNormalizer.canonicalTokens(
+                    rawEntry: entry.sourceMarkup,
+                    renderedTextProvider: { entry.taggedText },
+                    isNewTestamentBook: canonSection == .newTestament
+                )
+                let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
+                for token in Self.orderedUnique(rawTokens + taggedTokens) {
+                    sqlite3_reset(strongsStatement)
+                    sqlite3_clear_bindings(strongsStatement)
+                    bind(moduleName, to: strongsStatement, at: 1)
+                    bind(token, to: strongsStatement, at: 2)
+                    bind(entry.displayKey, to: strongsStatement, at: 3)
+                    sqlite3_bind_int64(strongsStatement, 4, sqlite3_int64(entry.entryOrder))
+                    try stepDone(db: db, statement: strongsStatement, operation: "inserting Strong's token")
+                }
+
+                insertedVerseCount += 1
+                if insertedVerseCount.isMultiple(of: 200) {
+                    let total = max(source.searchIndexProgressTotal, 1)
+                    let progress = min(Double(entry.sourcePosition) / Double(total), 0.99)
+                    DispatchQueue.main.async {
+                        guard self.indexingGeneration == generation else { return }
+                        self.indexProgress = progress
+                        self.indexingKey = entry.displayKey
+                    }
+                }
                 return true
             }
-            guard let verseStatement, let strongsStatement else {
-                throw SearchIndexError.databaseUnavailable(operation: "indexing \(moduleName)")
-            }
-
-            sqlite3_reset(verseStatement)
-            sqlite3_clear_bindings(verseStatement)
-            bind(analyzed, to: verseStatement, at: 1)
-            bind(entry.displayKey, to: verseStatement, at: 2)
-            bind(cleaned, to: verseStatement, at: 3)
-            bind(moduleName, to: verseStatement, at: 4)
-            sqlite3_bind_int64(verseStatement, 5, sqlite3_int64(entry.entryOrder))
-            bind(entry.osisBookId, to: verseStatement, at: 6)
-            bind(entry.displayBook, to: verseStatement, at: 7)
-            bind(entry.bookNamePresentation.rawValue, to: verseStatement, at: 8)
-            sqlite3_bind_int(verseStatement, 9, Int32(entry.chapter))
-            sqlite3_bind_int(verseStatement, 10, Int32(entry.verse))
-            sqlite3_bind_int64(
-                verseStatement,
-                11,
-                sqlite3_int64(SearchCanonicalBookCatalog.order(of: entry.osisBookId))
-            )
-            let canonSection = SearchCanonicalBookCatalog.section(of: entry.osisBookId)
-            bind(canonSection.rawValue, to: verseStatement, at: 12)
-            try stepDone(db: db, statement: verseStatement, operation: "inserting \(entry.displayKey)")
-
-            let rawTokens = StrongsTokenNormalizer.canonicalTokens(
-                rawEntry: entry.sourceMarkup,
-                renderedTextProvider: { entry.taggedText },
-                isNewTestamentBook: canonSection == .newTestament
-            )
-            let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
-            for token in Self.orderedUnique(rawTokens + taggedTokens) {
-                sqlite3_reset(strongsStatement)
-                sqlite3_clear_bindings(strongsStatement)
-                bind(moduleName, to: strongsStatement, at: 1)
-                bind(token, to: strongsStatement, at: 2)
-                bind(entry.displayKey, to: strongsStatement, at: 3)
-                sqlite3_bind_int64(strongsStatement, 4, sqlite3_int64(entry.entryOrder))
-                try stepDone(db: db, statement: strongsStatement, operation: "inserting Strong's token")
-            }
-
-            insertedVerseCount += 1
-            if insertedVerseCount.isMultiple(of: 200) {
-                let total = max(source.searchIndexProgressTotal, 1)
-                let progress = min(Double(entry.sourcePosition) / Double(total), 0.99)
-                DispatchQueue.main.async {
-                    guard self.indexingGeneration == generation else { return }
-                    self.indexProgress = progress
-                    self.indexingKey = entry.displayKey
-                }
-            }
-            return true
         }
 
         try cancellationProbe.checkCancellation()
@@ -1360,18 +1365,24 @@ public final class SearchIndexService: @unchecked Sendable {
 
     // MARK: - Text Cleaning
 
+    /// Compiled once because text cleanup runs for every verse of a full-Bible index build.
+    private static let inlineStrongsTagRegex = try? NSRegularExpression(pattern: "<[HGhgW]\\d+>")
+
+    /// Compiled once because text cleanup runs for every verse of a full-Bible index build.
+    private static let repeatedSpaceRegex = try? NSRegularExpression(pattern: "  +")
+
     /** Removes inline Strong's tags from user-visible indexed text. */
     public static func cleanText(_ text: String) -> String {
         guard text.contains("<") else { return text }
         var result = text
-        if let regex = try? NSRegularExpression(pattern: "<[HGhgW]\\d+>") {
+        if let regex = inlineStrongsTagRegex {
             result = regex.stringByReplacingMatches(
                 in: result,
                 range: NSRange(result.startIndex..., in: result),
                 withTemplate: ""
             )
         }
-        if let regex = try? NSRegularExpression(pattern: "  +") {
+        if let regex = repeatedSpaceRegex {
             result = regex.stringByReplacingMatches(
                 in: result,
                 range: NSRange(result.startIndex..., in: result),
