@@ -1052,7 +1052,7 @@ public struct ModuleBrowserView: View {
        mutates `searchText`.
      - Failure modes: Empty language catalogs show the all-language label and keep the menu usable.
      */
-    private func androidFilterBar(visibleModuleCount: Int) -> some View {
+    private func androidFilterBar(visibleModuleCount: Int) -> AndroidDocumentSelectionFilterBar {
         let categoryOptions = [nil] + visibleCategoryFilters.map(Optional.some)
         return AndroidDocumentSelectionFilterBar(
             surfacePalette: surfacePalette,
