@@ -1519,3 +1519,6 @@
 "move_down" = "Přesunout dolů";
 "move_up" = "Přesunout nahoru";
 "text_display_margin_size_title_format" = "Velikost okrajů (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dvojklik ukončí režim celé obrazovky";

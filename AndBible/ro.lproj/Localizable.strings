@@ -1535,3 +1535,6 @@
 "module_installed" = "Instalate";
 "module_installed_version" = "Instalate";
 "text_display_margin_size_title_format" = "Dimensiunile marginilor (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Apasă de două ori pentru a reduce";

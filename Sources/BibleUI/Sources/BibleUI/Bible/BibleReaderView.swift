@@ -1635,7 +1635,36 @@ public struct BibleReaderView: View {
     private func handleFullScreenChange(_ fullScreen: Bool) {
         if !fullScreen {
             lastFullScreenByDoubleTap = false
+        } else {
+            // Android's MainBibleActivity.toggleFullScreen posts the exit_fullscreen toast on
+            // every entry into fullscreen so hidden chrome never becomes a trap. All iOS entry
+            // paths (double-tap, overflow menu, auto fullscreen) funnel through this change
+            // handler, matching Android's single toggle path.
+            showReaderToast(
+                String(
+                    localized: "exit_fullscreen",
+                    defaultValue: "Double-tap screen to exit fullscreen"
+                )
+            )
         }
+    }
+
+    /**
+     Shows the transient reader toast and schedules its dismissal.
+
+     - Parameter text: Localized message to display above the reader's bottom edge.
+     - Side effects: Cancels any pending toast dismissal, animates the overlay in, and schedules
+       one dismissal after 2.5 seconds.
+     - Failure modes: None.
+     */
+    private func showReaderToast(_ text: String) {
+        toastWorkItem?.cancel()
+        withAnimation { toastMessage = text }
+        let work = DispatchWorkItem {
+            withAnimation { toastMessage = nil }
+        }
+        toastWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
     /// Builds reader-stack destinations opened from the drawer, overflow, or keyboard shortcuts.
@@ -4163,13 +4192,7 @@ public struct BibleReaderView: View {
                 presentModulePicker(category, from: window.id)
             },
             onShowToast: { text in
-                toastWorkItem?.cancel()
-                withAnimation { toastMessage = text }
-                let work = DispatchWorkItem {
-                    withAnimation { toastMessage = nil }
-                }
-                toastWorkItem = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+                showReaderToast(text)
             },
             onShowWorkspaces: { presentReaderDestination(.workspaces, from: window.id) },
             onToggleFullScreen: {

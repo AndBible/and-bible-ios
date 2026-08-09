@@ -902,3 +902,6 @@
 
 /* Android shared translations */
 "delete_module_index_title" = "အညွှန်း ရှာဖွေမှုကို ဖျက်ပါ";
+
+/* Android shared translations */
+"exit_fullscreen" = "မျက်နှာပြင်အပြည့်မှထွက်ရန် မျက်နှာပြင်ကို နှစ်ချက်နှိပ်ပါ";

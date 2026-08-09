@@ -1538,3 +1538,6 @@
 "module_installed" = "Zainstalowane";
 "module_installed_version" = "Zainstalowane";
 "text_display_margin_size_title_format" = "Szerokość marginesów (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Stuknij podwójnie, aby wyjść z trybu pełnoekranowego";

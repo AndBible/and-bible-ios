@@ -1524,3 +1524,6 @@ Podczas korzystania z Dysku Google, aplikacja %@ otrzymuje uprawnienie na dostę
 "move_down" = "Przesuń w dół";
 "move_up" = "Przesuń w górę";
 "text_display_margin_size_title_format" = "Szerokość marginesów (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Stuknij podwójnie, aby wyjść z trybu pełnoekranowego";

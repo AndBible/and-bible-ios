@@ -1683,3 +1683,6 @@
 
 /* Android shared translations */
 "backup_modules" = "Còpia de seguretat dels documents a…";
+
+/* Android shared translations */
+"exit_fullscreen" = "Fes doble toc a la pantalla per sortir de la pantalla completa";

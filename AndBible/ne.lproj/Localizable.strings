@@ -1690,3 +1690,6 @@
 
 /* Android shared translations */
 "backup_modules" = "कागजातहरू ब्याकअप गर्नुहोस्…";
+
+/* Android shared translations */
+"exit_fullscreen" = "पूर्णस्क्रिन बाहिर निस्कन स्क्रिन दोहोरो ट्याप गर्नुहोस्";

@@ -375,15 +375,34 @@ extension BibleWebView {
                 } catch(e) {}
             };
         })();
-        // Double-click/tap toggles fullscreen mode (matching Android behavior)
-        document.addEventListener('dblclick', function(e) {
-            // Don't toggle fullscreen if clicking on interactive elements
-            if (e.target.closest('a, button, input, textarea, [contenteditable]')) return;
-            window.webkit.messageHandlers.bibleView.postMessage({
-                method: 'toggleFullScreen',
-                args: []
+        // Double-tap toggles fullscreen mode (matching Android behavior). Android's
+        // GestureDetector pairs taps within 300 ms and ~100 px of slop; the DOM dblclick
+        // event instead follows the host pointer's double-click interval (the macOS system
+        // setting under Mac Catalyst and the simulator), which pairs unrelated taps into
+        // accidental fullscreen toggles. Detect the double tap manually with Android's
+        // timing so single taps never toggle.
+        (function() {
+            var lastTap = null;
+            document.addEventListener('click', function(e) {
+                // Don't toggle fullscreen if clicking on interactive elements
+                if (e.target.closest('a, button, input, textarea, [contenteditable]')) {
+                    lastTap = null;
+                    return;
+                }
+                var now = Date.now();
+                if (lastTap && (now - lastTap.time) <= 300
+                        && Math.abs(e.clientX - lastTap.x) <= 50
+                        && Math.abs(e.clientY - lastTap.y) <= 50) {
+                    lastTap = null;
+                    window.webkit.messageHandlers.bibleView.postMessage({
+                        method: 'toggleFullScreen',
+                        args: []
+                    });
+                    return;
+                }
+                lastTap = { time: now, x: e.clientX, y: e.clientY };
             });
-        });
+        })();
         """
     }
 

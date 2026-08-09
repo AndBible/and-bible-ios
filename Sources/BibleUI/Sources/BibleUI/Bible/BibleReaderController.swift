@@ -4985,6 +4985,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     logger.info(
       "Restored position: \(self.currentBook) \(self.currentChapter):\(self.currentVerse)")
+
+        // Android's page manager persists the MYNOTE category so a relaunch restores the My
+        // Notes page; the window's persisted Bible position supplies the chapter. An
+        // unresolvable target falls back to the Bible document instead of a blank pane.
+        if pm.currentCategoryName == Self.myNotesPageManagerCategoryName {
+            if let target = currentMyNotesTarget(jumpToOrdinal: nil) {
+                loadMyNotesDocument(target: target)
+            } else {
+                pm.currentCategoryName = DocumentCategory.bible.pageManagerKey
+                onPersistState?()
+            }
+        }
     }
 
     /// Apply SWORD global options based on current display settings.
@@ -7208,8 +7220,41 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Failure modes: An unresolved target chapter fails in the annotation loader without falling
        back to the active pane's chapter.
      */
+    /**
+     Android's persisted page-manager category value for the My Notes fake document; the Android
+     backup boundary upper-cases it to the `MYNOTE` enum name.
+     */
+    static let myNotesPageManagerCategoryName = "mynote"
+
+    /**
+     Persists Android's MYNOTE page-manager category for this window.
+
+     Android's `CurrentPageManager` stores the MYNOTE category so relaunch and workspace sync
+     restore the My Notes page. iOS mirrors that by writing the lower-case page-manager key the
+     backup and sync boundaries translate to Android's enum name.
+
+     - Parameter visible: `true` while the My Notes document owns the pane; `false` restores the
+       Bible category, but only when My Notes still owns the stored value so other categories
+       keep their own key.
+     - Side effects: Mutates the active window's page manager and persists workspace state when
+       the stored value changes.
+     - Failure modes: Missing page managers are ignored.
+     */
+    private func persistMyNotesPageCategory(visible: Bool) {
+        guard let pm = activeWindow?.pageManager else { return }
+        if visible {
+            guard pm.currentCategoryName != Self.myNotesPageManagerCategoryName else { return }
+            pm.currentCategoryName = Self.myNotesPageManagerCategoryName
+        } else {
+            guard pm.currentCategoryName == Self.myNotesPageManagerCategoryName else { return }
+            pm.currentCategoryName = DocumentCategory.bible.pageManagerKey
+        }
+        onPersistState?()
+    }
+
     private func loadMyNotesDocument(target: MyNotesTarget) {
         beginReplacingContentIntent()
+        persistMyNotesPageCategory(visible: true)
         guard clientReady else {
             pendingClientReadyMyNotesTarget = target
             activeMyNotesTarget = target
@@ -7505,6 +7550,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
         beginReplacingContentIntent()
+        persistMyNotesPageCategory(visible: false)
         guard clientReady else {
             guard let label = bookmarkService?.label(id: labelId) else { return }
             let labelName = AndroidLabelPresentation.displayName(for: label)
@@ -9477,6 +9523,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func loadCurrentChapter() {
         beginReplacingContentIntent()
+        persistMyNotesPageCategory(visible: false)
         showingMyNotes = false
         showingStudyPad = false
         activeStudyPadLabelId = nil

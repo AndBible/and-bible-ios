@@ -1529,3 +1529,6 @@ Google ড্রাইভ ব্যবহার করার সময়, %@শ
 "move_down" = "নিচে সরান";
 "move_up" = "উপরে সরান";
 "text_display_margin_size_title_format" = "মার্জিনের আকার (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "ফুলস্ক্রিন থেকে প্রস্থান করতে স্ক্রীনে ডবল-ট্যাপ করুন";

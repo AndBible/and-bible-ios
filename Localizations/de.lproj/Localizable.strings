@@ -1515,3 +1515,6 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 "move_down" = "Nach unten verschieben";
 "move_up" = "Nach oben verschieben";
 "text_display_margin_size_title_format" = "Randgröße (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Doppelt Antippen, um den Vollbildschirm zu verlassen";

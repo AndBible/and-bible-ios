@@ -969,3 +969,6 @@
 "backup_modules" = "備份文件至...";
 "delete_module_index_title" = "刪除索引";
 "text_display_margin_size_title_format" = "邊界大小 (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "雙點以離開全螢幕模式";

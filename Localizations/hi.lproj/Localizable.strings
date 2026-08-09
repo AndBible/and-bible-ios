@@ -1513,3 +1513,6 @@
 "move_down" = "नीचे ले जाएं";
 "move_up" = "ऊपर ले जाएं";
 "text_display_margin_size_title_format" = "मार्जिन आकार (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "फ़ुलस्क्रीन से बाहर निकलने के लिए स्क्रीन पर दो बार टैप करें";

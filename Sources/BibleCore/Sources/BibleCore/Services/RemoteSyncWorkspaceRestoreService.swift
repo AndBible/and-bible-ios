@@ -2760,6 +2760,11 @@ public final class RemoteSyncWorkspaceRestoreService {
             return "general_book"
         case "MAP", "MAPS":
             return "map"
+        case "MYNOTE":
+            // Android persists the My Notes fake document as its own page category; iOS restores
+            // it through the reader's `mynote` page-manager key so relaunch and cross-device
+            // sync reopen the My Notes page instead of collapsing to the Bible text.
+            return "mynote"
         default:
             return "bible"
         }

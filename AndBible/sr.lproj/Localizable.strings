@@ -1546,3 +1546,6 @@
 "module_installed" = "Инсталирано";
 "module_installed_version" = "Инсталирано";
 "text_display_margin_size_title_format" = "Величина маргина (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Двапут додирните екран за излаз из Целог Екрана";

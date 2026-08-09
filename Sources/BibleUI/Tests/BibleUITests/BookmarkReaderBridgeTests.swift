@@ -1021,6 +1021,56 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a persisted MYNOTE page category restores the My Notes document after relaunch.
+
+     Android's `CurrentPageManager` persists the MYNOTE category, so a window showing My Notes
+     reopens on My Notes after restart; iOS previously collapsed it to the Bible text. The
+     persisted Bible position supplies the restored chapter, and exiting My Notes must hand the
+     stored category back to the Bible page.
+
+     - Setup: Restores a controller whose page manager persisted the `mynote` category, then
+       marks the client ready so the pre-ready restore replays.
+     - Expected result: The controller restores into visible My Notes state, replays a `notes`
+       document on client-ready, and `returnFromMyNotes` restores the persisted `bible` category.
+     - Failure meaning: Relaunch or workspace sync silently turns a My Notes window into a Bible
+       window, diverging from Android's page restore.
+     - Side effects: Emits bridge documents against an in-memory recording bridge only.
+     */
+    @MainActor
+    func testRestoreSavedPositionReopensPersistedMyNotesPage() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: BibleReaderController.myNotesPageManagerCategoryName
+        )
+        window.pageManager = pageManager
+        controller.activeWindow = window
+
+        controller.restoreSavedPosition()
+
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(
+            pageManager.currentCategoryName,
+            BibleReaderController.myNotesPageManagerCategoryName
+        )
+
+        controller.bridgeDidSetClientReady(bridge)
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "notes")
+
+        controller.returnFromMyNotes()
+
+        XCTAssertFalse(controller.showingMyNotes)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+    }
+
+    /**
      Verifies chapter stepping keeps the My Notes document current like Android.
 
      Android's `CurrentMyNotePage.next()/previous()` step the underlying Bible key one chapter

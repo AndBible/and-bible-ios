@@ -67,6 +67,17 @@ time.
   matters under slow SwiftUI pane creation and degrades to Android's
   "open here" behavior.
 
+## Confirmed-parity behaviors that read as bugs
+
+- **Chained links windows.** A link tapped inside the dedicated links window
+  (for example a My Notes row's verse-number link while My Notes occupies the
+  links window) opens a *new* chained links window, exactly like Android's
+  `Window.targetLinksWindow`. On a phone this shrinks every pane and moves
+  focus to the new pane, which can scroll the My Notes heading out of view.
+  Verified against a live trace and explicitly decided (2026-08-09) to keep
+  Android's behavior rather than reuse the tapped pane or route to the main
+  window.
+
 ## Follow-ups that need their own scoped changes
 
 - **History semantics.** Android records the pre-navigation location before

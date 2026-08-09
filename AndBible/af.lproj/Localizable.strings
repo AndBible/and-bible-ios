@@ -1543,3 +1543,6 @@
 "module_installed" = "Geïnstalleer";
 "module_installed_version" = "Geïnstalleer";
 "text_display_margin_size_title_format" = "Kantlyn grootte (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dubbel tik op die skerm om die volle skerm te verlaat";

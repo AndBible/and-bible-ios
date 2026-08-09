@@ -1523,3 +1523,6 @@
 "move_down" = "Sposta giù";
 "move_up" = "Sposta su";
 "text_display_margin_size_title_format" = "Dimensioni del margine (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Tocca due volte per uscire dallo schermo intero";

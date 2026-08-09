@@ -1543,3 +1543,6 @@
 "module_installed" = "நிறுவப்பட்டது";
 "module_installed_version" = "நிறுவப்பட்டது";
 "text_display_margin_size_title_format" = "விளிம்பு அளவு (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "இரு முறை தட்டினால் முழு திரை பயன்முறையிலிருந்து வெளியேறலாம்";

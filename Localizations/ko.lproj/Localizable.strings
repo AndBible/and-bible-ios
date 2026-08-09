@@ -1525,3 +1525,6 @@
 "move_down" = "아래로 이동";
 "move_up" = "위로 이동";
 "text_display_margin_size_title_format" = "여백 크기 (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "두 번 탭하여 전체 화면 종료";

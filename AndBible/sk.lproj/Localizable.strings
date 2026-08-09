@@ -1535,3 +1535,6 @@
 "module_installed" = "Nainštalované";
 "module_installed_version" = "Nainštalované";
 "text_display_margin_size_title_format" = "Veľkosť okraja (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dvojitým klepnutím opustiť režim celej obrazovky";

@@ -1663,3 +1663,6 @@
 "move_up" = "माथि सार्नुहोस्";
 "tilt_to_scroll" = "झुकाएर स्क्रोल गर्नुहोस्";
 "window_pinning" = "विन्डो पिनिङ";
+
+/* Android shared translations */
+"exit_fullscreen" = "पूर्णस्क्रिन बाहिर निस्कन स्क्रिन दोहोरो ट्याप गर्नुहोस्";

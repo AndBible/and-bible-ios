@@ -1652,3 +1652,6 @@
 "move_up" = "Flyt op";
 "tilt_to_scroll" = "Vip for at rulle";
 "window_pinning" = "Fastgøring af vindue";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dobbelttryk på skærmen for at afslutte fuldskærm";

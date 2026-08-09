@@ -1665,3 +1665,6 @@
 "move_up" = "เลื่อนขึ้น";
 "tilt_to_scroll" = "เอียงเพื่อเลื่อน";
 "window_pinning" = "การปักหมุดหน้าต่าง";
+
+/* Android shared translations */
+"exit_fullscreen" = "แตะหน้าจอสองครั้งเพื่อออกจากโหมดเต็มหน้าจอ";

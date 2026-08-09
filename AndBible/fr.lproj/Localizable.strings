@@ -1520,3 +1520,6 @@
 "module_installed" = "Installés";
 "module_installed_version" = "Installés";
 "text_display_margin_size_title_format" = "Taille de la marge (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Appuyez deux fois sur l’écran pour quitter le mode plein écran";

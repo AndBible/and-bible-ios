@@ -1530,3 +1530,6 @@
 "move_down" = "Переместить вниз";
 "move_up" = "Переместить вверх";
 "text_display_margin_size_title_format" = "Размер поля (%1$d/%2$d/%3$d мм)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Дважды коснитесь экрана, чтобы выйти из полноэкранного режима";

@@ -1547,3 +1547,6 @@
 "module_installed" = "Встановлені";
 "module_installed_version" = "Встановлені";
 "text_display_margin_size_title_format" = "Розмір поля (%1$d/%2$d/%3$d мм)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Двічі торкніться екрана, щоб вийти з повноекранного режиму";
