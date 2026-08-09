@@ -230,6 +230,71 @@ final class SpeakParityTests: XCTestCase {
     }
 
     /**
+     Verifies Strong's-tagged OSIS speaks as one continuous run with attached punctuation.
+
+     KJV-class modules wrap every word in `<w lemma="strong:...">`, leaving punctuation as bare
+     text nodes between elements. Flushing at inline boundaries produced one utterance per word
+     with prosody gaps, and lone punctuation runs that the synthesizer narrated aloud as "comma"
+     and "full stop". Android's OsisToBibleSpeak accumulates through inline markup, so iOS must
+     produce a single text command per verse body.
+     */
+    func testStrongsTaggedVerseSpeaksAsOneContinuousRun() {
+        let osis = #"<verse osisID="Gen.1.1" sID="Gen.1.1"/>"# +
+            #"<w lemma="strong:H07225">In the beginning</w> "# +
+            #"<w lemma="strong:H0430">God</w> <w lemma="strong:H1254">created</w> "# +
+            #"<transChange type="added">the</transChange> "# +
+            #"<w lemma="strong:H8064">heaven</w> and "# +
+            #"<w lemma="strong:H776">the earth</w>."#
+        let commands = SpeakCommandBuilder.commands(
+            rawOSIS: osis,
+            fallbackPlainText: "",
+            language: "en",
+            playbackSettings: PlaybackSettings(),
+            advancedSettings: AdvancedSpeakSettings()
+        )
+
+        XCTAssertEqual(
+            commands,
+            [
+                .verseNumber(1),
+                .text("In the beginning God created the heaven and the earth."),
+            ],
+            "commands: \(commands)"
+        )
+    }
+
+    /**
+     Verifies punctuation stranded by hidden elements never becomes its own spoken command.
+
+     A run containing no letters or digits must merge into the preceding same-kind command or be
+     dropped; spoken alone, the synthesizer narrates the punctuation name aloud.
+     */
+    func testPunctuationOnlyRunsMergeIntoPrecedingTextInsteadOfBeingSpoken() {
+        let osis = #"<w lemma="strong:G2424">Jesus wept</w>"# +
+            #"<note type="crossReference">hidden</note>."#
+        let commands = SpeakCommandBuilder.commands(
+            rawOSIS: osis,
+            fallbackPlainText: "",
+            language: "en",
+            playbackSettings: PlaybackSettings(),
+            advancedSettings: AdvancedSpeakSettings()
+        )
+
+        XCTAssertEqual(
+            commands,
+            [
+                .text("Jesus wept"),
+                .excluded(.nonStudyNote),
+            ],
+            "Expected the stranded period to be dropped rather than spoken; commands: \(commands)"
+        )
+        XCTAssertFalse(
+            commands.contains(.text(".")),
+            "A lone punctuation run must never become a spoken command."
+        )
+    }
+
+    /**
      Reproduces the aggregate ordering that exposed decoder and localized-command contamination.
 
      The sequence generates localized commands, decodes malformed playback and container settings,

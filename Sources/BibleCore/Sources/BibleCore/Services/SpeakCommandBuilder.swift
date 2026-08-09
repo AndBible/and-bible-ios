@@ -104,7 +104,6 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
     private struct PendingText {
         var rawValue: String
         let kind: SpokenTextKind
-        let replacesDivineName: Bool
     }
 
     let playbackSettings: PlaybackSettings
@@ -117,6 +116,9 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
     private var divineNameDepth = 0
     private var footnoteDepth = 0
     private var pendingText: PendingText?
+
+    /// Divine-name content accumulated for replacement before folding into the surrounding run.
+    private var divineNameRun: String?
 
     init(
         playbackSettings: PlaybackSettings,
@@ -135,17 +137,18 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
         qualifiedName qName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
-        flushPendingText()
         let name = localName(elementName)
         let parentVisible = states.last?.visible ?? true
         switch name {
         case "verse":
+            flushPendingText()
             if let marker = attributeDict["osisID"] ?? attributeDict["sID"],
                let verse = marker.split(separator: ".").last.flatMap({ Int($0) }) {
                 commands.append(.verseNumber(verse))
             }
             states.append(.init(visible: parentVisible, kind: .normal))
         case "note":
+            flushPendingText()
             if attributeDict["type"] == "study", playbackSettings.speakFootnotes {
                 commands.append(.pause(milliseconds: 150))
                 footnoteDepth += 1
@@ -155,9 +158,11 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
                 states.append(.init(visible: false, kind: .hidden))
             }
         case "reference":
+            flushPendingText()
             commands.append(.excluded(.crossReference))
             states.append(.init(visible: false, kind: .hidden))
         case "title":
+            flushPendingText()
             if playbackSettings.speakTitles {
                 commands.append(.pause(milliseconds: 150))
             }
@@ -167,8 +172,10 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
             divineNameDepth += 1
             states.append(.init(visible: parentVisible, kind: .divineName))
         case "p", "l", "lb":
+            flushPendingText()
             states.append(.init(visible: parentVisible, kind: .paragraph))
         case "div":
+            flushPendingText()
             let type = attributeDict["type"] ?? ""
             let isParagraph = ["paragraph", "x-p", "x-end-paragraph"].contains(type)
             if isParagraph, attributeDict["sID"] == nil {
@@ -176,6 +183,10 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
             }
             states.append(.init(visible: parentVisible, kind: isParagraph ? .paragraph : .normal))
         default:
+            // Inline OSIS markup (w, seg, transChange, q, hi, milestones, unknown elements) must
+            // not interrupt the spoken run: Android's OsisToBibleSpeak accumulates straight
+            // through it. Flushing here split Strong's-tagged text into one utterance per word
+            // and left bare punctuation runs that the synthesizer narrated as "comma".
             states.append(.init(visible: parentVisible, kind: .normal))
         }
     }
@@ -186,20 +197,24 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        flushPendingText()
         guard states.count > 1 else { return }
         let state = states.removeLast()
         switch state.kind {
         case .title where playbackSettings.speakTitles:
+            flushPendingText()
             commands.append(.pause(milliseconds: 500))
             titleDepth = max(titleDepth - 1, 0)
         case .footnote where playbackSettings.speakFootnotes:
+            flushPendingText()
             commands.append(.pause(milliseconds: 150))
             footnoteDepth = max(footnoteDepth - 1, 0)
         case .divineName:
+            foldDivineNameRun()
             divineNameDepth = max(divineNameDepth - 1, 0)
         case .title:
             titleDepth = max(titleDepth - 1, 0)
+        case .paragraph:
+            flushPendingText()
         default:
             break
         }
@@ -207,6 +222,19 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         guard let state = states.last, state.visible else { return }
+        if divineNameDepth > 0, advancedSettings.replaceDivineName {
+            divineNameRun = (divineNameRun ?? "") + string
+            return
+        }
+        appendToPendingText(string)
+    }
+
+    func parserDidEndDocument(_ parser: XMLParser) {
+        flushPendingText()
+    }
+
+    /** Accumulates one visible character run into the current same-kind pending text. */
+    private func appendToPendingText(_ string: String) {
         let kind: SpokenTextKind
         if titleDepth > 0 {
             kind = .title
@@ -215,38 +243,76 @@ private final class OSISSpeechParserDelegate: NSObject, XMLParserDelegate {
         } else {
             kind = .normal
         }
-        let replacesDivineName = divineNameDepth > 0 && advancedSettings.replaceDivineName
-        if pendingText?.kind == kind, pendingText?.replacesDivineName == replacesDivineName {
+        if pendingText?.kind == kind {
             pendingText?.rawValue.append(string)
         } else {
             flushPendingText()
-            pendingText = PendingText(
-                rawValue: string,
-                kind: kind,
-                replacesDivineName: replacesDivineName
-            )
+            pendingText = PendingText(rawValue: string, kind: kind)
         }
     }
 
-    /** Flushes one XML character run without crossing an OSIS element boundary. */
+    /** Applies divine-name replacement to the finished run and folds it into the surrounding text. */
+    private func foldDivineNameRun() {
+        guard let run = divineNameRun else { return }
+        divineNameRun = nil
+        var text = run
+        for (source, replacement) in zip(divineNameArrays.original, divineNameArrays.replacement)
+            where !source.isEmpty {
+            text = text.replacingOccurrences(of: source, with: replacement)
+        }
+        appendToPendingText(text)
+    }
+
+    /** Flushes the accumulated spoken run at one structural OSIS boundary. */
     private func flushPendingText() {
         guard let pendingText else { return }
         self.pendingText = nil
-        var text = SpeakCommandBuilder.normalizeText(pendingText.rawValue)
+        let text = SpeakCommandBuilder.normalizeText(pendingText.rawValue)
         guard !text.isEmpty else { return }
-        if pendingText.replacesDivineName {
-            for (source, replacement) in zip(divineNameArrays.original, divineNameArrays.replacement)
-                where !source.isEmpty {
-                text = text.replacingOccurrences(of: source, with: replacement)
-            }
+        // A run without letters or digits is stray markup punctuation; synthesizers narrate it
+        // ("comma", "full stop") when spoken alone, so it merges into the preceding same-kind
+        // command or is dropped.
+        if !text.contains(where: { $0.isLetter || $0.isNumber }) {
+            mergeTrailingPunctuation(text, kind: pendingText.kind)
+            return
         }
-        switch pendingText.kind {
+        commands.append(command(for: text, kind: pendingText.kind))
+    }
+
+    /** Attaches a punctuation-only run to the previous same-kind command when one exists. */
+    private func mergeTrailingPunctuation(_ text: String, kind: SpokenTextKind) {
+        guard let last = commands.last else { return }
+        let merged: SpeakCommand?
+        switch (last, kind) {
+        case (.text(let value), .normal):
+            merged = .text("\(value)\(joiner(for: text))\(text)")
+        case (.heading(let value), .title):
+            merged = .heading("\(value)\(joiner(for: text))\(text)")
+        case (.footnote(let value), .footnote):
+            merged = .footnote("\(value)\(joiner(for: text))\(text)")
+        default:
+            merged = nil
+        }
+        if let merged {
+            commands[commands.count - 1] = merged
+        }
+    }
+
+    /** Sentence punctuation attaches directly; bracketing punctuation keeps one space. */
+    private func joiner(for text: String) -> String {
+        guard let first = text.first else { return "" }
+        return [",", ".", ";", ":", "!", "?"].contains(String(first)) ? "" : " "
+    }
+
+    /** Maps one spoken-text kind onto its command constructor. */
+    private func command(for text: String, kind: SpokenTextKind) -> SpeakCommand {
+        switch kind {
         case .title:
-            commands.append(.heading(text))
+            return .heading(text)
         case .footnote:
-            commands.append(.footnote(text))
+            return .footnote(text)
         case .normal:
-            commands.append(.text(text))
+            return .text(text)
         }
     }
 
