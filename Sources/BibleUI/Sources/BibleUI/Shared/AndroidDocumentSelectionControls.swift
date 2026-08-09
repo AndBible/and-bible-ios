@@ -23,6 +23,12 @@ struct AndroidDocumentSelectionOption: Identifiable, Equatable {
     let title: String
 }
 
+/// Popup anchors shared by the filter-strip triggers and the activity-screen dropdown host.
+private enum AndroidDocumentSelectionPopupAnchor {
+    static let language = "androidDocumentSelectionLanguageAnchor"
+    static let documentType = "androidDocumentSelectionTypeAnchor"
+}
+
 /**
  Shared full-screen activity host for Android screens derived from `DocumentSelectionBase`.
 
@@ -50,7 +56,9 @@ struct AndroidDocumentSelectionOption: Identifiable, Equatable {
  - accessibility-sized content may scroll only when the caller's row content provides scrolling,
    matching the ownership boundary of Android's `DocumentSelectionBase`
  */
-struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Rows: View>: View {
+struct AndroidDocumentSelectionActivityScreen<TopBar: View, Rows: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Reader/workspace colors shared by Choose Document and Download Documents.
     let surfacePalette: ReaderThemeSurfacePalette
 
@@ -58,10 +66,16 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
     private let topBar: TopBar
 
     /// Configured shared language/search/type filter strip.
-    private let filterBar: FilterBar
+    private let filterBar: AndroidDocumentSelectionFilterBar
 
     /// Activity-specific document rows and empty/loading states.
     private let rows: Rows
+
+    /// Whether the app-owned language dropdown overlays the activity.
+    @State private var showsLanguageOptions = false
+
+    /// Whether the app-owned document-type dropdown overlays the activity.
+    @State private var showsDocumentTypeOptions = false
 
     /**
      Creates the shared Android document-selection activity host.
@@ -69,7 +83,8 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
      - Parameters:
        - surfacePalette: Palette inherited from the launching reader window or workspace.
        - topBar: Normal or contextual app bar for the active activity state.
-       - filterBar: Shared `document_selection.xml` filter projection.
+       - filterBar: Shared `document_selection.xml` filter projection. The host owns the dropdown
+         popups so they can overlay the whole activity like Android spinner popup windows.
        - rows: Activity-owned document rows and state content.
      - Returns: A configured viewport-filling activity host.
      - Side effects: Evaluates the view-builder closures once during initialization.
@@ -78,7 +93,7 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
     init(
         surfacePalette: ReaderThemeSurfacePalette,
         @ViewBuilder topBar: () -> TopBar,
-        @ViewBuilder filterBar: () -> FilterBar,
+        filterBar: () -> AndroidDocumentSelectionFilterBar,
         @ViewBuilder rows: () -> Rows
     ) {
         self.surfacePalette = surfacePalette
@@ -92,11 +107,79 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
             topBar
         } content: {
             VStack(spacing: 0) {
-                filterBar
+                filterBar.dropdownVisibility(
+                    language: $showsLanguageOptions,
+                    documentType: $showsDocumentTypeOptions
+                )
                 rows
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
+        .androidAnchoredPopupMenu(
+            anchorID: AndroidDocumentSelectionPopupAnchor.language,
+            isPresented: $showsLanguageOptions,
+            menuWidth: 260,
+            estimatedMenuHeight: Self.popupHeight(optionCount: filterBar.languageOptions.count),
+            accessibilityIdentifier: "\(filterBar.accessibilityPrefix)LanguageMenu"
+        ) {
+            optionsPopup(
+                filterBar.languageOptions,
+                accessibilityIdentifier: "\(filterBar.accessibilityPrefix)LanguageMenuSurface"
+            ) { optionID in
+                showsLanguageOptions = false
+                filterBar.onSelectLanguage(optionID)
+            }
+        }
+        .androidAnchoredPopupMenu(
+            anchorID: AndroidDocumentSelectionPopupAnchor.documentType,
+            isPresented: $showsDocumentTypeOptions,
+            menuWidth: 240,
+            estimatedMenuHeight: Self.popupHeight(optionCount: filterBar.documentTypeOptions.count),
+            accessibilityIdentifier: "\(filterBar.accessibilityPrefix)DocumentTypeMenu"
+        ) {
+            optionsPopup(
+                filterBar.documentTypeOptions,
+                accessibilityIdentifier: "\(filterBar.accessibilityPrefix)DocumentTypeMenuSurface"
+            ) { optionID in
+                showsDocumentTypeOptions = false
+                filterBar.onSelectDocumentType(optionID)
+            }
+        }
+    }
+
+    /** Builds a bounded shared popup so long language catalogs remain usable on compact screens. */
+    private func optionsPopup(
+        _ options: [AndroidDocumentSelectionOption],
+        accessibilityIdentifier: String,
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
+        AndroidPopupMenuSurface(
+            colorScheme: colorScheme,
+            accessibilityIdentifier: accessibilityIdentifier,
+            backgroundColor: surfacePalette.backgroundColor,
+            primaryTextColor: surfacePalette.foregroundColor,
+            secondaryTextColor: surfacePalette.secondaryForegroundColor,
+            accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
+        ) {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(options) { option in
+                        AndroidPopupMenuRow(
+                            title: option.title,
+                            accessibilityIdentifier: "\(accessibilityIdentifier)::\(option.id)"
+                        ) {
+                            onSelect(option.id)
+                        }
+                    }
+                }
+            }
+            .frame(height: Self.popupHeight(optionCount: options.count))
+        }
+    }
+
+    /** Resolves the measured popup height while keeping at least one row tappable. */
+    private static func popupHeight(optionCount: Int) -> CGFloat {
+        min(max(CGFloat(optionCount) * 48, 48), 336)
     }
 }
 
@@ -106,7 +189,9 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
  Android's Choose Document and Download Documents activities inflate the same
  `document_selection.xml`: a 55dp strip containing language autocomplete, free-text search,
  document-type spinner, and result count. This component preserves that shared ownership boundary
- on iOS and presents both dropdowns through the app-owned popup system rather than native `Menu`.
+ on iOS. Its dropdowns use the app-owned popup system rather than native `Menu`, and
+ `AndroidDocumentSelectionActivityScreen` hosts those popups at the activity level because an
+ overlay attached to the 55-point strip would paint underneath the sibling document list.
 
  Inputs:
  - owner palette for the active reader/workspace
@@ -129,12 +214,6 @@ struct AndroidDocumentSelectionActivityScreen<TopBar: View, FilterBar: View, Row
    accessibility Dynamic Type sizes
  */
 struct AndroidDocumentSelectionFilterBar: View {
-    /// Popup anchors shared by the trigger buttons and app-owned overlay modifiers.
-    private enum PopupAnchor {
-        static let language = "androidDocumentSelectionLanguageAnchor"
-        static let documentType = "androidDocumentSelectionTypeAnchor"
-    }
-
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -177,11 +256,87 @@ struct AndroidDocumentSelectionFilterBar: View {
     /// Document-type selection callback receiving the option identity.
     let onSelectDocumentType: (String) -> Void
 
-    /// Whether the app-owned language dropdown is visible.
-    @State private var showsLanguageOptions = false
+    /// Language-dropdown visibility owned by the presenting activity screen.
+    @Binding private var showsLanguageOptions: Bool
 
-    /// Whether the app-owned document-type dropdown is visible.
-    @State private var showsDocumentTypeOptions = false
+    /// Document-type-dropdown visibility owned by the presenting activity screen.
+    @Binding private var showsDocumentTypeOptions: Bool
+
+    /**
+     Creates the shared filter strip with inert dropdown visibility.
+
+     The activity screen replaces the inert visibility through `dropdownVisibility(language:documentType:)`
+     so the dropdowns can overlay the whole activity instead of the 55-point strip.
+
+     - Parameters:
+       - surfacePalette: Reader/workspace colors resolved by the launching activity.
+       - languageTitle: Current localized language field title.
+       - languageOptions: Ordered language dropdown values.
+       - documentTypeTitle: Current localized document-type field title.
+       - documentTypeOptions: Ordered document-type dropdown values.
+       - resultCountTitle: Localized visible-result count.
+       - searchPlaceholder: Localized Android search hint.
+       - searchText: Caller-owned free-text filter.
+       - accessibilityPrefix: Prefix used for stable accessibility identifiers.
+       - onOpenLanguageOptions: Android autocomplete-open callback.
+       - onSelectLanguage: Language selection callback receiving the option identity.
+       - onSearchFocused: Android search-focus callback.
+       - onSelectDocumentType: Document-type selection callback receiving the option identity.
+     - Returns: A configured strip whose triggers mutate inert visibility until adopted by a host.
+     - Side effects: none.
+     - Failure modes: none; an unadopted strip renders but its dropdown triggers show no popup.
+     */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette,
+        languageTitle: String,
+        languageOptions: [AndroidDocumentSelectionOption],
+        documentTypeTitle: String,
+        documentTypeOptions: [AndroidDocumentSelectionOption],
+        resultCountTitle: String,
+        searchPlaceholder: String,
+        searchText: Binding<String>,
+        accessibilityPrefix: String,
+        onOpenLanguageOptions: @escaping () -> Void,
+        onSelectLanguage: @escaping (String) -> Void,
+        onSearchFocused: @escaping () -> Void,
+        onSelectDocumentType: @escaping (String) -> Void
+    ) {
+        self.surfacePalette = surfacePalette
+        self.languageTitle = languageTitle
+        self.languageOptions = languageOptions
+        self.documentTypeTitle = documentTypeTitle
+        self.documentTypeOptions = documentTypeOptions
+        self.resultCountTitle = resultCountTitle
+        self.searchPlaceholder = searchPlaceholder
+        _searchText = searchText
+        self.accessibilityPrefix = accessibilityPrefix
+        self.onOpenLanguageOptions = onOpenLanguageOptions
+        self.onSelectLanguage = onSelectLanguage
+        self.onSearchFocused = onSearchFocused
+        self.onSelectDocumentType = onSelectDocumentType
+        _showsLanguageOptions = .constant(false)
+        _showsDocumentTypeOptions = .constant(false)
+    }
+
+    /**
+     Returns a copy whose dropdown visibility is owned by the presenting activity screen.
+
+     - Parameters:
+       - language: Host-owned language dropdown visibility.
+       - documentType: Host-owned document-type dropdown visibility.
+     - Returns: The strip with its triggers wired to the host's popup state.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    func dropdownVisibility(
+        language: Binding<Bool>,
+        documentType: Binding<Bool>
+    ) -> AndroidDocumentSelectionFilterBar {
+        var copy = self
+        copy._showsLanguageOptions = language
+        copy._showsDocumentTypeOptions = documentType
+        return copy
+    }
 
     /**
      Formats Android's shared visible-document count with the exact resource key and placeholder.
@@ -211,36 +366,6 @@ struct AndroidDocumentSelectionFilterBar: View {
                 Rectangle()
                     .fill(surfacePalette.inactiveBorderColor)
                     .frame(height: 1)
-            }
-            .androidAnchoredPopupMenu(
-                anchorID: PopupAnchor.language,
-                isPresented: $showsLanguageOptions,
-                menuWidth: 260,
-                estimatedMenuHeight: popupHeight(optionCount: languageOptions.count),
-                accessibilityIdentifier: "\(accessibilityPrefix)LanguageMenu"
-            ) {
-                optionsPopup(
-                    languageOptions,
-                    accessibilityIdentifier: "\(accessibilityPrefix)LanguageMenuSurface"
-                ) { optionID in
-                    showsLanguageOptions = false
-                    onSelectLanguage(optionID)
-                }
-            }
-            .androidAnchoredPopupMenu(
-                anchorID: PopupAnchor.documentType,
-                isPresented: $showsDocumentTypeOptions,
-                menuWidth: 240,
-                estimatedMenuHeight: popupHeight(optionCount: documentTypeOptions.count),
-                accessibilityIdentifier: "\(accessibilityPrefix)DocumentTypeMenu"
-            ) {
-                optionsPopup(
-                    documentTypeOptions,
-                    accessibilityIdentifier: "\(accessibilityPrefix)DocumentTypeMenuSurface"
-                ) { optionID in
-                    showsDocumentTypeOptions = false
-                    onSelectDocumentType(optionID)
-                }
             }
     }
 
@@ -283,7 +408,7 @@ struct AndroidDocumentSelectionFilterBar: View {
             underlinedLabel(languageTitle, alignment: .leading, includesDropdownIndicator: false)
         }
         .buttonStyle(.plain)
-        .androidPopupMenuAnchor(id: PopupAnchor.language)
+        .androidPopupMenuAnchor(id: AndroidDocumentSelectionPopupAnchor.language)
         .accessibilityIdentifier("\(accessibilityPrefix)LanguageFilter")
     }
 
@@ -333,7 +458,7 @@ struct AndroidDocumentSelectionFilterBar: View {
                 )
             }
             .buttonStyle(.plain)
-            .androidPopupMenuAnchor(id: PopupAnchor.documentType)
+            .androidPopupMenuAnchor(id: AndroidDocumentSelectionPopupAnchor.documentType)
         }
         .accessibilityIdentifier("\(accessibilityPrefix)CategoryFilter")
     }
@@ -363,41 +488,6 @@ struct AndroidDocumentSelectionFilterBar: View {
                 .frame(height: 1)
         }
         .contentShape(Rectangle())
-    }
-
-    /** Builds a bounded shared popup so long language catalogs remain usable on compact screens. */
-    private func optionsPopup(
-        _ options: [AndroidDocumentSelectionOption],
-        accessibilityIdentifier: String,
-        onSelect: @escaping (String) -> Void
-    ) -> some View {
-        AndroidPopupMenuSurface(
-            colorScheme: colorScheme,
-            accessibilityIdentifier: accessibilityIdentifier,
-            backgroundColor: surfacePalette.backgroundColor,
-            primaryTextColor: surfacePalette.foregroundColor,
-            secondaryTextColor: surfacePalette.secondaryForegroundColor,
-            accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
-        ) {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(options) { option in
-                        AndroidPopupMenuRow(
-                            title: option.title,
-                            accessibilityIdentifier: "\(accessibilityIdentifier)::\(option.id)"
-                        ) {
-                            onSelect(option.id)
-                        }
-                    }
-                }
-            }
-            .frame(height: popupHeight(optionCount: options.count))
-        }
-    }
-
-    /** Resolves the measured popup height while keeping at least one row tappable. */
-    private func popupHeight(optionCount: Int) -> CGFloat {
-        min(max(CGFloat(optionCount) * 48, 48), 336)
     }
 }
 

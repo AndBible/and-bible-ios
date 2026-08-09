@@ -664,7 +664,7 @@ struct BibleReaderModulePicker: View {
      - Side effects: Menus and the text field mutate the active picker filters.
      - Failure modes: Large Dynamic Type splits controls into two rows to avoid overlap.
      */
-    private func androidFilterBar(visibleDocumentCount: Int) -> some View {
+    private func androidFilterBar(visibleDocumentCount: Int) -> AndroidDocumentSelectionFilterBar {
         AndroidDocumentSelectionFilterBar(
             surfacePalette: surfacePalette,
             languageTitle: languageFilterTitle(for: selectedLanguage),
