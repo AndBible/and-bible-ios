@@ -1038,23 +1038,34 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
         XCTAssertEqual(ModuleBrowserView.installSizeText(for: modules[0].installSizeBytes), "1.3 MB")
         XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.10", installedVersion: "1.9"))
         XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "1.0"))
-        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: "1.0"))
         XCTAssertNil(ModuleBrowserView.installSizeText(for: 0))
         XCTAssertNil(ModuleBrowserView.installSizeText(for: -1))
     }
 
     /**
-     Verifies same-repository invalid version metadata remains updateable like Android.
+     Verifies same-repository malformed versions stay updateable while blank versions compare as 1.0.
 
-     Android constructs both values with JSword `Version`; any constructor failure deliberately
-     returns `UPGRADE_AVAILABLE`. This test covers blank, malformed, excessive-component, and
-     overflowing metadata, JSword's arbitrary single-character separator, rejected line terminators,
-     and `-1` ordering for omitted components. A failure would hide the only reinstall/update
-     affordance for a damaged same-repository catalog or local descriptor.
+     Android constructs both values with JSword `Version`; a constructor failure deliberately
+     returns `UPGRADE_AVAILABLE`, but a *missing* version never reaches the constructor because
+     `SwordBookMetaData` defaults it to `1.0` at read time. This test covers the blank read-time
+     default (including catalog caches persisted before the default existed), malformed,
+     excessive-component, and overflowing metadata, JSword's arbitrary single-character separator,
+     rejected line terminators, and `-1` ordering for omitted components. A failure either hides
+     the reinstall/update affordance for damaged metadata or reports a phantom update forever for
+     versionless modules such as BDBT.
      - Side effects: None.
      */
     func testSameRepositoryInvalidVersionsRemainUpdateableLikeAndroid() {
-        let remote = RemoteModuleInfo(
+        let malformedRemote = RemoteModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en",
+            sourceName: "CrossWire",
+            version: "not-a-version"
+        )
+        let versionlessRemote = RemoteModuleInfo(
             name: "KJV",
             description: "King James Version",
             category: .bible,
@@ -1081,11 +1092,19 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
 
         XCTAssertEqual(
             ModuleBrowserView.displayStatus(
-                for: remote,
+                for: malformedRemote,
                 installedModules: [installed],
                 downloadActivities: [:]
             ),
             .updateAvailable
+        )
+        XCTAssertEqual(
+            ModuleBrowserView.displayStatus(
+                for: versionlessRemote,
+                installedModules: [installed],
+                downloadActivities: [:]
+            ),
+            .installed
         )
         XCTAssertEqual(
             ModuleBrowserView.displayStatus(
@@ -1095,6 +1114,9 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             ),
             .installable
         )
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "", installedVersion: ""))
+        XCTAssertFalse(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: ""))
+        XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "2.0", installedVersion: ""))
         XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "invalid", installedVersion: "1.0"))
         XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.0", installedVersion: "invalid"))
         XCTAssertTrue(ModuleBrowserView.isRemoteVersionNewer(remoteVersion: "1.2.3.4.5", installedVersion: "1.0"))
