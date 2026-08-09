@@ -213,7 +213,12 @@ public final class WindowManager {
            let maxWindow = allWindows.first(where: { $0.id == maxId }) {
             visibleWindows = [maxWindow]
         } else {
-            visibleWindows = allWindows.filter { $0.layoutState != "minimized" }
+            // Android renders only VISIBLE windows; `closed` rows exist solely through synced
+            // or imported Android state (local close deletes the row) and must stay hidden
+            // like Android hides them instead of rendering as extra panes.
+            visibleWindows = allWindows.filter {
+                $0.layoutState != "minimized" && $0.layoutState != "closed"
+            }
         }
 
         if activeWindow == nil || !visibleWindows.contains(where: { $0.id == activeWindow?.id }) {
@@ -480,6 +485,17 @@ public final class WindowManager {
         } else {
             window = workspaceStore.addWindow(to: workspace, document: document, category: category)
             window.isLinksWindow = asLinksWindow
+        }
+
+        // Android also clones the source page manager into a chained links window, but its
+        // showLink overwrites the target's document synchronously before anything can observe
+        // the clone. iOS panes boot asynchronously, so a cloned `mynote` category could restore
+        // the My Notes page in the new links window before the link navigation lands. Reset it
+        // to the Bible category Android guarantees as the post-link state.
+        if asLinksWindow,
+           let pageManager = window.pageManager,
+           pageManager.currentCategoryName == "mynote" {
+            pageManager.currentCategoryName = "bible"
         }
 
         // Intentional divergence from Android: Android's window creation never touches
