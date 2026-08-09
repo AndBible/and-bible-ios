@@ -915,7 +915,7 @@ struct BibleReaderAnnotationPayloadFactory {
             verseRangeOnlyNumber: displayProjection.verseRangeOnlyNumber,
             verseRangeAbbreviated: displayProjection.verseRangeAbbreviated,
             v11n: hasSourceModule ? bookmark.v11n : JSwordKJVAVersification.name,
-            osisFragment: nil
+            osisFragment: bibleBookmarkOsisFragment(for: bookmark)
         )
     }
 
@@ -994,6 +994,58 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: Malformed KJVA ordinals retain best-effort display coordinates with ordinal
        `0`; source ordinals are never reinterpreted as KJVA or active-module ordinals.
      */
+    /**
+     Builds Android's per-bookmark OSIS fragment for the expanded `BookmarkText` view.
+
+     Android's `BookmarkControl.addText` renders every serialized Bible bookmark's verse range
+     from the bookmark's own module (falling back to the default Bible) via `readOsisFragment`.
+     The shared `BookmarkText` component renders that fragment when a row expands, so a null
+     fragment makes expansion collapse the visible quote into empty content — the "text
+     disappears" defect in My Notes rows.
+
+     - Parameter bookmark: Persisted Bible bookmark being serialized.
+     - Returns: Bridge fragment for the bookmark's range, or `nil` when no Bible module resolves,
+       the stored canon cannot resolve the ordinals, or content is incomplete — Android's
+       `OsisError` null path, which keeps the collapsed one-liner.
+     - Side effects: Reads SWORD content on the shared serialization queue.
+     - Failure modes: Returns `nil`; the web client keeps the collapsed quote.
+     */
+    private func bibleBookmarkOsisFragment(for bookmark: BibleBookmark) -> OsisFragment? {
+        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        let module = (initials.isEmpty ? nil : sourceModuleResolver(initials)) ?? activeModule
+        guard let module, module.info.category == .bible else { return nil }
+        let source = BibleReaderInstalledScriptureSource.sword(module)
+        let sourceV11n = bookmark.v11n
+        guard !sourceV11n.isEmpty, bookmark.ordinalStart > 0 else { return nil }
+        let endOrdinal = max(bookmark.ordinalEnd, bookmark.ordinalStart)
+        var references: [VerseKeyReference] = []
+        for ordinal in bookmark.ordinalStart...endOrdinal {
+            guard let reference = SwordVersification.reference(
+                forIndex: ordinal,
+                versification: sourceV11n
+            ) else { return nil }
+            // Chapter-introduction slots are outside Android's VerseRange membership.
+            guard reference.verse > 0 else { continue }
+            guard let mapped = source.mappedReference(
+                osisBookId: reference.osisBookId,
+                chapter: reference.chapter,
+                verse: reference.verse,
+                from: sourceV11n
+            ) else { return nil }
+            if let previous = references.last {
+                if previous == mapped { continue }
+                guard source.isCanonicallyAdjacent(mapped, after: previous) else { return nil }
+            }
+            references.append(mapped)
+        }
+        guard !references.isEmpty else { return nil }
+        return BibleReaderInstalledScriptureFragmentBuilder.build(
+            source: source,
+            references: references,
+            requiresCompleteContent: true
+        )
+    }
+
     /**
      Builds the bookmark's own-versification display projection for annotation documents.
 

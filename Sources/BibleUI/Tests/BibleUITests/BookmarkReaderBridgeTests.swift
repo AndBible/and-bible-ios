@@ -970,6 +970,18 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(hasNoteById.count, 2)
         XCTAssertEqual(hasNoteById[noteless.id.uuidString.lowercased()], false)
         XCTAssertEqual(hasNoteById[noted.id.uuidString.lowercased()], true)
+
+        // Android's addText serializes each row's rendered OSIS fragment; the shared
+        // BookmarkText component renders it when the row expands, so a null fragment makes
+        // expansion blank the visible quote.
+        let notedRow = try XCTUnwrap(
+            (documentPayload["bookmarks"] as? [[String: Any]])?.first {
+                ($0["id"] as? String)?.lowercased() == noted.id.uuidString.lowercased()
+            }
+        )
+        let fragment = try XCTUnwrap(notedRow["osisFragment"] as? [String: Any])
+        XCTAssertEqual(fragment["bookInitials"] as? String, "KJV")
+        XCTAssertFalse(((fragment["xml"] as? String) ?? "").isEmpty)
     }
 
     /**
