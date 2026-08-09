@@ -664,7 +664,12 @@ final class BibleReaderSpeechCoordinator {
         })
     }
 
-    /** Highlights one provider-owned Bible verse after the caller validates session generation. */
+    /**
+     Scrolls the reader to one provider-owned Bible verse after session-generation validation.
+
+     Android tracks the spoken position by scrolling only; it applies no per-verse highlight
+     styling during playback, so iOS must not either.
+     */
     private func highlightVerseNow(
         _ ordinal: Int,
         evaluateJavaScript: @escaping (String) -> Void
@@ -672,11 +677,8 @@ final class BibleReaderSpeechCoordinator {
         currentHighlightedOrdinal = ordinal
         let js = """
         (function() {
-            var oldVerse = document.querySelector('.speaking-verse');
-            if (oldVerse) oldVerse.classList.remove('speaking-verse');
             var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
             if (!verse) return;
-            verse.classList.add('speaking-verse');
             verse.scrollIntoView({behavior: 'smooth', block: 'center'});
         })();
         """
@@ -684,28 +686,14 @@ final class BibleReaderSpeechCoordinator {
     }
 
     /**
-     Clears speech highlights from the reader web view.
+     Clears spoken-position tracking when playback stops.
 
-     - Parameter evaluateJavaScript: Closure used to run DOM cleanup in the reader web view.
-     - Side effects: Resets the current highlighted ordinal and removes the active word/verse
-       highlight DOM state. The caller owns main-actor and session-generation validation.
+     - Parameter evaluateJavaScript: Retained for call-site symmetry; Android leaves no playback
+       styling in the document, so there is no DOM state to clean.
+     - Side effects: Resets the current tracked ordinal.
      */
     private func clearSpeakHighlightNow(evaluateJavaScript: @escaping (String) -> Void) {
         currentHighlightedOrdinal = nil
-        let js = """
-        (function() {
-            var prev = document.getElementById('speaking-word');
-            if (prev) {
-                var p = prev.parentNode;
-                if (p) {
-                    p.replaceChild(document.createTextNode(prev.textContent || ''), prev);
-                    p.normalize();
-                }
-            }
-            var v = document.querySelector('.speaking-verse');
-            if (v) v.classList.remove('speaking-verse');
-        })();
-        """
-        evaluateJavaScript(js)
+        _ = evaluateJavaScript
     }
 }

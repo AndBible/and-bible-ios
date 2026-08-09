@@ -1669,13 +1669,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Injects the night/day page background and the TTS highlight styles.
+     Injects the night/day page background colors.
 
      Body/document colors are set natively because they must hold before the Vue client is ready
      (initial load, document replacement) when no `set_config` styling exists yet; once the client
-     runs, the shared frontend derives the same colors from config. All layout — paddings, margins,
-     and text width — belongs exclusively to the shared Vue `contentStyle` so Android's
-     text-display settings keep authority (issue #377).
+     runs, the shared frontend derives the same colors from config. All layout and playback
+     styling belongs exclusively to the shared frontend so Android's behavior keeps authority
+     (issues #377 and the speak-highlight parity that followed it).
 
      - Side effects: Evaluates one JavaScript block in the pane web view.
      - Failure modes: Evaluation failures leave the previous styling; the next content load retries.
@@ -1702,14 +1702,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if (content) {
             content.style.removeProperty('padding-top');
             content.style.removeProperty('padding-bottom');
-        }
-        // Inject CSS for TTS speak highlighting only. Padding and max-width belong to the shared
-        // Vue contentStyle; a native override here would defeat Android's text-display settings.
-        if (!document.getElementById('ios-tts-highlight')) {
-            var s = document.createElement('style');
-            s.id = 'ios-tts-highlight';
-            s.textContent = '.speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; } .night .speaking-verse { background-color: rgba(135, 168, 255, 0.28); } .night #speaking-word { background-color: rgba(135, 168, 255, 0.6); }';
-            document.head.appendChild(s);
         }
         """)
     }
