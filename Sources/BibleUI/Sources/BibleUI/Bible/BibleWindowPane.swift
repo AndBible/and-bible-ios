@@ -347,10 +347,19 @@ struct BibleWindowPane: View {
             } else {
                 let workspaceStore = WorkspaceStore(modelContext: modelContext)
                 let settingsStore = SettingsStore(modelContext: modelContext)
+                // Display settings can change while this pane is unmounted (minimized window,
+                // covered destination); .onChange cannot observe that, and configureController's
+                // plain assignment never re-renders. Detect drift first and push it through the
+                // full update path so restored panes match the current settings.
+                let displaySettingsDrifted = controller!.displaySettings != displaySettings
+                    || controller!.nightMode != nightMode
         configureController(
           controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
         configureAICoordinator(for: controller!)
                 registerController(controller!)
+                if displaySettingsDrifted {
+                    controller!.updateDisplaySettings(displaySettings, nightMode: nightMode)
+                }
             }
         }
         .onChange(of: nightMode) { _, newValue in
