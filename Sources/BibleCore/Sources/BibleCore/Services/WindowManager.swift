@@ -304,9 +304,11 @@ public final class WindowManager {
     /**
      Resolves the Android-style links target window for a source window.
 
-     Normal content windows route link results into the workspace primary links window, reusing an
-     existing links window before creating a new one. Links windows keep their own chained target
-     through `targetLinksWindowId`, matching Android's recursive links-window behavior.
+     Every window first honors its own persisted `targetLinksWindowId`, matching Android's
+     `Window.targetLinksWindow` lookup order. Without one, normal content windows route link
+     results into the workspace primary links window, reusing an existing links window before
+     creating a new one, while links windows chain a new target of their own — Android's
+     recursive links-window behavior.
 
      - Parameter sourceWindow: Window that initiated the link navigation.
      - Returns: Existing or newly created links window, or `nil` when no workspace is active or
@@ -327,10 +329,14 @@ public final class WindowManager {
         var createdLinksWindow = false
         let linksWindow: Window
 
-        if sourceWindow.isLinksWindow {
-            if let existing = explicitLinksWindowTarget(for: sourceWindow) {
-                linksWindow = existing
-            } else if let newWindow = createLinksWindow(from: sourceWindow) {
+        if let existing = explicitLinksWindowTarget(for: sourceWindow) {
+            // Android's `Window.targetLinksWindow` consults the window's own persisted target
+            // before any kind-specific fallback, so Android-synced workspaces whose normal
+            // windows carry `targetLinksWindowId` route to that exact window instead of the
+            // workspace primary.
+            linksWindow = existing
+        } else if sourceWindow.isLinksWindow {
+            if let newWindow = createLinksWindow(from: sourceWindow) {
                 sourceWindow.targetLinksWindowId = newWindow.id
                 linksWindow = newWindow
                 createdLinksWindow = true
@@ -347,7 +353,10 @@ public final class WindowManager {
             return nil
         }
 
-        if linksWindow.layoutState == "minimized" {
+        // Android treats both CLOSED and MINIMISED targets as non-visible and reveals the
+        // selected links window, so a persisted explicit target in either hidden state is
+        // restored before receiving the link result.
+        if linksWindow.layoutState == "minimized" || linksWindow.layoutState == "closed" {
             restoreWindow(linksWindow)
         } else if createdLinksWindow, let previousActiveWindow {
             activeWindow = previousActiveWindow
@@ -473,6 +482,11 @@ public final class WindowManager {
             window.isLinksWindow = asLinksWindow
         }
 
+        // Intentional divergence from Android: Android's window creation never touches
+        // `maximizedWindowId`, leaving a new window active but hidden behind the maximized pane.
+        // iOS exits maximize so the created window is immediately visible. Link results never
+        // reach this path while maximized because the pane-level links gate opens them in the
+        // current window, matching Android's `checkIfOpenLinksInDedicatedWindow`.
         if workspace.maximizedWindowId != nil {
             workspace.maximizedWindowId = nil
         }

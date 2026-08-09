@@ -274,27 +274,43 @@ struct BibleReaderAnnotationDocumentLoader {
             return false
         }
 
-        prepareVisibleState(label.name)
+        // Android's StudyPadKey.name always renders the localized display name, so native pane
+        // chrome shows "Speak"/"Unlabelled" translations instead of the stored sentinel names.
+        prepareVisibleState(AndroidLabelPresentation.displayName(for: label))
 
+        // Android derives the junction payloads from the returned bookmark rows
+        // (`bookmarks.mapNotNull { getBookmarkToLabel(it, label.id) }`), so every emitted
+        // bookmark has a matching bookmarkToLabel and the document never carries junctions
+        // for rows it does not render.
+        let bibleRows = bookmarkService.bibleBookmarks(withLabel: labelId)
+        let genericRows = bookmarkService.genericBookmarks(withLabel: labelId)
         let document = StudyPadDocumentPayload(
             id: "journal_\(labelId.uuidString)",
             type: "journal",
             label: labelData,
-            bookmarks: bookmarkService.bibleBookmarks(withLabel: labelId).map { bookmarkPayload($0) },
-            genericBookmarks: bookmarkService.genericBookmarks(withLabel: labelId).map { genericBookmarkPayload($0) },
-            bookmarkToLabels: bookmarkService.bibleBookmarkToLabels(labelId: labelId).compactMap {
-                bibleBookmarkToLabelPayload($0)
-            },
-            genericBookmarkToLabels: bookmarkService.genericBookmarkToLabels(labelId: labelId).compactMap {
-                genericBookmarkToLabelPayload($0)
-            },
+            bookmarks: bibleRows.map { bookmarkPayload($0) },
+            genericBookmarks: genericRows.map { genericBookmarkPayload($0) },
+            bookmarkToLabels: bibleRows.flatMap { bookmark in
+                (bookmark.bookmarkToLabels ?? []).filter { $0.label?.id == labelId }
+            }.compactMap { bibleBookmarkToLabelPayload($0) },
+            genericBookmarkToLabels: genericRows.flatMap { bookmark in
+                (bookmark.bookmarkToLabels ?? []).filter { $0.label?.id == labelId }
+            }.compactMap { genericBookmarkToLabelPayload($0) },
             journalTextEntries: bookmarkService.studyPadEntries(labelId: labelId).map { studyPadEntryPayload($0) }
         )
 
         sendLabels()
+        // Android composes `jumpToId` as "o-<abs(entryId.hashCode())>" so setup_content scrolls
+        // to the shared StudyPad row markup, whose element id is `o-${j.hashCode}`. Every iOS row
+        // payload derives `hashCode` from the uppercase UUID string, so the same derivation here
+        // targets bookmark, generic-bookmark, and text-entry rows alike; a raw UUID matches no
+        // element and silently falls back to the top of the document.
+        let jumpToId = bookmarkId.map {
+            "o-\(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: $0.uuidString.hashValue))"
+        }
         guard documentReplacement.replace(
             document: document,
-            setup: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
+            setup: ReaderSetupContentPayload(jumpToId: jumpToId)
         ) else {
             annotationDocumentLoaderLogger.error("Failed to emit StudyPad document replacement")
             return false

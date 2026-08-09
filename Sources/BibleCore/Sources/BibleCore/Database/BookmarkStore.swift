@@ -1041,6 +1041,13 @@ public final class BookmarkStore {
 
     /**
      * Fetches all Bible bookmark-to-label junction rows for a label.
+     *
+     * The trust gate is an intentional divergence from Android: Android's rows are natively
+     * KJVA-authoritative, while iOS quarantines legacy rows whose persisted KJVA coordinates
+     * could belong to another ordinal domain until `PersistedOrdinalTrustMigrationService`
+     * verifies them. Rendering quarantined coordinates would place rows on wrong verses — a
+     * state Android cannot reach — so hiding them is the parity-safe choice.
+     *
      * - Parameter labelId: Label UUID.
      * - Returns: Matching junction rows.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
@@ -1069,24 +1076,55 @@ public final class BookmarkStore {
 
     /**
      * Fetches Bible bookmarks carrying the given label.
+     *
+     * Android's `getBibleBookmarksWithLabel` branches the persisted Unlabelled label to
+     * `unlabelledBookmarks` — junction equality can never match it because unlabelled rows have
+     * no junction rows — and orders results by `BIBLE_ORDER` (`kjvOrdinalStart, startOffset`).
+     *
      * - Parameter labelId: Label UUID.
-     * - Returns: Bible bookmarks associated with the label.
+     * - Returns: Bible bookmarks associated with the label in Android's Bible order.
      * - Failure: Junction fetch failures are swallowed and reported as an empty array.
      */
     public func bibleBookmarks(withLabel labelId: UUID) -> [BibleBookmark] {
+        if labelId == Label.unlabeledId {
+            return bibleBookmarks(sortOrder: .bibleOrder)
+                .filter { ($0.bookmarkToLabels ?? []).isEmpty }
+        }
         let btls = bibleBookmarkToLabels(labelId: labelId)
         return btls.compactMap { $0.bookmark }
+            .sorted {
+                if $0.kjvOrdinalStart != $1.kjvOrdinalStart {
+                    return $0.kjvOrdinalStart < $1.kjvOrdinalStart
+                }
+                return ($0.startOffset ?? Int.min) < ($1.startOffset ?? Int.min)
+            }
     }
 
     /**
      * Fetches generic bookmarks carrying the given label.
+     *
+     * Android's `getGenericBookmarksWithLabel` branches the persisted Unlabelled label to
+     * `unlabelledGenericBookmarks`, which junction equality can never match.
+     *
      * - Parameter labelId: Label UUID.
      * - Returns: Generic bookmarks associated with the label.
      * - Failure: Junction fetch failures are swallowed and reported as an empty array.
      */
     public func genericBookmarks(withLabel labelId: UUID) -> [GenericBookmark] {
+        // Android orders generic rows by bookInitials then key in every branch.
+        let ordered: ([GenericBookmark]) -> [GenericBookmark] = { rows in
+            rows.sorted {
+                if $0.bookInitials != $1.bookInitials {
+                    return $0.bookInitials < $1.bookInitials
+                }
+                return $0.key < $1.key
+            }
+        }
+        if labelId == Label.unlabeledId {
+            return ordered(genericBookmarks().filter { ($0.bookmarkToLabels ?? []).isEmpty })
+        }
         let gbtls = genericBookmarkToLabels(labelId: labelId)
-        return gbtls.compactMap { $0.bookmark }
+        return ordered(gbtls.compactMap { $0.bookmark })
     }
 
     // MARK: - Persistence

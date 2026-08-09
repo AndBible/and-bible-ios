@@ -563,7 +563,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return (start: start, end: end, verseCount: verseCount)
     }
 
-    /** Returns note-backed bookmarks inside one explicit KJVA My Notes page. */
+    /**
+     Returns every bookmark inside one explicit KJVA My Notes page.
+
+     Android's `CurrentMyNotePage` passes all of `bookmarksForVerseRange(...)` to the shared
+     `MyNotesDocument`, including bookmarks without notes; the Vue layer then applies the
+     `showBookmarks` and hidden-label display filters. iOS must not pre-filter to note-bearing
+     bookmarks here, or chapters whose bookmarks have no notes render Android's empty state
+     instead of their bookmark rows.
+     */
     private func myNotesBookmarks(for target: MyNotesTarget) -> [BibleBookmark] {
         guard let service = bookmarkService,
       let range = myNotesChapterRange(for: target)
@@ -573,10 +581,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             endOrdinal: range.end,
             book: target.bookName
         )
-        .filter { $0.notes?.notes.isEmpty == false }
         .sorted {
             if $0.kjvOrdinalStart != $1.kjvOrdinalStart {
                 return $0.kjvOrdinalStart < $1.kjvOrdinalStart
+            }
+            // Android orders chapter rows by kjvOrdinalStart then startOffset (SQLite sorts NULL
+            // offsets first); the UUID tail only keeps equal-offset rows deterministic.
+            let lhsOffset = $0.startOffset ?? Int.min
+            let rhsOffset = $1.startOffset ?? Int.min
+            if lhsOffset != rhsOffset {
+                return lhsOffset < rhsOffset
             }
             return $0.id.uuidString < $1.id.uuidString
         }
@@ -768,7 +782,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
-    /// Notes with non-empty payloads that belong to the currently visible chapter.
+    /**
+     Bookmark rows backing the visible My Notes document, or note-bearing chapter bookmarks for
+     the pre-open accessibility export.
+     */
     private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
         if showingMyNotes, let activeMyNotesTarget {
             return myNotesBookmarks(for: activeMyNotesTarget)
@@ -1500,6 +1517,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 self?.onPersistState?()
             },
             loadCurrentContent: { [weak self] in
+                // Android's document/category switches select the new page and leave the MYNOTE
+                // category (CurrentPageManager.setCurrentDocument*), so switch-driven reloads
+                // must exit My Notes; only navigation-driven reloads keep it current.
+                self?.showingMyNotes = false
                 self?.loadCurrentContent()
             }
         )
@@ -1572,6 +1593,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.onPersistState?()
       },
       reloadContent: { [weak self] in
+        // Android's document/category switches select the new page and leave the MYNOTE
+        // category, so SQLite-backed switches must exit My Notes like the SWORD switch path.
+        self?.showingMyNotes = false
         self?.loadCurrentContent()
       }
     )
@@ -3071,6 +3095,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 return
             }
             if loadRestoredAndroidMemorizeDocument() {
+                return
+            }
+        }
+
+        if showingMyNotes {
+            // Android keeps the My Notes page current through chapter stepping and passage
+            // selection (`pageManager.currentPage.setKey` stays on the MYNOTE category), so
+            // position-driven reloads regenerate the notes document for the new position
+            // instead of exiting to the Bible text. Bookmark-list navigation and the return
+            // affordance exit explicitly before loading. An explicit verse keeps its row jump
+            // like Android's key-anchored reload; chapter stepping lands at the chapter top.
+            let target: MyNotesTarget?
+            if currentVerse > 1,
+               let ordinal = kjvaOrdinal(
+                   osisBookId: osisBookId(for: currentBook),
+                   chapter: currentChapter,
+                   verse: currentVerse,
+                   sourceVersification: activeSourceVersificationName()
+               ) {
+                target = myNotesTarget(kjvaOrdinal: ordinal)
+            } else {
+                target = currentMyNotesTarget(jumpToOrdinal: nil)
+            }
+            if let target {
+                loadMyNotesDocument(target: target)
                 return
             }
         }
@@ -7457,7 +7506,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
         beginReplacingContentIntent()
         guard clientReady else {
-            guard let labelName = bookmarkService?.label(id: labelId)?.name else { return }
+            guard let label = bookmarkService?.label(id: labelId) else { return }
+            let labelName = AndroidLabelPresentation.displayName(for: label)
             showingMyNotes = false
             showingStudyPad = true
             activeStudyPadLabelId = labelId
@@ -8213,6 +8263,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   @discardableResult
   func navigateToBibleLink(_ ref: OsisRef) -> Bool {
     guard let target = navigationReference(for: ref) else { return false }
+    // Android routes link results through setCurrentDocumentAndKey, which selects the Bible
+    // page, so link navigation always exits My Notes instead of re-rendering it in place.
+    showingMyNotes = false
 
     if activeInstalledScriptureSource()?.info.name != target.moduleName
         || currentCategory != .bible {
@@ -8429,6 +8482,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       target: target,
       inventory: inventory
     )
+    // Android's bookmark-list navigation forces the default Bible document whenever the pane is
+    // not showing Bible text (MainBibleActivity's isFromBookmark branch), so a successfully
+    // planned bookmark target leaves My Notes before committing. Planning failures above throw
+    // without mutating reader state.
+    showingMyNotes = false
 
     switch plan {
     case .bible(let biblePlan):

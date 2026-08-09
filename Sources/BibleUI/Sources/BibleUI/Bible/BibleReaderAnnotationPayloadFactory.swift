@@ -348,7 +348,9 @@ struct BibleReaderAnnotationPayloadFactory {
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
-        let hasNote = !noteText.isEmpty
+        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
+        // presence keys off the trimmed text while real notes keep their original whitespace.
+        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.genericPayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
@@ -723,7 +725,8 @@ struct BibleReaderAnnotationPayloadFactory {
             text: text,
             contentType: entry.contentType,
             orderNumber: entry.orderNumber,
-            indentLevel: entry.indentLevel
+            indentLevel: entry.indentLevel,
+            sourcePromptId: entry.sourcePromptId?.uuidString
         )
     }
 
@@ -786,9 +789,12 @@ struct BibleReaderAnnotationPayloadFactory {
         guard let labelID = BookmarkLabelSerializationSupport.liveLabelIDString(for: label) else {
             return nil
         }
+        // Android serializes `label.displayName.trim()`, so reserved system labels reach Vue with
+        // their localized titles rather than the raw persisted sentinel names.
         return LabelData(
             id: labelID,
-            name: label.name,
+            name: AndroidLabelPresentation.displayName(for: label)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
             style: BookmarkStyleData(
                 color: label.color,
                 isSpeak: label.name == BibleCore.Label.speakLabelName,
@@ -828,7 +834,9 @@ struct BibleReaderAnnotationPayloadFactory {
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
-        let hasNote = !noteText.isEmpty
+        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
+        // presence keys off the trimmed text while real notes keep their original whitespace.
+        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
@@ -856,6 +864,20 @@ struct BibleReaderAnnotationPayloadFactory {
             ordinalProjection: .activeModule
         )
         let fullText = loadVerseText(for: textRangeProjection)
+        // Android's ClientBibleBookmark emits ordinalRange in the requested document domain but
+        // derives osisRef and every verse-range display string from bookmark.verseRange — the
+        // stored range in the bookmark's own versification. Resolving the source ordinals in the
+        // persisted v11n keeps osisRef consistent with the emitted v11n field; a KJVA osisRef
+        // paired with a source v11n misresolves links for divergent canons. Unresolvable canons
+        // fall back to the active-module projection.
+        let displayProjection: BookmarkBridgeVerseRangeProjection
+        if ordinalProjection == .kjva, let sourceProjection = sourceDomainDisplayProjection(for: bookmark) {
+            displayProjection = sourceProjection
+        } else if ordinalProjection == .kjva {
+            displayProjection = textRangeProjection
+        } else {
+            displayProjection = rangeProjection
+        }
         let sourceModuleMetadata = sourceModuleMetadata(for: bookmark)
         let hasSourceModule = !sourceModuleMetadata.initials.isEmpty
         let effectiveWholeVerse = bookmark.wholeVerse || !hasSourceModule
@@ -887,11 +909,11 @@ struct BibleReaderAnnotationPayloadFactory {
             wholeVerse: effectiveWholeVerse,
             customIcon: bookmark.customIcon,
             editAction: editAction,
-            osisRef: rangeProjection.osisRef,
+            osisRef: displayProjection.osisRef,
             originalOrdinalRange: [bookmark.ordinalStart, effectiveSourceEndOrdinal],
-            verseRange: rangeProjection.verseRange,
-            verseRangeOnlyNumber: rangeProjection.verseRangeOnlyNumber,
-            verseRangeAbbreviated: rangeProjection.verseRangeAbbreviated,
+            verseRange: displayProjection.verseRange,
+            verseRangeOnlyNumber: displayProjection.verseRangeOnlyNumber,
+            verseRangeAbbreviated: displayProjection.verseRangeAbbreviated,
             v11n: hasSourceModule ? bookmark.v11n : JSwordKJVAVersification.name,
             osisFragment: nil
         )
@@ -972,6 +994,57 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: Malformed KJVA ordinals retain best-effort display coordinates with ordinal
        `0`; source ordinals are never reinterpreted as KJVA or active-module ordinals.
      */
+    /**
+     Builds the bookmark's own-versification display projection for annotation documents.
+
+     Android's `ClientBibleBookmark` derives `osisRef` and every verse-range display string from
+     `bookmark.verseRange` — the stored range in the bookmark's own versification — regardless of
+     the requested ordinal domain. This resolves the stored source ordinals directly in the
+     persisted `v11n` canon through SWORD's intro-inclusive index tables.
+
+     - Parameter bookmark: Persisted Bible bookmark being serialized.
+     - Returns: Display projection in the bookmark's own versification, or `nil` when the stored
+       canon cannot resolve the ordinals.
+     - Side effects: Reads SWORD canon tables on the shared serialization queue.
+     - Failure modes: Returns `nil`; callers fall back to the active-module display projection.
+     */
+    private func sourceDomainDisplayProjection(
+        for bookmark: BibleBookmark
+    ) -> BookmarkBridgeVerseRangeProjection? {
+        let v11n = bookmark.v11n
+        guard !v11n.isEmpty, bookmark.ordinalStart > 0 else { return nil }
+        let endOrdinal = bookmark.ordinalEnd > bookmark.ordinalStart
+            ? bookmark.ordinalEnd
+            : bookmark.ordinalStart
+        guard
+            let startRef = SwordVersification.reference(forIndex: bookmark.ordinalStart, versification: v11n),
+            let endRef = SwordVersification.reference(forIndex: endOrdinal, versification: v11n),
+            startRef.verse > 0,
+            endRef.verse > 0
+        else { return nil }
+        let start = VerseKeyReference(
+            osisBookId: startRef.osisBookId,
+            chapter: startRef.chapter,
+            verse: startRef.verse,
+            ordinal: bookmark.ordinalStart
+        )
+        let end = VerseKeyReference(
+            osisBookId: endRef.osisBookId,
+            chapter: endRef.chapter,
+            verse: endRef.verse,
+            ordinal: endOrdinal
+        )
+        let fallbackBook = bookmark.book ?? currentBook
+        return BookmarkBridgeVerseRangeProjection(
+            startBookName: bridgeBookName(for: start, fallback: fallbackBook),
+            startBookAbbreviation: bridgeBookAbbreviation(for: start),
+            start: start,
+            endBookName: bridgeBookName(for: end, fallback: fallbackBook),
+            endBookAbbreviation: bridgeBookAbbreviation(for: end),
+            end: end
+        )
+    }
+
     private func renderedReference(
         kjvOrdinal: Int,
         sourceOrdinal: Int,

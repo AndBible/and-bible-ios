@@ -56,6 +56,12 @@ appendStudyPadNoteAccessibilityLabel: Add StudyPad note after last entry for %s
 studyPadNoteEntryAccessibilityName: note
 editStudyPadEntryAccessibilityLabel: Edit StudyPad %s for %s
 studyPadEntryEditorAccessibilityLabel: StudyPad %s editor for %s
+myNotesActionsAccessibilityLabel: My Notes actions for %s
+myNotesBookmarkDetailsAccessibilityLabel: Show My Notes bookmark details for %s
+myNotesOpenEditorAccessibilityLabel: Open My Notes note editor for %s
+myNotesEditNoteAccessibilityLabel: Edit My Notes note for %s
+myNotesEditorAccessibilityLabel: My Notes note editor for %s
+myNotesDeleteNoteAccessibilityLabel: Delete My Notes note for %s
 doYouWantToDeleteEntry: Delete this study pad entry?
 removeStudyPadConfirmationTitle: Remove study pad entry?
 dragHelp: Drag to reorder

@@ -100,6 +100,12 @@ type TranslatedStrings = {
     studyPadNoteEntryAccessibilityName: string
     editStudyPadEntryAccessibilityLabel: string
     studyPadEntryEditorAccessibilityLabel: string
+    myNotesActionsAccessibilityLabel: string
+    myNotesBookmarkDetailsAccessibilityLabel: string
+    myNotesOpenEditorAccessibilityLabel: string
+    myNotesEditNoteAccessibilityLabel: string
+    myNotesEditorAccessibilityLabel: string
+    myNotesDeleteNoteAccessibilityLabel: string
     doYouWantToDeleteEntry: string
     removeStudyPadConfirmationTitle: string
     dragHelp: string

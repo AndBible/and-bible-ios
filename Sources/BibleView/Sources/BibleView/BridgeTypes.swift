@@ -731,6 +731,8 @@ public struct StudyPadTextItemData: Codable, Sendable {
     public var orderNumber: Int
     /// Nesting depth within the StudyPad tree.
     public var indentLevel: Int
+    /// Optional AI prompt identifier that produced this entry, matching Android's serialized row.
+    public var sourcePromptId: IdType?
 
     /// Creates a StudyPad text item payload matching the reader client's journal item contract.
     public init(
@@ -741,7 +743,8 @@ public struct StudyPadTextItemData: Codable, Sendable {
         text: String,
         contentType: String?,
         orderNumber: Int,
-        indentLevel: Int
+        indentLevel: Int,
+        sourcePromptId: IdType? = nil
     ) {
         self.id = id
         self.type = type
@@ -751,6 +754,7 @@ public struct StudyPadTextItemData: Codable, Sendable {
         self.contentType = contentType
         self.orderNumber = orderNumber
         self.indentLevel = indentLevel
+        self.sourcePromptId = sourcePromptId
     }
 
     /**
@@ -770,6 +774,7 @@ public struct StudyPadTextItemData: Codable, Sendable {
         try container.encodeNullable(contentType, forKey: .contentType)
         try container.encode(orderNumber, forKey: .orderNumber)
         try container.encode(indentLevel, forKey: .indentLevel)
+        try container.encodeNullable(sourcePromptId, forKey: .sourcePromptId)
     }
 }
 
