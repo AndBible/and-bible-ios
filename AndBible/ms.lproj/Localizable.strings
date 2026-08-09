@@ -1682,3 +1682,6 @@
 
 /* Android shared translations */
 "backup_modules" = "Sandaran Dokumen ke…";
+
+/* Android shared translations */
+"exit_fullscreen" = "Ketuk dua kali skrin untuk keluar skrin penuh";

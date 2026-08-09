@@ -1693,3 +1693,6 @@
 
 /* Android shared translations */
 "backup_modules" = "สำรองเอกสารไปยัง…";
+
+/* Android shared translations */
+"exit_fullscreen" = "แตะหน้าจอสองครั้งเพื่อออกจากโหมดเต็มหน้าจอ";

@@ -1525,3 +1525,6 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 "move_down" = "Pomakni dolje";
 "move_up" = "Pomakni gore";
 "text_display_margin_size_title_format" = "Veličina margina (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dvaput dodirnite zaslon za izlaz iz cijelog zaslona";

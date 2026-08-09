@@ -1532,3 +1532,6 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 "move_down" = "కిందికి తరలించు";
 "move_up" = "పైకి తరలించు";
 "text_display_margin_size_title_format" = "మార్జిన్ పరిమాణం (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "పూర్తి స్క్రీన్ నుండి నిష్క్రమించడానికి స్క్రీన్‌పై రెండుసార్లు నొక్కండి";

@@ -1530,3 +1530,6 @@
 "module_installed" = "Terpasang";
 "module_installed_version" = "Terpasang";
 "text_display_margin_size_title_format" = "Ukuran margin (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Ketuk dua kali layar untuk keluar dari layar penuh";

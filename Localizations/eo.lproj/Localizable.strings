@@ -1530,3 +1530,6 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "move_down" = "Movi malsupren";
 "move_up" = "Movi supren";
 "text_display_margin_size_title_format" = "Larĝoj de marĝenoj (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Duoble frapetu por eliri plenekranan reĝimon";

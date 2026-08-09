@@ -1538,3 +1538,6 @@
 "module_installed" = "Nameščeno";
 "module_installed_version" = "Nameščeno";
 "text_display_margin_size_title_format" = "Robovi (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dvakrat tapnite za izhod iz celozaslonskega načina";

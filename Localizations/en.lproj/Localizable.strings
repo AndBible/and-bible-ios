@@ -1666,3 +1666,6 @@
 "move_up" = "Move up";
 "tilt_to_scroll" = "Tilt to scroll";
 "window_pinning" = "Window pinning";
+
+/* Android shared translations */
+"exit_fullscreen" = "Double-tap screen to exit fullscreen";

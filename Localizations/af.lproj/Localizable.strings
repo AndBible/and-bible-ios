@@ -1529,3 +1529,6 @@ Wanneer Google Drive gebruik word, kry %@ slegs toegang tot toepassinglêers, ni
 "move_down" = "Skuif af";
 "move_up" = "Skuif op";
 "text_display_margin_size_title_format" = "Kantlyn grootte (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dubbel tik op die skerm om die volle skerm te verlaat";

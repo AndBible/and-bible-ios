@@ -1690,3 +1690,6 @@
 
 /* Android shared translations */
 "bug_report_show_in_finder" = "Show in Finder";
+
+/* Android shared translations */
+"exit_fullscreen" = "Double-tap screen to exit fullscreen";

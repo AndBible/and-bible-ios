@@ -1528,3 +1528,6 @@ Kada koristite Google Drive, %@ dat je pristup samo fajlovima aplikacije, ne liÄ
 "move_down" = "Pomeri dole";
 "move_up" = "Pomeri gore";
 "text_display_margin_size_title_format" = "VeliÄina margina (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dvaput dodirnite ekran za izlaz iz Celog Ekrana";

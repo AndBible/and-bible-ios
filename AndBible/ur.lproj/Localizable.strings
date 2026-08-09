@@ -1692,3 +1692,6 @@
 
 /* Android shared translations */
 "backup_modules" = "دستاویزات کا بیک اپ کریں…";
+
+/* Android shared translations */
+"exit_fullscreen" = "فل اسکرین سے باہر نکلنے کے لیے اسکرین ڈبل ٹیپ کریں";

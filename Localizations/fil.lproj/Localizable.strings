@@ -1631,3 +1631,6 @@
 "move_up" = "Ilipat pataas";
 "tilt_to_scroll" = "Itilt para mag-scroll";
 "window_pinning" = "Pag-pin ng window";
+
+/* Android shared translations */
+"exit_fullscreen" = "I-double-tap ang screen para lumabas sa fullscreen";

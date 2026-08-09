@@ -1545,3 +1545,6 @@
 "module_installed" = "מותקנים";
 "module_installed_version" = "מותקנים";
 "text_display_margin_size_title_format" = "מידת שוליים (%1$d/%2$d/%3$d מ\"מ)";
+
+/* Android shared translations */
+"exit_fullscreen" = "הקשה כפולה כדי לצאת ממסך מלא";

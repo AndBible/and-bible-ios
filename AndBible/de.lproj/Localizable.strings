@@ -1529,3 +1529,6 @@
 "module_installed" = "Installiert";
 "module_installed_version" = "Installiert";
 "text_display_margin_size_title_format" = "Randgröße (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Doppelt Antippen, um den Vollbildschirm zu verlassen";

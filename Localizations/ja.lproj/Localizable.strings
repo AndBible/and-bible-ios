@@ -1665,3 +1665,6 @@
 "move_up" = "上に移動";
 "tilt_to_scroll" = "傾けてスクロール";
 "window_pinning" = "ウィンドウのピン留め";
+
+/* Android shared translations */
+"exit_fullscreen" = "画面をダブルタップして全画面表示を終了";

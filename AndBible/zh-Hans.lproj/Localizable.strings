@@ -1544,3 +1544,6 @@
 "module_installed" = "已安装";
 "module_installed_version" = "已安装";
 "text_display_margin_size_title_format" = "边距大小（%1$d/%2$d/%3$d mm）";
+
+/* Android shared translations */
+"exit_fullscreen" = "双击以退出全屏幕模式";

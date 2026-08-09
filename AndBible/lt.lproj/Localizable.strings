@@ -1546,3 +1546,6 @@
 "module_installed" = "Įdiegti";
 "module_installed_version" = "Įdiegti";
 "text_display_margin_size_title_format" = "Paraščių plotis (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Bakstelėkite du kartus, kad išeitumėte iš viso ekrano";

@@ -1666,3 +1666,6 @@
 "move_up" = "Hamia juu";
 "tilt_to_scroll" = "Inamisha kusogeza";
 "window_pinning" = "Upinzani wa dirisha";
+
+/* Android shared translations */
+"exit_fullscreen" = "Gonga mara mbili skrini kutoka hali ya skrini nzima";

@@ -1659,3 +1659,6 @@
 
 /* Android shared translations */
 "backup_modules" = "I-backup ang Mga Dokumento sa…";
+
+/* Android shared translations */
+"exit_fullscreen" = "I-double-tap ang screen para lumabas sa fullscreen";

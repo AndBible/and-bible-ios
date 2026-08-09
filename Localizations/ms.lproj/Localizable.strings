@@ -1654,3 +1654,6 @@
 "move_up" = "Pindah ke atas";
 "tilt_to_scroll" = "Tilt untuk menatal";
 "window_pinning" = "Penepatan tetingkap";
+
+/* Android shared translations */
+"exit_fullscreen" = "Ketuk dua kali skrin untuk keluar skrin penuh";

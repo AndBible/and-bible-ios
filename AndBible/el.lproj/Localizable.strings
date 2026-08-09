@@ -1542,3 +1542,6 @@
 "module_installed" = "Εγκατεστημένα";
 "module_installed_version" = "Εγκατεστημένα";
 "text_display_margin_size_title_format" = "Μέγεθος περιθωρίου (%1$d/%2$d/%3$d mm)";
+
+/* Android shared translations */
+"exit_fullscreen" = "Διπλό πάτημα για έξοδο από πλήρη οθόνη";

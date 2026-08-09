@@ -1680,3 +1680,6 @@
 
 /* Android shared translations */
 "backup_modules" = "Sikkerhedskopier dokumenter til…";
+
+/* Android shared translations */
+"exit_fullscreen" = "Dobbelttryk på skærmen for at afslutte fuldskærm";

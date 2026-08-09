@@ -1655,3 +1655,6 @@
 "move_up" = "Mou amunt";
 "tilt_to_scroll" = "Inclina per desplaçar";
 "window_pinning" = "Fixació de finestres";
+
+/* Android shared translations */
+"exit_fullscreen" = "Fes doble toc a la pantalla per sortir de la pantalla completa";

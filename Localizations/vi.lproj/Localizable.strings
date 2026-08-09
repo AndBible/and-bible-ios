@@ -1662,3 +1662,6 @@
 "move_up" = "Di chuyển lên";
 "tilt_to_scroll" = "Nghiêng để cuộn";
 "window_pinning" = "Ghim cửa sổ";
+
+/* Android shared translations */
+"exit_fullscreen" = "Nhấn đúp màn hình để thoát toàn màn hình";

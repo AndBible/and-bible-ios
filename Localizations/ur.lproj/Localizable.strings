@@ -1664,3 +1664,6 @@
 "move_up" = "اوپر منتقل کریں";
 "tilt_to_scroll" = "جھکا کر اسکرول کریں";
 "window_pinning" = "ونڈو پننگ";
+
+/* Android shared translations */
+"exit_fullscreen" = "فل اسکرین سے باہر نکلنے کے لیے اسکرین ڈبل ٹیپ کریں";
