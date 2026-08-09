@@ -2493,6 +2493,115 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
     }
 
     /**
+     Verifies a stem package with a differently named config and nested images payload installs.
+
+     Real CrossWire packages ship both traits: EpiphanyMaps names its config
+     `mods.d/epiphany-maps.conf` while its initials are `EpiphanyMaps`, and stem modules such as
+     EpiphanyMaps and OpenHymnal carry ThML `images/` subdirectories beside their stem files.
+     Failure means the package validator rejects modules Android installs without complaint.
+     */
+    func testModuleRepositoryInstallsStemPackageWithRenamedConfigAndNestedImages() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let source = SourceConfig(
+            name: "Package Repo",
+            type: "HTTP",
+            host: "example.test",
+            catalogPath: "/raw",
+            packageDirectory: "/packages"
+        )
+        let dataPath = "./modules/lexdict/rawld4/epiphany-maps/maps"
+        let catalogData = try makeModuleRepositoryCatalogArchive(
+            moduleName: "EpiphanyMaps",
+            category: "Maps",
+            modDrv: "RawLD4",
+            dataPath: dataPath
+        )
+        let zipData = makeModuleRepositoryZip([
+            ("mods.d/", Data()),
+            ("mods.d/epiphany-maps.conf", Data(moduleRepositoryConfiguration(
+                moduleName: "EpiphanyMaps",
+                category: "Maps",
+                modDrv: "RawLD4",
+                dataPath: dataPath,
+                description: "Maps by Epiphany Software"
+            ).utf8)),
+            ("modules/", Data()),
+            ("modules/lexdict/", Data()),
+            ("modules/lexdict/rawld4/", Data()),
+            ("modules/lexdict/rawld4/epiphany-maps/", Data()),
+            ("modules/lexdict/rawld4/epiphany-maps/maps.dat", Data("maps-data".utf8)),
+            ("modules/lexdict/rawld4/epiphany-maps/maps.idx", Data("maps-index".utf8)),
+            ("modules/lexdict/rawld4/epiphany-maps/images/", Data()),
+            ("modules/lexdict/rawld4/epiphany-maps/images/israjesu.jpg", Data("map-image".utf8))
+        ])
+
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let response: HTTPURLResponse
+            let data: Data
+            switch request.url?.path {
+            case "/raw/mods.d.tar.gz":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = catalogData
+            case "/packages/EpiphanyMaps.zip":
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = zipData
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "<nil>")")
+                response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!
+                data = Data()
+            }
+            return (response, data)
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+
+        _ = try await repository.refreshCatalog(for: source)
+        try await repository.installModule(named: "EpiphanyMaps", from: source)
+
+        let dataDir = swordDir
+            .appendingPathComponent("modules/lexdict/rawld4/epiphany-maps", isDirectory: true)
+        XCTAssertEqual(
+            try Data(contentsOf: dataDir.appendingPathComponent("maps.dat")),
+            Data("maps-data".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: dataDir.appendingPathComponent("images/israjesu.jpg")),
+            Data("map-image".utf8)
+        )
+        let installedConfiguration = try String(
+            contentsOf: swordDir.appendingPathComponent("mods.d/epiphanymaps.conf"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(installedConfiguration.contains("[EpiphanyMaps]"))
+        XCTAssertTrue(installedConfiguration.contains("Repository=Package Repo"))
+    }
+
+    /**
      Verifies direct SWORD catalog custom repositories install from `catalogPath/packages`.
 
      Android's custom repository editor accepts a direct SWORD catalog only when both

@@ -49,6 +49,9 @@ public struct ModuleStoreInstalledLayout: Sendable, Equatable {
 
      - Parameter relativePath: Exact `modules/...` file path.
      - Returns: `true` only for files bound by this layout's directory or filename-prefix rule.
+       Stem layouts additionally own nested subdirectories (for example ThML `images/`) because
+     SWORD stem modules routinely ship auxiliary directories beside their stem files, while sibling
+     stem files sharing the same directory remain protected by the prefix rule.
      - Side effects: none.
      */
     public func ownsPayload(atRelativePath relativePath: String) -> Bool {
@@ -57,8 +60,11 @@ public struct ModuleStoreInstalledLayout: Sendable, Equatable {
             return relativePath.hasPrefix(dataDirectoryRelativePath + "/")
         case .filenamePrefix(let prefix):
             let nsPath = relativePath as NSString
-            return nsPath.deletingLastPathComponent == dataDirectoryRelativePath
-                && nsPath.lastPathComponent.hasPrefix(prefix)
+            let parent = nsPath.deletingLastPathComponent
+            if parent == dataDirectoryRelativePath {
+                return nsPath.lastPathComponent.hasPrefix(prefix)
+            }
+            return parent.hasPrefix(dataDirectoryRelativePath + "/")
         }
     }
 }

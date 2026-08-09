@@ -2118,15 +2118,16 @@ public final class ModuleRepository: @unchecked Sendable {
             }
             directRootEntries.append((archiveEntry, relativePath))
         }
-        let expectedConfigPath = layout.configRelativePath
+        // CrossWire packages may name the config differently from the module initials (for
+        // example EpiphanyMaps ships mods.d/epiphany-maps.conf); identity is proven from the
+        // parsed content below and the staged config is written at the canonical path.
         let packageConfigEntries = directRootEntries.filter { item in
             item.1.hasPrefix("mods.d/") && item.1.lowercased().hasSuffix(".conf")
         }
         guard packageConfigEntries.count == 1,
-              let packageConfigEntry = packageConfigEntries.first,
-              packageConfigEntry.1.caseInsensitiveCompare(expectedConfigPath) == .orderedSame else {
+              let packageConfigEntry = packageConfigEntries.first else {
             throw ModuleRepositoryError.invalidZip(
-                "\(downloadedPackageURL.lastPathComponent) must contain only \(expectedConfigPath) as its module config"
+                "\(downloadedPackageURL.lastPathComponent) must contain exactly one mods.d module config"
             )
         }
         let packageConfigurationContent = try configurationContent(
@@ -2144,7 +2145,7 @@ public final class ModuleRepository: @unchecked Sendable {
             packageLayout.ownsPayload(atRelativePath: item.1)
         }
         let unexpectedEntries = directRootEntries.filter { item in
-            item.1.caseInsensitiveCompare(expectedConfigPath) != .orderedSame
+            item.1.caseInsensitiveCompare(packageConfigEntry.1) != .orderedSame
                 && !packageLayout.ownsPayload(atRelativePath: item.1)
         }
         guard unexpectedEntries.isEmpty else {

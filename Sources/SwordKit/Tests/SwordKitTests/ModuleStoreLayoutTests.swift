@@ -38,7 +38,47 @@ final class ModuleStoreLayoutTests: XCTestCase {
         XCTAssertEqual(prefix.payloadShape, .filenamePrefix("strongs"))
         XCTAssertTrue(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/strongs.dat"))
         XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/other.dat"))
-        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/nested/strongs.dat"))
+        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/strongs.dat"))
+    }
+
+    /**
+     Verifies stem layouts own nested auxiliary subdirectories while direct stem siblings stay
+     protected.
+
+     Failure means real CrossWire stem modules that ship ThML `images/` directories beside their
+     stem files (for example EpiphanyMaps and OpenHymnal) are rejected at install, or a stem module
+     can claim a sibling module's stem files in a shared directory.
+     */
+    func testResolverBindsStemDriverNestedSubdirectoryPayload() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let resolver = ModuleStoreInstalledLayoutResolver(moduleRootURL: root)
+
+        let maps = try resolver.resolve(configuration(
+            name: "EpiphanyMaps",
+            driver: "RawLD4",
+            dataPath: "./modules/lexdict/rawld4/epiphany-maps/maps"
+        ))
+        XCTAssertEqual(maps.payloadShape, .filenamePrefix("maps"))
+        XCTAssertTrue(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/maps.dat"))
+        XCTAssertTrue(maps.ownsPayload(
+            atRelativePath: "modules/lexdict/rawld4/epiphany-maps/images/israjesu.jpg"
+        ))
+        XCTAssertFalse(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/other.dat"))
+        XCTAssertFalse(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/images/israjesu.jpg"))
+
+        let hymnal = try resolver.resolve(configuration(
+            name: "OpenHymnal",
+            driver: "RawGenBook",
+            dataPath: "./modules/genbook/rawgenbook/openhymnal/openhymnal"
+        ))
+        XCTAssertEqual(hymnal.payloadShape, .filenamePrefix("openhymnal"))
+        XCTAssertTrue(hymnal.ownsPayload(
+            atRelativePath: "modules/genbook/rawgenbook/openhymnal/openhymnal.bdt"
+        ))
+        XCTAssertTrue(hymnal.ownsPayload(
+            atRelativePath: "modules/genbook/rawgenbook/openhymnal/images/Abide_With_Me-Eventide.gif"
+        ))
     }
 
     /**
