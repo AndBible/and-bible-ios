@@ -42,6 +42,33 @@ final class ModuleStoreLayoutTests: XCTestCase {
     }
 
     /**
+     Verifies a trailing-slash `DataPath` binds directory ownership even for stem-capable drivers.
+
+     Failure means font add-ons such as FontPack (RawGenBook with a directory `DataPath` whose
+     payload lives in nested subdirectories) are rejected at install for owning payload "outside"
+     their own declared data directory.
+     */
+    func testResolverBindsTrailingSlashStemDriverDataPathAsDirectory() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let resolver = ModuleStoreInstalledLayoutResolver(moduleRootURL: root)
+
+        let fontPack = try resolver.resolve(configuration(
+            name: "FontPack",
+            driver: "RawGenBook",
+            dataPath: "./modules/texts/ztext/FontPack/"
+        ))
+        XCTAssertEqual(fontPack.payloadShape, .directory)
+        XCTAssertEqual(fontPack.dataDirectoryRelativePath, "modules/texts/ztext/FontPack")
+        XCTAssertTrue(fontPack.ownsPayload(
+            atRelativePath: "modules/texts/ztext/FontPack/and-bible/AntiochText.ttf"
+        ))
+        XCTAssertTrue(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/FontPack/readme.txt"))
+        XCTAssertFalse(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/FontPack2/font.ttf"))
+        XCTAssertFalse(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/other/font.ttf"))
+    }
+
+    /**
      Verifies every forbidden lexical `DataPath` form is rejected from raw config text.
 
      Failure means an absolute, empty, dot-component, backslash, encoded traversal, repeated

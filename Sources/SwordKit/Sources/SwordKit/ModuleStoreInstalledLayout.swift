@@ -117,7 +117,7 @@ public struct ModuleStoreStagedInstallPlan: Sendable, Equatable {
  requires every target to remain a strict descendant of canonical `modules`.
  */
 public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
-    /// Drivers whose `DataPath` ends in a filename stem rather than a directory.
+    /** Drivers whose slash-less `DataPath` ends in a filename stem; a trailing slash still denotes a directory. */
     public static let filenamePrefixDrivers: Set<String> = [
         "rawld", "rawld4", "zld", "rawgenbook", "rawfiles",
     ]
@@ -204,9 +204,15 @@ public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
         let normalizedDataPath = try validatedDataPath(dataPath, moduleName: normalizedName)
         let components = normalizedDataPath.split(separator: "/").map(String.init)
         let normalizedDriver = driver.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // SWORD distinguishes stem and directory DataPaths by the trailing slash, not the driver
+        // alone: font add-ons such as FontPack declare RawGenBook with a trailing-slash DataPath
+        // and ship payload in nested subdirectories of that directory.
+        let denotesDirectory = dataPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .hasSuffix("/")
         let shape: ModuleStorePayloadShape
         let directoryComponents: [String]
-        if Self.filenamePrefixDrivers.contains(normalizedDriver) {
+        if Self.filenamePrefixDrivers.contains(normalizedDriver), !denotesDirectory {
             guard components.count >= 3, let prefix = components.last, !prefix.isEmpty else {
                 throw ModuleStoreMutationError.unsafeDataPath(
                     moduleName: normalizedName,
