@@ -563,7 +563,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return (start: start, end: end, verseCount: verseCount)
     }
 
-    /** Returns note-backed bookmarks inside one explicit KJVA My Notes page. */
+    /**
+     Returns every bookmark inside one explicit KJVA My Notes page.
+
+     Android's `CurrentMyNotePage` passes all of `bookmarksForVerseRange(...)` to the shared
+     `MyNotesDocument`, including bookmarks without notes; the Vue layer then applies the
+     `showBookmarks` and hidden-label display filters. iOS must not pre-filter to note-bearing
+     bookmarks here, or chapters whose bookmarks have no notes render Android's empty state
+     instead of their bookmark rows.
+     */
     private func myNotesBookmarks(for target: MyNotesTarget) -> [BibleBookmark] {
         guard let service = bookmarkService,
       let range = myNotesChapterRange(for: target)
@@ -573,7 +581,6 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             endOrdinal: range.end,
             book: target.bookName
         )
-        .filter { $0.notes?.notes.isEmpty == false }
         .sorted {
             if $0.kjvOrdinalStart != $1.kjvOrdinalStart {
                 return $0.kjvOrdinalStart < $1.kjvOrdinalStart
@@ -768,7 +775,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
-    /// Notes with non-empty payloads that belong to the currently visible chapter.
+    /**
+     Bookmark rows backing the visible My Notes document, or note-bearing chapter bookmarks for
+     the pre-open accessibility export.
+     */
     private func currentChapterMyNotesBookmarks() -> [BibleBookmark] {
         if showingMyNotes, let activeMyNotesTarget {
             return myNotesBookmarks(for: activeMyNotesTarget)

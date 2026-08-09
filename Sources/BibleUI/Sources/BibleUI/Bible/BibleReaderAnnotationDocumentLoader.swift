@@ -292,9 +292,17 @@ struct BibleReaderAnnotationDocumentLoader {
         )
 
         sendLabels()
+        // Android composes `jumpToId` as "o-<abs(entryId.hashCode())>" so setup_content scrolls
+        // to the shared StudyPad row markup, whose element id is `o-${j.hashCode}`. Every iOS row
+        // payload derives `hashCode` from the uppercase UUID string, so the same derivation here
+        // targets bookmark, generic-bookmark, and text-entry rows alike; a raw UUID matches no
+        // element and silently falls back to the top of the document.
+        let jumpToId = bookmarkId.map {
+            "o-\(BibleReaderAnnotationPayloadFactory.normalizedBridgeHashCode(from: $0.uuidString.hashValue))"
+        }
         guard documentReplacement.replace(
             document: document,
-            setup: ReaderSetupContentPayload(jumpToId: bookmarkId?.uuidString)
+            setup: ReaderSetupContentPayload(jumpToId: jumpToId)
         ) else {
             annotationDocumentLoaderLogger.error("Failed to emit StudyPad document replacement")
             return false

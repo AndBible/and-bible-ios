@@ -944,6 +944,22 @@ struct BibleWindowPane: View {
         }
 
         /**
+         Applies Android's `LinkControl.checkIfOpenLinksInDedicatedWindow` gate to link results.
+
+         - Parameter wm: Window manager owning the workspace's maximized state.
+         - Returns: `true` when link results should target the dedicated links window; `false`
+           when the links preference is off or a window is maximized, both of which Android treats
+           as "open in the current window".
+         - Side effects: None.
+         - Failure modes: A missing window manager keeps preference-only routing so standalone
+           panes still honor the setting.
+         */
+        func openLinksInDedicatedWindow(using wm: WindowManager?) -> Bool {
+            if wm?.maximizedWindowId != nil { return false }
+            return store.getBool(.openLinksInSpecialWindowPref)
+        }
+
+        /**
          Runs a link-result load as soon as the destination pane controller exists.
 
          SwiftUI creates the new pane and registers its controller on the next layout pass. Android
@@ -989,7 +1005,7 @@ struct BibleWindowPane: View {
     // Links window support: single contiguous OSIS passages open in a links window.
     ctrl.onOpenInLinksWindow = { [weak ctrl, weak windowManager] reference in
       guard let ctrl else { return }
-      let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+      let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
       guard useLinksWindow else {
         BibleWindowPaneReferenceRouter.navigate(reference, in: ctrl)
         return
@@ -1012,7 +1028,7 @@ struct BibleWindowPane: View {
 
     ctrl.onOpenAIDocumentPageInLinksWindow = { [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
         ctrl.loadMyDocumentPage(
           bookInitials: request.documentInitials,
@@ -1045,7 +1061,7 @@ struct BibleWindowPane: View {
     ctrl.onOpenMultiReferenceDocumentInLinksWindow = {
       [weak ctrl, weak windowManager] documentJSON in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
                 ctrl.loadMultiReferenceDocument(documentJSON)
                 return
@@ -1066,7 +1082,7 @@ struct BibleWindowPane: View {
 
         ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] emission in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
                 ctrl.renderMemorizeDocument(emission)
                 return
@@ -1088,7 +1104,7 @@ struct BibleWindowPane: View {
         ctrl.onOpenDefinitionDocumentInLinksWindow = {
             [weak ctrl, weak windowManager] documentJSON, renderedBook, renderedKey in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
                 ctrl.loadDefinitionDocument(
                     documentJSON,
@@ -1125,7 +1141,7 @@ struct BibleWindowPane: View {
         // the journal document opens in the dedicated links window unless the preference is off.
         ctrl.onOpenStudyPadInLinksWindow = { [weak ctrl, weak windowManager] labelId, bookmarkId in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
                 ctrl.loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
                 return
@@ -1151,7 +1167,7 @@ struct BibleWindowPane: View {
         // projection itself.
         ctrl.onOpenMyNotesInLinksWindow = { [weak ctrl, weak windowManager] v11nName, ordinal in
             guard let ctrl else { return }
-            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
                 ctrl.loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)
                 return

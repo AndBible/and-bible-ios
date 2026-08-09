@@ -884,12 +884,86 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies the My Notes document includes chapter bookmarks that have no notes.
+
+     Android's `CurrentMyNotePage` hands every `bookmarksForVerseRange` row to the shared
+     `MyNotesDocument`, and the Vue layer applies the `showBookmarks` and hidden-label display
+     filters. A native note-bearing pre-filter makes chapters whose bookmarks lack notes render
+     the empty state where Android shows their bookmark rows.
+
+     - Setup: Persists one noteless and one note-bearing bookmark in the same KJVA chapter, then
+       routes the Android-style My Notes bridge action with no links-routing owner installed.
+     - Expected result: The emitted document's `bookmarks` array contains both rows with accurate
+       `hasNote` values.
+     - Failure meaning: My Notes hides noteless bookmarks and diverges from Android's document
+       contract.
+     - Side effects: Persists two bookmarks in an in-memory store and records bridge emissions.
+     */
+    @MainActor
+    func testReaderMyNotesDocumentIncludesNotelessChapterBookmarks() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        controller.bookmarkService = bookmarkService
+
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let notelessOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 2)
+        )
+        let notedOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 3)
+        )
+        let noteless = bookmarkService.addBibleBookmark(
+            ordinalRange: try verifiedKJVAOrdinalRange(
+                sourceOrdinalStart: notelessOrdinal,
+                sourceOrdinalEnd: notelessOrdinal
+            ),
+            wholeVerse: true
+        )
+        let noted = bookmarkService.addBibleBookmark(
+            ordinalRange: try verifiedKJVAOrdinalRange(
+                sourceOrdinalStart: notedOrdinal,
+                sourceOrdinalEnd: notedOrdinal
+            ),
+            wholeVerse: true
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: noted.id, note: "Chapter note")
+
+        let sourceOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        let baselineCount = recordedScripts().count
+
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
+
+        let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let documentPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
+        )
+        let bookmarkRows = try XCTUnwrap(documentPayload["bookmarks"] as? [[String: Any]])
+        let hasNoteById = Dictionary(
+            uniqueKeysWithValues: bookmarkRows.compactMap { row in
+                (row["id"] as? String).map { ($0.lowercased(), row["hasNote"] as? Bool) }
+            }
+        )
+        XCTAssertEqual(hasNoteById.count, 2)
+        XCTAssertEqual(hasNoteById[noteless.id.uuidString.lowercased()], false)
+        XCTAssertEqual(hasNoteById[noted.id.uuidString.lowercased()], true)
+    }
+
+    /**
      Guards the production `BibleWindowPane` StudyPad and My Notes links-window callbacks.
 
-     The source slice covers both new callback assignments. Each must honor the Android links
-     preference and pass the identical payload to all three destination branches (preference-off
-     current pane, exhausted-retry fallback, and registered links controller). Dropping a branch
-     would silently strand one route in the wrong window and diverge from Android's
+     The source slice covers both new callback assignments. Each must honor the shared
+     Android-parity links gate and pass the identical payload to all three destination branches
+     (gate-off current pane, exhausted-retry fallback, and registered links controller). Dropping
+     a branch would silently strand one route in the wrong window and diverge from Android's
      `LinkControl.showLink` behavior.
      */
     func testBibleWindowPaneProductionCallbacksRouteStudyPadAndMyNotesThroughLinksPolicy() throws {
@@ -909,7 +983,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let studyPadSlice = source[studyPadStart.lowerBound..<myNotesStart.lowerBound]
         let myNotesSlice = source[myNotesStart.lowerBound...]
 
-        XCTAssertTrue(studyPadSlice.contains(".openLinksInSpecialWindowPref"))
+        XCTAssertTrue(studyPadSlice.contains("openLinksInDedicatedWindow(using: windowManager)"))
         XCTAssertEqual(
             studyPadSlice
                 .components(separatedBy: ".loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)")
@@ -917,12 +991,45 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             3
         )
 
-        XCTAssertTrue(myNotesSlice.contains(".openLinksInSpecialWindowPref"))
+        XCTAssertTrue(myNotesSlice.contains("openLinksInDedicatedWindow(using: windowManager)"))
         XCTAssertEqual(
             myNotesSlice
                 .components(separatedBy: ".loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)")
                 .count - 1,
             3
+        )
+    }
+
+    /**
+     Guards Android's `checkIfOpenLinksInDedicatedWindow` gate in the production pane wiring.
+
+     Android refuses the dedicated links window whenever the workspace is maximized, regardless of
+     the links preference, and otherwise follows `open_links_in_special_window_pref`. Every link
+     route in `BibleWindowPane` must consult the one shared gate so no route can drift back to a
+     preference-only check that pops the links pane over a maximized window.
+     */
+    func testBibleWindowPaneLinksGateHonorsMaximizedWorkspaceLikeAndroid() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
+        )
+
+        let gateStart = try XCTUnwrap(
+            source.range(of: "func openLinksInDedicatedWindow(using wm: WindowManager?) -> Bool")
+        )
+        let gateEnd = try XCTUnwrap(
+            source.range(of: "ctrl.onOpenInLinksWindow", range: gateStart.upperBound..<source.endIndex)
+        )
+        let gateSlice = source[gateStart.lowerBound..<gateEnd.lowerBound]
+        XCTAssertTrue(gateSlice.contains("maximizedWindowId != nil"))
+        XCTAssertTrue(gateSlice.contains(".openLinksInSpecialWindowPref"))
+
+        XCTAssertEqual(
+            source.components(separatedBy: "openLinksInDedicatedWindow(using: windowManager)").count - 1,
+            7
+        )
+        XCTAssertEqual(
+            source.components(separatedBy: "store.getBool(.openLinksInSpecialWindowPref)").count - 1,
+            1
         )
     }
 
@@ -977,7 +1084,10 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let setupPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
         )
-        XCTAssertEqual(setupPayload["jumpToId"] as? String, bookmark.id.uuidString)
+        // Android scrolls StudyPad targets through the shared row element id `o-<hashCode>`;
+        // the jump target must therefore match the emitted row's own hashCode, not the raw UUID.
+        let rowHashCode = try XCTUnwrap(bookmarkObject["hashCode"] as? Int)
+        XCTAssertEqual(setupPayload["jumpToId"] as? String, "o-\(rowHashCode)")
     }
 
     /**
