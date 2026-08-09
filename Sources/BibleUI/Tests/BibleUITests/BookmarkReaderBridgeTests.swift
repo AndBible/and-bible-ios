@@ -756,6 +756,177 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies the StudyPad bridge action hands the parsed identifiers to pane-owned link routing.
+
+     Android's `LinkControl.openStudyPad` routes the journal document through `showLink`, so the
+     dedicated links window — not the initiating window — hosts the StudyPad by default. The iOS
+     bridge must therefore delegate to the installed links-window policy without mutating the
+     initiating pane's reader state.
+
+     - Setup: Installs a routing callback on a controller with no StudyPad state loaded.
+     - Expected result: The callback receives the exact label/bookmark UUID pair, no StudyPad
+       document loads in the initiating controller, and no bridge emission occurs.
+     - Failure meaning: Modal StudyPad buttons replace the initiating pane before the links-window
+       policy chooses its destination, diverging from Android issue #376 behavior.
+     - Side effects: Invokes one in-memory bridge delegate callback only.
+     */
+    @MainActor
+    func testOpenStudyPadBridgeDelegatesToPaneRoutingPolicy() {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let labelId = UUID()
+        let bookmarkId = UUID()
+        var routedLabelId: UUID?
+        var routedBookmarkId: UUID??
+        controller.onOpenStudyPadInLinksWindow = { label, bookmark in
+            routedLabelId = label
+            routedBookmarkId = bookmark
+        }
+
+        controller.bridge(
+            bridge,
+            openStudyPad: labelId.uuidString,
+            bookmarkId: bookmarkId.uuidString
+        )
+
+        XCTAssertEqual(routedLabelId, labelId)
+        XCTAssertEqual(routedBookmarkId, bookmarkId)
+        XCTAssertFalse(controller.showingStudyPad)
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+    }
+
+    /**
+     Verifies a malformed StudyPad label identifier fails closed before links routing runs.
+
+     Android resolves the label before building the `StudyPadKey`, so an unresolvable identifier
+     never reaches window routing. The iOS bridge must keep that ordering: parse failures may not
+     open or create a links window.
+
+     - Setup: Installs a routing callback, then delivers a non-UUID label identifier.
+     - Expected result: The routing callback never fires and reader state is untouched.
+     - Failure meaning: Malformed frontend payloads could create or focus a links window with no
+       document to show.
+     - Side effects: None.
+     */
+    @MainActor
+    func testOpenStudyPadBridgeRejectsMalformedLabelIdBeforeRouting() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        var routed = false
+        controller.onOpenStudyPadInLinksWindow = { _, _ in routed = true }
+
+        controller.bridge(bridge, openStudyPad: "not-a-uuid", bookmarkId: UUID().uuidString)
+
+        XCTAssertFalse(routed)
+        XCTAssertFalse(controller.showingStudyPad)
+    }
+
+    /**
+     Verifies the StudyPad bridge action keeps its current-pane fallback without a routing owner.
+
+     Standalone controllers (and panes whose owner installs no policy) must retain the existing
+     in-pane StudyPad load so the bridge action never becomes a no-op.
+
+     - Setup: Creates a bookmark service with one label and delivers the bridge action with no
+       routing callback installed.
+     - Expected result: The controller loads the StudyPad document itself and exposes native
+       StudyPad visible state.
+     - Failure meaning: The links-window delegation removed the standalone fallback and orphaned
+       the bridge action.
+     - Side effects: Persists one label in an in-memory bookmark store.
+     */
+    @MainActor
+    func testOpenStudyPadBridgeFallsBackToCurrentPaneWithoutRoutingOwner() throws {
+        let bridge = BibleBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let controller = BibleReaderController(bridge: bridge)
+        controller.bookmarkService = bookmarkService
+        let label = bookmarkService.createLabel(name: "Fallback Pad", color: Label.defaultColor)
+
+        controller.bridge(bridge, openStudyPad: label.id.uuidString, bookmarkId: "")
+
+        XCTAssertTrue(controller.showingStudyPad)
+        XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadLabel=Fallback Pad"))
+    }
+
+    /**
+     Verifies the My Notes bridge action hands the raw source coordinate to pane-owned routing.
+
+     Android's `LinkControl.openMyNotes` routes the notes document through `showLink`, so the
+     dedicated links window hosts My Notes by default. The routed payload must stay in the source
+     versification domain because the destination controller performs its own KJVA projection.
+
+     - Setup: Installs a routing callback on a controller with no My Notes state loaded.
+     - Expected result: The callback receives the unconverted versification/ordinal pair and the
+       initiating controller shows no My Notes state.
+     - Failure meaning: My Notes modal links replace the initiating pane, or the coordinate is
+       projected twice and scrolls to the wrong row.
+     - Side effects: Invokes one in-memory bridge delegate callback only.
+     */
+    @MainActor
+    func testOpenMyNotesBridgeDelegatesToPaneRoutingPolicy() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        var routedV11n: String?
+        var routedOrdinal: Int?
+        controller.onOpenMyNotesInLinksWindow = { v11nName, ordinal in
+            routedV11n = v11nName
+            routedOrdinal = ordinal
+        }
+
+        controller.bridge(bridge, openMyNotes: "Vulg", ordinal: 4242)
+
+        XCTAssertEqual(routedV11n, "Vulg")
+        XCTAssertEqual(routedOrdinal, 4242)
+        XCTAssertFalse(controller.showingMyNotes)
+    }
+
+    /**
+     Guards the production `BibleWindowPane` StudyPad and My Notes links-window callbacks.
+
+     The source slice covers both new callback assignments. Each must honor the Android links
+     preference and pass the identical payload to all three destination branches (preference-off
+     current pane, exhausted-retry fallback, and registered links controller). Dropping a branch
+     would silently strand one route in the wrong window and diverge from Android's
+     `LinkControl.showLink` behavior.
+     */
+    func testBibleWindowPaneProductionCallbacksRouteStudyPadAndMyNotesThroughLinksPolicy() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
+        )
+
+        let studyPadStart = try XCTUnwrap(
+            source.range(of: "ctrl.onOpenStudyPadInLinksWindow = {")
+        )
+        let myNotesStart = try XCTUnwrap(
+            source.range(
+                of: "ctrl.onOpenMyNotesInLinksWindow = {",
+                range: studyPadStart.upperBound..<source.endIndex
+            )
+        )
+        let studyPadSlice = source[studyPadStart.lowerBound..<myNotesStart.lowerBound]
+        let myNotesSlice = source[myNotesStart.lowerBound...]
+
+        XCTAssertTrue(studyPadSlice.contains(".openLinksInSpecialWindowPref"))
+        XCTAssertEqual(
+            studyPadSlice
+                .components(separatedBy: ".loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)")
+                .count - 1,
+            3
+        )
+
+        XCTAssertTrue(myNotesSlice.contains(".openLinksInSpecialWindowPref"))
+        XCTAssertEqual(
+            myNotesSlice
+                .components(separatedBy: ".loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)")
+                .count - 1,
+            3
+        )
+    }
+
+    /**
      Verifies StudyPad requests made before the Vue client is ready replay after client-ready.
 
      Android treats StudyPad as a reader document, so selecting a StudyPad label while the shared
