@@ -2759,18 +2759,22 @@ public struct ModuleBrowserView: View {
        - remoteVersion: Repository version string.
        - installedVersion: Local installed version string.
      - Returns: `true` when the remote version sorts after the installed version, or when either
-       value cannot be parsed by Android's JSword version grammar.
+       non-empty value cannot be parsed by Android's JSword version grammar.
 
      Side effects:
      - none
 
      Failure modes:
-     - missing, malformed, or overflowing versions return `true`, matching Android's deliberate
+     - empty versions compare as JSword's read-time `1.0` default, so versionless modules and
+       catalog caches persisted before that default never report a phantom update
+     - malformed or overflowing versions return `true`, matching Android's deliberate
        upgrade-available fallback when `Version(...)` throws
      */
     static func isRemoteVersionNewer(remoteVersion: String, installedVersion: String) -> Bool {
-        guard let remote = parseJSwordVersion(remoteVersion),
-              let installed = parseJSwordVersion(installedVersion) else {
+        let remoteText = remoteVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let installedText = installedVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let remote = parseJSwordVersion(remoteText.isEmpty ? "1.0" : remoteText),
+              let installed = parseJSwordVersion(installedText.isEmpty ? "1.0" : installedText) else {
             return true
         }
         return compareVersion(remote, installed) == .orderedDescending

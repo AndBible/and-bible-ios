@@ -163,7 +163,9 @@ struct SwordModuleConfig: Sendable {
             language: firstValue("lang", in: values) ?? "en",
             modDrv: modDrv,
             dataPath: normalizedDataPath(firstValue("datapath", in: values) ?? "", modDrv: modDrv),
-            version: firstValue("version", in: values) ?? "",
+            // JSword's SwordBookMetaData defaults a missing Version to 1.0; Android compares that
+            // default on both sides, so versionless modules never report a phantom update.
+            version: firstValue("version", in: values).flatMap { $0.isEmpty ? nil : $0 } ?? "1.0",
             installSize: firstValue("installsize", in: values) ?? "",
             direction: firstValue("direction", in: values) ?? "LtoR",
             features: ModuleFeatures.fromConfigValues(

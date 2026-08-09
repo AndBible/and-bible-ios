@@ -9,7 +9,13 @@ public enum ModuleStorePayloadShape: Sendable, Equatable {
     /// Every staged file below the exact data directory belongs to the module.
     case directory
 
-    /// Direct children whose filename starts with the associated stem belong to the module.
+    /**
+     The stem's parent directory belongs to the module; the associated stem names its data files.
+
+     Ownership matches `.directory` because Android/JSword treat the stem's parent directory as the
+     module's directory for extraction and deletion, and real packages ship non-stem files such as
+     `BuildModule` scripts and `images/` directories beside the stem.
+     */
     case filenamePrefix(String)
 }
 
@@ -48,18 +54,14 @@ public struct ModuleStoreInstalledLayout: Sendable, Equatable {
      Tests whether one validated archive-relative file is owned by this config.
 
      - Parameter relativePath: Exact `modules/...` file path.
-     - Returns: `true` only for files bound by this layout's directory or filename-prefix rule.
+     - Returns: `true` for every file below this layout's data directory. Stem layouts own their
+       parent directory exactly like directory layouts because Android/JSword extract and delete
+       the whole module directory, and real CrossWire packages ship non-stem files such as
+       `BuildModule` scripts and `images/` directories beside the stem files.
      - Side effects: none.
      */
     public func ownsPayload(atRelativePath relativePath: String) -> Bool {
-        switch payloadShape {
-        case .directory:
-            return relativePath.hasPrefix(dataDirectoryRelativePath + "/")
-        case .filenamePrefix(let prefix):
-            let nsPath = relativePath as NSString
-            return nsPath.deletingLastPathComponent == dataDirectoryRelativePath
-                && nsPath.lastPathComponent.hasPrefix(prefix)
-        }
+        relativePath.hasPrefix(dataDirectoryRelativePath + "/")
     }
 }
 
@@ -117,7 +119,7 @@ public struct ModuleStoreStagedInstallPlan: Sendable, Equatable {
  requires every target to remain a strict descendant of canonical `modules`.
  */
 public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
-    /// Drivers whose `DataPath` ends in a filename stem rather than a directory.
+    /** Drivers whose slash-less `DataPath` ends in a filename stem; a trailing slash still denotes a directory. */
     public static let filenamePrefixDrivers: Set<String> = [
         "rawld", "rawld4", "zld", "rawgenbook", "rawfiles",
     ]
@@ -204,9 +206,15 @@ public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
         let normalizedDataPath = try validatedDataPath(dataPath, moduleName: normalizedName)
         let components = normalizedDataPath.split(separator: "/").map(String.init)
         let normalizedDriver = driver.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // SWORD distinguishes stem and directory DataPaths by the trailing slash, not the driver
+        // alone: font add-ons such as FontPack declare RawGenBook with a trailing-slash DataPath
+        // and ship payload in nested subdirectories of that directory.
+        let denotesDirectory = dataPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .hasSuffix("/")
         let shape: ModuleStorePayloadShape
         let directoryComponents: [String]
-        if Self.filenamePrefixDrivers.contains(normalizedDriver) {
+        if Self.filenamePrefixDrivers.contains(normalizedDriver), !denotesDirectory {
             guard components.count >= 3, let prefix = components.last, !prefix.isEmpty else {
                 throw ModuleStoreMutationError.unsafeDataPath(
                     moduleName: normalizedName,

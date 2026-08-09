@@ -11,10 +11,10 @@ import XCTest
  */
 final class ModuleStoreLayoutTests: XCTestCase {
     /**
-     Verifies directory and filename-prefix drivers bind only their actual staged payload files.
+     Verifies directory and filename-prefix drivers bind their whole data directory like Android.
 
-     Failure means RawLD-family modules can be treated as directories, or directory drivers can
-     accidentally claim sibling module data.
+     Failure means stem modules cannot ship auxiliary files (`BuildModule`, `images/`) beside their
+     stem data as real CrossWire packages do, or any driver can claim a sibling module's directory.
      */
     func testResolverBindsDirectoryAndFilenamePrefixDriverLayouts() throws {
         let root = try makeRoot()
@@ -37,8 +37,74 @@ final class ModuleStoreLayoutTests: XCTestCase {
         ))
         XCTAssertEqual(prefix.payloadShape, .filenamePrefix("strongs"))
         XCTAssertTrue(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/strongs.dat"))
-        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/other.dat"))
-        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/nested/strongs.dat"))
+        XCTAssertTrue(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/BuildModule"))
+        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/strongs.dat"))
+    }
+
+    /**
+     Verifies stem layouts own auxiliary files and nested subdirectories like Android extraction.
+
+     Failure means real CrossWire stem modules that ship `BuildModule` scripts or ThML `images/`
+     directories beside their stem files (EpiphanyMaps, OpenHymnal, WebstersLinked,
+     StrongsRealGreek) are rejected at install even though Android installs them verbatim.
+     */
+    func testResolverBindsStemDriverAuxiliaryAndNestedPayload() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let resolver = ModuleStoreInstalledLayoutResolver(moduleRootURL: root)
+
+        let maps = try resolver.resolve(configuration(
+            name: "EpiphanyMaps",
+            driver: "RawLD4",
+            dataPath: "./modules/lexdict/rawld4/epiphany-maps/maps"
+        ))
+        XCTAssertEqual(maps.payloadShape, .filenamePrefix("maps"))
+        XCTAssertTrue(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/maps.dat"))
+        XCTAssertTrue(maps.ownsPayload(
+            atRelativePath: "modules/lexdict/rawld4/epiphany-maps/images/israjesu.jpg"
+        ))
+        XCTAssertTrue(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/BuildModule"))
+        XCTAssertFalse(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/images/israjesu.jpg"))
+
+        let hymnal = try resolver.resolve(configuration(
+            name: "OpenHymnal",
+            driver: "RawGenBook",
+            dataPath: "./modules/genbook/rawgenbook/openhymnal/openhymnal"
+        ))
+        XCTAssertEqual(hymnal.payloadShape, .filenamePrefix("openhymnal"))
+        XCTAssertTrue(hymnal.ownsPayload(
+            atRelativePath: "modules/genbook/rawgenbook/openhymnal/openhymnal.bdt"
+        ))
+        XCTAssertTrue(hymnal.ownsPayload(
+            atRelativePath: "modules/genbook/rawgenbook/openhymnal/images/Abide_With_Me-Eventide.gif"
+        ))
+    }
+
+    /**
+     Verifies a trailing-slash `DataPath` binds directory ownership even for stem-capable drivers.
+
+     Failure means font add-ons such as FontPack (RawGenBook with a directory `DataPath` whose
+     payload lives in nested subdirectories) are rejected at install for owning payload "outside"
+     their own declared data directory.
+     */
+    func testResolverBindsTrailingSlashStemDriverDataPathAsDirectory() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let resolver = ModuleStoreInstalledLayoutResolver(moduleRootURL: root)
+
+        let fontPack = try resolver.resolve(configuration(
+            name: "FontPack",
+            driver: "RawGenBook",
+            dataPath: "./modules/texts/ztext/FontPack/"
+        ))
+        XCTAssertEqual(fontPack.payloadShape, .directory)
+        XCTAssertEqual(fontPack.dataDirectoryRelativePath, "modules/texts/ztext/FontPack")
+        XCTAssertTrue(fontPack.ownsPayload(
+            atRelativePath: "modules/texts/ztext/FontPack/and-bible/AntiochText.ttf"
+        ))
+        XCTAssertTrue(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/FontPack/readme.txt"))
+        XCTAssertFalse(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/FontPack2/font.ttf"))
+        XCTAssertFalse(fontPack.ownsPayload(atRelativePath: "modules/texts/ztext/other/font.ttf"))
     }
 
     /**

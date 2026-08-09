@@ -83,9 +83,12 @@ extension ModuleStoreTransactionPublisher {
      Resolves current live payload targets for a driver-aware layout.
 
      - Parameter layout: Revalidated installed layout.
-     - Returns: Existing directory target or exact prefix-driver files.
-     - Side effects: Reads live directory entries and canonical path metadata.
-     - Throws: Filesystem or canonical-containment errors.
+     - Returns: The module's whole data directory when it exists. Stem layouts delete their parent
+       directory exactly like directory layouts because Android's JSword `SwordBookDriver.delete`
+       removes the book's location directory, and stem packages ship non-stem files such as
+       `BuildModule` scripts and `images/` directories that would otherwise be orphaned.
+     - Side effects: Reads canonical path metadata.
+     - Throws: Filesystem errors or a data path that is not a directory.
      */
     func payloadTargets(for layout: ModuleStoreInstalledLayout) throws -> [URL] {
         guard fileManager.fileExists(atPath: layout.dataDirectoryURL.path) else { return [] }
@@ -93,30 +96,7 @@ extension ModuleStoreTransactionPublisher {
         guard directoryValues.isDirectory == true else {
             throw ModuleStoreMutationError.invalidConfiguration(layout.configRelativePath)
         }
-
-        switch layout.payloadShape {
-        case .directory:
-            return [layout.dataDirectoryURL]
-        case .filenamePrefix(let prefix):
-            let prefixKey = resolver.filesystemCollisionKey(prefix)
-            let children = try fileManager.contentsOfDirectory(
-                at: layout.dataDirectoryURL,
-                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-                options: [.skipsHiddenFiles]
-            )
-            var targets: [URL] = []
-            for child in children where resolver.filesystemCollisionKey(child.lastPathComponent)
-                .hasPrefix(prefixKey) {
-                let values = try child.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
-                try resolver.validateCanonicalContainment(
-                    of: child,
-                    beneath: try resolver.canonicalModulesRootURL()
-                )
-                targets.append(child)
-            }
-            return targets
-        }
+        return [layout.dataDirectoryURL]
     }
 
     /**
