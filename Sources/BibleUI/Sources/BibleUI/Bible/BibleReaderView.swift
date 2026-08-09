@@ -716,9 +716,16 @@ public struct BibleReaderView: View {
             ?? MyNotesAccessibilitySnapshot.empty.encodedValue
         let studyPadToken = exportController?.studyPadAccessibilityState
             ?? StudyPadAccessibilitySnapshot.empty.encodedValue
-        let strongsMode = resolvedDisplaySettings(for: windowManager.activeWindow).strongsMode
+        let resolvedDisplay = resolvedDisplaySettings(for: windowManager.activeWindow)
+        let strongsMode = resolvedDisplay.strongsMode
             ?? TextDisplaySettings.appDefaults.strongsMode
             ?? 0
+        // Rendered-effect assertions still need frame or screenshot evidence; these tokens let
+        // tests distinguish "setting never resolved" from "resolved but not rendered" cheaply.
+        let displayMaxWidthToken =
+            "displayMaxWidth=\(resolvedDisplay.maxWidth ?? TextDisplaySettings.appDefaults.maxWidth ?? 170)"
+        let displayFontSizeToken =
+            "displayFontSize=\(resolvedDisplay.fontSize ?? TextDisplaySettings.appDefaults.fontSize ?? 16)"
         let drawerToken = "drawerVisible=\(showReaderNavigationDrawer ? "true" : "false")"
         let overflowToken = "overflowVisible=\(showReaderOverflowMenu ? "true" : "false")"
         let destinationToken = "readerDestination=\(activeReaderDestination?.rawValue ?? "none")"
@@ -744,6 +751,8 @@ public struct BibleReaderView: View {
             searchToken,
             nightModeToken,
             readerBackgroundToken,
+            displayMaxWidthToken,
+            displayFontSizeToken,
         ].joined(separator: ";")
     }
 
