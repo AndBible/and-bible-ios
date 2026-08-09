@@ -1031,4 +1031,147 @@ extension AndBibleUITests {
         )
     }
 
+    /**
+     Verifies the Android margins editor's maximum text width narrows the rendered reader text.
+     *
+     Package tests prove the `set_config` payload carries `marginSize`, so this smoke guards the
+     remaining production chain: the margins dialog commit, the reader refresh push, and the shared
+     Vue content layout actually constraining visible text (issue #377 reported no visible effect).
+     *
+     * - Side effects:
+     *   - launches the reader shell with deterministic in-memory data
+     *   - reduces the workspace maximum text width through the real margins editor dialog
+     * - Failure modes:
+     *   - fails if the margins dialog, its seek bar, or its OK action cannot be reached
+     *   - fails if rendered reader text stays at its previous width after the commit
+     */
+    func testMarginMaxWidthEditorNarrowsRenderedReaderText() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
+        let initialWidth = widestReaderTextLineWidth(in: app)
+        XCTAssertGreaterThan(
+            initialWidth,
+            100,
+            "Expected measurable rendered reader text before editing margins."
+        )
+        attachReaderScreenshot(named: "reader-before-margin-edit", of: app)
+
+        let textDisplayScreen = openAllTextOptions(in: app)
+        XCTAssertTrue(textDisplayScreen.exists)
+        let marginsButton = requireReachableTextDisplayButton(
+            "textDisplayMarginSizeButton",
+            in: app,
+            timeout: 10
+        )
+        tapElementReliably(marginsButton, timeout: 10)
+        XCTAssertTrue(requireElement("textDisplayPreferenceEditorDialog", in: app, timeout: 10).exists)
+
+        let maxWidthSlider = requireElement(
+            "textDisplayPreferenceEditorSeekBar::Maximum width of text",
+            in: app,
+            timeout: 10
+        )
+        maxWidthSlider
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+            .press(forDuration: 0.1)
+        XCTAssertLessThan(
+            seekBarNumericValue(maxWidthSlider),
+            120,
+            "Expected the seek bar press to reduce the drafted maximum width below its 170 default."
+        )
+
+        tapElementReliably(
+            requireElement("textDisplayPreferenceEditorOKButton", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        tapElementReliably(
+            requireReachableTextDisplayButton("textDisplayMarginSizeButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        let reopenedSlider = requireElement(
+            "textDisplayPreferenceEditorSeekBar::Maximum width of text",
+            in: app,
+            timeout: 10
+        )
+        XCTAssertLessThan(
+            seekBarNumericValue(reopenedSlider),
+            120,
+            "Expected the committed maximum width to persist into the reopened margins editor."
+        )
+        tapElementReliably(
+            requireElement("textDisplayPreferenceEditorCancelButton", in: app, timeout: 10),
+            timeout: 10
+        )
+
+        tapElementReliably(
+            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
+
+        var narrowedWidth = CGFloat.greatestFiniteMagnitude
+        for _ in 0..<20 {
+            narrowedWidth = widestReaderTextLineWidth(in: app)
+            if narrowedWidth > 0, narrowedWidth < initialWidth * 0.8 { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        attachReaderScreenshot(named: "reader-after-margin-edit", of: app)
+        XCTAssertLessThan(
+            narrowedWidth,
+            initialWidth * 0.8,
+            "Expected a much smaller maximum text width to narrow rendered reader text."
+        )
+    }
+
+    /**
+     Attaches one always-kept reader screenshot for visual diagnosis of layout assertions.
+     *
+     * - Parameters:
+     *   - name: Stable attachment name recorded in the result bundle.
+     *   - app: Running application under test.
+     * - Side effects: Adds one XCTAttachment to the current test.
+     * - Failure modes: none; attachment capture failures surface through XCTest itself.
+     */
+    private func attachReaderScreenshot(named name: String, of app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /**
+     Reads the Android seek bar's numeric accessibility value.
+     *
+     * - Parameter element: Seek bar element exposing its bound value as accessibility value.
+     * - Returns: Parsed numeric value, or `greatestFiniteMagnitude` when unavailable so callers'
+     *   less-than assertions fail loudly.
+     * - Side effects: none.
+     * - Failure modes: Missing or non-numeric accessibility values return the sentinel maximum.
+     */
+    private func seekBarNumericValue(_ element: XCUIElement) -> Double {
+        Double((element.value as? String) ?? "") ?? .greatestFiniteMagnitude
+    }
+
+    /**
+     Measures the widest rendered text line inside the reader's web content.
+     *
+     * - Parameter app: Running application under test.
+     * - Returns: Width of the widest static text exposed by the reader web view, or zero when no
+     *   rendered text is available.
+     * - Side effects: none.
+     * - Failure modes: Returns zero when the web view or its text runs never appear.
+     */
+    private func widestReaderTextLineWidth(in app: XCUIApplication) -> CGFloat {
+        let webView = app.webViews.firstMatch
+        guard webView.waitForExistence(timeout: 20) else { return 0 }
+        var widest: CGFloat = 0
+        for element in webView.staticTexts.allElementsBoundByIndex.prefix(40) where element.exists {
+            widest = max(widest, element.frame.width)
+        }
+        return widest
+    }
+
 }

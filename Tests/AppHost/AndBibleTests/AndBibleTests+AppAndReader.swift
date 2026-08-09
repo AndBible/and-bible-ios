@@ -1216,6 +1216,70 @@ private func bindMemorizeParityUUIDBlob(_ uuid: UUID, to statement: OpaquePointe
  - Side effects: Installs a JavaScript evaluation observer on the returned bridge.
  - Failure modes: None.
  */
+extension AndBibleTests {
+    /**
+     Verifies a display-settings update pushes the new margin size in every subsequent config emit.
+
+     Issue #377 reports margin edits with no visible reader effect. The staged UI repro proves the
+     margins dialog commits and persists, so this probe pins the next stage: after
+     `updateDisplaySettings`, both the immediate `set_config` push and the initial config carried by
+     the follow-up content reload must serialize the reduced `marginSize.maxWidth`.
+
+     - Side effects: Creates a temporary SWORD fixture root and a recording bridge controller.
+     - Failure modes: Fails when any post-update `set_config` payload omits or reverts the new
+       maximum text width.
+     */
+    @MainActor
+    func testUpdateDisplaySettingsPushesReducedMaxWidthThroughReloadConfig() throws {
+        let (bridge, recordedScripts) = makeMemorizeParityRecordingBridge()
+        let modulePath = try makeMemorizeParityTemporarySwordPath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.displaySettings = .appDefaults
+        controller.nightMode = false
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+
+        var narrowed = TextDisplaySettings.appDefaults
+        narrowed.maxWidth = 50
+        controller.updateDisplaySettings(narrowed, nightMode: false)
+
+        let reloadDeadline = Date(timeIntervalSinceNow: 3)
+        while Date() < reloadDeadline,
+              !recordedScripts()
+                .dropFirst(baselineScriptCount)
+                .contains(where: { $0.contains("emit('clear_document'") }) {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        let updateScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let configScripts = updateScripts.filter { $0.contains("set_config") }
+        XCTAssertFalse(
+            configScripts.isEmpty,
+            "Expected at least one set_config emission after updateDisplaySettings."
+        )
+        for script in configScripts {
+            XCTAssertTrue(
+                script.contains("\"maxWidth\":50"),
+                "Expected every post-update config to carry maxWidth 50: \(script.prefix(400))"
+            )
+            XCTAssertFalse(
+                script.contains("\"maxWidth\":170"),
+                "Expected no post-update config to revert to the default maxWidth: \(script.prefix(400))"
+            )
+        }
+        XCTAssertTrue(
+            updateScripts.contains { $0.contains("emit('clear_document'") },
+            "Expected updateDisplaySettings to trigger the content reload replacement."
+        )
+    }
+}
+
 private func makeMemorizeParityRecordingBridge() -> (BibleBridge, () -> [String]) {
     let bridge = BibleBridge()
     var scripts: [String] = []

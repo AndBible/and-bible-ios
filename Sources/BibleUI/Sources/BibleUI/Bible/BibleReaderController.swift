@@ -1646,11 +1646,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             content.style.paddingTop = '8px';
             content.style.paddingBottom = '16px';
         }
-        // Inject CSS overrides for margins and TTS highlighting
-        if (!document.getElementById('ios-margin-fix')) {
+        // Inject CSS for TTS speak highlighting only. Horizontal padding and max-width belong to
+        // the shared Vue contentStyle; an !important override here would defeat Android's
+        // marginSize text-display settings for every document.
+        var legacyMarginFix = document.getElementById('ios-margin-fix');
+        if (legacyMarginFix) { legacyMarginFix.remove(); }
+        if (!document.getElementById('ios-tts-highlight')) {
             var s = document.createElement('style');
-            s.id = 'ios-margin-fix';
-            s.textContent = '#content { padding-left: 16px !important; padding-right: 16px !important; max-width: none !important; } .speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; }';
+            s.id = 'ios-tts-highlight';
+            s.textContent = '.speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; }';
             document.head.appendChild(s);
         }
         """)
