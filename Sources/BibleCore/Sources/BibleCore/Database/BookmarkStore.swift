@@ -1111,11 +1111,20 @@ public final class BookmarkStore {
      * - Failure: Junction fetch failures are swallowed and reported as an empty array.
      */
     public func genericBookmarks(withLabel labelId: UUID) -> [GenericBookmark] {
+        // Android orders generic rows by bookInitials then key in every branch.
+        let ordered: ([GenericBookmark]) -> [GenericBookmark] = { rows in
+            rows.sorted {
+                if $0.bookInitials != $1.bookInitials {
+                    return $0.bookInitials < $1.bookInitials
+                }
+                return $0.key < $1.key
+            }
+        }
         if labelId == Label.unlabeledId {
-            return genericBookmarks().filter { ($0.bookmarkToLabels ?? []).isEmpty }
+            return ordered(genericBookmarks().filter { ($0.bookmarkToLabels ?? []).isEmpty })
         }
         let gbtls = genericBookmarkToLabels(labelId: labelId)
-        return gbtls.compactMap { $0.bookmark }
+        return ordered(gbtls.compactMap { $0.bookmark })
     }
 
     // MARK: - Persistence

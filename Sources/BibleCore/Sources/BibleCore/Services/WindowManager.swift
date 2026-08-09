@@ -353,7 +353,10 @@ public final class WindowManager {
             return nil
         }
 
-        if linksWindow.layoutState == "minimized" {
+        // Android treats both CLOSED and MINIMISED targets as non-visible and reveals the
+        // selected links window, so a persisted explicit target in either hidden state is
+        // restored before receiving the link result.
+        if linksWindow.layoutState == "minimized" || linksWindow.layoutState == "closed" {
             restoreWindow(linksWindow)
         } else if createdLinksWindow, let previousActiveWindow {
             activeWindow = previousActiveWindow

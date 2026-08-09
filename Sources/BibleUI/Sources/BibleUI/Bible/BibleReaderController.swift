@@ -1517,6 +1517,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 self?.onPersistState?()
             },
             loadCurrentContent: { [weak self] in
+                // Android's document/category switches select the new page and leave the MYNOTE
+                // category (CurrentPageManager.setCurrentDocument*), so switch-driven reloads
+                // must exit My Notes; only navigation-driven reloads keep it current.
+                self?.showingMyNotes = false
                 self?.loadCurrentContent()
             }
         )
@@ -1589,6 +1593,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.onPersistState?()
       },
       reloadContent: { [weak self] in
+        // Android's document/category switches select the new page and leave the MYNOTE
+        // category, so SQLite-backed switches must exit My Notes like the SWORD switch path.
+        self?.showingMyNotes = false
         self?.loadCurrentContent()
       }
     )
@@ -7487,7 +7494,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
         beginReplacingContentIntent()
         guard clientReady else {
-            guard let labelName = bookmarkService?.label(id: labelId)?.name else { return }
+            guard let label = bookmarkService?.label(id: labelId) else { return }
+            let labelName = AndroidLabelPresentation.displayName(for: label)
             showingMyNotes = false
             showingStudyPad = true
             activeStudyPadLabelId = labelId
@@ -8243,6 +8251,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   @discardableResult
   func navigateToBibleLink(_ ref: OsisRef) -> Bool {
     guard let target = navigationReference(for: ref) else { return false }
+    // Android routes link results through setCurrentDocumentAndKey, which selects the Bible
+    // page, so link navigation always exits My Notes instead of re-rendering it in place.
+    showingMyNotes = false
 
     if activeInstalledScriptureSource()?.info.name != target.moduleName
         || currentCategory != .bible {
@@ -8454,15 +8465,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    */
   @MainActor
   func navigate(toBookmarkTarget target: BookmarkNavigationTarget) throws {
-    // Android's bookmark-list navigation forces the default Bible document whenever the pane is
-    // not showing Bible text (MainBibleActivity's isFromBookmark branch), so bookmark targets
-    // always leave My Notes instead of re-rendering it at the new position.
-    showingMyNotes = false
     let inventory = try bookmarkNavigationInventory(for: target)
     let plan = try BibleReaderBookmarkNavigationCoordinator().plan(
       target: target,
       inventory: inventory
     )
+    // Android's bookmark-list navigation forces the default Bible document whenever the pane is
+    // not showing Bible text (MainBibleActivity's isFromBookmark branch), so a successfully
+    // planned bookmark target leaves My Notes before committing. Planning failures above throw
+    // without mutating reader state.
+    showingMyNotes = false
 
     switch plan {
     case .bible(let biblePlan):

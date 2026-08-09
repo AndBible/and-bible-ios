@@ -458,8 +458,10 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      *
      * Android renders `MyNotesDocument` with `ClientBibleBookmark(bookmark, KJVA)`, so the
      * bookmark's visible `ordinalRange` is KJVA while `originalOrdinalRange` remains the source
-     * versification ordinal used by modal links. A failure here means the iOS My Notes document can
-     * drift back to active-module ordinals and break link/scroll parity with Android.
+     * versification ordinal used by modal links, and every display string plus `osisRef` derives
+     * from the bookmark's own versification (`bookmark.verseRange`). A failure here means the iOS
+     * My Notes document can drift back to active-module ordinals or emit an `osisRef` that
+     * mismatches the emitted `v11n`, breaking link/scroll parity with Android.
      */
     func testMyNotesBookmarkPayloadUsesKJVAOrdinalRangeAndSourceOriginalOrdinals() throws {
         let john316 = try XCTUnwrap(
@@ -468,11 +470,23 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let john317 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 17)
         )
+        let nrsvJohn316 = try XCTUnwrap(
+            SwordVersification.referenceIndex(
+                for: SwordVersification.Reference(osisBookId: "John", chapter: 3, verse: 16),
+                versification: "NRSV"
+            )
+        )
+        let nrsvJohn317 = try XCTUnwrap(
+            SwordVersification.referenceIndex(
+                for: SwordVersification.Reference(osisBookId: "John", chapter: 3, verse: 17),
+                versification: "NRSV"
+            )
+        )
         let bookmark = BibleBookmark(
             kjvOrdinalStart: john316,
             kjvOrdinalEnd: john317,
-            ordinalStart: 42,
-            ordinalEnd: 43,
+            ordinalStart: nrsvJohn316,
+            ordinalEnd: nrsvJohn317,
             v11n: "NRSV",
             bookInitials: "NRSV"
         )
@@ -488,10 +502,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let payload = factory.bookmarkJSONForMyNotes(bookmark)
 
         XCTAssertEqual(payload.ordinalRange, [john316, john317])
-        XCTAssertEqual(payload.originalOrdinalRange, [42, 43])
+        XCTAssertEqual(payload.originalOrdinalRange, [nrsvJohn316, nrsvJohn317])
         XCTAssertEqual(payload.bookInitials, "NRSV")
         XCTAssertEqual(payload.bookName, "NRSV")
         XCTAssertEqual(payload.v11n, "NRSV")
+        XCTAssertEqual(payload.osisRef, "John.3.16-John.3.17")
         XCTAssertEqual(payload.verseRange, "John 3:16-17")
     }
 

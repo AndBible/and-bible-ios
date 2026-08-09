@@ -274,7 +274,9 @@ struct BibleReaderAnnotationDocumentLoader {
             return false
         }
 
-        prepareVisibleState(label.name)
+        // Android's StudyPadKey.name always renders the localized display name, so native pane
+        // chrome shows "Speak"/"Unlabelled" translations instead of the stored sentinel names.
+        prepareVisibleState(AndroidLabelPresentation.displayName(for: label))
 
         // Android derives the junction payloads from the returned bookmark rows
         // (`bookmarks.mapNotNull { getBookmarkToLabel(it, label.id) }`), so every emitted

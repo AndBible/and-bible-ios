@@ -83,8 +83,8 @@ time.
   mapping the source module's whole chapter into KJVA (the span can cross
   KJVA chapter bounds, and the heading renders JSword's range name); iOS
   always renders exactly one KJVA chapter with a fixed "Book N" heading.
-  Bookmark display strings still render in the active module's
-  versification when it differs from the bookmark's own.
+  Chapter stepping also does not wrap at the canon boundary the way
+  Android's `BibleTraverser` does.
 
 ## Consequences
 
