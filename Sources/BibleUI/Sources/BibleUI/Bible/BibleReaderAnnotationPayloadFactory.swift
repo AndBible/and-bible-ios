@@ -895,11 +895,16 @@ struct BibleReaderAnnotationPayloadFactory {
             wholeVerse: effectiveWholeVerse,
             customIcon: bookmark.customIcon,
             editAction: editAction,
-            osisRef: rangeProjection.osisRef,
+            // Android's ClientBibleBookmark emits ordinalRange in the requested document domain
+            // but keeps osisRef and every verse-range display string in the bookmark's own
+            // versification. The source projection also keeps osisRef consistent with the
+            // emitted v11n; a KJVA osisRef paired with a source v11n misresolves links for
+            // divergent canons.
+            osisRef: textRangeProjection.osisRef,
             originalOrdinalRange: [bookmark.ordinalStart, effectiveSourceEndOrdinal],
-            verseRange: rangeProjection.verseRange,
-            verseRangeOnlyNumber: rangeProjection.verseRangeOnlyNumber,
-            verseRangeAbbreviated: rangeProjection.verseRangeAbbreviated,
+            verseRange: textRangeProjection.verseRange,
+            verseRangeOnlyNumber: textRangeProjection.verseRangeOnlyNumber,
+            verseRangeAbbreviated: textRangeProjection.verseRangeAbbreviated,
             v11n: hasSourceModule ? bookmark.v11n : JSwordKJVAVersification.name,
             osisFragment: nil
         )
