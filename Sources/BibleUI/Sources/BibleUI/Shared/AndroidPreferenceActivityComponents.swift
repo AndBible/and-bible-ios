@@ -341,7 +341,8 @@ struct AndroidSeekBarPreferenceRow: View {
                     range: range,
                     step: step,
                     palette: palette,
-                    accessibilityIdentifier: accessibilityIdentifier
+                    accessibilityIdentifier: accessibilityIdentifier,
+                    accessibilityLabel: title
                 )
                 if let summary, !summary.isEmpty {
                     Text(summary)
@@ -369,6 +370,9 @@ struct AndroidSeekBar: View {
     let palette: ReaderThemeSurfacePalette
     let accessibilityIdentifier: String
 
+    /// Human-readable VoiceOver label; identifiers are automation-facing and must not be spoken.
+    let accessibilityLabel: String
+
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 1)
@@ -393,7 +397,7 @@ struct AndroidSeekBar: View {
         }
         .frame(height: 36)
         .accessibilityElement()
-        .accessibilityLabel(accessibilityIdentifier)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityValue("\(value)")
         .accessibilityAdjustableAction { direction in
             switch direction {

@@ -22,6 +22,8 @@
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": "baseline",
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": "baseline",
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "display-colors-custom",
+  "AndBibleUITests/AndBibleUITests/testMarginMaxWidthEditorNarrowsRenderedReaderText": "baseline",
+  "AndBibleUITests/AndBibleUITests/testFontSizeEditorGrowsRenderedReaderText": "baseline",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": "sync-nextcloud-bookmarks-enabled",

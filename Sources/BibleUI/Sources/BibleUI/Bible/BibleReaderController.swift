@@ -1644,7 +1644,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
-    /// Inject CSS to set the page background for night/day mode using display settings colors.
+    /**
+     Injects the night/day page background and the TTS highlight styles.
+
+     Body/document colors are set natively because they must hold before the Vue client is ready
+     (initial load, document replacement) when no `set_config` styling exists yet; once the client
+     runs, the shared frontend derives the same colors from config. All layout — paddings, margins,
+     and text width — belongs exclusively to the shared Vue `contentStyle` so Android's
+     text-display settings keep authority (issue #377).
+
+     - Side effects: Evaluates one JavaScript block in the pane web view.
+     - Failure modes: Evaluation failures leave the previous styling; the next content load retries.
+     */
     private func applyNightModeBackground() {
         let s = displaySettings
         let d = TextDisplaySettings.appDefaults
@@ -1665,14 +1676,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         document.body.style.color = '\(fg)';
         var content = document.getElementById('content');
         if (content) {
-            content.style.paddingTop = '8px';
-            content.style.paddingBottom = '16px';
+            content.style.removeProperty('padding-top');
+            content.style.removeProperty('padding-bottom');
         }
-        // Inject CSS overrides for margins and TTS highlighting
-        if (!document.getElementById('ios-margin-fix')) {
+        // Inject CSS for TTS speak highlighting only. Padding and max-width belong to the shared
+        // Vue contentStyle; a native override here would defeat Android's text-display settings.
+        if (!document.getElementById('ios-tts-highlight')) {
             var s = document.createElement('style');
-            s.id = 'ios-margin-fix';
-            s.textContent = '#content { padding-left: 16px !important; padding-right: 16px !important; max-width: none !important; } .speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; }';
+            s.id = 'ios-tts-highlight';
+            s.textContent = '.speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; } .night .speaking-verse { background-color: rgba(135, 168, 255, 0.28); } .night #speaking-word { background-color: rgba(135, 168, 255, 0.6); }';
             document.head.appendChild(s);
         }
         """)
