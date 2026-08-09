@@ -49,7 +49,8 @@ struct AndroidSpeakTransportView: View {
                     range: 10...300,
                     step: 1,
                     palette: surfacePalette,
-                    accessibilityIdentifier: "speakTransportSpeed"
+                    accessibilityIdentifier: "speakTransportSpeed",
+                    accessibilityLabel: String(localized: "speak_speed_title", defaultValue: "Speech speed")
                 )
                 .frame(maxWidth: 150)
             }

@@ -348,7 +348,8 @@ public struct SpeakControlView: View {
                 range: 0...300,
                 step: 1,
                 palette: surfacePalette,
-                accessibilityIdentifier: "speakSpeed"
+                accessibilityIdentifier: "speakSpeed",
+                accessibilityLabel: String(localized: "speak_speed_title", defaultValue: "Speech speed")
             )
             .padding(.horizontal, 8)
         }

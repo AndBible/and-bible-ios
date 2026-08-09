@@ -257,7 +257,8 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
                 range: range,
                 step: TextDisplaySettingsView.androidNumericSliderStep,
                 palette: surfacePalette,
-                accessibilityIdentifier: "textDisplayPreferenceEditorSeekBar::\(title)"
+                accessibilityIdentifier: "textDisplayPreferenceEditorSeekBar::\(title)",
+                accessibilityLabel: title
             )
         }
     }
