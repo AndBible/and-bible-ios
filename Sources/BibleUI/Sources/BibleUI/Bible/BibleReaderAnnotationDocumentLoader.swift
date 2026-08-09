@@ -276,18 +276,24 @@ struct BibleReaderAnnotationDocumentLoader {
 
         prepareVisibleState(label.name)
 
+        // Android derives the junction payloads from the returned bookmark rows
+        // (`bookmarks.mapNotNull { getBookmarkToLabel(it, label.id) }`), so every emitted
+        // bookmark has a matching bookmarkToLabel and the document never carries junctions
+        // for rows it does not render.
+        let bibleRows = bookmarkService.bibleBookmarks(withLabel: labelId)
+        let genericRows = bookmarkService.genericBookmarks(withLabel: labelId)
         let document = StudyPadDocumentPayload(
             id: "journal_\(labelId.uuidString)",
             type: "journal",
             label: labelData,
-            bookmarks: bookmarkService.bibleBookmarks(withLabel: labelId).map { bookmarkPayload($0) },
-            genericBookmarks: bookmarkService.genericBookmarks(withLabel: labelId).map { genericBookmarkPayload($0) },
-            bookmarkToLabels: bookmarkService.bibleBookmarkToLabels(labelId: labelId).compactMap {
-                bibleBookmarkToLabelPayload($0)
-            },
-            genericBookmarkToLabels: bookmarkService.genericBookmarkToLabels(labelId: labelId).compactMap {
-                genericBookmarkToLabelPayload($0)
-            },
+            bookmarks: bibleRows.map { bookmarkPayload($0) },
+            genericBookmarks: genericRows.map { genericBookmarkPayload($0) },
+            bookmarkToLabels: bibleRows.flatMap { bookmark in
+                (bookmark.bookmarkToLabels ?? []).filter { $0.label?.id == labelId }
+            }.compactMap { bibleBookmarkToLabelPayload($0) },
+            genericBookmarkToLabels: genericRows.flatMap { bookmark in
+                (bookmark.bookmarkToLabels ?? []).filter { $0.label?.id == labelId }
+            }.compactMap { genericBookmarkToLabelPayload($0) },
             journalTextEntries: bookmarkService.studyPadEntries(labelId: labelId).map { studyPadEntryPayload($0) }
         )
 
