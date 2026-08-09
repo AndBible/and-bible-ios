@@ -11,10 +11,10 @@ import XCTest
  */
 final class ModuleStoreLayoutTests: XCTestCase {
     /**
-     Verifies directory and filename-prefix drivers bind only their actual staged payload files.
+     Verifies directory and filename-prefix drivers bind their whole data directory like Android.
 
-     Failure means RawLD-family modules can be treated as directories, or directory drivers can
-     accidentally claim sibling module data.
+     Failure means stem modules cannot ship auxiliary files (`BuildModule`, `images/`) beside their
+     stem data as real CrossWire packages do, or any driver can claim a sibling module's directory.
      */
     func testResolverBindsDirectoryAndFilenamePrefixDriverLayouts() throws {
         let root = try makeRoot()
@@ -37,19 +37,18 @@ final class ModuleStoreLayoutTests: XCTestCase {
         ))
         XCTAssertEqual(prefix.payloadShape, .filenamePrefix("strongs"))
         XCTAssertTrue(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/strongs.dat"))
-        XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/other.dat"))
+        XCTAssertTrue(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/strongs/BuildModule"))
         XCTAssertFalse(prefix.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/strongs.dat"))
     }
 
     /**
-     Verifies stem layouts own nested auxiliary subdirectories while direct stem siblings stay
-     protected.
+     Verifies stem layouts own auxiliary files and nested subdirectories like Android extraction.
 
-     Failure means real CrossWire stem modules that ship ThML `images/` directories beside their
-     stem files (for example EpiphanyMaps and OpenHymnal) are rejected at install, or a stem module
-     can claim a sibling module's stem files in a shared directory.
+     Failure means real CrossWire stem modules that ship `BuildModule` scripts or ThML `images/`
+     directories beside their stem files (EpiphanyMaps, OpenHymnal, WebstersLinked,
+     StrongsRealGreek) are rejected at install even though Android installs them verbatim.
      */
-    func testResolverBindsStemDriverNestedSubdirectoryPayload() throws {
+    func testResolverBindsStemDriverAuxiliaryAndNestedPayload() throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
         let resolver = ModuleStoreInstalledLayoutResolver(moduleRootURL: root)
@@ -64,7 +63,7 @@ final class ModuleStoreLayoutTests: XCTestCase {
         XCTAssertTrue(maps.ownsPayload(
             atRelativePath: "modules/lexdict/rawld4/epiphany-maps/images/israjesu.jpg"
         ))
-        XCTAssertFalse(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/other.dat"))
+        XCTAssertTrue(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/epiphany-maps/BuildModule"))
         XCTAssertFalse(maps.ownsPayload(atRelativePath: "modules/lexdict/rawld4/other/images/israjesu.jpg"))
 
         let hymnal = try resolver.resolve(configuration(

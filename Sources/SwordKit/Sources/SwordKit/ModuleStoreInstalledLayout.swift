@@ -9,7 +9,13 @@ public enum ModuleStorePayloadShape: Sendable, Equatable {
     /// Every staged file below the exact data directory belongs to the module.
     case directory
 
-    /// Direct children whose filename starts with the associated stem belong to the module.
+    /**
+     The stem's parent directory belongs to the module; the associated stem names its data files.
+
+     Ownership matches `.directory` because Android/JSword treat the stem's parent directory as the
+     module's directory for extraction and deletion, and real packages ship non-stem files such as
+     `BuildModule` scripts and `images/` directories beside the stem.
+     */
     case filenamePrefix(String)
 }
 
@@ -48,24 +54,14 @@ public struct ModuleStoreInstalledLayout: Sendable, Equatable {
      Tests whether one validated archive-relative file is owned by this config.
 
      - Parameter relativePath: Exact `modules/...` file path.
-     - Returns: `true` only for files bound by this layout's directory or filename-prefix rule.
-       Stem layouts additionally own nested subdirectories (for example ThML `images/`) because
-     SWORD stem modules routinely ship auxiliary directories beside their stem files, while sibling
-     stem files sharing the same directory remain protected by the prefix rule.
+     - Returns: `true` for every file below this layout's data directory. Stem layouts own their
+       parent directory exactly like directory layouts because Android/JSword extract and delete
+       the whole module directory, and real CrossWire packages ship non-stem files such as
+       `BuildModule` scripts and `images/` directories beside the stem files.
      - Side effects: none.
      */
     public func ownsPayload(atRelativePath relativePath: String) -> Bool {
-        switch payloadShape {
-        case .directory:
-            return relativePath.hasPrefix(dataDirectoryRelativePath + "/")
-        case .filenamePrefix(let prefix):
-            let nsPath = relativePath as NSString
-            let parent = nsPath.deletingLastPathComponent
-            if parent == dataDirectoryRelativePath {
-                return nsPath.lastPathComponent.hasPrefix(prefix)
-            }
-            return parent.hasPrefix(dataDirectoryRelativePath + "/")
-        }
+        relativePath.hasPrefix(dataDirectoryRelativePath + "/")
     }
 }
 

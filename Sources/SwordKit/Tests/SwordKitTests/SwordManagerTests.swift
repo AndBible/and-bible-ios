@@ -265,6 +265,31 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(info.aboutMetadata.swordVersionDate, "2024-01-02")
     }
 
+    /**
+     Verifies a versionless config defaults to JSword's `1.0` on parse.
+
+     Android reads `Version` through `SwordBookMetaData`, which defaults a missing value to `1.0`
+     on both the catalog and installed sides. Failure means modules without a `Version` line (for
+     example BDBT) permanently report an update because an empty installed version can never equal
+     the catalog value.
+     */
+    func testConfigWithoutVersionDefaultsToJSwordOneDotZero() throws {
+        let config = try XCTUnwrap(SwordModuleConfig.parse("""
+        [BDBT]
+        DataPath=./modules/texts/MyBible/BDBT/
+        ModDrv=MyBibleDictionary
+        """))
+        XCTAssertEqual(config.version, "1.0")
+
+        let versioned = try XCTUnwrap(SwordModuleConfig.parse("""
+        [KJV]
+        DataPath=./modules/texts/ztext/kjv/
+        ModDrv=zText
+        Version=2.3
+        """))
+        XCTAssertEqual(versioned.version, "2.3")
+    }
+
     func testRemoteModuleInfoDefaultsToInstallable() {
         let info = RemoteModuleInfo(
             name: "KJV",

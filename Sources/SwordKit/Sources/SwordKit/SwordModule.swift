@@ -389,7 +389,10 @@ public final class SwordModule: @unchecked Sendable {
             let directionPtr = SWModule_getConfigEntry(handle, "Direction")
             let direction = directionPtr != nil ? String(cString: directionPtr!) : "LtoR"
             let versionPtr = SWModule_getConfigEntry(handle, "Version")
-            let versionStr = versionPtr != nil ? String(cString: versionPtr!) : ""
+            // JSword defaults a missing Version to 1.0; matching it keeps installed metadata equal
+            // to catalog metadata for versionless modules so no phantom update is reported.
+            let rawVersion = versionPtr.map { String(cString: $0) } ?? ""
+            let versionStr = rawVersion.isEmpty ? "1.0" : rawVersion
             func configValue(_ key: String) -> String {
                 guard let value = SWModule_getConfigEntry(handle, key) else { return "" }
                 return String(cString: value)

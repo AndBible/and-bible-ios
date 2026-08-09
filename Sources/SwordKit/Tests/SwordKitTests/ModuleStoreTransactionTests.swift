@@ -647,60 +647,54 @@ final class ModuleStoreTransactionTests: XCTestCase {
     }
 
     /**
-     Verifies prefix-driver uninstall deletes only matching files and preserves sibling ownership.
+     Verifies stem-driver uninstall removes the module's whole data directory like Android.
 
-     Failure means RawLD/RawLD4 uninstall can remove a shared containing directory.
+     JSword's `SwordBookDriver.delete` removes the book's location directory, so stem uninstall
+     must also delete auxiliary files (`BuildModule`, `images/`) beside the stem files while other
+     modules' directories stay untouched.
      */
-    func testPrefixDriverUninstallPreservesSiblingModuleFiles() throws {
+    func testPrefixDriverUninstallRemovesWholeModuleDirectoryLikeAndroid() throws {
         let context = try makeContext()
         defer { try? FileManager.default.removeItem(at: context.parent) }
         try writeInstalledModule(
             root: context.root,
             name: "STRONGS",
             driver: "RawLD4",
-            dataPath: "./modules/lexdict/rawld4/shared/strongs",
-            payloadPath: "modules/lexdict/rawld4/shared/strongs.dat",
+            dataPath: "./modules/lexdict/rawld4/strongs/strongs",
+            payloadPath: "modules/lexdict/rawld4/strongs/strongs.dat",
             marker: "strongs"
         )
         try writeInstalledModule(
             root: context.root,
             name: "OTHER",
             driver: "RawLD4",
-            dataPath: "./modules/lexdict/rawld4/shared/other",
-            payloadPath: "modules/lexdict/rawld4/shared/other.dat",
+            dataPath: "./modules/lexdict/rawld4/other/other",
+            payloadPath: "modules/lexdict/rawld4/other/other.dat",
             marker: "other"
         )
         try Data("index".utf8).write(
-            to: context.root.appendingPathComponent("modules/lexdict/rawld4/shared/strongs.idx")
+            to: context.root.appendingPathComponent("modules/lexdict/rawld4/strongs/strongs.idx")
         )
-        let matchingDirectory = context.root
-            .appendingPathComponent("modules/lexdict/rawld4/shared/strongs-cache", isDirectory: true)
-        try FileManager.default.createDirectory(at: matchingDirectory, withIntermediateDirectories: true)
-        let matchingSymlink = context.root
-            .appendingPathComponent("modules/lexdict/rawld4/shared/strongs-alias")
-        try FileManager.default.createSymbolicLink(
-            at: matchingSymlink,
-            withDestinationURL: context.root
-                .appendingPathComponent("modules/lexdict/rawld4/shared/other.dat")
+        try Data("#!/bin/sh".utf8).write(
+            to: context.root.appendingPathComponent("modules/lexdict/rawld4/strongs/BuildModule")
         )
+        let imagesDirectory = context.root
+            .appendingPathComponent("modules/lexdict/rawld4/strongs/images", isDirectory: true)
+        try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+        try Data("map".utf8).write(to: imagesDirectory.appendingPathComponent("map.gif"))
 
         try context.firstPublisher.uninstall(moduleName: "STRONGS")
 
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: context.root.appendingPathComponent("modules/lexdict/rawld4/shared/strongs.dat").path
-        ))
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: context.root.appendingPathComponent("modules/lexdict/rawld4/shared/strongs.idx").path
+            atPath: context.root.appendingPathComponent("modules/lexdict/rawld4/strongs").path
         ))
         XCTAssertEqual(
-            try payloadString(context.root, "modules/lexdict/rawld4/shared/other.dat"),
+            try payloadString(context.root, "modules/lexdict/rawld4/other/other.dat"),
             "other"
         )
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: context.root.appendingPathComponent("mods.d/other.conf").path
         ))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: matchingDirectory.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: matchingSymlink.path))
         try assertNoTransactionBackups(in: context.root)
     }
 
@@ -1071,8 +1065,8 @@ final class ModuleStoreTransactionTests: XCTestCase {
     /**
      Verifies no-overwrite publication rejects every existing path owned by the incoming layout.
 
-     Exact staged filenames are insufficient: directory drivers own the complete target subtree,
-     while prefix drivers own matching sibling files even when those names are absent from the ZIP.
+     Exact staged filenames are insufficient: directory and stem drivers both own their complete
+     target directory, so any existing file below it must block a no-overwrite install.
      */
     func testNoOverwriteRejectsExistingDirectoryAndPrefixOwnedPayload() throws {
         let context = try makeContext()
@@ -1132,7 +1126,7 @@ final class ModuleStoreTransactionTests: XCTestCase {
             guard case let ModuleStoreMutationError.destinationFilesExist(paths) = error else {
                 return XCTFail("Expected prefix conflict, received \(error)")
             }
-            XCTAssertTrue(paths.contains("modules/lexdict/rawld/prefixconflict/dict.idx"))
+            XCTAssertTrue(paths.contains("modules/lexdict/rawld/prefixconflict"))
         }
         XCTAssertEqual(try String(contentsOf: existingPrefixFile, encoding: .utf8), "existing-prefix")
         XCTAssertFalse(FileManager.default.fileExists(

@@ -2534,6 +2534,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             ("modules/lexdict/", Data()),
             ("modules/lexdict/rawld4/", Data()),
             ("modules/lexdict/rawld4/epiphany-maps/", Data()),
+            ("modules/lexdict/rawld4/epiphany-maps/BuildModule", Data("#!/bin/sh".utf8)),
             ("modules/lexdict/rawld4/epiphany-maps/maps.dat", Data("maps-data".utf8)),
             ("modules/lexdict/rawld4/epiphany-maps/maps.idx", Data("maps-index".utf8)),
             ("modules/lexdict/rawld4/epiphany-maps/images/", Data()),
