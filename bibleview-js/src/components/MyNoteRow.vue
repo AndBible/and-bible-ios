@@ -34,6 +34,7 @@
         <FontAwesomeIcon icon="info-circle"/>
       </button>
       <button
+          v-if="!bookmark.notes"
           type="button"
           class="journal-button"
           :aria-label="myNotesEditButtonAccessibilityLabel"
@@ -131,14 +132,26 @@ const bibleUrl = computed(
     }
 );
 
-const {strings} = useCommon();
+const {strings, sprintf} = useCommon();
 const myNotesReferenceLabel = computed(() => props.bookmark.verseRange || props.bookmark.verseRangeOnlyNumber);
-const myNotesMenuAccessibilityLabel = computed(() => `My Notes actions for ${myNotesReferenceLabel.value}`);
-const myNotesInfoAccessibilityLabel = computed(() => `Show My Notes bookmark details for ${myNotesReferenceLabel.value}`);
-const myNotesEditButtonAccessibilityLabel = computed(() => `Open My Notes note editor for ${myNotesReferenceLabel.value}`);
-const myNotesEditAccessibilityLabel = computed(() => `Edit My Notes note for ${myNotesReferenceLabel.value}`);
-const myNotesEditorAccessibilityLabel = computed(() => `My Notes note editor for ${myNotesReferenceLabel.value}`);
-const myNotesDeleteAccessibilityLabel = computed(() => `Delete My Notes note for ${myNotesReferenceLabel.value}`);
+const myNotesMenuAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesActionsAccessibilityLabel, myNotesReferenceLabel.value)
+);
+const myNotesInfoAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesBookmarkDetailsAccessibilityLabel, myNotesReferenceLabel.value)
+);
+const myNotesEditButtonAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesOpenEditorAccessibilityLabel, myNotesReferenceLabel.value)
+);
+const myNotesEditAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesEditNoteAccessibilityLabel, myNotesReferenceLabel.value)
+);
+const myNotesEditorAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesEditorAccessibilityLabel, myNotesReferenceLabel.value)
+);
+const myNotesDeleteAccessibilityLabel = computed(
+    () => sprintf(strings.myNotesDeleteNoteAccessibilityLabel, myNotesReferenceLabel.value)
+);
 </script>
 
 <style scoped lang="scss">
