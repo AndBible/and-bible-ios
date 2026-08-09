@@ -183,38 +183,29 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
      Builds the deterministic spoken-verse DOM highlight and centering script.
 
      - Parameter ordinal: Exact rendered KJVA verse ordinal to select.
-     - Returns: Self-contained JavaScript that replaces the prior verse highlight and centers the
-       matching `data-ordinal` element when present.
+     - Returns: Self-contained JavaScript that marks the matching `data-ordinal` element with the
+       Android-red speak-position class and centers it when present.
      - Side effects: None until the caller evaluates the returned script in the reader WebView.
      - Failure modes: The evaluated script exits without mutation when no matching verse exists.
      */
     private static func highlightScript(ordinal: Int) -> String {
         """
         (function() {
-            var oldVerse = document.querySelector('.speaking-verse');
-            if (oldVerse) oldVerse.classList.remove('speaking-verse');
+            var old = document.querySelector('.speak-position');
+            if (old) old.classList.remove('speak-position');
             var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
             if (!verse) return;
-            verse.classList.add('speaking-verse');
+            verse.classList.add('speak-position');
             verse.scrollIntoView({behavior: 'smooth', block: 'center'});
         })();
         """
     }
 
-    /**
-     Deterministic DOM cleanup for word and verse speech highlights.
-
-     Evaluation removes the current verse class and unwraps a transient spoken-word marker while
-     preserving its text. Missing nodes are accepted, making repeated cleanup idempotent.
-     */
-    private static let cleanupScript = """
+    /** Removes the speak-position marker when a SQLite speech session stops. */
+    static let cleanupScript = """
     (function() {
-        var word = document.getElementById('speaking-word');
-        if (word && word.parentNode) {
-            word.parentNode.replaceChild(document.createTextNode(word.textContent || ''), word);
-        }
-        var verse = document.querySelector('.speaking-verse');
-        if (verse) verse.classList.remove('speaking-verse');
+        var v = document.querySelector('.speak-position');
+        if (v) v.classList.remove('speak-position');
     })();
     """
 }

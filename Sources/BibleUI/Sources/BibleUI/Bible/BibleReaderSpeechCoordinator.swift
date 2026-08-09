@@ -664,7 +664,12 @@ final class BibleReaderSpeechCoordinator {
         })
     }
 
-    /** Highlights one provider-owned Bible verse after the caller validates session generation. */
+    /**
+     Marks and centers one provider-owned Bible verse after session-generation validation.
+
+     The marker uses Android's red speak-label visual so the live reading position matches the
+     speak identity users know from Android's paused speak bookmark.
+     */
     private func highlightVerseNow(
         _ ordinal: Int,
         evaluateJavaScript: @escaping (String) -> Void
@@ -672,11 +677,11 @@ final class BibleReaderSpeechCoordinator {
         currentHighlightedOrdinal = ordinal
         let js = """
         (function() {
-            var oldVerse = document.querySelector('.speaking-verse');
-            if (oldVerse) oldVerse.classList.remove('speaking-verse');
+            var old = document.querySelector('.speak-position');
+            if (old) old.classList.remove('speak-position');
             var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
             if (!verse) return;
-            verse.classList.add('speaking-verse');
+            verse.classList.add('speak-position');
             verse.scrollIntoView({behavior: 'smooth', block: 'center'});
         })();
         """
@@ -684,28 +689,18 @@ final class BibleReaderSpeechCoordinator {
     }
 
     /**
-     Clears speech highlights from the reader web view.
+     Clears the spoken-position marker when playback stops.
 
-     - Parameter evaluateJavaScript: Closure used to run DOM cleanup in the reader web view.
-     - Side effects: Resets the current highlighted ordinal and removes the active word/verse
-       highlight DOM state. The caller owns main-actor and session-generation validation.
+     - Parameter evaluateJavaScript: Closure used to remove the marker class in the reader client.
+     - Side effects: Resets the current tracked ordinal and removes the marker class.
      */
     private func clearSpeakHighlightNow(evaluateJavaScript: @escaping (String) -> Void) {
         currentHighlightedOrdinal = nil
-        let js = """
+        evaluateJavaScript("""
         (function() {
-            var prev = document.getElementById('speaking-word');
-            if (prev) {
-                var p = prev.parentNode;
-                if (p) {
-                    p.replaceChild(document.createTextNode(prev.textContent || ''), prev);
-                    p.normalize();
-                }
-            }
-            var v = document.querySelector('.speaking-verse');
-            if (v) v.classList.remove('speaking-verse');
+            var v = document.querySelector('.speak-position');
+            if (v) v.classList.remove('speak-position');
         })();
-        """
-        evaluateJavaScript(js)
+        """)
     }
 }

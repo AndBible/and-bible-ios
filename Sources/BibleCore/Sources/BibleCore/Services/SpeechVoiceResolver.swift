@@ -17,10 +17,28 @@ struct SpeechVoiceDescriptor: Equatable, Sendable {
     /// BCP-47 language identifier advertised by the installed voice.
     let language: String
 
+    /// Platform quality ranking: 0 compact/default, 1 enhanced, 2 premium.
+    let qualityRank: Int
+
+    /// Whether the platform marks this as a novelty voice unsuitable for long-form reading.
+    let isNoveltyVoice: Bool
+
+    /// Whether this is a Personal Voice requiring authorization the app does not request.
+    let isPersonalVoice: Bool
+
     /** Creates an immutable installed-voice descriptor. */
-    init(identifier: String, language: String) {
+    init(
+        identifier: String,
+        language: String,
+        qualityRank: Int = 0,
+        isNoveltyVoice: Bool = false,
+        isPersonalVoice: Bool = false
+    ) {
         self.identifier = identifier
         self.language = language
+        self.qualityRank = qualityRank
+        self.isNoveltyVoice = isNoveltyVoice
+        self.isPersonalVoice = isPersonalVoice
     }
 }
 
@@ -102,6 +120,10 @@ enum SpeechVoiceResolution {
 
      Exact regional candidates win first. Only the final base-language candidate may accept an
      installed regional variant, mirroring Android's `setLanguage(Locale(language))` behavior.
+     Within one matched candidate, the highest platform quality wins (premium over enhanced over
+     compact) because the platform catalog lists compact voices first and long-form Bible reading
+     with a compact voice is barely usable; novelty and unauthorized Personal voices are never
+     selected. Ties keep catalog order, so selection stays deterministic.
 
      - Parameters:
        - requestedLanguage: Module or document language supplied by the active provider.
@@ -117,7 +139,8 @@ enum SpeechVoiceResolution {
         installedVoices: [SpeechVoiceDescriptor]
     ) -> String? {
         let normalizedVoices = installedVoices.compactMap { voice -> (SpeechVoiceDescriptor, String)? in
-            guard let language = normalizedLanguageIdentifier(voice.language) else { return nil }
+            guard !voice.isNoveltyVoice, !voice.isPersonalVoice,
+                  let language = normalizedLanguageIdentifier(voice.language) else { return nil }
             return (voice, language)
         }
 
@@ -125,19 +148,36 @@ enum SpeechVoiceResolution {
             requestedLanguage: requestedLanguage,
             deviceLocaleIdentifier: deviceLocale.identifier
         ) {
-            if let exact = normalizedVoices.first(where: { $0.1 == candidate.identifier }) {
-                return exact.0.identifier
+            if let exact = bestQualityVoice(
+                in: normalizedVoices,
+                matching: { $0 == candidate.identifier }
+            ) {
+                return exact.identifier
             }
             guard candidate.permitsRegionalVoice,
                   let candidateLanguage = primaryLanguage(in: candidate.identifier),
-                  let regional = normalizedVoices.first(where: {
-                      primaryLanguage(in: $0.1) == candidateLanguage
-                  }) else {
+                  let regional = bestQualityVoice(
+                      in: normalizedVoices,
+                      matching: { primaryLanguage(in: $0) == candidateLanguage }
+                  ) else {
                 continue
             }
-            return regional.0.identifier
+            return regional.identifier
         }
         return nil
+    }
+
+    /** Returns the highest-quality matching voice, keeping catalog order between equal ranks. */
+    private static func bestQualityVoice(
+        in normalizedVoices: [(SpeechVoiceDescriptor, String)],
+        matching languageMatches: (String) -> Bool
+    ) -> SpeechVoiceDescriptor? {
+        var best: SpeechVoiceDescriptor?
+        for (voice, language) in normalizedVoices where languageMatches(language) {
+            if let current = best, current.qualityRank >= voice.qualityRank { continue }
+            best = voice
+        }
+        return best
     }
 
     /** Builds Android's ordered locale candidates and preserves base-language fallback semantics. */
@@ -256,8 +296,26 @@ struct SystemSpeechVoiceResolver: SpeechVoiceResolving {
         deviceLocale: Locale
     ) -> AVSpeechSynthesisVoice? {
         let voices = AVSpeechSynthesisVoice.speechVoices()
-        let descriptors = voices.map {
-            SpeechVoiceDescriptor(identifier: $0.identifier, language: $0.language)
+        let descriptors = voices.map { voice -> SpeechVoiceDescriptor in
+            let qualityRank: Int
+            switch voice.quality {
+            case .premium: qualityRank = 2
+            case .enhanced: qualityRank = 1
+            default: qualityRank = 0
+            }
+            var isNovelty = false
+            var isPersonal = false
+            if #available(iOS 17.0, macOS 14.0, *) {
+                isNovelty = voice.voiceTraits.contains(.isNoveltyVoice)
+                isPersonal = voice.voiceTraits.contains(.isPersonalVoice)
+            }
+            return SpeechVoiceDescriptor(
+                identifier: voice.identifier,
+                language: voice.language,
+                qualityRank: qualityRank,
+                isNoveltyVoice: isNovelty,
+                isPersonalVoice: isPersonal
+            )
         }
         guard let identifier = SpeechVoiceResolution.selectedVoiceIdentifier(
             requestedLanguage: requestedLanguage,

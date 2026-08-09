@@ -117,6 +117,75 @@ final class SpeechVoiceAndProductBoundaryTests: XCTestCase {
         )
     }
 
+    /**
+     Verifies quality-aware voice selection prefers premium and enhanced voices for long reading.
+
+     The platform catalog lists compact voices first, so first-match selection picked the worst
+     installed voice for every language. Failure means Bible reading falls back to a compact voice
+     while a better one is installed, or a novelty/Personal voice is chosen for scripture.
+     */
+    func testVoiceSelectionPrefersHighestQualityAndExcludesNoveltyAndPersonalVoices() {
+        let catalog = [
+            SpeechVoiceDescriptor(identifier: "us-compact", language: "en-US", qualityRank: 0),
+            SpeechVoiceDescriptor(identifier: "us-novelty", language: "en-US", qualityRank: 2, isNoveltyVoice: true),
+            SpeechVoiceDescriptor(identifier: "us-personal", language: "en-US", qualityRank: 2, isPersonalVoice: true),
+            SpeechVoiceDescriptor(identifier: "us-enhanced", language: "en-US", qualityRank: 1),
+            SpeechVoiceDescriptor(identifier: "us-premium", language: "en-US", qualityRank: 2),
+            SpeechVoiceDescriptor(identifier: "gb-compact", language: "en-GB", qualityRank: 0),
+        ]
+
+        XCTAssertEqual(
+            SpeechVoiceResolution.selectedVoiceIdentifier(
+                requestedLanguage: "en-US",
+                deviceLocale: Locale(identifier: "en_US"),
+                installedVoices: catalog
+            ),
+            "us-premium",
+            "Premium must beat enhanced, compact, and excluded high-quality voices."
+        )
+        XCTAssertEqual(
+            SpeechVoiceResolution.selectedVoiceIdentifier(
+                requestedLanguage: "en-US",
+                deviceLocale: Locale(identifier: "en_US"),
+                installedVoices: catalog.filter { $0.identifier != "us-premium" }
+            ),
+            "us-enhanced",
+            "Enhanced must beat compact when premium is absent."
+        )
+        XCTAssertEqual(
+            SpeechVoiceResolution.selectedVoiceIdentifier(
+                requestedLanguage: "en-GB",
+                deviceLocale: Locale(identifier: "en_GB"),
+                installedVoices: catalog
+            ),
+            "gb-compact",
+            "A compact voice remains selectable when it is the only non-excluded match."
+        )
+        XCTAssertNil(
+            SpeechVoiceResolution.selectedVoiceIdentifier(
+                requestedLanguage: "en-US",
+                deviceLocale: Locale(identifier: "en_US"),
+                installedVoices: [
+                    SpeechVoiceDescriptor(identifier: "only-novelty", language: "en-US", qualityRank: 2, isNoveltyVoice: true),
+                    SpeechVoiceDescriptor(identifier: "only-personal", language: "en-US", qualityRank: 2, isPersonalVoice: true),
+                ]
+            ),
+            "Novelty and Personal voices must never be selected even when nothing else matches."
+        )
+        XCTAssertEqual(
+            SpeechVoiceResolution.selectedVoiceIdentifier(
+                requestedLanguage: "en-US",
+                deviceLocale: Locale(identifier: "en_US"),
+                installedVoices: [
+                    SpeechVoiceDescriptor(identifier: "first-enhanced", language: "en-US", qualityRank: 1),
+                    SpeechVoiceDescriptor(identifier: "second-enhanced", language: "en-US", qualityRank: 1),
+                ]
+            ),
+            "first-enhanced",
+            "Equal quality keeps platform catalog order for deterministic selection."
+        )
+    }
+
     /** Unsupported languages stop visibly before the synthesizer receives any spoken content. */
     func testUnsupportedSpeechLanguageStopsWithoutSynthesisAndPublishesFailure() {
         let synthesizer = FakeSpeechSynthesizer()
