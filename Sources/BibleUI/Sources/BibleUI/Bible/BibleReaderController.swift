@@ -1703,6 +1703,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             content.style.removeProperty('padding-top');
             content.style.removeProperty('padding-bottom');
         }
+        // Live speak-position marker styled as Android's red speak-label bookmark so the
+        // reading position stays visible during playback on both platforms' visual language.
+        if (!document.getElementById('ios-speak-position')) {
+            var s = document.createElement('style');
+            s.id = 'ios-speak-position';
+            s.textContent = '.speak-position { text-decoration: underline; text-decoration-thickness: 2px; text-decoration-color: rgb(255, 0, 0); text-underline-offset: 3px; }';
+            document.head.appendChild(s);
+        }
         """)
     }
 

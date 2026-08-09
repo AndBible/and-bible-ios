@@ -95,7 +95,7 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
                 }
             },
             stopped: {
-                // Android leaves no playback styling in the document, so stop needs no DOM cleanup.
+                context.evaluateJavaScript(Self.cleanupScript)
             }
         )
     }
@@ -131,7 +131,7 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
                 }
             },
             stopped: {
-                // Android leaves no playback styling in the document, so stop needs no DOM cleanup.
+                context.evaluateJavaScript(Self.cleanupScript)
             }
         )
     }
@@ -183,18 +183,29 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
      Builds the deterministic spoken-verse DOM highlight and centering script.
 
      - Parameter ordinal: Exact rendered KJVA verse ordinal to select.
-     - Returns: Self-contained JavaScript that centers the matching `data-ordinal` element when
-       present. Android tracks the spoken position by scrolling only, with no playback styling.
+     - Returns: Self-contained JavaScript that marks the matching `data-ordinal` element with the
+       Android-red speak-position class and centers it when present.
      - Side effects: None until the caller evaluates the returned script in the reader WebView.
      - Failure modes: The evaluated script exits without mutation when no matching verse exists.
      */
     private static func highlightScript(ordinal: Int) -> String {
         """
         (function() {
+            var old = document.querySelector('.speak-position');
+            if (old) old.classList.remove('speak-position');
             var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
             if (!verse) return;
+            verse.classList.add('speak-position');
             verse.scrollIntoView({behavior: 'smooth', block: 'center'});
         })();
         """
     }
+
+    /** Removes the speak-position marker when a SQLite speech session stops. */
+    static let cleanupScript = """
+    (function() {
+        var v = document.querySelector('.speak-position');
+        if (v) v.classList.remove('speak-position');
+    })();
+    """
 }

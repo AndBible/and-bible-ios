@@ -665,10 +665,10 @@ final class BibleReaderSpeechCoordinator {
     }
 
     /**
-     Scrolls the reader to one provider-owned Bible verse after session-generation validation.
+     Marks and centers one provider-owned Bible verse after session-generation validation.
 
-     Android tracks the spoken position by scrolling only; it applies no per-verse highlight
-     styling during playback, so iOS must not either.
+     The marker uses Android's red speak-label visual so the live reading position matches the
+     speak identity users know from Android's paused speak bookmark.
      */
     private func highlightVerseNow(
         _ ordinal: Int,
@@ -677,8 +677,11 @@ final class BibleReaderSpeechCoordinator {
         currentHighlightedOrdinal = ordinal
         let js = """
         (function() {
+            var old = document.querySelector('.speak-position');
+            if (old) old.classList.remove('speak-position');
             var verse = document.querySelector('[data-ordinal="\(ordinal)"]');
             if (!verse) return;
+            verse.classList.add('speak-position');
             verse.scrollIntoView({behavior: 'smooth', block: 'center'});
         })();
         """
@@ -686,14 +689,18 @@ final class BibleReaderSpeechCoordinator {
     }
 
     /**
-     Clears spoken-position tracking when playback stops.
+     Clears the spoken-position marker when playback stops.
 
-     - Parameter evaluateJavaScript: Retained for call-site symmetry; Android leaves no playback
-       styling in the document, so there is no DOM state to clean.
-     - Side effects: Resets the current tracked ordinal.
+     - Parameter evaluateJavaScript: Closure used to remove the marker class in the reader client.
+     - Side effects: Resets the current tracked ordinal and removes the marker class.
      */
     private func clearSpeakHighlightNow(evaluateJavaScript: @escaping (String) -> Void) {
         currentHighlightedOrdinal = nil
-        _ = evaluateJavaScript
+        evaluateJavaScript("""
+        (function() {
+            var v = document.querySelector('.speak-position');
+            if (v) v.classList.remove('speak-position');
+        })();
+        """)
     }
 }
