@@ -958,6 +958,63 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies chapter stepping keeps the My Notes document current like Android.
+
+     Android's `CurrentMyNotePage.next()/previous()` step the underlying Bible key one chapter
+     while the MYNOTE category stays current, so paging walks adjacent chapters of notes. iOS
+     previously exited to the Bible text on the first swipe because `loadCurrentContent` had no
+     My Notes branch.
+
+     - Setup: Opens My Notes for Matthew 1 on a real SWORD fixture, then navigates next and
+       previous through the standard controller entry points.
+     - Expected result: Each step emits a fresh `notes` document for the adjacent chapter and
+       `showingMyNotes` never drops.
+     - Failure meaning: Chapter navigation silently exits My Notes, diverging from Android's
+       paging behavior.
+     - Side effects: Emits bridge documents against an in-memory recording bridge only.
+     */
+    @MainActor
+    func testReaderMyNotesChapterSteppingStaysInMyNotesLikeAndroid() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let sourceOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
+        XCTAssertTrue(controller.showingMyNotes)
+        let baselineCount = recordedScripts().count
+
+        controller.navigateNext()
+
+        XCTAssertTrue(controller.showingMyNotes)
+        let nextScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let nextPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: nextScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(nextPayload["type"] as? String, "notes")
+        XCTAssertEqual(nextPayload["verseRange"] as? String, "Matthew 2")
+        let chapterTwoIntro = try XCTUnwrap(
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Matt", chapter: 2)
+        )
+        XCTAssertEqual((nextPayload["ordinalRange"] as? [Int])?.first, chapterTwoIntro)
+
+        let previousBaseline = recordedScripts().count
+        controller.navigatePrevious()
+
+        XCTAssertTrue(controller.showingMyNotes)
+        let previousScripts = Array(recordedScripts().dropFirst(previousBaseline))
+        let previousPayload = try XCTUnwrap(
+            bridgeEmissionPayload(from: previousScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(previousPayload["verseRange"] as? String, "Matthew 1")
+    }
+
+    /**
      Guards the production `BibleWindowPane` StudyPad and My Notes links-window callbacks.
 
      The source slice covers both new callback assignments. Each must honor the shared
