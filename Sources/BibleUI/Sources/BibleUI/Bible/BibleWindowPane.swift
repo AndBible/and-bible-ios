@@ -1120,6 +1120,57 @@ struct BibleWindowPane: View {
                 )
             }
         }
+
+        // StudyPad modal buttons follow Android's LinkControl.openStudyPad -> showLink routing:
+        // the journal document opens in the dedicated links window unless the preference is off.
+        ctrl.onOpenStudyPadInLinksWindow = { [weak ctrl, weak windowManager] labelId, bookmarkId in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
+                return
+            }
+
+            guard let wm = windowManager,
+                let linksWindow = prepareLinksWindow(using: wm)
+            else { return }
+
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: {
+                    ctrl.loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
+                }
+            ) { targetController in
+                targetController.loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
+            }
+        }
+
+        // My Notes modal links follow Android's LinkControl.openMyNotes -> showLink routing. The
+        // raw source coordinate is forwarded so the destination controller runs the KJVA
+        // projection itself.
+        ctrl.onOpenMyNotesInLinksWindow = { [weak ctrl, weak windowManager] v11nName, ordinal in
+            guard let ctrl else { return }
+            let useLinksWindow = store.getBool(.openLinksInSpecialWindowPref)
+            guard useLinksWindow else {
+                ctrl.loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)
+                return
+            }
+
+            guard let wm = windowManager,
+                let linksWindow = prepareLinksWindow(using: wm)
+            else { return }
+
+            withLinksController(
+                for: linksWindow,
+                using: wm,
+                fallback: {
+                    ctrl.loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)
+                }
+            ) { targetController in
+                targetController.loadMyNotesDocument(v11nName: v11nName, sourceOrdinal: ordinal)
+            }
+        }
     }
 
   /** Whether Android's AI action rows should be visible for this installation. */

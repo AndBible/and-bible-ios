@@ -1236,6 +1236,28 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    */
   var onOpenAIDocumentPageInLinksWindow: ((AIDocumentPageRequest) -> Void)?
 
+    /**
+     Callback for routing a StudyPad journal document through the pane-owned links-window policy.
+
+     Android's `LinkControl.openStudyPad` wraps the label in a `StudyPadKey` and hands it to
+     `showLink`, so modal StudyPad buttons open the journal document in the dedicated links window
+     by default. The owning pane applies the same preference, window-creation, and registration
+     retry path as other link results. Without an owner, the bridge keeps its current-pane
+     fallback for standalone controller use.
+     */
+    var onOpenStudyPadInLinksWindow: ((UUID, UUID?) -> Void)?
+
+    /**
+     Callback for routing the My Notes document through the pane-owned links-window policy.
+
+     Android's `LinkControl.openMyNotes` resolves the source-versification verse and routes it
+     through `showLink` like any other link result. The parameters are the raw source
+     versification name and source ordinal from the bridge, so the destination controller performs
+     its own KJVA projection. Without an owner, the bridge keeps its current-pane fallback for
+     standalone controller use.
+     */
+    var onOpenMyNotesInLinksWindow: ((String, Int) -> Void)?
+
     /// Callback for presenting native AI regeneration for a validated My Documents page.
     var onRegenerateMyDocumentPage: ((MyDocumentAIPageActionContext) -> Void)?
 
@@ -6999,34 +7021,80 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Opens a label-backed StudyPad journal document in the current pane.
+     Opens a label-backed StudyPad journal document through the links-window policy.
+
+     Android routes `openStudyPad` through `LinkControl.showLink`, so the journal document opens in
+     the dedicated links window unless the links preference or window mode selects the current
+     window. The pane owner installs that policy through `onOpenStudyPadInLinksWindow`; without an
+     owner the document loads in the current pane as the standalone-controller fallback.
+
+     - Parameters:
+       - bridge: BibleView bridge instance that delivered the action; unused because routing is
+         owned by the controller and its pane owner.
+       - labelId: Persisted StudyPad label identifier string from the shared frontend.
+       - bookmarkId: Bookmark row to scroll to after the journal document renders.
+     - Side effects: Delegates to pane-owned links routing when configured, otherwise loads the
+       StudyPad document in this controller.
+     - Failure modes: A malformed label identifier fails closed without touching reader state.
      */
     public func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String) {
         logger.info("Open StudyPad for label: \(labelId)")
         guard let uuid = UUID(uuidString: labelId) else { return }
         let bmUuid = UUID(uuidString: bookmarkId)
+        if let route = onOpenStudyPadInLinksWindow {
+            route(uuid, bmUuid)
+            return
+        }
         loadStudyPadDocument(labelId: uuid, bookmarkId: bmUuid)
     }
 
     /**
-     Opens the chapter-level My Notes document in the current pane.
+     Opens the chapter-level My Notes document through the links-window policy.
 
-     Android passes My Notes modal links as the source versification plus the bookmark's original
-     source ordinal, while the fake My Notes document itself renders rows in KJVA order. This bridge
-     converts the source ordinal before loading the document so the optional scroll target stays in
-     the document's ordinal domain.
+     Android routes `openMyNotes` through `LinkControl.showLink`, so the My Notes document opens in
+     the dedicated links window unless the links preference selects the current window. The pane
+     owner installs that policy through `onOpenMyNotesInLinksWindow`; without an owner the document
+     loads in the current pane as the standalone-controller fallback.
 
      - Parameters:
-       - bridge: BibleView bridge instance that delivered the action; unused because the controller
-         owns document loading state.
+       - bridge: BibleView bridge instance that delivered the action; unused because routing is
+         owned by the controller and its pane owner.
        - v11n: Source versification name associated with `ordinal`.
        - ordinal: Source-versification ordinal from the bookmark modal link.
+     - Side effects: Delegates to pane-owned links routing when configured, otherwise loads the
+       My Notes document through `loadMyNotesDocument(v11nName:sourceOrdinal:)`.
+     - Failure modes: If the source ordinal cannot be projected to KJVA, the destination load fails
+       closed rather than opening an unrelated active chapter or sending an ordinal from the wrong
+       domain.
+     */
+    public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
+        if let route = onOpenMyNotesInLinksWindow {
+            route(v11n, ordinal)
+            return
+        }
+        loadMyNotesDocument(v11nName: v11n, sourceOrdinal: ordinal)
+    }
+
+    /**
+     Loads the My Notes document for an Android source-domain verse coordinate.
+
+     Android passes My Notes modal links as the source versification plus the bookmark's original
+     source ordinal, while the fake My Notes document itself renders rows in KJVA order. This entry
+     point converts the source ordinal before loading the document so the optional scroll target
+     stays in the document's ordinal domain, and is public so pane-owned links routing can run the
+     same conversion on the destination controller.
+
+     - Parameters:
+       - v11nName: Source versification name associated with `sourceOrdinal`.
+       - sourceOrdinal: Source-versification ordinal from the bookmark modal link.
      - Side effects: Loads or queues the My Notes document through `loadMyNotesDocument`.
      - Failure modes: If the source ordinal cannot be projected to KJVA, the route fails closed
        rather than opening an unrelated active chapter or sending an ordinal from the wrong domain.
      */
-    public func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {
-        guard let target = myNotesTarget(v11nName: v11n, sourceOrdinal: ordinal) else { return }
+    public func loadMyNotesDocument(v11nName: String, sourceOrdinal: Int) {
+        guard let target = myNotesTarget(v11nName: v11nName, sourceOrdinal: sourceOrdinal) else {
+            return
+        }
         loadMyNotesDocument(target: target)
     }
 
