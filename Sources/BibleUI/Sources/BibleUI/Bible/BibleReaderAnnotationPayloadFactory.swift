@@ -348,7 +348,9 @@ struct BibleReaderAnnotationPayloadFactory {
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
-        let hasNote = !noteText.isEmpty
+        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
+        // presence keys off the trimmed text while real notes keep their original whitespace.
+        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.genericPayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,
@@ -723,7 +725,8 @@ struct BibleReaderAnnotationPayloadFactory {
             text: text,
             contentType: entry.contentType,
             orderNumber: entry.orderNumber,
-            indentLevel: entry.indentLevel
+            indentLevel: entry.indentLevel,
+            sourcePromptId: entry.sourcePromptId?.uuidString
         )
     }
 
@@ -786,9 +789,12 @@ struct BibleReaderAnnotationPayloadFactory {
         guard let labelID = BookmarkLabelSerializationSupport.liveLabelIDString(for: label) else {
             return nil
         }
+        // Android serializes `label.displayName.trim()`, so reserved system labels reach Vue with
+        // their localized titles rather than the raw persisted sentinel names.
         return LabelData(
             id: labelID,
-            name: label.name,
+            name: AndroidLabelPresentation.displayName(for: label)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
             style: BookmarkStyleData(
                 color: label.color,
                 isSpeak: label.name == BibleCore.Label.speakLabelName,
@@ -828,7 +834,9 @@ struct BibleReaderAnnotationPayloadFactory {
         let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
         let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
         let noteText = bookmark.notes?.notes ?? ""
-        let hasNote = !noteText.isEmpty
+        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
+        // presence keys off the trimmed text while real notes keep their original whitespace.
+        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
             bookmarkID: bookmark.id,
             links: bookmark.bookmarkToLabels,

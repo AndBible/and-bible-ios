@@ -958,6 +958,54 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a whitespace-only note serializes as absent like Android.
+
+     Android's `ClientBibleBookmark` nulls out notes whose trimmed text is empty, so the shared
+     frontend treats them as note-less rows. iOS previously keyed `hasNote` off the raw string,
+     so a whitespace-only note rendered as a note-bearing row.
+
+     - Setup: Persists one bookmark whose note is only whitespace, then opens My Notes for its
+       chapter.
+     - Expected result: The emitted row carries `hasNote: false` and no `notes` string.
+     - Failure meaning: Whitespace-only notes diverge from Android's note-presence contract.
+     - Side effects: Persists one bookmark in an in-memory store and records bridge emissions.
+     */
+    @MainActor
+    func testWhitespaceOnlyNoteSerializesAsAbsentLikeAndroid() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        controller.bookmarkService = bookmarkService
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 2))
+        let bookmark = bookmarkService.addBibleBookmark(
+            ordinalRange: try verifiedKJVAOrdinalRange(
+                sourceOrdinalStart: ordinal,
+                sourceOrdinalEnd: ordinal
+            ),
+            wholeVerse: true
+        )
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: " \n\t ")
+
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        let baselineCount = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: ordinal)
+
+        let scripts = Array(recordedScripts().dropFirst(baselineCount))
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
+        )
+        let row = try XCTUnwrap((payload["bookmarks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(row["hasNote"] as? Bool, false)
+        XCTAssertNil(row["notes"] as? String)
+    }
+
+    /**
      Verifies chapter stepping keeps the My Notes document current like Android.
 
      Android's `CurrentMyNotePage.next()/previous()` step the underlying Bible key one chapter
