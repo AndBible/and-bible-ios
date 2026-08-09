@@ -666,7 +666,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let pageManagers = try modelContext.fetch(FetchDescriptor<PageManager>()).sorted { $0.id.uuidString < $1.id.uuidString }
         XCTAssertEqual(pageManagers.count, 2)
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.currentCategoryName, "general_book")
-        XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.currentCategoryName, "bible")
+        // Android MYNOTE windows restore into iOS's `mynote` page-manager key so the reader
+        // reopens the My Notes page instead of collapsing the window to the Bible text.
+        XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.currentCategoryName, "mynote")
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.generalBookDocument, "Josephus")
         XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.commentaryDocument, "TSK")
 
@@ -1652,7 +1654,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let pageManagers = try modelContext.fetch(FetchDescriptor<PageManager>())
         XCTAssertEqual(pageManagers.count, 2)
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.currentCategoryName, "general_book")
-        XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.currentCategoryName, "bible")
+        // Android MYNOTE windows restore into iOS's `mynote` page-manager key so the reader
+        // reopens the My Notes page instead of collapsing the window to the Bible text.
+        XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.currentCategoryName, "mynote")
         XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.dictionaryDocument, "Easton")
 
         let historyItems = try modelContext.fetch(FetchDescriptor<HistoryItem>())
