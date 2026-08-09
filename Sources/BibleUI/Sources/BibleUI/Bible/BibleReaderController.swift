@@ -1644,7 +1644,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadCurrentContent()
     }
 
-    /// Inject CSS to set the page background for night/day mode using display settings colors.
+    /**
+     Injects the night/day page background and the TTS highlight styles.
+
+     Body/document colors are set natively because they must hold before the Vue client is ready
+     (initial load, document replacement) when no `set_config` styling exists yet; once the client
+     runs, the shared frontend derives the same colors from config. All layout — paddings, margins,
+     and text width — belongs exclusively to the shared Vue `contentStyle` so Android's
+     text-display settings keep authority (issue #377).
+
+     - Side effects: Evaluates one JavaScript block in the pane web view.
+     - Failure modes: Evaluation failures leave the previous styling; the next content load retries.
+     */
     private func applyNightModeBackground() {
         let s = displaySettings
         let d = TextDisplaySettings.appDefaults
@@ -1665,12 +1676,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         document.body.style.color = '\(fg)';
         var content = document.getElementById('content');
         if (content) {
-            content.style.paddingTop = '8px';
-            content.style.paddingBottom = '16px';
+            content.style.removeProperty('padding-top');
+            content.style.removeProperty('padding-bottom');
         }
-        // Inject CSS for TTS speak highlighting only. Horizontal padding and max-width belong to
-        // the shared Vue contentStyle; an !important override here would defeat Android's
-        // marginSize text-display settings for every document.
+        // Inject CSS for TTS speak highlighting only. Padding and max-width belong to the shared
+        // Vue contentStyle; a native override here would defeat Android's text-display settings.
         var legacyMarginFix = document.getElementById('ios-margin-fix');
         if (legacyMarginFix) { legacyMarginFix.remove(); }
         if (!document.getElementById('ios-tts-highlight')) {
