@@ -1037,35 +1037,39 @@ extension AndBibleUITests {
      Package tests prove the `set_config` payload carries `marginSize`, so this smoke guards the
      remaining production chain: the margins dialog commit, the reader refresh push, and the shared
      Vue content layout actually constraining visible text (issue #377 reported no visible effect).
+     Draft-versus-committed persistence stays in package tests; this smoke asserts only the
+     rendered outcome.
      *
      * - Side effects:
      *   - launches the reader shell with deterministic in-memory data
      *   - reduces the workspace maximum text width through the real margins editor dialog
      * - Failure modes:
      *   - fails if the margins dialog, its seek bar, or its OK action cannot be reached
-     *   - fails if rendered reader text stays at its previous width after the commit
+     *   - fails if reader text never renders, disappears after the commit, or keeps its width
      */
     func testMarginMaxWidthEditorNarrowsRenderedReaderText() {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
-        let initialWidth = widestReaderTextLineWidth(in: app)
-        XCTAssertGreaterThan(
-            initialWidth,
-            100,
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 20))
+        var initialWidth: CGFloat = 0
+        XCTAssertTrue(
+            waitForUITestCondition("initial reader text renders", timeout: 20) {
+                initialWidth = Self.widestTextLineWidth(in: webView)
+                return initialWidth > 100
+            },
             "Expected measurable rendered reader text before editing margins."
         )
         attachReaderScreenshot(named: "reader-before-margin-edit", of: app)
 
         let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
-        let marginsButton = requireReachableTextDisplayButton(
-            "textDisplayMarginSizeButton",
-            in: app,
+        tapElementReliably(
+            requireReachableTextDisplayButton("textDisplayMarginSizeButton", in: app, timeout: 10),
             timeout: 10
         )
-        tapElementReliably(marginsButton, timeout: 10)
         XCTAssertTrue(requireElement("textDisplayPreferenceEditorDialog", in: app, timeout: 10).exists)
 
         let maxWidthSlider = requireElement(
@@ -1073,56 +1077,38 @@ extension AndBibleUITests {
             in: app,
             timeout: 10
         )
-        maxWidthSlider
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
-            .press(forDuration: 0.1)
+        dragSeekBar(maxWidthSlider, fromNormalizedX: 0.34, toNormalizedX: 0.1)
         XCTAssertLessThan(
             seekBarNumericValue(maxWidthSlider),
             120,
-            "Expected the seek bar press to reduce the drafted maximum width below its 170 default."
+            "Expected the seek bar drag to reduce the drafted maximum width below its 170 default."
         )
 
         tapElementReliably(
             requireElement("textDisplayPreferenceEditorOKButton", in: app, timeout: 10),
             timeout: 10
         )
-
-        tapElementReliably(
-            requireReachableTextDisplayButton("textDisplayMarginSizeButton", in: app, timeout: 10),
-            timeout: 10
-        )
-        let reopenedSlider = requireElement(
-            "textDisplayPreferenceEditorSeekBar::Maximum width of text",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertLessThan(
-            seekBarNumericValue(reopenedSlider),
-            120,
-            "Expected the committed maximum width to persist into the reopened margins editor."
-        )
-        tapElementReliably(
-            requireElement("textDisplayPreferenceEditorCancelButton", in: app, timeout: 10),
-            timeout: 10
-        )
-
         tapElementReliably(
             requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
             timeout: 10
         )
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
 
-        var narrowedWidth = CGFloat.greatestFiniteMagnitude
-        for _ in 0..<20 {
-            narrowedWidth = widestReaderTextLineWidth(in: app)
-            if narrowedWidth > 0, narrowedWidth < initialWidth * 0.8 { break }
-            Thread.sleep(forTimeInterval: 0.5)
+        var narrowedWidth: CGFloat = 0
+        let didNarrow = waitForUITestCondition("reader text narrows", timeout: 20) {
+            narrowedWidth = Self.widestTextLineWidth(in: webView)
+            return narrowedWidth > 0 && narrowedWidth < initialWidth * 0.8
         }
         attachReaderScreenshot(named: "reader-after-margin-edit", of: app)
-        XCTAssertLessThan(
+        XCTAssertTrue(
+            didNarrow,
+            "Expected a much smaller maximum text width to narrow rendered reader text; "
+                + "initial=\(initialWidth) final=\(narrowedWidth)"
+        )
+        XCTAssertGreaterThan(
             narrowedWidth,
-            initialWidth * 0.8,
-            "Expected a much smaller maximum text width to narrow rendered reader text."
+            0,
+            "Expected the reader to keep rendering text after the margin commit."
         )
     }
 
@@ -1143,6 +1129,96 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies the Android font-size editor visibly changes rendered reader text.
+     *
+     Issue #377 hid in the gap between a correct `set_config` payload and native CSS overriding the
+     rendered result, so payload-level tests alone cannot protect display settings. This smoke
+     drives the real font-size editor to a much larger value and asserts the rendered text lines
+     grow, closing that gap for the second-most-used text display setting.
+     *
+     * - Side effects:
+     *   - launches the reader shell with deterministic in-memory data
+     *   - raises the workspace font size through the real editor dialog
+     * - Failure modes:
+     *   - fails if the font-size dialog, its seek bar, or its OK action cannot be reached
+     *   - fails if rendered reader text keeps its previous line height after the commit
+     */
+    func testFontSizeEditorGrowsRenderedReaderText() {
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 20))
+        var initialHeight: CGFloat = 0
+        XCTAssertTrue(
+            waitForUITestCondition("initial reader text renders", timeout: 20) {
+                initialHeight = Self.tallestTextLineHeight(in: webView)
+                return initialHeight > 10
+            },
+            "Expected measurable rendered reader text before editing font size."
+        )
+
+        let textDisplayScreen = openAllTextOptions(in: app)
+        XCTAssertTrue(textDisplayScreen.exists)
+        tapElementReliably(
+            requireReachableTextDisplayButton("textDisplayFontSizeButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        let fontSizeSlider = requireElement(
+            "textDisplayPreferenceEditorSeekBar::Font size",
+            in: app,
+            timeout: 10
+        )
+        dragSeekBar(fontSizeSlider, fromNormalizedX: 0.3, toNormalizedX: 0.9)
+        XCTAssertGreaterThan(
+            seekBarNumericValue(fontSizeSlider),
+            35,
+            "Expected the seek bar drag to raise the drafted font size well above its default."
+        )
+        tapElementReliably(
+            requireElement("textDisplayPreferenceEditorOKButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        tapElementReliably(
+            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
+
+        var grownHeight: CGFloat = 0
+        let didGrow = waitForUITestCondition("reader text grows", timeout: 20) {
+            grownHeight = Self.tallestTextLineHeight(in: webView)
+            return grownHeight > initialHeight * 1.5
+        }
+        XCTAssertTrue(
+            didGrow,
+            "Expected a much larger font size to grow rendered reader text lines; "
+                + "initial=\(initialHeight) final=\(grownHeight)"
+        )
+    }
+
+    /**
+     Drags an Android seek bar thumb between two normalized horizontal positions.
+     *
+     * - Parameters:
+     *   - element: Seek bar whose drag gesture should receive the interaction.
+     *   - fromNormalizedX: Approximate current thumb position in normalized element space.
+     *   - toNormalizedX: Target position in normalized element space.
+     * - Side effects: Performs one press-and-drag interaction on the element.
+     * - Failure modes: none directly; callers assert the resulting accessibility value.
+     */
+    private func dragSeekBar(
+        _ element: XCUIElement,
+        fromNormalizedX: CGFloat,
+        toNormalizedX: CGFloat
+    ) {
+        let start = element.coordinate(withNormalizedOffset: CGVector(dx: fromNormalizedX, dy: 0.5))
+        let end = element.coordinate(withNormalizedOffset: CGVector(dx: toNormalizedX, dy: 0.5))
+        start.press(forDuration: 0.15, thenDragTo: end)
+    }
+
+    /**
      Reads the Android seek bar's numeric accessibility value.
      *
      * - Parameter element: Seek bar element exposing its bound value as accessibility value.
@@ -1156,17 +1232,30 @@ extension AndBibleUITests {
     }
 
     /**
-     Measures the widest rendered text line inside the reader's web content.
+     Measures the tallest rendered text line inside an existing reader web view.
      *
-     * - Parameter app: Running application under test.
-     * - Returns: Width of the widest static text exposed by the reader web view, or zero when no
-     *   rendered text is available.
+     * - Parameter webView: Reader web view element already confirmed to exist.
+     * - Returns: Height of the tallest static text run, or zero when none are exposed.
      * - Side effects: none.
-     * - Failure modes: Returns zero when the web view or its text runs never appear.
+     * - Failure modes: Text runs that vanish mid-scan are skipped.
      */
-    private func widestReaderTextLineWidth(in app: XCUIApplication) -> CGFloat {
-        let webView = app.webViews.firstMatch
-        guard webView.waitForExistence(timeout: 20) else { return 0 }
+    private static func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
+        var tallest: CGFloat = 0
+        for element in webView.staticTexts.allElementsBoundByIndex.prefix(40) where element.exists {
+            tallest = max(tallest, element.frame.height)
+        }
+        return tallest
+    }
+
+    /**
+     Measures the widest rendered text line inside an existing reader web view.
+     *
+     * - Parameter webView: Reader web view element already confirmed to exist.
+     * - Returns: Width of the widest static text run, or zero when none are exposed.
+     * - Side effects: none.
+     * - Failure modes: Text runs that vanish mid-scan are skipped.
+     */
+    private static func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
         var widest: CGFloat = 0
         for element in webView.staticTexts.allElementsBoundByIndex.prefix(40) where element.exists {
             widest = max(widest, element.frame.width)

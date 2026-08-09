@@ -1,6 +1,7 @@
 {
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 155.0,
   "AndBibleUITests/AndBibleUITests/testMarginMaxWidthEditorNarrowsRenderedReaderText": 150.0,
+  "AndBibleUITests/AndBibleUITests/testFontSizeEditorGrowsRenderedReaderText": 150.0,
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": 105.0,
   "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": 150.0,
   "AndBibleUITests/AndBibleUITests/testDocumentChooserMatchesDownloadDocumentsActivityStructure": 105.0,

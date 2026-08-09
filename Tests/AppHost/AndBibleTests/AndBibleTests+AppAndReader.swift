@@ -1248,29 +1248,25 @@ extension AndBibleTests {
         var narrowed = TextDisplaySettings.appDefaults
         narrowed.maxWidth = 50
         controller.updateDisplaySettings(narrowed, nightMode: false)
-
-        let reloadDeadline = Date(timeIntervalSinceNow: 3)
-        while Date() < reloadDeadline,
-              !recordedScripts()
-                .dropFirst(baselineScriptCount)
-                .contains(where: { $0.contains("emit('clear_document'") }) {
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
-        }
+        // The push and reload emit synchronously on the main thread; this settle exists only to
+        // catch a regression that reverts the config from an asynchronous follow-up emission.
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
 
         let updateScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
-        let configScripts = updateScripts.filter { $0.contains("set_config") }
+        let configScripts = updateScripts.filter { $0.contains("emit('set_config'") }
         XCTAssertFalse(
             configScripts.isEmpty,
             "Expected at least one set_config emission after updateDisplaySettings."
         )
         for script in configScripts {
-            XCTAssertTrue(
-                script.contains("\"maxWidth\":50"),
-                "Expected every post-update config to carry maxWidth 50: \(script.prefix(400))"
-            )
-            XCTAssertFalse(
-                script.contains("\"maxWidth\":170"),
-                "Expected no post-update config to revert to the default maxWidth: \(script.prefix(400))"
+            let payload = try memorizeParityBridgeEmissionPayload(from: [script], event: "set_config")
+            let dictionary = try XCTUnwrap(payload as? [String: Any])
+            let config = try XCTUnwrap(dictionary["config"] as? [String: Any])
+            let marginSize = try XCTUnwrap(config["marginSize"] as? [String: Any])
+            XCTAssertEqual(
+                marginSize["maxWidth"] as? Int,
+                50,
+                "Expected every post-update config payload to carry the reduced maxWidth."
             )
         }
         XCTAssertTrue(
