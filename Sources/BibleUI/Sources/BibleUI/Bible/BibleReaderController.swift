@@ -1681,12 +1681,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
         // Inject CSS for TTS speak highlighting only. Padding and max-width belong to the shared
         // Vue contentStyle; a native override here would defeat Android's text-display settings.
-        var legacyMarginFix = document.getElementById('ios-margin-fix');
-        if (legacyMarginFix) { legacyMarginFix.remove(); }
         if (!document.getElementById('ios-tts-highlight')) {
             var s = document.createElement('style');
             s.id = 'ios-tts-highlight';
-            s.textContent = '.speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; }';
+            s.textContent = '.speaking-verse { background-color: rgba(100, 149, 237, 0.12); border-radius: 4px; transition: background-color 0.3s ease; } #speaking-word { background-color: rgba(100, 149, 237, 0.45); border-radius: 3px; padding: 1px 0; } .night .speaking-verse { background-color: rgba(135, 168, 255, 0.28); } .night #speaking-word { background-color: rgba(135, 168, 255, 0.6); }';
             document.head.appendChild(s);
         }
         """)
