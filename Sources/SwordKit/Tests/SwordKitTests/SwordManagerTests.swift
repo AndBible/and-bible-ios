@@ -137,6 +137,56 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Verifies a verified encrypted Bible remains decryptable through a newly constructed manager.
+
+     - Setup: Creates a licensed-safe two-verse RawText Bible, Sapphire-encrypts each native record,
+       and opens it once with an empty `CipherKey` so libsword materializes its locked aggregate
+       config cache. The test rejects one wrong key before accepting the real key.
+     - Expected result: The wrong key changes neither config nor cache; the correct key decrypts a
+       live chapter range, removes the stale cache, and a fresh manager rebuilds that cache with the
+       persisted key and reconstructs both exact source verses.
+     - Side effects: Creates and removes one isolated SWORD root, rewrites its temporary module
+       config, and lets libsword rebuild `mods.d/modules-conf.cache`.
+     - Failure meaning: Picker unlock can appear successful in memory while startup or saved-position
+       restore after relaunch authorizes ciphertext as a readable Bible.
+     - Note: Every fixture byte is synthetic; no distributable Bible text or key is embedded.
+     */
+    func testEncryptedRawTextBibleUnlockSurvivesFreshManagerChapterRead() throws {
+        let fixture = try makeEncryptedRawTextBibleFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let cacheURL = fixture.root.appendingPathComponent("mods.d/modules-conf.cache")
+
+        do {
+            let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+            let originalConfig = try Data(contentsOf: fixture.configURL)
+            let originalCache = try Data(contentsOf: cacheURL)
+
+            XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .locked)
+            XCTAssertNil(manager.readableModule(named: "LOCKEDBIBLE"))
+            XCTAssertFalse(
+                manager.unlockModule(named: "LOCKEDBIBLE", withCipherKey: "wrongtestkey")
+            )
+            XCTAssertEqual(try Data(contentsOf: fixture.configURL), originalConfig)
+            XCTAssertEqual(try Data(contentsOf: cacheURL), originalCache)
+
+            XCTAssertTrue(
+                manager.unlockModule(named: "LOCKEDBIBLE", withCipherKey: fixture.cipherKey)
+            )
+            XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+            XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .readable)
+            let liveModule = try XCTUnwrap(manager.readableModule(named: "LOCKEDBIBLE"))
+            try assertSyntheticEncryptedChapterReadable(in: liveModule)
+        }
+
+        let freshManager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        XCTAssertEqual(freshManager.moduleAccessState(named: "LOCKEDBIBLE"), .readable)
+        let freshModule = try XCTUnwrap(freshManager.readableModule(named: "LOCKEDBIBLE"))
+        try assertSyntheticEncryptedChapterReadable(in: freshModule)
+        let rebuiltCache = try String(contentsOf: cacheURL, encoding: .utf8)
+        XCTAssertTrue(rebuiltCache.contains("CipherKey=\(fixture.cipherKey)"))
+    }
+
+    /**
      Verifies access checks resolve the same installed initials that Java would resolve.
 
      - Setup: Installs a real locked RawLD module whose initials are `ß`, then requests the
@@ -198,10 +248,15 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
-     Verifies a content-verified key is durably written to the exact module config section.
+     Verifies direct verified-key persistence invalidates libsword's aggregate config cache.
 
-     A read-back failure means a picker unlock could work only for the current manager session and
-     regress to locked after relaunch.
+     - Setup: Writes one locked config plus a stale `modules-conf.cache` snapshot without creating a
+       native manager.
+     - Expected result: The exact key survives config reload and the aggregate cache is absent so a
+       later manager must rebuild it from the updated module config.
+     - Side effects: Creates and removes one temporary config directory.
+     - Failure meaning: A picker unlock can persist only metadata while a relaunched native manager
+       continues reading the old blank `CipherKey` from cache.
      */
     func testPersistVerifiedCipherKeySurvivesConfigReload() throws {
         let moduleRoot = FileManager.default.temporaryDirectory
@@ -216,6 +271,8 @@ final class SwordManagerTests: XCTestCase {
         DataPath=./modules/texts/rawtext/locked/
         CipherKey=
         """.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = configDirectory.appendingPathComponent("modules-conf.cache")
+        try Data("[LOCKED]\nCipherKey=\n".utf8).write(to: cacheURL)
 
         XCTAssertTrue(
             SwordManager.persistVerifiedCipherKey(
@@ -227,6 +284,65 @@ final class SwordManagerTests: XCTestCase {
 
         let reloaded = try String(contentsOf: configURL, encoding: .utf8)
         XCTAssertTrue(reloaded.contains("CipherKey=secret-key"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    /**
+     Verifies failed cipher-key read-back restores both sides of the persistence transaction.
+
+     - Setup: Writes a locked config and stale aggregate cache, then injects a publisher that first
+       observes cache removal and atomically replaces the real config with invalid bytes.
+     - Expected result: Staging succeeds, persistence fails real-config read-back, and config plus
+       cache bytes exactly match their pre-mutation snapshots.
+     - Side effects: Creates and removes one temporary config directory.
+     - Failure meaning: Cache invalidation can escape rollback after a config write fails
+       verification, leaving restart behavior different even though unlock reported failure.
+     */
+    func testPersistVerifiedCipherKeyRestoresConfigAndCacheAfterReadBackFailure() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let configURL = configDirectory.appendingPathComponent("locked.conf")
+        try """
+        [LOCKED]
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/locked/
+        CipherKey=original-key
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = configDirectory.appendingPathComponent("modules-conf.cache")
+        try Data("[LOCKED]\nCipherKey=original-key\n".utf8).write(to: cacheURL)
+        let originalConfig = try Data(contentsOf: configURL)
+        let originalCache = try Data(contentsOf: cacheURL)
+        var didPublishAfterCacheRemoval = false
+
+        XCTAssertFalse(
+            SwordManager.persistVerifiedCipherKey(
+                "replacement-key",
+                moduleName: "locked",
+                modulePath: moduleRoot.path,
+                publishVerifiedConfig: { verifiedData, destinationURL in
+                    didPublishAfterCacheRemoval = !FileManager.default.fileExists(
+                        atPath: cacheURL.path
+                    )
+                    XCTAssertTrue(
+                        String(decoding: verifiedData, as: UTF8.self)
+                            .contains("CipherKey=replacement-key")
+                    )
+                    try Data("invalid published config".utf8).write(
+                        to: destinationURL,
+                        options: .atomic
+                    )
+                }
+            )
+        )
+        XCTAssertTrue(didPublishAfterCacheRemoval)
+        XCTAssertEqual(try Data(contentsOf: configURL), originalConfig)
+        XCTAssertEqual(try Data(contentsOf: cacheURL), originalCache)
     }
 
     func testDefaultModulePath() {
@@ -863,6 +979,151 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Asserts that one decrypted fixture module can reconstruct its complete two-verse chapter range.
+
+     - Parameters:
+       - module: Readable RawText Bible handle from either the live unlock manager or a fresh one.
+       - file: XCTest source location forwarded to assertion failures.
+       - line: XCTest source line forwarded to assertion failures.
+     - Side effects: Temporarily moves and restores the native module cursor while resolving
+       ordinals and reading the bounded range.
+     - Failure modes: Throws when SWORD cannot inspect the exact range; XCTest failures identify
+       ciphertext leakage, missing verses, or loss of synthetic canonical text.
+     */
+    private func assertSyntheticEncryptedChapterReadable(
+        in module: SwordModule,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let startOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1),
+            file: file,
+            line: line
+        )
+        let endOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2),
+            file: file,
+            line: line
+        )
+        let chapter = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+
+        XCTAssertEqual(chapter.sourceOSISRange, "Gen.1.1-Gen.1.2", file: file, line: line)
+        XCTAssertEqual(
+            chapter.entries.map(\.reference.osisRef),
+            ["Gen.1.1", "Gen.1.2"],
+            file: file,
+            line: line
+        )
+        let sourceXML = chapter.entries.compactMap(\.osisFragment).joined()
+        XCTAssertTrue(sourceXML.contains("Synthetic encrypted first verse"), file: file, line: line)
+        XCTAssertTrue(
+            sourceXML.contains("Synthetic encrypted second verse"),
+            file: file,
+            line: line
+        )
+        let canonicalText = try XCTUnwrap(chapter.canonicalText, file: file, line: line)
+        XCTAssertTrue(
+            canonicalText.contains("Synthetic encrypted first verse"),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            canonicalText.contains("Synthetic encrypted second verse"),
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Builds a genuine Sapphire-encrypted two-verse RawText Bible without licensed source material.
+
+     The sparse records use pinned KJV RawText indexes: rows zero through three are introduction
+     slots and Genesis 1:1/1:2 occupy rows four and five. Each independently encrypted record owns
+     an encrypted trailing NUL because libsword's RawText cipher filter decrypts one scratch byte
+     beyond the indexed payload before exposing a C string.
+
+     - Returns: Temporary SWORD root, locked Bible config, and its deterministic plaintext key.
+     - Side effects: Creates one config, OT/NT data files, and their complete KJV `.vss` indexes.
+     - Failure modes: Propagates filesystem errors or rejects a record too large for RawText's
+       two-byte length field.
+     - Note: All verse text and the fixture key are synthetic and safe to distribute with tests.
+     */
+    private func makeEncryptedRawTextBibleFixture() throws -> SwordManagerEncryptedFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent(
+            "modules/texts/rawtext/lockedbible",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: dataDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let cipherKey = "rawtextcipherkey"
+        let sourceEntries = [
+            #"<verse osisID="Gen.1.1"><w>Synthetic encrypted first verse.</w></verse>"#,
+            #"<verse osisID="Gen.1.2"><w>Synthetic encrypted second verse.</w></verse>"#,
+        ]
+        var oldTestamentData = Data()
+        var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
+        for (entryOffset, sourceXML) in sourceEntries.enumerated() {
+            var plaintext = Array(sourceXML.utf8)
+            plaintext.append(0)
+            guard plaintext.count <= Int(UInt16.max) else {
+                throw SwordManagerEncryptedFixtureError.entryTooLarge
+            }
+            var cipher = SwordManagerTestSapphire(key: Array(cipherKey.utf8))
+            let encrypted = plaintext.map { cipher.encrypt($0) }
+            let dataOffset = UInt32(oldTestamentData.count)
+            let entryLength = UInt16(encrypted.count)
+            let indexOffset = (4 + entryOffset) * 6
+            oldTestamentIndex[indexOffset] = UInt8(dataOffset & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 1] = UInt8((dataOffset >> 8) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 2] = UInt8((dataOffset >> 16) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 3] = UInt8((dataOffset >> 24) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 4] = UInt8(entryLength & 0x00ff)
+            oldTestamentIndex[indexOffset + 5] = UInt8((entryLength >> 8) & 0x00ff)
+            oldTestamentData.append(contentsOf: encrypted)
+            oldTestamentData.append(0x0A)
+        }
+
+        try oldTestamentData.write(to: dataDirectory.appendingPathComponent("ot"))
+        try Data(oldTestamentIndex).write(to: dataDirectory.appendingPathComponent("ot.vss"))
+        try Data().write(to: dataDirectory.appendingPathComponent("nt"))
+        try Data(repeating: 0, count: 8_246 * 6).write(
+            to: dataDirectory.appendingPathComponent("nt.vss")
+        )
+
+        let configURL = configDirectory.appendingPathComponent("lockedbible.conf")
+        try """
+        [LOCKEDBIBLE]
+        Description=Synthetic Encrypted RawText Bible Fixture
+        Category=Biblical Texts
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/lockedbible/
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        CipherKey=
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        return SwordManagerEncryptedFixture(
+            root: root,
+            configURL: configURL,
+            cipherKey: cipherKey
+        )
+    }
+
+    /**
      Builds a native encrypted RawLD fixture whose ciphertext contains no embedded NUL.
 
      - Returns: Temporary SWORD root, config location, and the correct key.
@@ -953,7 +1214,7 @@ final class SwordManagerTests: XCTestCase {
  I/O, cannot fail, and is deterministic for the supplied values.
  */
 private struct SwordManagerEncryptedFixture {
-    /// SWORD root containing the encrypted RawLD module.
+    /// SWORD root containing the encrypted native module.
     let root: URL
 
     /// Config whose `CipherKey` persistence is asserted.
@@ -965,13 +1226,13 @@ private struct SwordManagerEncryptedFixture {
 }
 
 /**
- Describes deterministic failures while constructing a native encrypted RawLD fixture.
+ Describes deterministic failures while constructing a native encrypted fixture.
 
  Cases identify fixture limitations rather than production unlock failures. The enum has no side
  effects and is used only to fail a test before libsword is invoked.
  */
 private enum SwordManagerEncryptedFixtureError: Error {
-    /// RawLD cannot represent the fixture entry in its two-byte length field.
+    /// The selected native record format cannot represent an entry in its two-byte length field.
     case entryTooLarge
 
     /// No bounded test key produced RawLD ciphertext without an embedded C-string terminator.
@@ -983,7 +1244,7 @@ private enum SwordManagerEncryptedFixtureError: Error {
  Test-only Sapphire II encryptor matching libsword's `Sapphire::encrypt` state transitions.
 
  Production decryption remains entirely inside libsword. This implementation only creates realistic
- ciphertext at runtime so unlock tests exercise a native RawLD SWORD backend.
+ ciphertext at runtime so unlock tests exercise native RawLD and RawText SWORD backends.
  */
 private struct SwordManagerTestSapphire {
     private var cards = [UInt8](repeating: 0, count: 256)

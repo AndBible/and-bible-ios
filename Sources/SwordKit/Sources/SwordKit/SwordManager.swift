@@ -444,34 +444,102 @@ public final class SwordManager: @unchecked Sendable {
        - cipherKey: Verified module key.
        - moduleName: Installed module section/initials.
        - modulePath: SWORD root containing `mods.d`.
-     - Returns: `true` only when the exact key can be read back from the saved module config.
-     - Side Effects: Atomically updates the module's `CipherKey` config entry on disk after retaining
-       the original bytes for rollback.
-     - Failure Modes: Missing configs, write failures, or read-back mismatches restore the original
-       config bytes and return `false`.
+       - publishVerifiedConfig: Atomic publisher for already-verified staged bytes. The default
+         writes atomically; tests inject a failing publisher to exercise post-invalidation rollback.
+     - Returns: `true` only when the exact key can be read back and the stale cache is absent.
+     - Side Effects: Serializes and verifies the candidate in a sibling staging file, snapshots and
+       removes `mods.d/modules-conf.cache`, then atomically publishes the verified bytes to the real
+       config. A successful write leaves the cache absent for native reconstruction.
+     - Failure Modes: Missing configs, staging failures, unreadable or unremovable cache state,
+       publish failures, and read-back mismatches return `false`. Post-invalidation failures restore
+       the config first; the prior cache is restored only after exact config restoration succeeds.
+     - Important: The native streaming writer touches only staging. Once cache invalidation begins,
+       every interruption-safe state has either old or new complete config bytes and no stale cache.
      */
     static func persistVerifiedCipherKey(
         _ cipherKey: String,
         moduleName: String,
-        modulePath: String
+        modulePath: String,
+        publishVerifiedConfig: (Data, URL) throws -> Void = { data, destinationURL in
+            try data.write(to: destinationURL, options: .atomic)
+        }
     ) -> Bool {
         guard !cipherKey.isEmpty,
               let configURL = moduleConfigURL(named: moduleName, modulePath: modulePath),
               let originalData = try? Data(contentsOf: configURL),
-              let parsedConfig = parseModuleConfig(at: configURL),
-              let config = SwordConfig(filePath: configURL.path) else {
+              let parsedConfig = parseModuleConfig(at: configURL) else {
             return false
         }
 
-        var didVerifyPersistence = false
+        let fileManager = FileManager.default
+        let stagingURL = configURL.deletingLastPathComponent().appendingPathComponent(
+            ".\(configURL.lastPathComponent).cipher-\(UUID().uuidString).staging"
+        )
         defer {
-            if !didVerifyPersistence {
-                try? originalData.write(to: configURL, options: .atomic)
+            if fileManager.fileExists(atPath: stagingURL.path) {
+                try? fileManager.removeItem(at: stagingURL)
             }
         }
-        config.setValue(section: parsedConfig.name, key: "CipherKey", value: cipherKey)
-        config.save()
-        didVerifyPersistence = parseModuleConfig(at: configURL)?.values["cipherkey"]?.first == cipherKey
+        do {
+            try originalData.write(to: stagingURL, options: .atomic)
+        } catch {
+            return false
+        }
+        guard let stagedConfig = SwordConfig(filePath: stagingURL.path) else {
+            return false
+        }
+        stagedConfig.setValue(section: parsedConfig.name, key: "CipherKey", value: cipherKey)
+        stagedConfig.save()
+        guard parseModuleConfig(at: stagingURL)?.values["cipherkey"]?.first == cipherKey,
+              let verifiedConfigData = try? Data(contentsOf: stagingURL) else {
+            return false
+        }
+
+        let cacheURL = configURL.deletingLastPathComponent()
+            .appendingPathComponent("modules-conf.cache")
+        let cacheExisted = fileManager.fileExists(atPath: cacheURL.path)
+        let originalCacheData: Data?
+        if cacheExisted {
+            guard let cacheData = try? Data(contentsOf: cacheURL) else { return false }
+            originalCacheData = cacheData
+        } else {
+            originalCacheData = nil
+        }
+
+        var didBeginLiveMutation = false
+        var didVerifyPersistence = false
+        defer {
+            if didBeginLiveMutation, !didVerifyPersistence {
+                let didRestoreConfig: Bool
+                do {
+                    try originalData.write(to: configURL, options: .atomic)
+                    didRestoreConfig = (try? Data(contentsOf: configURL)) == originalData
+                } catch {
+                    didRestoreConfig = false
+                }
+                if didRestoreConfig, let originalCacheData {
+                    try? originalCacheData.write(to: cacheURL, options: .atomic)
+                } else if fileManager.fileExists(atPath: cacheURL.path) {
+                    try? fileManager.removeItem(at: cacheURL)
+                }
+            }
+        }
+        if cacheExisted {
+            do {
+                try fileManager.removeItem(at: cacheURL)
+            } catch {
+                return false
+            }
+        }
+        didBeginLiveMutation = true
+        do {
+            try publishVerifiedConfig(verifiedConfigData, configURL)
+        } catch {
+            return false
+        }
+        didVerifyPersistence = parseModuleConfig(at: configURL)?
+            .values["cipherkey"]?.first == cipherKey
+            && !fileManager.fileExists(atPath: cacheURL.path)
         return didVerifyPersistence
     }
 
