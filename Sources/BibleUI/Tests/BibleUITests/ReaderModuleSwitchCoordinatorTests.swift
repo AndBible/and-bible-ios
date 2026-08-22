@@ -1,7 +1,8 @@
 // ReaderModuleSwitchCoordinatorTests.swift -- Reader document-switch planner coverage
 
+import Foundation
 import XCTest
-import BibleCore
+@testable import BibleCore
 import SwordKit
 @testable import BibleUI
 
@@ -394,6 +395,247 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies module-only auxiliary routes reject readable modules from every wrong category.
+
+     - Setup: Uses the readable KJV Bible as the target of commentary, dictionary, general-book,
+       and map module-only switches, with recording contexts that already own generic state.
+     - Expected result: Commentary and all three generic outcomes fail before exact-key validation,
+       enumeration, active-handle assignment, key/category mutation, persistence, or reload.
+     - Failure meaning: A quick selector can bind a readable handle to the wrong auxiliary category
+       and either inspect unrelated keys or persist an invalid document identity.
+     - Side effects: Creates inherited temporary fixtures and records only in-memory callbacks.
+     - Failure modes: Fixture discovery and manager initialization can throw through XCTest.
+     */
+    func testModuleOnlyAuxiliarySwitchesRejectWrongCategoriesBeforeKeysOrMutation() throws {
+        let manager = try makeGenericModuleManager()
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+        var keyValidationCount = 0
+        var keyEnumerationCount = 0
+
+        let commentaryHarness = GenericModuleSwitchHarness(
+            manager: manager,
+            targetCategory: .dictionary,
+            currentKey: "baseline-key",
+            containsExactKey: { _, _ in
+                keyValidationCount += 1
+                return true
+            },
+            loadKeys: { _ in
+                keyEnumerationCount += 1
+                return ["unexpected-key"]
+            }
+        )
+        XCTAssertEqual(
+            coordinator.switchCommentaryModule(to: "KJV", context: commentaryHarness.makeContext()),
+            .failed
+        )
+        XCTAssertNil(commentaryHarness.pageManager.commentaryDocument)
+        assertFailedSwitchDidNotMutate(commentaryHarness)
+
+        for category in [DocumentCategory.dictionary, .generalBook, .map] {
+            let harness = GenericModuleSwitchHarness(
+                manager: manager,
+                targetCategory: category,
+                currentKey: "baseline-key",
+                containsExactKey: { _, _ in
+                    keyValidationCount += 1
+                    return true
+                },
+                loadKeys: { _ in
+                    keyEnumerationCount += 1
+                    return ["unexpected-key"]
+                }
+            )
+            let outcome: BibleReaderGenericModuleSwitchOutcome
+            switch category {
+            case .dictionary:
+                outcome = coordinator.switchDictionaryModule(to: "KJV", context: harness.makeContext())
+            case .generalBook:
+                outcome = coordinator.switchGeneralBookModule(to: "KJV", context: harness.makeContext())
+            case .map:
+                outcome = coordinator.switchMapModule(to: "KJV", context: harness.makeContext())
+            default:
+                XCTFail("Unexpected auxiliary category \(category).")
+                continue
+            }
+            guard case .failed = outcome else {
+                XCTFail("Expected wrong-category module-only switch to fail, received \(outcome).")
+                continue
+            }
+            assertFailedSwitchDidNotMutate(harness)
+        }
+
+        XCTAssertEqual(keyValidationCount, 0)
+        XCTAssertEqual(keyEnumerationCount, 0)
+    }
+
+    /**
+     Verifies a Java-compatible case variant resolves through the manager-owned readable handle.
+
+     - Setup: Installs the readable `UITestDict` module and requests its module-only switch using
+       lowercase initials with no current key.
+     - Expected result: The switch requires key selection and the active setter receives the
+       canonical `UITestDict` SWORD handle returned by `SwordManager.readableModule(named:)`.
+     - Failure meaning: Access classification can report readable while the subsequent inclusive
+       lookup rejects the caller spelling, causing ordinary case-variant quick selections to fail.
+     - Side effects: Creates inherited temporary fixtures and mutates one in-memory harness.
+     - Failure modes: Fixture discovery and manager initialization can throw through XCTest.
+     */
+    func testAuxiliarySwitchUsesManagerReadableHandleForCaseVariant() throws {
+        let manager = try makeGenericModuleManager()
+        var keyEnumerationCount = 0
+        let harness = GenericModuleSwitchHarness(
+            manager: manager,
+            targetCategory: .dictionary,
+            currentKey: nil,
+            containsExactKey: { _, _ in
+                XCTFail("A missing current key must not perform exact-key validation.")
+                return false
+            },
+            loadKeys: { module in
+                keyEnumerationCount += 1
+                XCTAssertEqual(module.info.name, "UITestDict")
+                return []
+            }
+        )
+
+        let outcome = BibleReaderModuleSwitchCoordinator().switchDictionaryModule(
+            to: "uitestdict",
+            context: harness.makeContext()
+        )
+
+        XCTAssertEqual(outcome, .switchedRequiringKeySelection)
+        XCTAssertEqual(harness.selectedModuleCanonicalName, "UITestDict")
+        XCTAssertEqual(keyEnumerationCount, 1)
+    }
+
+    /**
+     Verifies every auxiliary switch authorizes its target before key reads or state mutation.
+
+     - Setup: Installs plaintext-backed but encrypted/locked commentary, dictionary, general-book,
+       and map descriptors, then invokes each category's module-only and document switch against one
+       recording context that already contains non-default persisted state.
+     - Expected result: Both commentary routes return `.failed`; all six generic routes return a
+       failure; exact-key validation, key enumeration, active setters, category writes, persistence,
+       and reload callbacks remain untouched.
+     - Failure meaning: A quick selector, full chooser, restore caller, or AI route can obtain an
+       inclusive locked handle and read its keys or partially replace the readable pane.
+     - Side effects: Writes only inherited temporary SWORD fixtures and records in-memory callbacks.
+     - Failure modes: Fixture discovery or filesystem failures throw through XCTest.
+     */
+    func testAllAuxiliarySwitchesAuthorizeBeforeKeyReadsOrMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: "LockedComm", in: modulePath)
+        try seedEmptyRawDictionaryModule(named: "LockedDict", in: modulePath)
+        try seedEmptyRawGeneralBookModule(named: "LockedGB", in: modulePath)
+        try seedEmptyRawMapModule(named: "LockedMap", in: modulePath)
+        for moduleName in ["LockedComm", "LockedDict", "LockedGB", "LockedMap"] {
+            let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+            var configuration = try String(contentsOf: configURL, encoding: .utf8)
+            configuration.append("\nCipherKey=\n")
+            try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        for moduleName in ["LockedComm", "LockedDict", "LockedGB", "LockedMap"] {
+            XCTAssertEqual(manager.moduleAccessState(named: moduleName), .locked)
+        }
+
+        let window = Window()
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.bible.pageManagerKey
+        )
+        pageManager.commentaryDocument = "BaselineComm"
+        pageManager.dictionaryDocument = "BaselineDict"
+        pageManager.dictionaryKey = "baseline-dictionary-key"
+        pageManager.generalBookDocument = "BaselineGB"
+        pageManager.generalBookKey = "baseline-general-book-key"
+        pageManager.mapDocument = "BaselineMap"
+        pageManager.mapKey = "baseline-map-key"
+        window.pageManager = pageManager
+
+        var keyValidationCount = 0
+        var keyEnumerationCount = 0
+        var moduleAssignments: [DocumentCategory] = []
+        var keyAssignments: [DocumentCategory] = []
+        var categoryAssignments: [DocumentCategory] = []
+        var persistCount = 0
+        var reloadCount = 0
+        let context = BibleReaderModuleSwitchContext(
+            swordManager: manager,
+            activeWindow: window,
+            clientReady: true,
+            currentCategory: .bible,
+            currentDictionaryKey: pageManager.dictionaryKey,
+            currentGeneralBookKey: pageManager.generalBookKey,
+            currentMapKey: pageManager.mapKey,
+            containsExactGenericKey: { _, _ in
+                keyValidationCount += 1
+                return true
+            },
+            loadGenericKeys: { _ in
+                keyEnumerationCount += 1
+                return ["unexpected-key"]
+            },
+            setBibleModule: { _, _ in moduleAssignments.append(.bible) },
+            setCommentaryModule: { _, _ in moduleAssignments.append(.commentary) },
+            setDictionaryModule: { _, _ in moduleAssignments.append(.dictionary) },
+            setGeneralBookModule: { _, _ in moduleAssignments.append(.generalBook) },
+            setMapModule: { _, _ in moduleAssignments.append(.map) },
+            setDictionaryKey: { _ in keyAssignments.append(.dictionary) },
+            setGeneralBookKey: { _ in keyAssignments.append(.generalBook) },
+            setMapKey: { _ in keyAssignments.append(.map) },
+            setCurrentCategory: { categoryAssignments.append($0) },
+            refreshBookList: {},
+            moduleBookListCount: { 0 },
+            persistState: { persistCount += 1 },
+            loadCurrentContent: { reloadCount += 1 }
+        )
+        let coordinator = BibleReaderModuleSwitchCoordinator()
+
+        XCTAssertEqual(
+            coordinator.switchCommentaryModule(to: "LockedComm", context: context),
+            .failed
+        )
+        XCTAssertEqual(
+            coordinator.switchCommentaryDocument(to: "LockedComm", context: context),
+            .failed
+        )
+        let genericOutcomes = [
+            coordinator.switchDictionaryModule(to: "LockedDict", context: context),
+            coordinator.switchDictionaryDocument(to: "LockedDict", context: context),
+            coordinator.switchGeneralBookModule(to: "LockedGB", context: context),
+            coordinator.switchGeneralBookDocument(to: "LockedGB", context: context),
+            coordinator.switchMapModule(to: "LockedMap", context: context),
+            coordinator.switchMapDocument(to: "LockedMap", context: context),
+        ]
+        for outcome in genericOutcomes {
+            guard case .failed = outcome else {
+                XCTFail("Expected locked auxiliary switch to fail, received \(outcome).")
+                continue
+            }
+        }
+
+        XCTAssertEqual(keyValidationCount, 0)
+        XCTAssertEqual(keyEnumerationCount, 0)
+        XCTAssertTrue(moduleAssignments.isEmpty)
+        XCTAssertTrue(keyAssignments.isEmpty)
+        XCTAssertTrue(categoryAssignments.isEmpty)
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(reloadCount, 0)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertEqual(pageManager.commentaryDocument, "BaselineComm")
+        XCTAssertEqual(pageManager.dictionaryDocument, "BaselineDict")
+        XCTAssertEqual(pageManager.dictionaryKey, "baseline-dictionary-key")
+        XCTAssertEqual(pageManager.generalBookDocument, "BaselineGB")
+        XCTAssertEqual(pageManager.generalBookKey, "baseline-general-book-key")
+        XCTAssertEqual(pageManager.mapDocument, "BaselineMap")
+        XCTAssertEqual(pageManager.mapKey, "baseline-map-key")
+    }
+
+    /**
      Verifies retained generic keys persist through every category-specific PageManager plan.
 
      - Setup: Applies dictionary, general-book, and map document plans with explicit retained keys.
@@ -433,6 +675,55 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(mapPage.mapDocument, "TargetMap")
         XCTAssertEqual(mapPage.mapKey, "map-key")
         XCTAssertEqual(mapPage.currentCategoryName, DocumentCategory.map.pageManagerKey)
+    }
+
+    /**
+     Verifies SQLite Bible preparation shares the fail-before-mutation switch boundary.
+
+     - Setup: Runs one unresolved request and one resolved in-memory SQLite Bible request through
+       recording switch contexts.
+     - Expected result: Rejection performs resolution only; success prepares after resolution and
+       immediately before the existing activation, persistence, readiness, and reload sequence.
+     - Failure meaning: A stale SQLite link can leave My Notes or mutate pane state before its
+       backend is known to be activatable.
+     - Side effects: Mutates two in-memory operation logs; no files or global state are touched.
+     */
+    func testSQLiteBiblePreparationRunsOnlyAfterSuccessfulResolution() {
+        let coordinator = BibleReaderSQLiteModuleSwitchCoordinator()
+        let rejected = SQLiteBibleSwitchRecorder(resolvedModule: nil)
+
+        let rejectedResult = coordinator.switchBible(
+            to: "Missing",
+            updatesVisibleCategory: true,
+            context: rejected.makeContext(),
+            prepareForSwitch: rejected.recordPreparation
+        )
+
+        XCTAssertFalse(rejectedResult)
+        XCTAssertEqual(rejected.operations, ["resolve"])
+
+        let reader = SQLiteBibleSwitchFixtureReader()
+        let module = SQLiteDocumentModule(reader: reader, origin: .manual)
+        let accepted = SQLiteBibleSwitchRecorder(
+            resolvedModule: BibleReaderSQLiteModuleHandle(module: module)
+        )
+
+        let acceptedResult = coordinator.switchBible(
+            to: "SQLiteSwitch",
+            updatesVisibleCategory: true,
+            context: accepted.makeContext(),
+            prepareForSwitch: accepted.recordPreparation
+        )
+
+        XCTAssertTrue(acceptedResult)
+        XCTAssertEqual(accepted.requestedModuleName, "SQLiteSwitch")
+        XCTAssertEqual(accepted.requestedCategory, ModuleCategory.bible)
+        XCTAssertEqual(accepted.activatedModuleName, "SQLiteSwitch")
+        XCTAssertEqual(accepted.persistedModuleName, "SQLiteSwitch")
+        XCTAssertEqual(
+            accepted.operations,
+            ["resolve", "prepare", "activate", "category", "books", "persist", "ready", "reload"]
+        )
     }
 
     /**
@@ -509,6 +800,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             line: line
         )
         XCTAssertTrue(harness.moduleAssignments.isEmpty, file: file, line: line)
+        XCTAssertNil(harness.selectedModuleCanonicalName, file: file, line: line)
         XCTAssertTrue(harness.keyAssignments.isEmpty, file: file, line: line)
         XCTAssertEqual(harness.persistCount, 0, file: file, line: line)
         XCTAssertEqual(harness.reloadCount, 0, file: file, line: line)
@@ -521,6 +813,106 @@ private enum GenericKeyValidationFixtureError: LocalizedError {
 
     /// Actionable fixture message expected in the public switch outcome.
     var errorDescription: String? { "Fixture generic-key backend unavailable." }
+}
+
+/** Records the exact SQLite Bible switch transaction without controller or bridge state. */
+private final class SQLiteBibleSwitchRecorder {
+    /// Optional handle returned by the resolution seam.
+    private let resolvedModule: BibleReaderSQLiteModuleHandle?
+
+    /// Ordered switch callbacks observed by the harness.
+    private(set) var operations: [String] = []
+
+    /// Exact requested module initials.
+    private(set) var requestedModuleName: String?
+
+    /// Requested SQLite document category.
+    private(set) var requestedCategory: ModuleCategory?
+
+    /// Module initials passed to the activation callback.
+    private(set) var activatedModuleName: String?
+
+    /// Module initials passed to the persistence callback.
+    private(set) var persistedModuleName: String?
+
+    /** Captures the deterministic resolver result for one transaction. */
+    init(resolvedModule: BibleReaderSQLiteModuleHandle?) {
+        self.resolvedModule = resolvedModule
+    }
+
+    /** Records caller-owned preparation at its exact transaction position. */
+    func recordPreparation() {
+        operations.append("prepare")
+    }
+
+    /**
+     Builds a complete SQLite switch context backed by ordered in-memory recorders.
+
+     - Returns: Synchronous context resolving `resolvedModule` and recording every Bible callback.
+     - Side effects: None until a returned closure is invoked.
+     - Failure modes: None; fixture callbacks do not throw.
+     */
+    func makeContext() -> BibleReaderSQLiteModuleSwitchContext {
+        BibleReaderSQLiteModuleSwitchContext(
+            resolveModule: { [self] name, category in
+                operations.append("resolve")
+                requestedModuleName = name
+                requestedCategory = category
+                return resolvedModule
+            },
+            currentDictionaryKey: { nil },
+            currentCategory: { .bible },
+            isClientReady: { [self] in
+                operations.append("ready")
+                return true
+            },
+            activateBible: { [self] module in
+                operations.append("activate")
+                activatedModuleName = module.info.name
+            },
+            activateCommentary: { _ in },
+            activateDictionary: { _, _ in },
+            setCurrentCategory: { [self] _ in operations.append("category") },
+            refreshBookList: { [self] in operations.append("books") },
+            persistSelection: { [self] category, moduleName, key, updatesVisibleCategory in
+                XCTAssertEqual(category, .bible)
+                XCTAssertNil(key)
+                XCTAssertTrue(updatesVisibleCategory)
+                operations.append("persist")
+                persistedModuleName = moduleName
+            },
+            reloadContent: { [self] in operations.append("reload") }
+        )
+    }
+}
+
+/** Minimal immutable Bible reader used to create one activatable SQLite handle. */
+private final class SQLiteBibleSwitchFixtureReader: SQLiteDocumentReading {
+    /// Stable Bible metadata projected into the handle under test.
+    let metadata = SQLiteDocumentMetadata(
+        sourceURL: URL(fileURLWithPath: "/tmp/sqlite-switch-fixture.SQLite3"),
+        format: .myBible,
+        initials: "SQLiteSwitch",
+        abbreviation: "SQLite switch",
+        title: "SQLite switch fixture",
+        description: "SQLite switch fixture",
+        language: "en",
+        version: "1",
+        category: .bible,
+        direction: .ltr,
+        hasStrongs: false,
+        isStrongsDictionary: false,
+        hasWordsOfChrist: false
+    )
+
+    /// Fixed Bible category required by the reader contract.
+    var category: DocumentCategory { .bible }
+
+    /** Returns no content keys because activation does not read scripture. */
+    func keys() throws -> [SQLiteDocumentKey] { [] }
+
+    /** Returns no content because activation does not query an entry. */
+    func content(for key: SQLiteDocumentKey) throws -> SQLiteDocumentContent? { nil }
 }
 
 /**
@@ -566,6 +958,9 @@ private final class GenericModuleSwitchHarness {
 
     /// Categories whose active module setter ran.
     private(set) var moduleAssignments: [DocumentCategory] = []
+
+    /// Canonical initials carried by the last manager-owned handle passed to an active setter.
+    private(set) var selectedModuleCanonicalName: String?
 
     /// Categories whose current-key setter ran.
     private(set) var keyAssignments: [DocumentCategory] = []
@@ -675,17 +1070,20 @@ private final class GenericModuleSwitchHarness {
             loadGenericKeys: loadKeys,
             setBibleModule: { _, _ in },
             setCommentaryModule: { _, _ in },
-            setDictionaryModule: { [weak self] _, name in
+            setDictionaryModule: { [weak self] module, name in
                 self?.moduleAssignments.append(.dictionary)
                 self?.selectedModuleName = name
+                self?.selectedModuleCanonicalName = module.info.name
             },
-            setGeneralBookModule: { [weak self] _, name in
+            setGeneralBookModule: { [weak self] module, name in
                 self?.moduleAssignments.append(.generalBook)
                 self?.selectedModuleName = name
+                self?.selectedModuleCanonicalName = module.info.name
             },
-            setMapModule: { [weak self] _, name in
+            setMapModule: { [weak self] module, name in
                 self?.moduleAssignments.append(.map)
                 self?.selectedModuleName = name
+                self?.selectedModuleCanonicalName = module.info.name
             },
             setDictionaryKey: { [weak self] key in
                 self?.keyAssignments.append(.dictionary)

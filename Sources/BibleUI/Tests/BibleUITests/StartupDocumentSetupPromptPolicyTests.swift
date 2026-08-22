@@ -1,15 +1,152 @@
 import XCTest
 @testable import BibleUI
+import SwordKit
 
 /**
  Verifies the reader startup setup prompt policy independently from the app-host lifecycle.
 
- These tests protect the Android-parity startup contract: setup appears only while no Bible module
- is installed, and iOS must not ship a bundled KJV module that creates a separate first-run path.
- Failures mean iOS has drifted back toward bundled-content or setup-marker behavior that Android
- does not have.
+ These tests protect the Android-parity startup contract: reading begins only with a readable Bible,
+ locked-only inventory starts an app-owned full credential queue before setup, and iOS must not ship
+ a bundled KJV module that creates a separate first-run path. Failures mean iOS has drifted toward
+ unauthorized activation, incomplete queue handling, bundled content, or setup-marker behavior that
+ Android does not have.
  */
 final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
+    /**
+     Classifies a resolved locked-only Bible inventory for startup authorization.
+
+     - Setup: Supplies one installed encrypted Bible whose fresh metadata has no verified key.
+     - Expected result: The startup inventory predicate reports no readable Bible and returns the
+       distinct reason consumed by the automatic queue, even though inclusive catalog is non-empty.
+     - Failure meaning: Startup can activate encrypted content or collapse issue #389 back into the
+       no-Bible path before the app-owned queue receives its input.
+     - Side effects: None; the test uses immutable metadata only.
+     */
+    func testLockedOnlyBibleInventoryRequiresStartupAuthorization() {
+        let lockedBible = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+
+        XCTAssertTrue(
+            StartupDocumentSetupPromptPolicy.hasNoReadableBibleModules(in: [lockedBible])
+        )
+        XCTAssertEqual(
+            StartupDocumentSetupPromptPolicy.promptReason(in: [lockedBible]),
+            .lockedBibleModules
+        )
+    }
+
+    /**
+     Keeps empty startup inventory distinct from installed encrypted Bibles.
+
+     - Setup: Evaluates an empty inclusive inventory and one locked Bible inventory.
+     - Expected result: Empty inventory requires installation while locked inventory exposes the
+       distinct automatic-queue input reason.
+     - Failure meaning: Locked users can bypass credential authorization or be treated as though no
+       installed module exists.
+     - Side effects: None; both snapshots use immutable metadata.
+     */
+    func testStartupPromptReasonDistinguishesEmptyFromLockedOnlyInventory() {
+        let lockedBible = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+
+        XCTAssertEqual(
+            StartupDocumentSetupPromptPolicy.promptReason(in: []),
+            .noBibleModules
+        )
+        XCTAssertEqual(
+            StartupDocumentSetupPromptPolicy.promptReason(in: [lockedBible]),
+            .lockedBibleModules
+        )
+    }
+
+    /**
+     Allows startup as soon as one Bible in an otherwise locked inventory becomes readable.
+
+     - Setup: Supplies one locked Bible plus one unencrypted Bible in stable catalog order.
+     - Expected result: The readable Bible satisfies startup without removing the locked row needed
+       by the full chooser and Downloads.
+     - Failure meaning: The fail-closed locked-only route can trap users on setup despite a valid
+       reader fallback.
+     - Side effects: None; the test uses immutable metadata only.
+     */
+    func testReadableBibleSuppressesSetupAlongsideLockedInventory() {
+        let lockedBible = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let readableBible = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+
+        XCTAssertFalse(
+            StartupDocumentSetupPromptPolicy.hasNoReadableBibleModules(
+                in: [lockedBible, readableBible]
+            )
+        )
+        XCTAssertNil(
+            StartupDocumentSetupPromptPolicy.promptReason(
+                in: [lockedBible, readableBible]
+            )
+        )
+    }
+
+    /**
+     Models the fresh access transition consumed after the full startup queue completes.
+
+     - Setup: Evaluates the same encrypted Bible first locked and then unlocked in a new metadata
+       snapshot, matching final manager inventory after every initial locked row was processed.
+     - Expected result: The first evaluation remains blocking with `.lockedBibleModules`; the next
+       resolved snapshot clears setup and permits the reader.
+     - Failure meaning: A successful unlock can leave startup stuck or clear it from stale metadata.
+     - Side effects: None; real manager cipher verification is covered by `SwordManagerTests`.
+     */
+    func testFreshUnlockedSnapshotClearsLockedOnlyStartupSetup() {
+        let lockedBible = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let unlockedBible = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: true
+        )
+
+        XCTAssertEqual(
+            StartupDocumentSetupPromptPolicy.evaluation(modules: [lockedBible]),
+            .init(promptReason: .lockedBibleModules, didEvaluateInventory: true)
+        )
+        XCTAssertEqual(
+            StartupDocumentSetupPromptPolicy.evaluation(modules: [unlockedBible]),
+            .init(promptReason: nil, didEvaluateInventory: true)
+        )
+    }
+
     /**
      Unresolved Bible inventory does not complete startup setup evaluation.
 
@@ -185,6 +322,81 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
         )
         XCTAssertFalse(presentation.allowsSkip)
         XCTAssertTrue(presentation.usesReaderStackSurface)
+    }
+
+    /**
+     Locked-only setup matches Android's first-download actions after the automatic queue finishes.
+
+     - Setup: Builds a non-English locked-only presentation so Easy Start does not affect ordering.
+     - Expected result: Download, restore, and import remain available without an iOS-only manual
+       unlock row; Skip remains unavailable.
+     - Failure meaning: iOS has invented a post-queue action that Android's `showFirstLayout()` does
+       not expose, or has lost one of Android's recovery routes.
+     - Side effects: None.
+     */
+    func testLockedOnlyPresentationMatchesAndroidSetupAfterQueueExhaustion() {
+        let presentation = StartupDocumentSetupPresentation(
+            reason: .lockedBibleModules,
+            isEasyStartAvailable: false
+        )
+
+        XCTAssertEqual(
+            presentation.actions,
+            [
+                .downloadDocuments,
+                .restoreDatabase,
+                .loadDocumentsFromFiles,
+            ]
+        )
+        XCTAssertFalse(presentation.allowsSkip)
+        XCTAssertTrue(presentation.usesReaderStackSurface)
+    }
+
+    /**
+     Guards automatic startup-queue wiring without changing the ordinary inclusive picker.
+
+     - Setup: Extracts startup evaluation/completion plus the queue and ordinary picker sources.
+     - Expected result: Locked-only evaluation starts the automatic queue, the queue reuses shared
+       passphrase behavior, final reconciliation occurs after queue completion, and setup/picker do
+       not expose startup-specific routing callbacks.
+     - Failure meaning: Startup can regress to an extra-tap-only picker flow, stop reconciling fresh
+       access, or fork credential validation away from the ordinary picker.
+     - Side effects: Reads package source only.
+     */
+    func testLockedOnlyStartupUsesSharedUnlockBehaviorWithoutSpecialPickerRouting() throws {
+        let readerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+        let pickerSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+        let setupSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/StartupDocumentSetupView.swift"
+        )
+        let queueSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/StartupLockedBibleUnlockQueue.swift"
+        )
+        let evaluateSource = try BibleUITestSourceLocator.extractFunction(
+            named: "evaluateStartupDownloadPromptIfNeeded",
+            from: readerSource
+        )
+        let completionSource = try BibleUITestSourceLocator.extractFunction(
+            named: "completeStartupLockedBibleUnlockQueue",
+            from: readerSource
+        )
+
+        XCTAssertFalse(setupSource.contains("unlockInstalledBible"))
+        XCTAssertFalse(setupSource.contains("localized: \"enter_module_passphrase\""))
+        XCTAssertFalse(setupSource.contains("startup_locked_bibles_message"))
+        XCTAssertTrue(evaluateSource.contains("beginStartupLockedBibleUnlockQueueIfNeeded"))
+        XCTAssertTrue(queueSource.contains("ModuleUnlockActionCoordinator.submit"))
+        XCTAssertTrue(queueSource.contains("ModulePickerUnlockDialog"))
+        XCTAssertTrue(queueSource.contains("localized: \"enter_module_passphrase\""))
+        XCTAssertTrue(completionSource.contains("StartupDocumentSetupPromptPolicy.evaluation"))
+        XCTAssertTrue(pickerSource.contains("ModuleUnlockActionCoordinator.submit"))
+        XCTAssertFalse(readerSource.contains("presentStartupLockedBiblePicker"))
+        XCTAssertFalse(pickerSource.contains("onBibleSelected"))
+        XCTAssertFalse(readerSource.contains("controller.presentStartupUnlock"))
     }
 
     /**

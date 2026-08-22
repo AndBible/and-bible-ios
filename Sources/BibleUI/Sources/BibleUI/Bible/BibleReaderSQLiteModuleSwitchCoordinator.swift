@@ -67,18 +67,23 @@ struct BibleReaderSQLiteModuleSwitchCoordinator {
        - moduleName: Requested case-insensitive initials.
        - updatesVisibleCategory: Whether Bible becomes the visible category.
        - context: Controller state, persistence, and dispatch seams.
+       - prepareForSwitch: Optional caller-owned preparation invoked after module resolution and
+         immediately before the successful activation sequence.
      - Returns: True only when SQLite owns and applies the request.
-     - Side effects: Clears SWORD Bible state, refreshes real books, persists selection, and reloads
-       content whenever the client is ready.
-     - Failure modes: Unknown, wrong-category, and SWORD-shadowed requests return false unchanged.
+     - Side effects: May run `prepareForSwitch`, then clears SWORD Bible state, refreshes real books,
+       persists selection, and reloads content whenever the client is ready.
+     - Failure modes: Unknown, wrong-category, and SWORD-shadowed requests return false without
+       invoking `prepareForSwitch` or mutating state.
      */
     @discardableResult
     func switchBible(
         to moduleName: String,
         updatesVisibleCategory: Bool,
-        context: BibleReaderSQLiteModuleSwitchContext
+        context: BibleReaderSQLiteModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> Bool {
         guard let module = context.resolveModule(moduleName, .bible) else { return false }
+        prepareForSwitch?()
         context.activateBible(module)
         if updatesVisibleCategory { context.setCurrentCategory(.bible) }
         context.refreshBookList()

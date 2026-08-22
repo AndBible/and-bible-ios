@@ -165,12 +165,11 @@ struct BibleReaderModulePicker: View {
        - onOpenStudyPadSelector: Follow-up route for Android's visible Journal/StudyPad pseudo-document.
        - onDeleteEpub: Reader-owner callback emitted only after durable EPUB deletion succeeds.
 
-     Side effects:
-     - initializes SwiftUI state only; controller mutations happen later from row selection.
+     - Side effects: Initializes SwiftUI state only; controller mutations happen later from row
+       selection.
 
-     Failure modes:
-     - The caller must wait for a ready pane controller before constructing the picker; a missing
-       controller is a pane-readiness state, not an empty installed-document state.
+     - Failure modes: The caller must wait for a ready pane controller before constructing the
+       picker; a missing controller is a pane-readiness state, not an empty installed-document state.
      */
     init(
         controller: BibleReaderController,
@@ -1159,17 +1158,23 @@ struct BibleReaderModulePicker: View {
      Selects a module and applies the category-specific reader transition.
 
      - Parameter module: Installed module selected from the chooser.
-     Side effects:
-     - mutates the reader controller's active module/category for normal reader modules
-     - dismisses the chooser for selectable reader documents
-     - opens the auxiliary browser for dictionary, general book, or map selections
-
-     Failure modes:
-     - locked encrypted modules open the cipher-key prompt without changing reader state
-     - add-on rows are intentionally non-selecting, matching Android's AND_BIBLE guard in
-       `ChooseDocument.handleDocumentSelection`
+     - Side effects:
+       - routes every Bible row through the controller's fresh access preflight before switching or
+         opening the existing cipher-key prompt
+       - mutates the reader controller's active module/category for other normal reader modules
+       - dismisses the chooser for selectable reader documents
+       - opens the auxiliary browser for dictionary, general book, or map selections
+     - Failure modes:
+       - locked encrypted modules open the cipher-key prompt without changing reader state
+       - stale locked Bible rows that became readable avoid a duplicate prompt and switch normally
+       - add-on rows are intentionally non-selecting, matching Android's AND_BIBLE guard in
+         `ChooseDocument.handleDocumentSelection`
      */
     private func select(_ module: ModuleInfo) {
+        if module.category == .bible {
+            selectUnlockedModule(module)
+            return
+        }
         if Self.requiresUnlock(module) {
             beginUnlock(module)
             return
@@ -1178,14 +1183,17 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Applies a category-specific reader transition after lock validation succeeds.
+     Applies a category-specific reader transition after chooser-row validation succeeds.
 
-     - Parameter module: Installed module already known to be selectable and unlocked.
-     - Side effects: Switches the pane document; exact generic keys dismiss without another chooser,
-       invalid/missing keys replace the picker with the matching key browser, and key validation or
-       enumeration failures keep the picker visible with Retry/Cancel actions.
-     - Failure modes: Add-ons and unsupported categories are ignored. Repeated SWORD failures retain
-       the selected module for retry without mutating the pane.
+     - Parameter module: Installed module selected from the inclusive full chooser.
+     - Side effects: Switches the pane document after the controller's authoritative access
+       preflight; exact generic keys dismiss without another chooser, invalid/missing keys replace
+       the picker with the matching key browser, and key validation or enumeration failures keep the
+       picker visible with Retry/Cancel actions.
+     - Failure modes: A Bible or commentary that became locked after row construction reuses the
+       existing passphrase prompt without dismissing or mutating the pane. Other unavailable,
+       add-on, and unsupported rows remain in the picker. Repeated generic SWORD failures retain the
+       selected module for retry.
      */
     private func selectUnlockedModule(_ module: ModuleInfo) {
         guard let selectedDocumentCategory = Self.documentCategory(for: module.category) else {
@@ -1194,8 +1202,14 @@ struct BibleReaderModulePicker: View {
 
         switch selectedDocumentCategory {
         case .commentary:
-            controller.switchCommentaryDocument(to: module.name)
-            onDismiss()
+            Self.handleCommentarySelection(
+                module,
+                controller: controller,
+                onDismiss: onDismiss,
+                onBeginAuthoritativeUnlock: {
+                    beginUnlock($0, authoritativeAccessState: true)
+                }
+            )
         case .dictionary:
             handleGenericModuleSwitch(
                 controller.switchDictionaryDocument(to: module.name),
@@ -1215,8 +1229,56 @@ struct BibleReaderModulePicker: View {
                 onOpenBrowser: onOpenMapBrowser
             )
         default:
-            controller.switchBibleDocument(to: module.name)
+            switch controller.switchBibleDocument(to: module.name) {
+            case .switched:
+                onDismiss()
+            case .requiresUnlock:
+                beginUnlock(module, authoritativeAccessState: true)
+            case .unavailable:
+                break
+            }
+        }
+    }
+
+    /**
+     Routes one commentary row through the controller's typed authorization outcome.
+
+     The chooser row is only a snapshot and can become stale before selection. A failed switch
+     therefore re-resolves the canonical installed row and manager access instead of trusting
+     `ModuleInfo`: only a freshly locked commentary enters the existing authoritative cipher-key
+     flow, while missing, unsupported, replaced, and category-incompatible targets keep the picker
+     visible.
+
+     - Parameters:
+       - module: Commentary row selected from the inclusive installed inventory.
+       - controller: Pane controller that owns the atomic commentary document switch and manager.
+       - onDismiss: Callback that closes the picker only after a completed switch.
+       - onBeginAuthoritativeUnlock: Callback that presents the existing unlock flow after fresh
+         manager classification reports `.locked`.
+     - Side effects: A successful controller switch mutates and persists the pane before dismissal;
+       a locked failure invokes the unlock callback. Other failures produce no picker or pane mutation.
+     - Failure modes: A missing manager, non-commentary canonical row, and every non-locked failure
+       retain the picker. Fresh classification is deliberately performed only after `.failed`, so
+       successful switches do not race redundant inventory reads.
+     */
+    static func handleCommentarySelection(
+        _ module: ModuleInfo,
+        controller: BibleReaderController,
+        onDismiss: () -> Void,
+        onBeginAuthoritativeUnlock: (ModuleInfo) -> Void
+    ) {
+        switch controller.switchCommentaryDocument(to: module.name) {
+        case .switched:
             onDismiss()
+        case .failed:
+            guard let manager = controller.swordManager,
+                  manager.installedModules().first(where: {
+                      SwordJavaStringIdentity.equalsIgnoreCase($0.name, module.name)
+                  })?.category == .commentary,
+                  manager.moduleAccessState(named: module.name) == .locked else {
+                return
+            }
+            onBeginAuthoritativeUnlock(module)
         }
     }
 
@@ -1251,12 +1313,20 @@ struct BibleReaderModulePicker: View {
     /**
      Starts Android's passphrase prompt for an encrypted locked module.
 
-     - Parameter module: Locked chooser row selected directly or through its context action.
-     - Side Effects: Clears stale key/error state and presents the module-scoped unlock alert.
-     - Failure Modes: Already-unlocked and unencrypted modules bypass the prompt and select normally.
+     - Parameters:
+       - module: Locked chooser row selected directly or through its context action.
+       - authoritativeAccessState: Whether the shared controller preflight freshly classified the
+         module locked, even if the chooser's older metadata snapshot says otherwise.
+     - Side effects: Clears stale key/error state and presents the module-scoped unlock alert.
+     - Failure modes: Without an authoritative locked result, already-unlocked and unencrypted
+       modules bypass the prompt and select normally. The authoritative path prevents a stale-row
+       recursion between selection and preflight.
      */
-    private func beginUnlock(_ module: ModuleInfo) {
-        guard Self.requiresUnlock(module) else {
+    private func beginUnlock(
+        _ module: ModuleInfo,
+        authoritativeAccessState: Bool = false
+    ) {
+        guard authoritativeAccessState || Self.requiresUnlock(module) else {
             selectUnlockedModule(module)
             return
         }

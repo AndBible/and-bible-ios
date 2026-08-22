@@ -37,14 +37,34 @@ public class BibleWebViewController: UIViewController {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    /// Installs and pins the web view to the controller's bounds.
+    /**
+     Installs the WebView and keeps its layout viewport above the software keyboard.
+
+     Android resizes `mainBibleView` by the IME inset so `position: fixed` note modals remain
+     focusable and dismissible while the keyboard is visible. Pinning the WebView to UIKit's
+     keyboard layout guide provides the same contract on iOS and avoids WebKit's iOS 26 visual-
+     viewport drift without applying modal-specific JavaScript offsets.
+
+     Side effects:
+     - attaches the persistent session WebView to this transient controller
+     - installs constraints that resize the WebView as the docked keyboard moves
+     - disables the keyboard guide's bottom-safe-area floor so the hidden-keyboard layout retains
+       the reader's existing edge-to-edge contract
+     - applies the current native background palette
+
+     Failure modes:
+     - floating keyboards intentionally do not resize the full-width WebView; WebKit retains its
+       normal cursor-scrolling behavior for those non-docked keyboards
+     */
     public override func viewDidLoad() {
         super.viewDidLoad()
         view.addSubview(webView)
         webView.translatesAutoresizingMaskIntoConstraints = false
+        let keyboardLayoutGuide = view.keyboardLayoutGuide
+        keyboardLayoutGuide.usesBottomSafeArea = false
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            webView.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])

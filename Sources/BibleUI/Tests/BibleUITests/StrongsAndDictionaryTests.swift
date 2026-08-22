@@ -1111,6 +1111,23 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         )
     }
 
+    /**
+     Protects Android's canonical five-digit lookup family for an unpadded Strong's link.
+
+     - Setup: Builds lookup candidates for the issue-388 request `G243`.
+     - Expected result: The original and unpadded candidates remain first, followed by Android's
+       `00243` and carriage-return `00243\r` variants.
+     - Failure meaning: A dictionary that stores canonical padded keys cannot resolve an unpadded
+       link even though Android resolves the same request.
+     - Side effects: None.
+     */
+    func testStrongsLookupKeyOptionsPadUnpaddedGreekNumberLikeAndroid() {
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "G243"),
+            ["G243", "243", "243\r", "00243", "00243\r"]
+        )
+    }
+
     func testDictionaryLookupCandidateRejectsNearestEntryLeakForIntermediateZeroTrimKey() {
         let rawEntry = """
         <entryFree n="430"><orth>אֱלֹהִים</orth></entryFree>

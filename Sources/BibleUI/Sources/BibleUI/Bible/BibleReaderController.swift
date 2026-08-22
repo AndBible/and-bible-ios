@@ -157,6 +157,42 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private(set) var installedBibleModules: [ModuleInfo] = []
 
     /**
+     Bible modules eligible for normal reader shortcuts and automatic fallback selection.
+
+     Android's `SwordDocumentFacade.unlockedBibles` keeps locked modules out of toolbar menus while
+     the full document chooser retains inclusive installed inventory for its unlock workflow. Native
+     SWORD rows are classified through the manager's fresh access snapshot; validated Android SQLite
+     projections are readable by construction.
+
+     - Returns: Installed Bible metadata in the existing catalog order, excluding locked or
+       unavailable native SWORD rows.
+     - Side effects: Reads one fresh native inventory snapshot; it does not mutate selection,
+       persistence, rendered content, or the controller's stable catalog order.
+     - Failure modes: Missing managers and unsupported native modules fail closed. SQLite modules
+       remain available because catalog discovery has already validated their readable payload.
+     */
+    var readableBibleModules: [ModuleInfo] {
+        let readableNativeNames: Set<SQLiteDocumentIdentity>
+        if let swordManager {
+            readableNativeNames = Set(
+                swordManager.installedModules().lazy.filter { info in
+                    !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info)
+                        && info.category == .bible
+                        && (!info.isEncrypted || info.isUnlocked)
+                }.map { SQLiteDocumentIdentity($0.name) }
+            )
+        } else {
+            readableNativeNames = []
+        }
+        return installedBibleModules.filter { info in
+            if BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) {
+                return true
+            }
+            return readableNativeNames.contains(SQLiteDocumentIdentity(info.name))
+        }
+    }
+
+    /**
      Dynamic book list from the active module's versification.
      Populated when a Bible module is loaded. Empty means either no module is active or the active
      module could not expose a safe module-specific book list.
@@ -1876,9 +1912,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           else {
             return
           }
-          if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
-            != .orderedSame
-          {
+          if !SwordJavaStringIdentity.equalsIgnoreCase(
+            self.activeModuleName,
+            sourceModule.info.name
+          ) {
             self.switchBibleDocument(to: sourceModule.info.name)
           }
           self.navigateToSynchronizedPosition(
@@ -2040,9 +2077,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                   else {
                     return
                   }
-                  if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
-                    != .orderedSame
-                  {
+                  if !SwordJavaStringIdentity.equalsIgnoreCase(
+                    self.activeModuleName,
+                    sourceModule.info.name
+                  ) {
                     self.switchBibleDocument(to: sourceModule.info.name)
                   }
                   self.navigateToSynchronizedPosition(
@@ -2145,26 +2183,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         BibleReaderSpeechProviderFactory.category(for: category)
     }
 
-    /** Resolves a generic identity exactly and rejects ambiguous cross-store collisions. */
+    /**
+     Resolves one readable generic source while preserving Android global-registry ownership.
+
+     - Parameters:
+       - bookInitials: Exact persisted source initials.
+       - expectedCategory: Persisted provider category, or `nil` for bridge-owned routing.
+     - Returns: One authorized SWORD, EPUB, or My Documents source when identity is unambiguous.
+     - Side effects: Captures one fresh installed-module resolver snapshot; no content is read.
+     - Failure modes: Locked native owners and registered SQLite identities fail closed and suppress
+       colliding local-document/EPUB sources. Missing, wrong-category, and ambiguous sources return
+       `nil` without constructing a speech provider.
+     */
     private func genericSpeechSource(
         bookInitials: String,
         expectedCategory: SpeakDocumentCategory?
     ) -> GenericSpeechSource? {
+        let resolver = installedModuleResolver()
+        let registeredSource = resolver.module(named: bookInitials)
+        let globalRegistryOwnsIdentity = resolver.hasNativeRegistration(named: bookInitials)
+            || registeredSource != nil
         var candidates: [GenericSpeechSource] = []
-    if expectedCategory == nil || expectedCategory == .generalBook
+    if !globalRegistryOwnsIdentity,
+      expectedCategory == nil || expectedCategory == .generalBook
       || expectedCategory == .myDocument,
       let document = myDocumentStore?.document(initials: bookInitials)
     {
             candidates.append(.myDocument(document))
         }
-        if expectedCategory == nil || expectedCategory == .generalBook,
+        if !globalRegistryOwnsIdentity,
+           expectedCategory == nil || expectedCategory == .generalBook,
            let reader = activeEpubReader?.initials == bookInitials
                ? activeEpubReader
         : EpubReader(initials: bookInitials)
     {
             candidates.append(.epub(reader))
         }
-        if let module = swordManager?.module(named: bookInitials),
+        if case .sword(let module)? = registeredSource,
            let category = Self.genericSpeechCategory(for: module.info.category),
       expectedCategory == nil || expectedCategory == category
     {
@@ -2320,7 +2375,23 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-  /** Builds an exact SQLite commentary/dictionary speech session before SWORD resolution. */
+  /**
+   Builds an exact SQLite commentary/dictionary speech session before SWORD resolution.
+
+   - Parameters:
+     - bookInitials: Android document identity requested by speech or checkpoint restoration.
+     - key: Exact commentary or dictionary source key.
+     - startOrdinal: Optional inclusive source start ordinal.
+     - endOrdinal: Optional inclusive source end ordinal.
+     - expectedCategory: Optional category constraint carried by the request.
+     - checkpoint: Optional persisted provider state to reconstruct.
+     - service: Speech service whose settings and callbacks own the session.
+   - Returns: A source-backed reconstruction, or `nil` when the SQLite source/key cannot be proven.
+   - Side effects: Reads SQLite content lazily and synchronizes accepted positions into the pane;
+     Android-37 Java identity decides whether synchronization switches the active document first.
+   - Failure modes: Missing, shadowed, wrong-category, malformed, and unreadable SQLite sources fail
+     closed without falling through to SWORD or mutating an unrelated active document.
+   */
   private func sqliteGenericSpeechSession(
     bookInitials: String,
     key: String?,
@@ -2349,9 +2420,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           guard let self else { return }
           switch category {
           case .commentary:
-            if self.activeCommentaryModuleName?.caseInsensitiveCompare(module.info.name)
-              != .orderedSame
-            {
+            if self.activeCommentaryModuleName.map({
+              SwordJavaStringIdentity.equalsIgnoreCase($0, module.info.name)
+            }) != true {
               self.switchCommentaryDocument(to: module.info.name)
             }
             guard
@@ -2366,9 +2437,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.currentVerse = reference.verse
             self.loadCommentaryForCurrentVerse()
           case .dictionary:
-            if self.activeDictionaryModuleName?.caseInsensitiveCompare(module.info.name)
-              != .orderedSame
-            {
+            if self.activeDictionaryModuleName.map({
+              SwordJavaStringIdentity.equalsIgnoreCase($0, module.info.name)
+            }) != true {
               _ = self.switchDictionaryDocument(to: module.info.name)
             }
             self.loadDictionaryEntry(key: sourceKey)
@@ -2465,7 +2536,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           service: service
         )
       }
-            guard let module = swordManager?.module(named: cursor.bookInitials),
+            guard let module = swordManager?.readableModule(named: cursor.bookInitials),
         let context = makeSpeechContext(module: module)
       else {
                 return nil
@@ -2591,14 +2662,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Creates the backend-neutral installed-Bible registry used by one Search presentation.
 
-     Genuine readable SWORD modules are registered first. Android-compatible SQLite modules are
-     discovered through `SQLiteDocumentModuleLibrary`, preserving its exact/full-name/Java-folded
-     ordering while `BibleSearchIndexSourceRegistry` keeps native SWORD ownership of collisions.
+     Freshly verified readable SWORD modules are registered first. Android-compatible SQLite modules
+     reuse the runtime coordinator's validated, registration-ordered handles while
+     `BibleSearchIndexSourceRegistry` keeps native SWORD ownership of collisions.
 
      - Returns: Immutable source snapshot, or nil before a SWORD manager is configured.
-     - Side effects: Enumerates installed SQLite files and validates their metadata read-only.
-     - Failure modes: Malformed SQLite files remain library diagnostics and are absent from Search;
-       unreadable or synthetic SWORD projection rows are excluded.
+     - Side effects: Reads one fresh native inventory snapshot and reuses the coordinator's
+       validated SQLite snapshot; no module is unlocked or rediscovered.
+     - Failure modes: Locked/unreadable native Bibles and SQLite identities shadowed by any native
+       registration are absent, preventing Search from indexing a source reader cannot navigate.
      */
     @MainActor
     func makeSearchIndexSourceRegistry() -> BibleSearchIndexSourceRegistry? {
@@ -2606,24 +2678,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         var registeredSwordIdentities = Set<SQLiteDocumentIdentity>()
         var swordSources: [any BibleSearchIndexSource] = []
-        for info in swordManager.installedModules() where info.category == .bible {
-            guard sqliteRuntimeCoordinator.hasGenuineSwordModule(named: info.name) else { continue }
-            let canonicalName = sqliteRuntimeCoordinator.canonicalSwordModuleName(info.name)
-            let identity = SQLiteDocumentIdentity(canonicalName)
+        for info in swordManager.installedModules()
+        where info.category == .bible
+            && !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info)
+            && (!info.isEncrypted || info.isUnlocked) {
+            let identity = SQLiteDocumentIdentity(info.name)
             guard registeredSwordIdentities.insert(identity).inserted,
-                  let module = swordManager.module(named: canonicalName),
+                  let module = swordManager.module(named: info.name),
                   module.info.category == .bible else {
                 continue
             }
             swordSources.append(module)
         }
 
-        let sqliteLibrary = SQLiteDocumentModuleLibrary(
-            moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
-        )
-        let sqliteSources: [any BibleSearchIndexSource] = sqliteLibrary
-            .modules(category: .bible)
-            .map { $0 }
+        let sqliteSources: [any BibleSearchIndexSource] = sqliteRuntimeCoordinator
+            .unshadowedSQLiteModules(category: .bible)
+            .map(\.searchIndexSource)
         return BibleSearchIndexSourceRegistry(
             primarySources: swordSources,
             additionalSources: sqliteSources
@@ -2769,19 +2839,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    Switches the selected Bible module without changing the visible category.
 
    - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Returns: `.switched` after activation, `.requiresUnlock` for a locked native SWORD module, or
+     `.unavailable` when no compatible backend resolves.
    - Side effects: Updates the active backend, refreshes its real book list, persists
      `PageManager.bibleDocument`, and reloads current content when the client is ready.
-   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+   - Failure modes: Locked, unknown, and unsupported native modules leave controller, persisted, and
+     rendered state unchanged. Serialized SQLite modules are readable and preserve their existing
+     switch path.
   */
-    public func switchModule(to moduleName: String) {
+    @discardableResult
+    public func switchModule(to moduleName: String) -> BibleReaderBibleModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchBible(
       to: moduleName,
       updatesVisibleCategory: false,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchModule(
+    return moduleSwitchCoordinator.switchModule(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2796,29 +2871,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      together, persisted together, and then rendered once when the web client is ready.
 
      - Parameter moduleName: Installed SWORD Bible module abbreviation to make current.
-     Side effects:
-     - mutates the active Bible module and current document category
-     - refreshes the cached Bible book list for the selected module
-     - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
-     - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
-     Failure modes:
-     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
-     - if the resolved module is not a Bible, logs a warning and leaves controller/page state
-       unchanged
+     - Returns: `.switched` after the atomic transition, `.requiresUnlock` before mutation for a
+       locked native SWORD module, or `.unavailable` for missing and incompatible targets.
+     - Side effects:
+       - mutates the active Bible module and current document category
+       - refreshes the cached Bible book list for the selected module
+       - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
+       - invokes `onPersistState` once when pane state is available
+       - reloads the visible reader document once when the JavaScript client is ready
+     - Failure modes:
+       - locked and unavailable native modules leave controller/page/render state unchanged
+       - if the resolved module is not a Bible, logs a warning and leaves controller/page state
+         unchanged
      - Important: Main-actor isolated because successful switches can mutate SwiftUI-observed reader
        state and synchronously emit WebView bridge updates through `loadCurrentContent()`.
      */
     @MainActor
-    public func switchBibleDocument(to moduleName: String) {
+    @discardableResult
+    public func switchBibleDocument(to moduleName: String) -> BibleReaderBibleModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchBible(
       to: moduleName,
       updatesVisibleCategory: true,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchBibleDocument(
+    return moduleSwitchCoordinator.switchBibleDocument(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2828,19 +2906,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    Switches the selected commentary module without changing the visible category.
 
    - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Returns: `.switched` after readable activation, or `.failed` before mutation.
    - Side effects: Updates and persists the commentary backend, reloading only when commentary is
      already visible and the client is ready.
-   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+   - Failure modes: Locked, unknown, unreadable, and unsupported modules leave controller,
+     persisted state, and rendered content unchanged.
   */
-    public func switchCommentaryModule(to moduleName: String) {
+  @discardableResult
+  public func switchCommentaryModule(
+    to moduleName: String
+  ) -> BibleReaderCommentaryModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchCommentary(
       to: moduleName,
       updatesVisibleCategory: false,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchCommentaryModule(
+    return moduleSwitchCoordinator.switchCommentaryModule(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2855,25 +2938,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      selections that should show commentary content immediately.
 
      - Parameter moduleName: Installed SWORD commentary module abbreviation to make current.
-     Side effects:
-     - mutates the active commentary module and current document category
-     - writes `commentaryDocument` and `currentCategoryName` to the active pane's `PageManager`
-     - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
-     Failure modes:
-     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
-     - if the resolved module is not a commentary, logs a warning and leaves state unchanged
+     - Returns: `.switched` after readable activation, or `.failed` before mutation.
+     - Side effects: On success, mutates the active commentary module/category, writes
+       `commentaryDocument` and `currentCategoryName`, persists once, and reloads once when ready.
+     - Failure modes: Locked, missing, unreadable, and wrong-category modules leave controller,
+       `PageManager`, persistence, navigation, and rendered content unchanged.
      */
     @MainActor
-    public func switchCommentaryDocument(to moduleName: String) {
+    @discardableResult
+    public func switchCommentaryDocument(
+      to moduleName: String
+    ) -> BibleReaderCommentaryModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchCommentary(
       to: moduleName,
       updatesVisibleCategory: true,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchCommentaryDocument(
+    return moduleSwitchCoordinator.switchCommentaryDocument(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -3094,9 +3177,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 renderMemorizeDocument(activeMemorizeEmission)
                 return
             }
-            if loadRestoredAndroidMemorizeDocument() {
-                return
-            }
+            // A persisted fake document keeps its own identity even when its source was relocked.
+            // Never reinterpret that authorization failure as ordinary commentary content.
+            _ = loadRestoredAndroidMemorizeDocument()
+            return
         }
 
         if showingMyNotes {
@@ -3408,9 +3492,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Builds a Memorize document request for one restored source range.
 
      - Parameter source: Restored Android source document initials and verse references.
-     - Returns: Request configured with source-module canonical text extraction and progress state.
-     - Side effects: None during request construction.
-     - Failure modes: Returns `nil` when the source has no concrete references.
+     - Returns: Request configured with an authorized SWORD handle and progress state.
+     - Side effects: Captures one fresh installed-module resolver snapshot; no content is read.
+     - Failure modes: Returns `nil` when the source has no concrete references, is no longer
+       readable, is not a native SWORD Bible, or is shadowed by a locked native owner.
      */
   private func restoredMemorizeDocumentRequest(source: RestoredMemorizeSource)
     -> MemorizeDocumentRequest?
@@ -3419,9 +3504,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       let lastReference = source.references.last
     else { return nil }
         let bookInitials = source.bookInitials.isEmpty ? activeModuleName : source.bookInitials
-    let sourceModule =
-      swordManager?.module(named: bookInitials)
-            ?? (bookInitials == activeModuleName ? activeModule : nil)
+    guard case .sword(let sourceModule)? = installedModuleResolver().scripture(named: bookInitials)
+    else { return nil }
         let referenceOrdinals = Set(source.references.map(\.ordinal))
         let request = MemorizeDocumentRequest(
             bookInitials: bookInitials,
@@ -4702,22 +4786,26 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    - Side effects: Resolves genuine SWORD or serialized SQLite handles for Bible, commentary, and
      dictionary fields; restores other document categories; canonicalizes persisted module
      spelling; validates exact SQLite dictionary keys; refreshes books; and restores navigation.
-   - Failure modes: Missing, wrong-category, unreadable, and SWORD-shadowed SQLite selections are
-     ignored without replacing the supported setup fallback. Invalid SQLite dictionary keys are
-     cleared rather than normalized. The method is a no-op before `activeWindow` is attached.
+   - Failure modes: Missing, locked, wrong-category, unreadable, and SWORD-shadowed SQLite selections
+     never activate content handles. Commentary keeps its readable setup fallback when available;
+     optional categories preserve their requested identity without inventing a fallback. Invalid
+     SQLite dictionary keys are cleared rather than normalized. The method is a no-op before
+     `activeWindow` is attached.
    - Note: Canonicalized fields invoke `onPersistState` once after all restore decisions.
      */
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
     var normalizedPersistedSelection = false
 
-        // Restore the saved Bible module. `module(named:)` returns nil for an unsupported
-        // (e.g. unknown-versification) module, so a persisted or synced selection naming one is not
-        // restored and the supported module chosen during SWORD configuration remains. ADR-0010.
+        // Restore the saved Bible module only after the manager's fresh access state confirms it is
+        // readable. Locked and unsupported selections retain the readable module chosen during
+        // SWORD configuration instead of entering content rendering. ADR-0010 and issue #389.
     if let saved = pm.bibleDocument {
       let canonicalSaved = sqliteRuntimeCoordinator.canonicalSwordModuleName(saved)
       if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: saved),
-        let mod = swordManager?.module(named: canonicalSaved),
+        let manager = swordManager,
+        manager.moduleAccessState(named: canonicalSaved) == .readable,
+        let mod = manager.module(named: canonicalSaved),
         mod.info.category == .bible
       {
         activeSQLiteBibleModule = nil
@@ -4745,6 +4833,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       }
         }
 
+        // One fresh global registry snapshot authorizes every auxiliary restore below. Native rows
+        // retain ownership while locked, so a colliding SQLite module cannot become a content
+        // fallback during session restoration.
+        let auxiliaryModuleResolver = installedModuleResolver()
+
         // Restore saved commentary module or Android synthetic Memorize document
         if pm.commentaryDocument == AndroidSpecialDocumentIdentity.memorizeDocumentInitials {
             activeCommentaryModule = nil
@@ -4752,102 +4845,82 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
             logger.info("Restored Android synthetic Memorize document")
         } else if let savedComm = pm.commentaryDocument,
-      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedComm),
-      let mod = swordManager?.module(
-        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
-      ),
-      mod.info.category == .commentary
+      let source = auxiliaryModuleResolver.module(named: savedComm),
+      source.info.category == .commentary
     {
-      activeSQLiteCommentaryModule = nil
-            activeCommentaryModule = mod
-      activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
+      switch source {
+      case .sword(let module):
+        activeCommentaryModule = module
+        activeSQLiteCommentaryModule = nil
+      case .sqlite(let module):
+        activeCommentaryModule = nil
+        activeSQLiteCommentaryModule = module
+      }
+      activeCommentaryModuleName = source.info.name
       if pm.commentaryDocument != activeCommentaryModuleName {
         pm.commentaryDocument = activeCommentaryModuleName
         normalizedPersistedSelection = true
       }
             logger.info("Restored saved commentary module: \(savedComm)")
-    } else if let savedComm = pm.commentaryDocument,
-      let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: savedComm,
-        category: .commentary
-      )
-    {
-      activeCommentaryModule = nil
-      activeSQLiteCommentaryModule = mod
-      activeCommentaryModuleName = mod.info.name
-      if pm.commentaryDocument != mod.info.name {
-        pm.commentaryDocument = mod.info.name
-        normalizedPersistedSelection = true
-      }
-      logger.info("Restored saved SQLite commentary module: \(savedComm)")
-    } else if let firstComm = installedCommentaryModules.first {
-      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: firstComm.name),
-        let mod = swordManager?.module(
-          named: sqliteRuntimeCoordinator.canonicalSwordModuleName(firstComm.name)
-        ),
-        mod.info.category == .commentary
-      {
+    } else if let firstCommentary = auxiliaryModuleResolver.modules(
+      category: .commentary,
+      orderedBy: installedCommentaryModules
+    ).first {
+      switch firstCommentary {
+      case .sword(let module):
+        activeCommentaryModule = module
         activeSQLiteCommentaryModule = nil
-        activeCommentaryModule = mod
-        activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(
-          firstComm.name
-        )
-      } else if let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: firstComm.name,
-        category: .commentary
-      ) {
+      case .sqlite(let module):
         activeCommentaryModule = nil
-        activeSQLiteCommentaryModule = mod
-        activeCommentaryModuleName = mod.info.name
+        activeSQLiteCommentaryModule = module
       }
+      activeCommentaryModuleName = firstCommentary.info.name
+    } else if let savedComm = pm.commentaryDocument {
+      activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = nil
+      activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
         }
 
         // Restore dictionary module
         if let savedDict = pm.dictionaryDocument,
-      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedDict),
-      let mod = swordManager?.module(
-        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
-      ),
-      mod.info.category == .dictionary || mod.info.category == .glossary
+      let source = auxiliaryModuleResolver.module(named: savedDict),
+      source.info.category == .dictionary || source.info.category == .glossary
     {
-      activeSQLiteDictionaryModule = nil
-            activeDictionaryModule = mod
-      activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
-            currentDictionaryKey = pm.dictionaryKey
+      switch source {
+      case .sword(let module):
+        activeDictionaryModule = module
+        activeSQLiteDictionaryModule = nil
+        currentDictionaryKey = pm.dictionaryKey
+      case .sqlite(let module):
+        let restoredKey: String?
+        do {
+          let keys = try module.dictionaryKeys()
+          restoredKey = BibleReaderSQLiteDictionaryChooser.exactSourceKey(
+            matching: pm.dictionaryKey,
+            in: keys
+          )
+        } catch {
+          restoredKey = nil
+        }
+        activeDictionaryModule = nil
+        activeSQLiteDictionaryModule = module
+        currentDictionaryKey = restoredKey
+        if pm.dictionaryKey != restoredKey {
+          pm.dictionaryKey = restoredKey
+          normalizedPersistedSelection = true
+        }
+      }
+      activeDictionaryModuleName = source.info.name
       if pm.dictionaryDocument != activeDictionaryModuleName {
         pm.dictionaryDocument = activeDictionaryModuleName
         normalizedPersistedSelection = true
       }
             logger.info("Restored saved dictionary module: \(savedDict)")
-    } else if let savedDict = pm.dictionaryDocument,
-      let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: savedDict,
-        category: .dictionary
-      )
-    {
-      let restoredKey: String?
-      do {
-        let keys = try mod.dictionaryKeys()
-        restoredKey = BibleReaderSQLiteDictionaryChooser.exactSourceKey(
-          matching: pm.dictionaryKey,
-          in: keys
-        )
-      } catch {
-        restoredKey = nil
-      }
+    } else if let savedDict = pm.dictionaryDocument {
       activeDictionaryModule = nil
-      activeSQLiteDictionaryModule = mod
-      activeDictionaryModuleName = mod.info.name
-      currentDictionaryKey = restoredKey
-      if pm.dictionaryDocument != mod.info.name {
-        pm.dictionaryDocument = mod.info.name
-        normalizedPersistedSelection = true
-      }
-      if pm.dictionaryKey != restoredKey {
-        pm.dictionaryKey = restoredKey
-        normalizedPersistedSelection = true
-      }
-      logger.info("Restored saved SQLite dictionary module: \(savedDict)")
+      activeSQLiteDictionaryModule = nil
+      activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
+      currentDictionaryKey = nil
         }
 
         var restoredEpub = false
@@ -4892,24 +4965,30 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             restoredEpub = true
             logger.info("Restored EPUB general book: \(savedGB)")
         } else if let savedGB = pm.generalBookDocument,
-                  let mgr = swordManager,
-      let mod = mgr.module(named: savedGB)
+      case .sword(let module)? = auxiliaryModuleResolver.module(named: savedGB)
     {
-            activeGeneralBookModule = mod
-            activeGeneralBookModuleName = savedGB
+            activeGeneralBookModule = module
+            activeGeneralBookModuleName = module.info.name
             currentGeneralBookKey = pm.generalBookKey
             logger.info("Restored saved general book module: \(savedGB)")
+        } else if let savedGB = pm.generalBookDocument {
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedGB)
+            currentGeneralBookKey = pm.generalBookKey
         }
 
         // Restore map module
         if let savedMap = pm.mapDocument,
-           let mgr = swordManager,
-      let mod = mgr.module(named: savedMap)
+      case .sword(let module)? = auxiliaryModuleResolver.module(named: savedMap)
     {
-            activeMapModule = mod
-            activeMapModuleName = savedMap
+            activeMapModule = module
+            activeMapModuleName = module.info.name
             currentMapKey = pm.mapKey
             logger.info("Restored saved map module: \(savedMap)")
+        } else if let savedMap = pm.mapDocument {
+            activeMapModule = nil
+            activeMapModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedMap)
+            currentMapKey = pm.mapKey
         }
 
         // Migrate legacy iOS-only EPUB PageManager fields into Android's general-book fields.
@@ -8300,31 +8379,36 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      module retained from the link parser.
    - Returns: `true` after exact target mapping and navigation; otherwise `false` with no
      navigation mutation.
-   - Side effects: May switch the visible Bible document/category, persist pane state, record
-     navigation history, and emit a reader document when the web client is ready.
+   - Side effects: For a validated readable destination, may leave My Notes, switch the visible
+     Bible document/category, persist pane state, record navigation history, and emit a reader
+     document when the web client is ready.
    - Failure modes: Missing current/target Bible modules, unsupported strict mappings, invalid
-     target entries, non-monotonic mapped ranges, and unavailable target book metadata fail
-     closed.
+     target entries, locked targets, non-monotonic mapped ranges, and unavailable target book
+     metadata fail closed without leaving My Notes.
    */
   @discardableResult
   func navigateToBibleLink(_ ref: OsisRef) -> Bool {
     guard let target = navigationReference(for: ref) else { return false }
-    // Android routes link results through setCurrentDocumentAndKey, which selects the Bible
-    // page, so link navigation always exits My Notes instead of re-rendering it in place.
-    showingMyNotes = false
 
     if activeInstalledScriptureSource()?.info.name != target.moduleName
         || currentCategory != .bible {
-      if !sqliteModuleSwitchCoordinator.switchBible(
-        to: target.moduleName,
-        updatesVisibleCategory: true,
-        context: makeSQLiteModuleSwitchContext()
-      ) {
-        moduleSwitchCoordinator.switchBibleDocument(
+      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: target.moduleName) {
+        guard moduleSwitchCoordinator.switchBibleDocument(
           to: sqliteRuntimeCoordinator.canonicalSwordModuleName(target.moduleName),
-          context: makeModuleSwitchContext()
-        )
+          context: makeModuleSwitchContext(),
+          prepareForSwitch: { self.showingMyNotes = false }
+        ) == .switched else { return false }
+      } else {
+        guard sqliteModuleSwitchCoordinator.switchBible(
+          to: target.moduleName,
+          updatesVisibleCategory: true,
+          context: makeSQLiteModuleSwitchContext(),
+          prepareForSwitch: { self.showingMyNotes = false }
+        ) else { return false }
       }
+    } else {
+      // Android routes same-module link results through the Bible page as well.
+      showingMyNotes = false
     }
     guard activeInstalledScriptureSource()?.info.name == target.moduleName,
       currentCategory == .bible
@@ -8546,21 +8630,37 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
   }
 
-  /** Builds the complete exact-identity inventory needed by one bookmark target. */
+  /**
+   Builds one exact-identity bookmark inventory from a fresh readable-source snapshot.
+
+   - Parameter target: Persisted Bible or generic bookmark target to plan without mutation.
+   - Returns: Authorized candidates preserving native ownership and backend registration order.
+   - Side effects: Enumerates installed source registries and may read exact My Documents metadata;
+     no reader or WebView state changes.
+   - Throws: Typed exact-lookup failures for duplicate or unreadable local metadata. Locked native
+     and registered SQLite owners suppress colliding My Documents and EPUB candidates.
+   */
   @MainActor
-  private func bookmarkNavigationInventory(
+  func bookmarkNavigationInventory(
     for target: BookmarkNavigationTarget
   ) throws -> BibleReaderBookmarkNavigationInventory {
-    let swordModules =
-      swordManager?.installedModules().compactMap { info in
-        swordManager?.module(named: info.name)
-      } ?? []
     let resolver = installedModuleResolver()
     let scriptureCandidates = resolver.modules(categories: [.bible])
       .compactMap(\.scripture)
       .map(BibleReaderBookmarkNavigationSwordCandidate.init(source:))
-    let genericSwordCandidates = swordModules
-      .filter { $0.info.category != .bible }
+    let genericSwordCategories: Set<ModuleCategory> = [
+      .commentary,
+      .dictionary,
+      .glossary,
+      .generalBook,
+      .map,
+      .dailyDevotion,
+    ]
+    let genericSwordCandidates = resolver.modules(categories: genericSwordCategories)
+      .compactMap { source -> SwordModule? in
+        guard case .sword(let module) = source else { return nil }
+        return module
+      }
       .map(BibleReaderBookmarkNavigationSwordCandidate.init(module:))
     let destinationCandidate = activeInstalledScriptureSource().map(
       BibleReaderBookmarkNavigationSwordCandidate.init(source:)
@@ -8573,8 +8673,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       )
     }
 
+    let registeredTarget = resolver.module(named: genericTarget.moduleInitials)
+    let globalRegistryOwnsTarget = resolver.hasNativeRegistration(
+      named: genericTarget.moduleInitials
+    ) || registeredTarget != nil
     var documentCandidates: [MyDocument] = []
-    if let store = myDocumentStore {
+    if !globalRegistryOwnsTarget, let store = myDocumentStore {
       do {
         documentCandidates = [try store.exactDocument(initials: genericTarget.moduleInitials)]
       } catch let error as MyDocumentExactLookupError {
@@ -8594,7 +8698,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       }
     }
 
-    let epubReaders = EpubReader.installedEpubs()
+    let epubReaders = globalRegistryOwnsTarget ? [] : EpubReader.installedEpubs()
       .filter { $0.initials == genericTarget.moduleInitials }
       .compactMap { EpubReader(identifier: $0.identifier) }
     return BibleReaderBookmarkNavigationInventory(
@@ -8655,12 +8759,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
   }
 
-  /** Prepares and commits one exact installed SWORD generic fragment. */
+  /**
+   Reauthorizes and commits one exact installed SWORD generic fragment.
+
+   - Parameter plan: Immutable fragment identity produced from an earlier readable inventory.
+   - Side effects: Captures one fresh resolver snapshot, re-reads the exact fragment, then mutates
+     pane/WebView state only after every identity and serialization check succeeds.
+   - Throws: `genericModuleNotFound` when the module was removed, relocked, changed category, or is
+     no longer an authorized native SWORD source; typed lookup/commit failures reject stale data.
+   */
   @MainActor
-  private func commitSwordBookmarkNavigation(
+  func commitSwordBookmarkNavigation(
     _ plan: BibleReaderBookmarkNavigationSwordPlan
   ) throws {
-    guard let module = swordManager?.module(named: plan.moduleInitials),
+    let resolver = installedModuleResolver()
+    guard case .sword(let module)? = resolver.module(named: plan.moduleInitials),
       module.info.category == plan.category
     else {
       throw BibleReaderBookmarkNavigationFailure.genericModuleNotFound(plan.moduleInitials)
@@ -10004,12 +10117,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        active reader document.
      */
     private func annotationPayloadFactory() -> BibleReaderAnnotationPayloadFactory {
-        BibleReaderAnnotationPayloadFactory(
+        let moduleResolver = installedModuleResolver()
+        let readableActiveModule: SwordModule? = {
+            guard case .sword(let module)? = moduleResolver.module(named: activeModuleName) else {
+                return nil
+            }
+            return module
+        }()
+        return BibleReaderAnnotationPayloadFactory(
             currentBook: currentBook,
             activeModuleName: activeModuleName,
-            activeModule: activeModule,
-            sourceModuleResolver: { [weak self] initials in
-                self?.swordManager?.module(named: initials)
+            activeModule: readableActiveModule,
+            sourceModuleResolver: { initials in
+                guard case .sword(let module)? = moduleResolver.module(named: initials) else {
+                    return nil
+                }
+                return module
             },
             genericSourceResolver: { [weak self] initials, key in
                 self?.genericBookmarkSourceContent(bookInitials: initials, key: key)
@@ -10908,7 +11031,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
-    /// Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
+    /**
+     Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
+
+     - Parameters:
+       - bookInitials: Vue-provided source initials compared with Android-37 Java identity semantics.
+       - startOrdinal: Rendered source ordinal that must belong to the visible chapter.
+       - chapter: Visible source chapter number.
+     - Returns: Verified KJVA progress identity, or `nil` when source identity or coordinates differ.
+     - Side effects: Reads active canon metadata and may perform bounded versification conversion.
+     - Failure modes: Locked/stale sources, Java-distinct Unicode identities, invalid ordinals, and
+       mismatched chapters fail closed before reading-progress history can mutate.
+     */
     private func readingProgressBridgeTarget(
         bookInitials: String,
         startOrdinal: Int,
@@ -10919,7 +11053,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               let chapterRange = currentChapterOrdinalRange(),
               currentCategory == .bible,
               !requestedInitials.isEmpty,
-              requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame,
+              SwordJavaStringIdentity.equalsIgnoreCase(
+                  requestedInitials,
+                  sourceModule.info.name
+              ),
               startOrdinal >= chapterRange.start,
               startOrdinal <= chapterRange.end,
               chapter == currentChapter,
@@ -11174,14 +11311,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             endOrdinal: bounds.end
         )
         let context: AIReaderSourceContext?
-        if let module = swordManager?.module(named: bookInitials),
-           module.info.name == bookInitials,
-           module.info.category == .bible {
+        let source = installedModuleResolver().scripture(named: bookInitials)
+        if case .sword(let module)? = source,
+           module.info.name == bookInitials {
             context = AIReaderSourceContextExtractor.swordBible(module: module, request: request)
-        } else if let module = sqliteRuntimeCoordinator.preferredModule(
-            named: bookInitials,
-            category: .bible
-        ), module.info.name == bookInitials {
+        } else if case .sqlite(let module)? = source,
+                  module.info.name == bookInitials {
             context = AIReaderSourceContextExtractor.sqliteBible(module: module, request: request)
         } else {
             return nil
@@ -11282,12 +11417,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      bridge events can still update the open document using rendered ordinals.
 
      - Parameters:
+       - bookInitials: Vue-provided source initials compared with Android-37 Java identity semantics.
        - startOrdinal: First rendered ordinal reported by Vue.
        - endOrdinal: Last rendered ordinal reported by Vue.
      - Returns: KJVA storage span plus rendered-to-KJVA projections, or `nil` if the selection
        cannot be represented in KJVA.
      - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
-     - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
+     - Failure modes: Returns `nil` for Java-distinct/stale source identities, invalid endpoints, or
+       references outside KJVA before memorization state can mutate.
      */
     private func memorizationOrdinalResolution(
         bookInitials: String,
@@ -11297,7 +11434,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let requestedInitials = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let sourceModule = activeModule,
               !requestedInitials.isEmpty,
-      requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame
+      SwordJavaStringIdentity.equalsIgnoreCase(requestedInitials, sourceModule.info.name)
     else {
             return nil
         }

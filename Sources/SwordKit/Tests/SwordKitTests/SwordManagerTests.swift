@@ -88,8 +88,9 @@ final class SwordManagerTests: XCTestCase {
 
      - Setup: Loads a native Sapphire II encrypted RawLD record through libsword with an empty
        `CipherKey`, then submits an ordinary wrong passphrase before the fixture's real key.
-     - Expected result: The wrong key leaves byte-identical config and locked inventory; the correct
-       retry decrypts content and persists the verified key.
+     - Expected result: The fresh manager access API stays locked after the wrong key, becomes
+       readable on the next inventory snapshot after the correct retry, decrypts content, and
+       persists the verified key even though the native module remains resolvable while locked.
      - Side effects: Writes a native RawLD index/record, encrypts the entry with SWORD's Sapphire II
        format, loads it through libsword, and rewrites only the temporary config after success.
      - Failure meaning: Wrong keys can mark encrypted modules unlocked, poison durable config, or
@@ -105,6 +106,9 @@ final class SwordManagerTests: XCTestCase {
         )
         XCTAssertTrue(initiallyLocked.isEncrypted)
         XCTAssertFalse(initiallyLocked.isUnlocked)
+        XCTAssertEqual(manager.moduleAccessState(named: "locked"), .locked)
+        XCTAssertNotNil(manager.module(named: "LOCKED"))
+        XCTAssertNil(manager.readableModule(named: "locked"))
 
         XCTAssertFalse(
             manager.unlockModule(named: "LOCKED", withCipherKey: "wrong-test-key")
@@ -113,6 +117,8 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertFalse(
             manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? true
         )
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKED"), .locked)
+        XCTAssertNil(manager.readableModule(named: "LOCKED"))
 
         XCTAssertTrue(manager.unlockModule(named: "LOCKED", withCipherKey: fixture.cipherKey))
         let persistedConfig = try String(contentsOf: fixture.configURL, encoding: .utf8)
@@ -120,9 +126,35 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertTrue(
             manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? false
         )
-        let module = try XCTUnwrap(manager.module(named: "LOCKED"))
+        XCTAssertEqual(
+            manager.moduleAccessState(named: "LOCKED"),
+            .readable,
+            "Manager access must observe the live unlock through a fresh inventory snapshot."
+        )
+        let module = try XCTUnwrap(manager.readableModule(named: "locked"))
         module.begin()
         XCTAssertTrue(module.rawEntry().contains("Encrypted dictionary entry"))
+    }
+
+    /**
+     Verifies access checks resolve the same installed initials that Java would resolve.
+
+     - Setup: Installs a real locked RawLD module whose initials are `ß`, then requests the
+       length-expanding Foundation case-fold alias `SS`.
+     - Expected result: The exact initials remain locked, while `SS` is unavailable because Java
+       `String.equalsIgnoreCase` never expands one UTF-16 code unit into two.
+     - Side effects: Creates and removes one temporary encrypted SWORD fixture.
+     - Failure meaning: A lookup can authorize or unlock a different installed row than Android.
+     */
+    func testModuleAccessStateDoesNotUseExpandingFoundationCaseFold() throws {
+        let fixture = try makeEncryptedRawLDFixture(moduleName: "ß")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(manager.moduleAccessState(named: "ß"), .locked)
+        XCTAssertEqual(manager.moduleAccessState(named: "SS"), .unavailable)
+        XCTAssertNil(manager.readableModule(named: "ß"))
+        XCTAssertNil(manager.readableModule(named: "SS"))
     }
 
     /**
@@ -839,7 +871,9 @@ final class SwordManagerTests: XCTestCase {
      - Failure Modes: Propagates filesystem errors, rejects oversized records, or fails if the
        bounded key search cannot produce C-string-safe fixture ciphertext.
      */
-    private func makeEncryptedRawLDFixture() throws -> SwordManagerEncryptedFixture {
+    private func makeEncryptedRawLDFixture(
+        moduleName: String = "LOCKED"
+    ) throws -> SwordManagerEncryptedFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
@@ -889,7 +923,7 @@ final class SwordManagerTests: XCTestCase {
 
         let configURL = configDirectory.appendingPathComponent("locked.conf")
         try """
-        [LOCKED]
+        [\(moduleName)]
         Description=Encrypted RawLD Fixture
         Category=Lexicons / Dictionaries
         ModDrv=RawLD

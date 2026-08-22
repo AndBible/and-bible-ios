@@ -377,13 +377,14 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
     /**
      Protects Java's non-expanding UTF-16 `String.equalsIgnoreCase` identity edge cases.
 
-     - Setup: Compares every OpenJDK BMP lowercase alias class, one pair from each supplementary
-       cased range, newer Unicode pairs absent from Java 17, sharp s, and equivalent accents.
-     - Expected result: Java 17 BMP and supplementary pairs compare equal; newer Apple-only pairs,
-       multi-character expansion, and composed/decomposed strings remain distinct.
+     - Setup: Compares established BMP aliases, Android 37 ICU 78.3 pairs newer than OpenJDK 17,
+       supplementary case pairs, sharp s, and equivalent accents.
+     - Expected result: Android BMP pairs compare equal, while supplementary pairs remain distinct
+       because Java's `String.equalsIgnoreCase` iterates UTF-16 `char`s rather than code points;
+       multi-character expansion and composed/decomposed strings also remain distinct.
      - Failure meaning: Foundation's full-string case mapping can hide, merge, or misroute module
        identities differently from Android's installed-book registry.
-     - Side effects: Loads the checked-in Java lowercase oracle table once; performs no I/O writes.
+     - Side effects: Loads the checked-in Android character oracle table once; performs no writes.
      */
     func testSQLiteDocumentIdentityMatchesJavaUTF16EqualsIgnoreCaseEdges() {
         XCTAssertEqual(SQLiteDocumentIdentity("İ"), SQLiteDocumentIdentity("i"))
@@ -425,10 +426,10 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
             ("\u{1E900}", "\u{1E922}"), // Adlam
         ]
         for (uppercase, lowercase) in supplementaryPairs {
-            XCTAssertEqual(SQLiteDocumentIdentity(uppercase), SQLiteDocumentIdentity(lowercase))
+            XCTAssertNotEqual(SQLiteDocumentIdentity(uppercase), SQLiteDocumentIdentity(lowercase))
         }
 
-        let newerUnicodePairsAbsentFromJava17: [(String, String)] = [
+        let android37UnicodePairs: [(String, String)] = [
             ("\u{019B}", "\u{A7DC}"),
             ("\u{0264}", "\u{A7CB}"),
             ("\u{1C8A}", "\u{1C89}"),
@@ -443,8 +444,8 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
             ("\u{A7D9}", "\u{A7D8}"),
             ("\u{A7DB}", "\u{A7DA}"),
         ]
-        for (lowercase, uppercase) in newerUnicodePairsAbsentFromJava17 {
-            XCTAssertNotEqual(SQLiteDocumentIdentity(lowercase), SQLiteDocumentIdentity(uppercase))
+        for (lowercase, uppercase) in android37UnicodePairs {
+            XCTAssertEqual(SQLiteDocumentIdentity(lowercase), SQLiteDocumentIdentity(uppercase))
         }
 
         XCTAssertEqual(SQLiteDocumentIdentity("ß"), SQLiteDocumentIdentity("ẞ"))

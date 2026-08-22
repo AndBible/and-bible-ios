@@ -55,7 +55,7 @@ struct BibleReaderSwordState {
     /// Installed map modules shown in map/document pickers.
     let installedMapModules: [ModuleInfo]
 
-    /// Active Bible module handle, or nil when no Bible module is installed.
+    /// Active readable Bible handle, or nil when no installed Bible is currently readable.
     let activeModule: SwordModule?
 
     /// Active Bible module initials to persist and display.
@@ -109,8 +109,8 @@ struct BibleReaderSwordCoordinator {
      - Returns: Installed-module catalog, resolved module handles, selected initials, and active
        module book list.
      - Side effects: Sets SWORD global options on `manager`.
-     - Failure modes: Missing modules produce nil handles while preserving selected initials;
-       missing Bible modules produce an empty book list instead of static-canon fallback.
+     - Failure modes: Missing or locked modules produce nil handles while preserving selected
+       initials; no readable Bible produces an empty book list instead of static-canon fallback.
      */
     func configure(
         manager: SwordManager,
@@ -142,15 +142,18 @@ struct BibleReaderSwordCoordinator {
         )
         let dictionary = activeOptionalModule(
             manager: manager,
-            requestedName: selection.activeDictionaryModuleName
+            requestedName: selection.activeDictionaryModuleName,
+            installedModules: dictionaryModules
         )
         let generalBook = activeOptionalModule(
             manager: manager,
-            requestedName: selection.activeGeneralBookModuleName
+            requestedName: selection.activeGeneralBookModuleName,
+            installedModules: generalBookModules
         )
         let map = activeOptionalModule(
             manager: manager,
-            requestedName: selection.activeMapModuleName
+            requestedName: selection.activeMapModuleName,
+            installedModules: mapModules
         )
 
         return BibleReaderSwordState(
@@ -213,7 +216,8 @@ struct BibleReaderSwordCoordinator {
     /**
      Reads the active Bible module's versification book list.
 
-     - Parameter module: Active Bible module handle, or nil when no Bible is installed.
+     - Parameter module: Active readable Bible module handle, or nil when no installed Bible is
+       currently readable.
      - Returns: SWORD-provided ordered books, or an empty list when no module is active or the module
        reports no books.
      - Side effects: Calls into SWORD through `SwordModule.getBookList()`.
@@ -225,34 +229,54 @@ struct BibleReaderSwordCoordinator {
     }
 
     /**
-     Resolves the active Bible module using the controller's historical fallback order.
+     Resolves the active readable Bible using the controller's historical fallback order.
 
      - Parameters:
        - manager: Manager used for module lookup.
        - requestedName: Previously selected Bible initials.
        - installedBibleModules: Installed Bible catalog used for first-installed fallback.
-     - Returns: A module/name pair. If no Bible can be resolved, the returned module is nil and the
-       requested name is preserved.
-     - Side effects: May create or reuse a cached `SwordModule` through `SwordManager`.
+     - Returns: A module/name pair selected from readable requested, KJV, or first-installed
+       candidates. If only locked or unavailable Bibles exist, the returned module is nil and the
+       requested name is preserved while the app-owned startup queue processes every initially
+       locked Bible; blocking setup follows only if final fresh inventory remains unreadable.
+     - Side effects: Resolves one native handle only after the caller's single fresh,
+       session-adjusted inventory snapshot classifies its selected row readable.
+     - Failure modes: Locked modules are retained in installed inventory but never returned as the
+       active reader backend. Missing and unsupported modules continue through the fallback order.
      */
     private func activeBibleModule(
         manager: SwordManager,
         requestedName: String,
         installedBibleModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String) {
-        // `module(named:)` returns nil for an unsupported (e.g. unknown-versification) module, so an
-        // unknown-versification requested module falls through to KJV / the first supported Bible
-        // rather than becoming active. See ADR-0010.
-        if let module = manager.module(named: requestedName) {
-            return (module, requestedName)
+        let nativeOwner: (String) -> ModuleInfo? = { name in
+            installedBibleModules.first { info in
+                !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info)
+                    && SwordJavaStringIdentity.equalsIgnoreCase(info.name, name)
+            }
         }
-        if let kjv = manager.module(named: "KJV") {
-            return (kjv, kjv.info.name)
+        let isReadable: (ModuleInfo) -> Bool = { info in
+            !info.isEncrypted || info.isUnlocked
         }
-        if let firstBible = installedBibleModules.first {
-            return (manager.module(named: firstBible.name), firstBible.name)
+
+        let selected: ModuleInfo?
+        if let requested = nativeOwner(requestedName), isReadable(requested) {
+            selected = requested
+        } else if let kjv = nativeOwner("KJV"), isReadable(kjv) {
+            selected = kjv
+        } else if let first = installedBibleModules.first(where: { info in
+            !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) && isReadable(info)
+        }) {
+            selected = first
+        } else {
+            selected = nil
         }
-        return (nil, requestedName)
+
+        guard let selected,
+              let module = manager.module(named: selected.name) else {
+            return (nil, requestedName)
+        }
+        return (module, selected.name)
     }
 
     /**
@@ -264,18 +288,30 @@ struct BibleReaderSwordCoordinator {
        - installedCommentaryModules: Installed commentary catalog used for fallback.
      - Returns: A commentary module/name pair, preserving the requested initials when no fallback is
        available.
-     - Side effects: May create or reuse a cached `SwordModule` through `SwordManager`.
+     - Side effects: Resolves at most one native handle after the caller's existing fresh inventory
+       snapshot classifies the selected or fallback row readable.
+     - Failure modes: Locked and missing requested rows continue to the first readable commentary;
+       if no readable row exists, the requested initials are preserved with a nil handle.
      */
     private func activeCommentaryModule(
         manager: SwordManager,
         requestedName: String?,
         installedCommentaryModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String?) {
-        if let requestedName, let module = manager.module(named: requestedName) {
+        let isReadable: (ModuleInfo) -> Bool = { info in
+            !info.isEncrypted || info.isUnlocked
+        }
+        if let requestedName,
+           let requested = installedCommentaryModules.first(where: {
+               SwordJavaStringIdentity.equalsIgnoreCase($0.name, requestedName)
+           }),
+           isReadable(requested),
+           let module = manager.module(named: requested.name) {
             return (module, requestedName)
         }
-        if let firstCommentary = installedCommentaryModules.first {
-            return (manager.module(named: firstCommentary.name), firstCommentary.name)
+        if let firstCommentary = installedCommentaryModules.first(where: isReadable),
+           let module = manager.module(named: firstCommentary.name) {
+            return (module, firstCommentary.name)
         }
         return (nil, requestedName)
     }
@@ -285,13 +321,31 @@ struct BibleReaderSwordCoordinator {
 
      Dictionaries, general books, and maps are only active when a pane has selected one. Android's
      durable page-manager fields keep those choices category-specific, so this helper preserves the
-     requested initials while returning a nil handle if the module is absent.
+     requested initials while returning a nil handle if the module is absent or locked.
+
+     - Parameters:
+       - manager: Manager used only to resolve the canonical readable row's native handle.
+       - requestedName: Persisted category-specific initials, or nil when no source was selected.
+       - installedModules: The category slice from the caller's single fresh inventory snapshot.
+     - Returns: A readable native handle plus the unchanged requested state, or a nil handle while
+       preserving that state when the row is missing or locked.
+     - Side effects: Resolves at most one native handle after snapshot authorization.
+     - Failure modes: Missing, locked, and native-resolution failures return a nil handle; no
+       fallback module is invented.
      */
     private func activeOptionalModule(
         manager: SwordManager,
-        requestedName: String?
+        requestedName: String?,
+        installedModules: [ModuleInfo]
     ) -> (module: SwordModule?, name: String?) {
         guard let requestedName else { return (nil, nil) }
-        return (manager.module(named: requestedName), requestedName)
+        guard let selected = installedModules.first(where: {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.name, requestedName)
+        }),
+              !selected.isEncrypted || selected.isUnlocked,
+              let module = manager.module(named: selected.name) else {
+            return (nil, requestedName)
+        }
+        return (module, requestedName)
     }
 }

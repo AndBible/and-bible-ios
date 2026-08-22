@@ -1412,26 +1412,29 @@ public final class SwordModule: @unchecked Sendable {
     }
 
     /**
-     Iterate through all entries while capturing plain text and raw OSIS from the same cursor.
+     Iterates all entries while capturing each Search source representation from the same cursor.
 
-     Search-index creation needs the cleaned verse text shown to users and the lexical markup
-     Android's JSword indexes for Strong's lookup. Reading both values inside one runtime block
-     prevents another SWORD operation from moving the module cursor between the stripped-text and
-     raw-entry reads.
+     Search indexing needs source-neutral OSIS for Android-compatible canonical/preview projection,
+     exact raw markup for Strong's attributes, and legacy stripped text for inline Strong's markers.
+     Reading them inside one runtime block prevents another SWORD operation from moving the module
+     cursor between representations.
 
-     - Parameter callback: Receives `(key, plainText, rawEntry, index)` for each module entry and
-       returns `true` to continue or `false` to stop early.
+     - Parameter callback: Receives `(key, strippedText, rawEntry, osisFragment, index)` for each
+       module entry and returns `true` to continue or `false` to stop early.
      - Side effects: Moves the module cursor from the beginning through each entry, then restores
        the cursor that was active before iteration.
      - Failure modes: Stops without invoking the callback when SWORD cannot position at the first
-       entry. Native rendering failures surface as empty strings from SWORD and are left for the
-       caller to filter.
+       entry. Native source/filter failures surface as empty representations for that cursor; the
+       Search adapter projects and skips that individual empty entry, continues traversal, and lets
+       the index service reject only an all-empty generation or roll back a consumer failure.
      - Important: Callback work runs while holding `SwordRuntime`; keep it bounded and do not wait
        on work that also needs SWORD access from another thread. Each entry runs inside its own
        autorelease pool because a full-Bible traversal otherwise accumulates every temporary
        Foundation object until the surrounding dispatch block ends.
      */
-    public func iterateAllEntriesWithRaw(_ callback: (String, String, String, Int) -> Bool) {
+    public func iterateAllSearchIndexEntries(
+        _ callback: (String, String, String, String, Int) -> Bool
+    ) {
         SwordRuntime.sync {
             let savedKey = String(cString: SWModule_getKeyText(handle))
             defer { SWModule_setKeyText(handle, savedKey) }
@@ -1446,7 +1449,8 @@ public final class SwordModule: @unchecked Sendable {
                     let key = String(cString: SWModule_getKeyText(handle))
                     let text = String(cString: SWModule_getStripText(handle))
                     let rawEntry = String(cString: SWModule_getRawEntry(handle))
-                    guard callback(key, text, rawEntry, index) else {
+                    let osisFragment = SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                    guard callback(key, text, rawEntry, osisFragment, index) else {
                         shouldContinue = false
                         return
                     }

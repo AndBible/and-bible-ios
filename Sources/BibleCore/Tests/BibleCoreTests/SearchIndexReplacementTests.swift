@@ -185,7 +185,8 @@ private final class ReplacementSearchSource: BibleSearchIndexSource {
     ) throws {
         _ = try consume(BibleSearchIndexEntry(
             displayKey: "Genesis 1:1",
-            visibleText: text,
+            indexText: text,
+            previewText: text,
             sourceMarkup: "<w lemma=\"strong:\(strongToken)\">\(text)</w>",
             taggedText: "<w lemma=\"strong:\(strongToken)\">\(text)</w>",
             entryOrder: 0,

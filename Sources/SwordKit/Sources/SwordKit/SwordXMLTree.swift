@@ -65,6 +65,24 @@ final class SwordXMLNode {
         }
     }
 
+    /**
+     Returns JDOM2's `Content.toString()` representation for non-Element/non-Text children.
+
+     Android's Bible Search preview appends this diagnostic representation for comments and
+     processing instructions before its one `Html.fromHtml` pass. Elements and text-like nodes
+     return nil because their dedicated traversal branches own those values.
+     */
+    var jdomContentDescription: String? {
+        switch kind {
+        case .comment:
+            return "[Comment: \(serializedXML())]"
+        case .processingInstruction:
+            return "[ProcessingInstruction: \(serializedXML())]"
+        case .element, .text, .cdata:
+            return nil
+        }
+    }
+
     /** Creates an element node with ordered children added later. */
     static func element(name: String, attributes: [String: String]) -> SwordXMLNode {
         SwordXMLNode(kind: .element(name: name, attributes: attributes))
@@ -109,6 +127,21 @@ final class SwordXMLNode {
     func attribute(named name: String) -> String? {
         guard case .element(_, let attributes) = kind else { return nil }
         return attributes[name]
+    }
+
+    /**
+     Sets one no-namespace attribute on an element node.
+
+     - Parameters:
+       - name: Exact attribute name.
+       - value: Replacement value serialized with normal XML escaping.
+     - Side effects: Mutates the receiver when it is an element; other node kinds are unchanged.
+     - Failure modes: None; assigning an existing name replaces its prior value.
+     */
+    func setAttribute(named name: String, value: String) {
+        guard case .element(let elementName, var attributes) = kind else { return }
+        attributes[name] = value
+        kind = .element(name: elementName, attributes: attributes)
     }
 
     /** Produces an independent recursive copy. */

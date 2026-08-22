@@ -46,17 +46,19 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
         }
 
         if controller.installedModules(for: .bible).contains(where: { $0.name == initials }) {
-            controller.switchBibleDocument(to: initials)
+            guard controller.switchBibleDocument(to: initials) == .switched else {
+                throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
+            }
             if let normalizedKey, !normalizedKey.isEmpty,
                !controller.navigateToRef(normalizedKey) {
                 throw failure("KEY_NOT_FOUND", "The requested Bible reference is not available.")
             }
         } else if controller.installedModules(for: .commentary).contains(where: { $0.name == initials }) {
+            try requireSuccessfulSwitch(controller.switchCommentaryDocument(to: initials))
             if let normalizedKey, !normalizedKey.isEmpty,
                !controller.navigateToRef(normalizedKey) {
                 throw failure("KEY_NOT_FOUND", "The requested commentary reference is not available.")
             }
-            controller.switchCommentaryDocument(to: initials)
         } else if controller.installedModules(for: .dictionary).contains(where: { $0.name == initials }) {
             try requireSuccessfulSwitch(controller.switchDictionaryDocument(to: initials))
             if let normalizedKey, !normalizedKey.isEmpty {
@@ -120,6 +122,22 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
     /** Converts retryable generic preflight outcomes into the tool's fail-closed contract. */
     private func requireSuccessfulSwitch(_ outcome: BibleReaderGenericModuleSwitchOutcome) throws {
         if case .failed = outcome {
+            throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
+        }
+    }
+
+    /**
+     Converts a commentary activation result into the AI tool's fail-closed navigation contract.
+
+     - Parameter outcome: Typed result returned after the controller's fresh access/category preflight.
+     - Side effects: None.
+     - Throws: `NAVIGATION_FAILED` when the target was locked, missing, unavailable, or invalid; the
+       caller performs no key navigation after this failure.
+     */
+    private func requireSuccessfulSwitch(
+        _ outcome: BibleReaderCommentaryModuleSwitchOutcome
+    ) throws {
+        guard outcome == .switched else {
             throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
         }
     }

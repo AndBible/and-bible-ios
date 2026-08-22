@@ -52,7 +52,9 @@ let package = Package(
             dependencies: ["CLibSword"],
             path: "Sources/SwordKit/Sources/SwordKit",
             resources: [
+                .copy("Resources/compatibility"),
                 .copy("Resources/versification"),
+                .copy("Resources/tagsoup"),
             ]
         ),
         .testTarget(

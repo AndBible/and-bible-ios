@@ -151,15 +151,22 @@ class BibleUISwordFixtureTestCase: XCTestCase {
 
      Reader coordinator parity tests need a real dictionary category because Android's multi-window
      state tracks auxiliary documents separately from Bible/commentary documents. The empty RawLD
-     payload is enough for SWORD discovery and controller switching without fixture content.
+     payload is enough for SWORD discovery and controller switching without fixture content. Tests
+     may also publish definition features so an empty module can model an installed Strong's source
+     whose requested entry is absent.
 
      - Parameters:
        - moduleName: SWORD module initials to publish in `mods.d`.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - features: Optional SWORD `Feature` values, such as `GreekDef`, written in declaration order.
      - Side effects: Writes a `.conf` file and empty `RawLD` data files under `modulePath`.
      - Failure modes: Propagates filesystem write errors.
      */
-    func seedEmptyRawDictionaryModule(named moduleName: String = "UITestDict", in modulePath: String) throws {
+    func seedEmptyRawDictionaryModule(
+        named moduleName: String = "UITestDict",
+        in modulePath: String,
+        features: [String] = []
+    ) throws {
         let fileManager = FileManager.default
         let moduleKey = moduleName.lowercased()
         let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
@@ -179,6 +186,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             }
         }
 
+        let featureEntries = features.map { "Feature=\($0)" }.joined(separator: "\n")
         let conf = """
         [\(moduleName)]
         Description=UI Test Dictionary
@@ -188,6 +196,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         SourceType=OSIS
         Encoding=UTF-8
         Lang=en
+        \(featureEntries)
         About=Deterministic empty dictionary module for iOS parity tests.
         """
         try conf.write(

@@ -1,7 +1,9 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
+@testable import BibleView
 @testable import SwordKit
 
 /**
@@ -155,6 +157,175 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
         XCTAssertEqual(controller.currentCategory, originalCategory)
         XCTAssertNil(controller.activeModuleName(for: .dictionary))
     }
+
+    /**
+     Rejects an installed-but-locked SWORD bookmark before any exact fragment read or UI mutation.
+
+     - Setup: Writes a plaintext RawLD record behind a locked descriptor so the inclusive native
+       handle could still expose the record, then opens the bookmark through a recording controller.
+     - Expected result: Readable inventory omits the source and planning fails with
+       `genericModuleNotFound`; bridge, category, and active dictionary identity stay unchanged.
+     - Failure meaning: Bookmark-list navigation can treat installed metadata as content authority
+       and read a relocked native module.
+     - Side effects: Writes only an inherited temporary SWORD fixture.
+     */
+    @MainActor
+    func testLockedGenericSwordTargetFailsBeforeReadOrMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeBookmarkNavigationRawLDModule(
+            named: "BOOKLOCK",
+            entries: [("ENTRY", "<div><p>Locked bookmark content.</p></div>")],
+            in: modulePath
+        )
+        try lockBookmarkNavigationModule(named: "BOOKLOCK", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNotNil(manager.module(named: "BOOKLOCK"))
+        XCTAssertNil(manager.readableModule(named: "BOOKLOCK"))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScripts = scripts().count
+        let baselineCategory = controller.currentCategory
+
+        XCTAssertThrowsError(
+            try controller.navigate(
+                toBookmarkTarget: .generic(.init(
+                    moduleInitials: "BOOKLOCK",
+                    key: "ENTRY",
+                    ordinalRange: nil
+                ))
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? BibleReaderBookmarkNavigationFailure,
+                .genericModuleNotFound("BOOKLOCK")
+            )
+        }
+
+        XCTAssertEqual(scripts().count, baselineScripts)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertNil(controller.activeModuleName(for: .dictionary))
+    }
+
+    /**
+     Reauthorizes a SWORD bookmark after planning to close the relock time-of-check/time-of-use gap.
+
+     - Setup: Plans from a readable RawLD source, then relocks the descriptor and constructs the
+       fresh reader process that performs the delayed commit with the immutable earlier plan.
+     - Expected result: Commit resolves current access state, rejects the locked module, and makes
+       no bridge or reader-state mutation.
+     - Failure meaning: A bookmark plan can retain content authority after credentials are revoked.
+     - Side effects: Rewrites only an inherited temporary descriptor between planning and commit.
+     */
+    @MainActor
+    func testGenericSwordCommitFailsWhenSourceRelocksAfterPlan() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeBookmarkNavigationRawLDModule(
+            named: "BOOKTOCTOU",
+            entries: [("ENTRY", "<div><p>Initially readable content.</p></div>")],
+            in: modulePath
+        )
+        let target = BookmarkNavigationTarget.generic(.init(
+            moduleInitials: "BOOKTOCTOU",
+            key: "ENTRY",
+            ordinalRange: nil
+        ))
+        let readableManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let planningController = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: readableManager
+        )
+        let inventory = try planningController.bookmarkNavigationInventory(for: target)
+        let commitPlan = try BibleReaderBookmarkNavigationCoordinator().plan(
+            target: target,
+            inventory: inventory
+        )
+        guard case .sword(let swordPlan) = commitPlan else {
+            return XCTFail("Expected a SWORD bookmark commit plan")
+        }
+
+        try lockBookmarkNavigationModule(named: "BOOKTOCTOU", in: modulePath)
+        let lockedManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNil(lockedManager.readableModule(named: "BOOKTOCTOU"))
+        let (bridge, scripts) = makeRecordingBridge()
+        let commitController = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: lockedManager
+        )
+        commitController.bridgeDidSetClientReady(bridge)
+        let baselineScripts = scripts().count
+        let baselineCategory = commitController.currentCategory
+
+        XCTAssertThrowsError(try commitController.commitSwordBookmarkNavigation(swordPlan)) { error in
+            XCTAssertEqual(
+                error as? BibleReaderBookmarkNavigationFailure,
+                .genericModuleNotFound("BOOKTOCTOU")
+            )
+        }
+        XCTAssertEqual(scripts().count, baselineScripts)
+        XCTAssertEqual(commitController.currentCategory, baselineCategory)
+        XCTAssertNil(commitController.activeModuleName(for: .dictionary))
+    }
+
+    /**
+     Preserves locked native ownership over colliding app-local generic documents.
+
+     - Setup: Installs a locked dictionary and a readable My Documents page with identical initials
+       and key, then requests that exact persisted bookmark identity.
+     - Expected result: Global native ownership suppresses local candidates, producing
+       `genericModuleNotFound` with no bridge or reader-state mutation.
+     - Failure meaning: A locked native identity can silently fall through to unrelated local or
+       EPUB content; SQLite collision precedence is covered by `InstalledScriptureSourceTests`.
+     - Side effects: Writes an inherited temporary module and an in-memory SwiftData document.
+     */
+    @MainActor
+    func testLockedNativeGenericIdentityDoesNotFallThroughToMyDocument() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeBookmarkNavigationRawLDModule(
+            named: "BOOKCOLLIDE",
+            entries: [("NATIVE", "<div><p>Locked native content.</p></div>")],
+            in: modulePath
+        )
+        try lockBookmarkNavigationModule(named: "BOOKCOLLIDE", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let document = MyDocument(name: "Collision Document", initials: "BOOKCOLLIDE")
+        let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
+        let content = MyDocumentPageContent(pageId: page.id, content: "Local collision content")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScripts = scripts().count
+        let baselineCategory = controller.currentCategory
+
+        XCTAssertThrowsError(
+            try controller.navigate(
+                toBookmarkTarget: .generic(.init(
+                    moduleInitials: "BOOKCOLLIDE",
+                    key: "ENTRY",
+                    ordinalRange: nil
+                ))
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? BibleReaderBookmarkNavigationFailure,
+                .genericModuleNotFound("BOOKCOLLIDE")
+            )
+        }
+        XCTAssertEqual(scripts().count, baselineScripts)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertNil(controller.activeModuleName(for: .dictionary))
+    }
 }
 
 /** Errors raised while writing the test-only RawLD fixture. */
@@ -218,6 +389,34 @@ private func writeBookmarkNavigationRawLDModule(
         atomically: true,
         encoding: .utf8
     )
+}
+
+/**
+ Marks one temporary SWORD fixture as installed but locked.
+
+ - Parameters:
+   - moduleName: Exact fixture initials whose descriptor should require credentials.
+   - modulePath: Existing temporary SWORD root.
+ - Side effects: Appends an empty `CipherKey` to the module descriptor and removes a generated
+   module cache when present so the next manager observes the authorization change.
+ - Failure modes: Propagates descriptor read/write and cache-removal errors.
+ */
+private func lockBookmarkNavigationModule(named moduleName: String, in modulePath: String) throws {
+    let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+    let configURL = moduleRoot.appendingPathComponent(
+        "mods.d/\(moduleName.lowercased()).conf",
+        isDirectory: false
+    )
+    var configuration = try String(contentsOf: configURL, encoding: .utf8)
+    configuration.append("\nCipherKey=\n")
+    try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+    let moduleCacheURL = moduleRoot.appendingPathComponent(
+        "mods.d/modules-conf.cache",
+        isDirectory: false
+    )
+    if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
+        try FileManager.default.removeItem(at: moduleCacheURL)
+    }
 }
 
 private extension Data {

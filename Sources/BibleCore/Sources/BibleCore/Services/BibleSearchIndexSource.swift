@@ -7,16 +7,20 @@ import SwordKit
 /**
  One canonical verse emitted by an installed Bible backend for transactional Search indexing.
 
- The value separates visible text from lexical source markup so full-text indexing never includes
- XML tags while Strong's extraction can still inspect exact OSIS lemmas. Canonical coordinates are
- mandatory because mixed-module grouping and scope filters must not depend on localized key text.
+ The value separates canonical analyzer text, visible preview text, and lexical source markup.
+ Android searches canonical JSword text but presents a fresh annotation-free OSIS projection, so
+ merging those concerns lets rendered filters leak annotations into both behavior domains. Canonical
+ coordinates remain mandatory because grouping and scope cannot depend on localized key text.
  */
 public struct BibleSearchIndexEntry: Sendable, Equatable {
     /// Backend-local display key retained for result diagnostics and compatibility UI.
     public let displayKey: String
 
-    /// User-visible verse text supplied to the module-language analyzer.
-    public let visibleText: String
+    /// JSword-compatible canonical body supplied to the module-language analyzer.
+    public let indexText: String
+
+    /// Android MultiSearch-compatible verse text stored for user-visible result previews.
+    public let previewText: String
 
     /// Exact or format-converted lexical markup inspected for Strong's lemmas.
     public let sourceMarkup: String
@@ -50,7 +54,8 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
 
      - Parameters:
        - displayKey: Backend display key retained for diagnostics and lexical-row joins.
-       - visibleText: Plain user-visible text supplied to the module analyzer.
+       - indexText: Canonical verse body supplied to the module analyzer.
+       - previewText: Annotation-free verse text persisted for Search presentation.
        - sourceMarkup: Exact lexical markup inspected for Strong's attributes.
        - taggedText: Rendered/tagged fallback inspected for legacy Strong's markers.
        - entryOrder: Stable source ordinal used as the final query-order tie breaker.
@@ -66,7 +71,8 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
      */
     public init(
         displayKey: String,
-        visibleText: String,
+        indexText: String,
+        previewText: String,
         sourceMarkup: String,
         taggedText: String,
         entryOrder: Int,
@@ -78,7 +84,8 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
         bookNamePresentation: SearchBookNamePresentation = .source
     ) {
         self.displayKey = displayKey
-        self.visibleText = visibleText
+        self.indexText = indexText
+        self.previewText = previewText
         self.sourceMarkup = sourceMarkup
         self.taggedText = taggedText
         self.entryOrder = entryOrder
@@ -111,8 +118,8 @@ public protocol BibleSearchIndexSource: AnyObject {
     /// Conservative traversal denominator used for pre-commit progress reporting.
     var searchIndexProgressTotal: Int { get }
 
-    /// Whether real source verses with no visible analyzer text still receive canonical index rows.
-    var searchIndexIncludesEmptyVisibleText: Bool { get }
+    /// Whether a real verse with neither analyzable text nor Strong's tokens still receives an identity row.
+    var searchIndexIncludesEmptyIndexText: Bool { get }
 
     /**
      Streams real canonical verses in deterministic source order.
@@ -130,8 +137,8 @@ public protocol BibleSearchIndexSource: AnyObject {
 
 /** Supplies the SWORD-compatible empty-entry policy to sources that do not override it. */
 public extension BibleSearchIndexSource {
-    /// SWORD Search historically omits entries whose rendered text is empty.
-    var searchIndexIncludesEmptyVisibleText: Bool { false }
+    /// By default, an otherwise empty row is omitted; independently extracted Strong's tokens retain it.
+    var searchIndexIncludesEmptyIndexText: Bool { false }
 
     /// Metadata-only revision used by native SWORD sources; module-store notifications cover replacement.
     var searchIndexStorageRevision: String { "" }
@@ -252,17 +259,21 @@ extension SwordModule: BibleSearchIndexSource {
     public var searchIndexProgressTotal: Int { 31_102 }
 
     /**
-     Streams stripped display text and raw lexical markup from the same serialized SWORD cursor.
+     Streams structured Search text and exact lexical markup from one serialized SWORD cursor.
 
      - Parameter consume: Consumer called for every real positive verse; `false` stops iteration.
      - Side effects: Traverses the module under `SwordRuntime` and restores its original cursor.
-     - Throws: Re-throws the first consumer failure after SWORD restores the cursor.
+     - Throws: Re-throws the first consumer failure after restoring the cursor.
+     - Note: Malformed structured entries pass through the shared pinned-JSword repair ladder. An
+       irreparable entry becomes empty instead of selecting rendered/stripped text or aborting the
+       remaining Bible.
      */
     public func forEachSearchIndexEntry(
         _ consume: (BibleSearchIndexEntry) throws -> Bool
     ) throws {
         var iterationFailure: Error?
-        iterateAllEntriesWithRaw { key, text, rawEntry, sourceIndex in
+        let moduleInitials = info.name
+        iterateAllSearchIndexEntries { key, text, rawEntry, osisFragment, sourceIndex in
             guard iterationFailure == nil else { return false }
             guard let verseKey = self.currentVerseKeyChildren(),
                   verseKey.chapter > 0,
@@ -271,12 +282,15 @@ extension SwordModule: BibleSearchIndexSource {
                 return true
             }
 
+            let projectedText = SwordBibleSearchTextProjection.project(
+                sourceXML: osisFragment,
+                moduleInitials: moduleInitials
+            )
             do {
                 return try consume(BibleSearchIndexEntry(
                     displayKey: key,
-                    visibleText: SearchIndexService.cleanText(
-                        text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    ),
+                    indexText: projectedText.indexText,
+                    previewText: projectedText.previewText,
                     sourceMarkup: rawEntry,
                     taggedText: text,
                     entryOrder: verseKey.index,
@@ -325,8 +339,8 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
         return "\(url.path)|\(size)|\(modified.bitPattern)|\(fileNumber)"
     }
 
-    /// Every real SQLite row receives canonical metadata even when its visible text is empty.
-    public var searchIndexIncludesEmptyVisibleText: Bool { true }
+    /// Every real SQLite row receives canonical metadata even when its index text is empty.
+    public var searchIndexIncludesEmptyIndexText: Bool { true }
 
     /**
      Streams one source chapter at a time and projects every real row into KJVA Search identity.
@@ -334,7 +348,9 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
      - Parameter consume: Consumer called once per valid present verse; `false` stops traversal.
      - Side effects: Opens operation-owned read-only SQLite connections for chapter enumeration and
        chapter content. No shared connection or whole-Bible row array is retained.
-     - Throws: Reader, cancellation, XML projection, or consumer failures.
+     - Throws: Reader failures and errors thrown by `consume`, including consumer-owned
+       cancellation. Structured projection itself is nonthrowing and isolates irreparable rows as
+       empty text through the shared JSword-compatible repair boundary.
      - Note: Coordinates outside the source format's KJVA map are omitted exactly as Android's
        KJVA-backed custom `SwordBook` omits keys it cannot construct.
      */
@@ -342,6 +358,7 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
         _ consume: (BibleSearchIndexEntry) throws -> Bool
     ) throws {
         guard info.category == .bible else { return }
+        let moduleInitials = info.name
         // Drained per chapter: whole-Bible streaming otherwise accumulates every XML-projection
         // temporary until the indexing dispatch block finishes.
         try reader.forEachBibleChapter { sourceBook, chapter in
@@ -357,15 +374,15 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
                     ) else {
                         continue
                     }
-                    let visibleText = try SQLiteSearchTextProjection.visibleText(
+                    let projectedText = SQLiteSearchTextProjection.project(
                         row.text,
-                        metadata: reader.metadata,
-                        moduleInitials: info.name
+                        moduleInitials: moduleInitials
                     )
                     let key = "\(osisBookId) \(chapter):\(row.verse)"
                     let shouldContinue = try consume(BibleSearchIndexEntry(
                         displayKey: key,
-                        visibleText: visibleText,
+                        indexText: projectedText.indexText,
+                        previewText: projectedText.previewText,
                         sourceMarkup: row.text,
                         taggedText: row.text,
                         entryOrder: ordinal,
@@ -384,36 +401,27 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
     }
 }
 
-/** Projects format-aware SQLite source text into the visible Search analyzer domain. */
+/** Projects SQLite source into separate canonical-index and visible-preview domains. */
 private enum SQLiteSearchTextProjection {
     /**
-     Returns visible text while preserving plain e-Sword `.bbli` content literally.
+     Returns Android-compatible Search text through the shared pinned-JSword repair boundary.
 
      - Parameters:
        - source: Exact transformed or plain source text returned by the format reader.
-       - metadata: Format and source-path identity controlling plain-versus-structural handling.
-       - moduleInitials: Exact module identity used by Android-compatible OSIS repair.
-     - Returns: Trimmed semantic text with structural markup removed.
+       - moduleInitials: Exact installed initials controlling pinned module-specific repair.
+     - Returns: Canonical analyzer text and annotation-free preview text.
      - Side effects: Parses one bounded verse fragment in memory.
-     - Throws: `SwordOSISProcessorError` only if the XML-safe fallback cannot be parsed.
+     - Failure modes: Irreparable source becomes an empty projection, matching JSword `OSISFilter`.
+     - Note: Every format is structural-first because Android registers its Bible backends as OSIS,
+       including e-Sword `.bbli`; no format falls back to rendered, stripped, or escaped literal text.
      */
-    static func visibleText(
+    static func project(
         _ source: String,
-        metadata: SQLiteDocumentMetadata,
         moduleInitials: String
-    ) throws -> String {
-        if metadata.format == .eSword,
-           metadata.sourceURL.pathExtension.caseInsensitiveCompare("bbli") == .orderedSame {
-            return source.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let safeFragment = SQLiteDocumentXMLCompatibility.validatedFragmentOrEscapedText(source)
-        let processed = try SwordOSISFragmentProcessor.process(
-            sourceXML: "<div>\(safeFragment)</div>",
-            category: .bible,
+    ) -> SwordBibleSearchTextProjection {
+        SwordBibleSearchTextProjection.project(
+            sourceXML: source,
             moduleInitials: moduleInitials
         )
-        return (processed.comparablePlainText ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

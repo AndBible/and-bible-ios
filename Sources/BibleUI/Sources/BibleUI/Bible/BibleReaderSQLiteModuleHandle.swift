@@ -29,6 +29,17 @@ final class BibleReaderSQLiteModuleHandle: @unchecked Sendable {
     private let module: SQLiteDocumentModule
 
     /**
+     Returns the exact catalog-owned module as a backend-neutral Search source.
+
+     - Returns: The same immutable module used by reader operations; no rediscovery occurs.
+     - Side effects: None.
+     - Failure modes: None; only validated catalog handles can be initialized.
+     */
+    var searchIndexSource: any BibleSearchIndexSource {
+        module
+    }
+
+    /**
      Creates one runtime handle for a freshly discovered module.
 
      - Parameter module: Validated SQLite module owned by one catalog snapshot.

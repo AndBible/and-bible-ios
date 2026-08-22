@@ -127,6 +127,7 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
     /// Strategy used to derive `displayBook` when the result is presented.
     public let bookNamePresentation: SearchBookNamePresentation
 
+    /// Complete stored visible preview; collapsed presentation may apply its own visual line limit.
     public let snippet: String
     public let identity: SearchVerseIdentity
 
@@ -151,7 +152,7 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
        - moduleName: Exact generated-index owner.
        - key: Backend display key retained for diagnostics and stable source lookup.
        - displayBook: Source display name or canonical OSIS fallback persisted with the row.
-       - snippet: Bounded visible verse text returned by Search.
+       - snippet: Complete stored visible preview returned by Search; callers may visually collapse it.
        - identity: Locale-independent OSIS verse identity used for grouping and navigation.
        - bookNamePresentation: Presentation strategy; SQLite rows use `localizedCanonical`.
      - Side effects: None.

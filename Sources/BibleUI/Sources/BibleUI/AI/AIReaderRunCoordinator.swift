@@ -402,7 +402,7 @@ final class AIReaderRunCoordinator {
   private let runGate: AIReaderWorkspaceRunGate
   private let referenceEnvironmentProvider:
     @MainActor () -> AIReaderReferenceEnvironmentResolver.Environment
-  private let isInstalledBible: (String) -> Bool
+  private let isReadableBible: (String) -> Bool
   private let openMyDocument: (String, String) -> Void
   private let openStudyPad: (UUID, UUID?) -> Void
   private let showTransientDocument: (AIReaderTransientDocument) -> Void
@@ -432,7 +432,7 @@ final class AIReaderRunCoordinator {
      - runGate: Process-wide workspace execution gate.
      - referenceEnvironmentProvider: Live search-Bible and reference-dictionary defaults. The empty
        default keeps construction testable until the pane injects installed-module state.
-     - isInstalledBible: Exact installed-Bible predicate used by regeneration validation.
+     - isReadableBible: Exact fresh-readable-Bible predicate used by regeneration validation.
      - openMyDocument: Reader navigation boundary for generated My Documents pages.
      - openStudyPad: Reader navigation boundary for generated StudyPad results.
      - showTransientDocument: Reader-local loading and terminal state presentation.
@@ -459,7 +459,7 @@ final class AIReaderRunCoordinator {
           preferredGreekMorphology: nil
         )
       },
-    isInstalledBible: @escaping (String) -> Bool,
+    isReadableBible: @escaping (String) -> Bool,
     openMyDocument: @escaping (String, String) -> Void,
     openStudyPad: @escaping (UUID, UUID?) -> Void,
     showTransientDocument: @escaping (AIReaderTransientDocument) -> Void,
@@ -483,7 +483,7 @@ final class AIReaderRunCoordinator {
     self.myDocumentStore = myDocumentStore
     self.runGate = runGate
     self.referenceEnvironmentProvider = referenceEnvironmentProvider
-    self.isInstalledBible = isInstalledBible
+    self.isReadableBible = isReadableBible
     self.openMyDocument = openMyDocument
     self.openStudyPad = openStudyPad
     self.showTransientDocument = showTransientDocument
@@ -685,7 +685,7 @@ final class AIReaderRunCoordinator {
       guard
         let sourceInitials = source.activeDocumentInitials
           ?? pageContext.sourceBookInitials,
-        isInstalledBible(sourceInitials)
+        isReadableBible(sourceInitials)
       else {
         throw AIReaderRunError.sourceUnavailable
       }

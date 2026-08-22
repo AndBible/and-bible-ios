@@ -441,13 +441,12 @@ struct BibleReaderAnnotationDocumentLoader {
      */
     private func buildMemorizeDocumentJSON(_ request: MemorizeDocumentRequest) -> String? {
         guard let ordinalRange = memorizeOrdinalRange(request) else { return nil }
-        let textItems = memorizeTextItems(request)
-        guard !textItems.isEmpty else { return nil }
-        guard let sourceModule = request.activeModule?.info.name == request.bookInitials
-            ? request.activeModule
-            : request.swordManager?.module(named: request.bookInitials) else {
+        guard let sourceModule = request.activeModule,
+              sourceModule.info.name == request.bookInitials else {
             return nil
         }
+        let textItems = memorizeTextItems(request)
+        guard !textItems.isEmpty else { return nil }
         let sourceVersification = VersificationMapper.versificationName(for: sourceModule)
 
         let document: [String: Any] = [
@@ -731,7 +730,7 @@ struct MemorizeDocumentRequest {
     let currentChapter: Int
     /// Active OSIS book identifier.
     let osisBookId: String
-    /// Active SWORD module, or `nil` for no-module placeholder behavior.
+    /// Caller-authorized readable SWORD handle; `nil` prevents Memorize document emission.
     let activeModule: SwordModule?
     /// Active SWORD manager used to control markup options during canonical text extraction.
     let swordManager: SwordManager?

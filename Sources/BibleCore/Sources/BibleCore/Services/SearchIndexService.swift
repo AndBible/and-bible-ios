@@ -56,8 +56,8 @@ private final class SearchIndexSourceTransfer: @unchecked Sendable {
  */
 @Observable
 public final class SearchIndexService: @unchecked Sendable {
-    /// Schema version for canonical metadata, analyzer identity, and transactional completion.
-    public static let currentSchemaVersion = 8
+    /// Schema/content version for canonical metadata, analyzer identity, and text projection.
+    public static let currentSchemaVersion = 9
 
     /// Android caps one module's Lucene result collection at 5,000 hits.
     public static let maximumResultsPerModule = 5_000
@@ -659,6 +659,12 @@ public final class SearchIndexService: @unchecked Sendable {
     /**
      Writes one streamed source into the current transaction and records completion atomically.
 
+     Canonical `indexText` is analyzed into FTS `search_text`; independently projected `previewText`
+     is stored as unindexed `plain_text`. Strong's tokens are collected independently of body text,
+     matching JSword's field-by-field document assembly so a lexical-only row remains searchable.
+     The split mirrors Android's JSword index and structured `MultiSearchItemAdapter` presentation
+     rather than trusting SWORD render filters.
+
      - Parameters:
        - db: Service-owned generated Search database.
        - source: Backend-neutral Bible source streamed in canonical verse order.
@@ -719,12 +725,22 @@ public final class SearchIndexService: @unchecked Sendable {
         try source.forEachSearchIndexEntry { entry in
             try autoreleasepool {
                 try cancellationProbe.checkCancellation()
-                let cleaned = entry.visibleText.trimmingCharacters(in: .whitespacesAndNewlines)
-                let analyzed = cleaned.isEmpty
+                let indexText = entry.indexText
+                let previewText = entry.previewText
+                let analyzed = indexText.isEmpty
                     ? ""
-                    : try SearchTextAnalyzer.analyzedText(cleaned, profile: analyzer)
-                guard source.searchIndexIncludesEmptyVisibleText
-                        || (!cleaned.isEmpty && !analyzed.isEmpty) else {
+                    : try SearchTextAnalyzer.analyzedText(indexText, profile: analyzer)
+                let canonSection = SearchCanonicalBookCatalog.section(of: entry.osisBookId)
+                let rawTokens = StrongsTokenNormalizer.canonicalTokens(
+                    rawEntry: entry.sourceMarkup,
+                    renderedTextProvider: { entry.taggedText },
+                    isNewTestamentBook: canonSection == .newTestament
+                )
+                let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
+                let strongsTokens = Self.orderedUnique(rawTokens + taggedTokens)
+                guard source.searchIndexIncludesEmptyIndexText
+                        || !analyzed.isEmpty
+                        || !strongsTokens.isEmpty else {
                     return true
                 }
                 guard let verseStatement, let strongsStatement else {
@@ -735,7 +751,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 sqlite3_clear_bindings(verseStatement)
                 bind(analyzed, to: verseStatement, at: 1)
                 bind(entry.displayKey, to: verseStatement, at: 2)
-                bind(cleaned, to: verseStatement, at: 3)
+                bind(previewText, to: verseStatement, at: 3)
                 bind(moduleName, to: verseStatement, at: 4)
                 sqlite3_bind_int64(verseStatement, 5, sqlite3_int64(entry.entryOrder))
                 bind(entry.osisBookId, to: verseStatement, at: 6)
@@ -748,17 +764,10 @@ public final class SearchIndexService: @unchecked Sendable {
                     11,
                     sqlite3_int64(SearchCanonicalBookCatalog.order(of: entry.osisBookId))
                 )
-                let canonSection = SearchCanonicalBookCatalog.section(of: entry.osisBookId)
                 bind(canonSection.rawValue, to: verseStatement, at: 12)
                 try stepDone(db: db, statement: verseStatement, operation: "inserting \(entry.displayKey)")
 
-                let rawTokens = StrongsTokenNormalizer.canonicalTokens(
-                    rawEntry: entry.sourceMarkup,
-                    renderedTextProvider: { entry.taggedText },
-                    isNewTestamentBook: canonSection == .newTestament
-                )
-                let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
-                for token in Self.orderedUnique(rawTokens + taggedTokens) {
+                for token in strongsTokens {
                     sqlite3_reset(strongsStatement)
                     sqlite3_clear_bindings(strongsStatement)
                     bind(moduleName, to: strongsStatement, at: 1)
@@ -1228,6 +1237,18 @@ public final class SearchIndexService: @unchecked Sendable {
         return try readSearchResults(db: db, statement: statement, moduleName: moduleName)
     }
 
+    /**
+     Materializes complete stored previews from one ordered Search statement.
+
+     - Parameters:
+       - db: Service-owned generated Search database used for diagnostics.
+       - statement: Prepared text or Strong's query positioned before its first row.
+       - moduleName: Exact module owner used when reporting a database failure.
+     - Returns: At most the Android-compatible result cap plus an explicit truncation flag; every
+       retained hit carries its full persisted preview so single and expanded UI rows can reveal it.
+     - Side effects: Advances `statement` through completion without mutating index storage.
+     - Throws: A typed SQLite error for malformed rows or failed statement execution.
+     */
     private func readSearchResults(
         db: OpaquePointer,
         statement: OpaquePointer,
@@ -1249,7 +1270,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 moduleName: storedModule,
                 key: key,
                 displayBook: displayBook,
-                snippet: String(text.prefix(240)),
+                snippet: text,
                 identity: SearchVerseIdentity(
                     osisBookId: osisBookId,
                     canonicalBookOrder: Int(sqlite3_column_int64(statement, 7)),
@@ -1361,35 +1382,6 @@ public final class SearchIndexService: @unchecked Sendable {
         case .currentBook(let osisBookId):
             return ("AND \(tableAlias).osis_book = ?", [osisBookId])
         }
-    }
-
-    // MARK: - Text Cleaning
-
-    /// Compiled once because text cleanup runs for every verse of a full-Bible index build.
-    private static let inlineStrongsTagRegex = try? NSRegularExpression(pattern: "<[HGhgW]\\d+>")
-
-    /// Compiled once because text cleanup runs for every verse of a full-Bible index build.
-    private static let repeatedSpaceRegex = try? NSRegularExpression(pattern: "  +")
-
-    /** Removes inline Strong's tags from user-visible indexed text. */
-    public static func cleanText(_ text: String) -> String {
-        guard text.contains("<") else { return text }
-        var result = text
-        if let regex = inlineStrongsTagRegex {
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: NSRange(result.startIndex..., in: result),
-                withTemplate: ""
-            )
-        }
-        if let regex = repeatedSpaceRegex {
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: NSRange(result.startIndex..., in: result),
-                withTemplate: " "
-            )
-        }
-        return result.trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - SQLite Helpers

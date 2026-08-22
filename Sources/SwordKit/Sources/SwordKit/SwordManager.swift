@@ -4,6 +4,29 @@ import Foundation
 import CLibSword
 
 /**
+ Current reader-access classification for one installed SWORD module.
+
+ Installed inventory deliberately includes encrypted locked modules so Downloads and document
+ choosers can display and unlock them. Reader activation must use this narrower classification
+ instead of treating every module returned by `module(named:)` as readable.
+
+ The value contains no module handle and has no side effects. Single-name activation preflight may
+ inspect it directly; arbitrary content readers should use `SwordManager.readableModule(named:)` so
+ classification and canonical handle resolution share one fresh inventory snapshot. This keeps
+ locked modules out of content-reading paths while preserving management visibility.
+ */
+public enum SwordModuleAccessState: Equatable, Sendable {
+    /// No supported native SWORD module currently resolves for the requested identity.
+    case unavailable
+
+    /// The module is installed and encrypted, but has no verified current-session or persisted key.
+    case locked
+
+    /// The module is installed and can be activated for content reads.
+    case readable
+}
+
+/**
  Swift wrapper around SWORD's SWMgr (module manager).
 
  Manages the SWORD module installation directory, provides access to
@@ -16,7 +39,7 @@ import CLibSword
  ```swift
  let manager = SwordManager(modulePath: "/path/to/sword/modules")
  let modules = manager.installedModules()
- if let kjv = manager.module(named: "KJV") {
+ if let kjv = manager.readableModule(named: "KJV") {
      kjv.setKey("Gen 1:1")
      let text = kjv.renderText()
  }
@@ -127,6 +150,63 @@ public final class SwordManager: @unchecked Sendable {
     /// List installed modules filtered by category.
     public func installedModules(category: ModuleCategory) -> [ModuleInfo] {
         installedModules().filter { $0.category == category }
+    }
+
+    /**
+     Classifies whether an installed native SWORD module can be activated for content reads.
+
+     This query intentionally derives from a fresh `installedModules()` snapshot so a successful
+     live unlock is observed through `sessionUnlockedModuleNames` even though a cached
+     `SwordModule.info` value is immutable. Inventory and `module(named:)` remain inclusive for
+     Downloads, About, uninstall, and unlock workflows.
+
+     - Parameter name: Case-insensitive installed module initials to classify.
+     - Returns: `.readable` for a supported native module with current access, `.locked` for an
+       encrypted module awaiting a verified key, or `.unavailable` for missing, unsupported, and
+       Android custom-driver projections that do not have a native SWORD handle.
+     - Side effects: Reads installed configuration and may populate the manager's native module
+       cache while resolving the canonical module identity; it does not mutate cipher or reader
+       state.
+     - Failure modes: Malformed configuration, unsupported modules, and native lookup failures are
+       classified as `.unavailable` rather than exposing a partially readable handle.
+     - Important: Libsword work is serialized by the existing `SwordRuntime` boundaries used by
+       `installedModules()` and `module(named:)`.
+     */
+    public func moduleAccessState(named name: String) -> SwordModuleAccessState {
+        guard !name.isEmpty,
+              let info = installedModules().first(where: {
+                  SwordJavaStringIdentity.equalsIgnoreCase($0.name, name)
+              }),
+              module(named: info.name) != nil else {
+            return .unavailable
+        }
+        if info.isEncrypted && !info.isUnlocked {
+            return .locked
+        }
+        return .readable
+    }
+
+    /**
+     Resolves one native module only when a fresh manager snapshot authorizes content access.
+
+     Inclusive `module(named:)` remains the inventory, unlock, uninstall, and metadata boundary.
+     Content callers use this method so a cached native handle cannot bypass a later relock.
+
+     - Parameter name: Installed module initials matched with Java `String.equalsIgnoreCase` rules.
+     - Returns: The canonical native handle when the fresh row is readable, otherwise nil.
+     - Side effects: Enumerates installed configuration once, then creates or reuses at most one
+       native handle for the selected readable row.
+     - Failure modes: Empty, missing, unsupported, custom-driver, and locked identities fail closed.
+     */
+    public func readableModule(named name: String) -> SwordModule? {
+        guard !name.isEmpty,
+              let info = installedModules().first(where: {
+                  SwordJavaStringIdentity.equalsIgnoreCase($0.name, name)
+              }),
+              !info.isEncrypted || info.isUnlocked else {
+            return nil
+        }
+        return module(named: info.name)
     }
 
     /**

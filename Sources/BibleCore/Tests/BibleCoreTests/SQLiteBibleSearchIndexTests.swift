@@ -98,6 +98,158 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
     }
 
     /**
+     Reproduces FinRK-shaped annotations through the SQLite Bible adapter and generated index.
+
+     - Setup: Builds real MyBible verses containing a Strong's word/cross-reference and a second
+       source with leading NBSP plus an encoded literal `<H123>` canonical token.
+     - Expected result: Text and Strong's hits return annotation-free previews, the reference target
+       is absent, and generated-index ingestion preserves both Java-trim NBSP and the literal H123
+       analyzer token instead of applying the legacy regex/Foundation cleanup a second time.
+     - Failure meaning: A backend adapter has reused commentary/render text for Search or the service
+       has recombined canonical analyzer text with visible preview text.
+     - Side effects: Creates and removes isolated source and generated-index SQLite databases.
+     */
+    func testStructuredSQLiteSearchExcludesCrossReferenceNotesFromCorpusAndPreview() async throws {
+        let fixture = try makeSQLiteBibleFixture(
+            fileName: "search-annotations.SQLite3",
+            description: "Search Annotation Fixture",
+            verses: [
+                (
+                    10,
+                    1,
+                    1,
+                    "Visible kointähti <w lemma=\"strong:H0430\">word</w> <note type=\"crossReference\"><reference osisRef=\"Ps.119.105\">xrefonly</reference></note>"
+                ),
+                (10, 1, 2, "&nbsp;&lt;H123&gt;word"),
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let service = SearchIndexService(
+            databasePath: fixture.root.appendingPathComponent("search.sqlite").path
+        )
+        let moduleName = fixture.module.info.name
+
+        try await service.createIndex(source: fixture.module)
+
+        let textHit = try XCTUnwrap(
+            service.search(
+                query: "kointähti",
+                moduleName: moduleName,
+                wordMode: .allWords
+            ).hits.first
+        )
+        XCTAssertEqual(textHit.snippet, "Visible kointähti word ")
+        XCTAssertTrue(
+            try service.search(
+                query: "xrefonly",
+                moduleName: moduleName,
+                wordMode: .allWords
+            ).hits.isEmpty
+        )
+
+        let strongsHit = try XCTUnwrap(
+            service.searchStrongs(canonicalTokens: ["H0430"], moduleName: moduleName).hits.first
+        )
+        XCTAssertEqual(strongsHit.snippet, "Visible kointähti word ")
+
+        let encodedLiteralHit = try XCTUnwrap(
+            service.search(
+                query: "H123",
+                moduleName: moduleName,
+                wordMode: .allWords
+            ).hits.first
+        )
+        XCTAssertEqual(encodedLiteralHit.identity.verse, 2)
+        XCTAssertEqual(encodedLiteralHit.snippet, "\u{00A0}word")
+    }
+
+    /**
+     Verifies valid e-Sword `.bbli` OSIS is structural despite its raw-byte reader contract.
+
+     - Setup: Creates a real `.bbli` Bible whose verse contains visible prose and a valid OSIS
+       cross-reference note, then builds the production generated Search index.
+     - Expected result: Visible prose is searchable/presented, while the note-only token is absent.
+     - Failure meaning: `.bbli` has been blanket-treated as literal text instead of Android's OSIS
+       backend contract, or annotations have re-entered one of the two Search text domains.
+     - Side effects: Creates and removes isolated source and generated-index SQLite databases.
+     */
+    func testESwordBBLISearchProjectsValidOSISStructure() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bbli-structured-search-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceURL = root.appendingPathComponent("structured.bbli")
+        try SQLiteDocumentTestDatabase.create(
+            at: sourceURL,
+            statements: [
+                "CREATE TABLE Details (Title TEXT, Abbreviation TEXT, RightToLeft INTEGER, Strongs INTEGER)",
+                "INSERT INTO Details VALUES ('Structured e-Sword Fixture', 'ESOSIS', 0, 0)",
+                "CREATE TABLE Bible (Book INTEGER, Chapter INTEGER, Verse INTEGER, Scripture TEXT)",
+                "INSERT INTO Bible VALUES (1, 1, 1, 'Visible bbliword <note type=\"crossReference\"><reference osisRef=\"Ps.119.105\">xrefonly</reference></note>')",
+            ]
+        )
+        let module = SQLiteDocumentModule(
+            reader: try ESwordReader(fileURL: sourceURL),
+            origin: .manual
+        )
+        let service = SearchIndexService(
+            databasePath: root.appendingPathComponent("search.sqlite").path
+        )
+
+        try await service.createIndex(source: module)
+
+        let hit = try XCTUnwrap(
+            service.search(
+                query: "bbliword",
+                moduleName: module.info.name,
+                wordMode: .allWords
+            ).hits.first
+        )
+        XCTAssertEqual(hit.snippet, "Visible bbliword ")
+        XCTAssertTrue(
+            try service.search(
+                query: "xrefonly",
+                moduleName: module.info.name,
+                wordMode: .allWords
+            ).hits.isEmpty
+        )
+    }
+
+    /**
+     Protects repairable e-Sword `.bbli` text through pinned JSword structural compatibility.
+
+     - Setup: Indexes the checked-in `.bbli` fixture containing an unclosed `<text>` element and bare
+       ampersand through the production SQLite module adapter.
+     - Expected result: Entity cleanup and tag reclosure retain the verse as structured OSIS; Search
+       omits the tag itself and Android's post-concatenation HTML pass collapses adjacent spaces.
+     - Failure meaning: SQLite Search has diverged from pinned `OSISFilter` repair/`htmlToSpan` or
+       selected an escaped/rendered fallback.
+     - Side effects: Reads one checked-in database and creates/removes an isolated generated index.
+     */
+    func testESwordBBLISearchRepairsMalformedOSISStructurally() async throws {
+        let reader = try ESwordReader(fileURL: sqliteDocumentFixtureURL("sample.bbli"))
+        let module = SQLiteDocumentModule(reader: reader, origin: .manual)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bbli-search-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let service = SearchIndexService(
+            databasePath: root.appendingPathComponent("search.sqlite").path
+        )
+
+        try await service.createIndex(source: module)
+
+        let hit = try XCTUnwrap(
+            service.search(
+                query: "unchanged",
+                moduleName: module.info.name,
+                wordMode: .allWords
+            ).hits.first
+        )
+        XCTAssertEqual(hit.snippet, "Plain stays unchanged & readable")
+    }
+
+    /**
      Builds real SWORD and SQLite indexes and groups equivalent verses across both backends.
 
      - Setup: Opens the checked-in KJV SWORD fixture and a one-verse MyBible source sharing the word
@@ -310,7 +462,8 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
     private func fixtureEntry(text: String, verse: Int) -> BibleSearchIndexEntry {
         BibleSearchIndexEntry(
             displayKey: "Genesis 1:\(verse)",
-            visibleText: text,
+            indexText: text,
+            previewText: text,
             sourceMarkup: text,
             taggedText: text,
             entryOrder: verse + 3,
@@ -371,6 +524,14 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
             candidate.deleteLastPathComponent()
         }
         throw SQLiteBibleSearchFixtureError.repositoryFixtureMissing
+    }
+
+    /** Returns one checked-in SQLite reader fixture without copying or mutating it. */
+    private func sqliteDocumentFixtureURL(_ name: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/SQLiteDocumentReaders/\(name)")
     }
 }
 

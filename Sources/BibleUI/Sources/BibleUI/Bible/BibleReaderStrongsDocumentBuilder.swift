@@ -64,6 +64,52 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
+     Records whether dictionary candidates came from an explicit user selection or automatic
+     installed-module discovery.
+
+     A nonempty preference is authoritative even when none of its named modules can be resolved.
+     Keeping that state distinct from automatic discovery prevents a stale or unavailable explicit
+     selection from silently opening a different dictionary or an automatic download fallback.
+     */
+    private enum LexiconModuleResolution {
+        /// Modules resolved from a nonempty explicit preference; the array may be empty.
+        case explicit([LexiconModule])
+
+        /// Modules resolved through automatic installed-module discovery; the array may be empty.
+        case automatic([LexiconModule])
+
+        /**
+         Returns the resolved candidates without discarding their selection provenance.
+
+         - Returns: Explicitly selected or automatically discovered dictionary candidates.
+         - Side effects: None.
+         - Failure modes: Returns an empty array when no candidate resolved.
+         */
+        var modules: [LexiconModule] {
+            switch self {
+            case .explicit(let modules), .automatic(let modules):
+                return modules
+            }
+        }
+
+        /**
+         Reports whether Android's synthetic missing-module document is appropriate.
+
+         - Returns: `true` only when automatic discovery found no compatible module.
+         - Side effects: None.
+         - Failure modes: Explicit selections always return `false`, including unresolved ones.
+         */
+        var shouldEmitMissingModuleFallback: Bool {
+            switch self {
+            case .explicit:
+                return false
+            case .automatic(let modules):
+                return modules.isEmpty
+            }
+        }
+    }
+
+    /**
      Creates a Strong's document builder with explicit dependencies.
 
      - Parameters:
@@ -118,7 +164,10 @@ struct BibleReaderStrongsDocumentBuilder {
 
      Android opens these results as a special `Multi` general-book document with
      `contentType: "strongs"`. iOS preserves that shape so dictionary tabs, recursive Strong's
-     links, missing-dictionary fallbacks, and links-window identity stay aligned with Android.
+     links, per-request missing-dictionary fallbacks, and links-window identity stay aligned with
+     Android. A Strong's number or Robinson code with compatible installed dictionaries contributes
+     only successful entries; a missing key never masquerades as a missing installation. Explicit
+     module selections remain authoritative even when their selected module is unavailable.
 
      - Parameters:
        - strongs: Strong's numbers parsed from `ab-w://` query items.
@@ -126,8 +175,9 @@ struct BibleReaderStrongsDocumentBuilder {
        - stateJSON: Optional opaque Vue state to restore into the result document.
      - Returns: Serialized Vue `MultiDocument` JSON, or `nil` when no content or fallback exists.
      - Side effects: Reads installed SWORD modules and temporarily moves dictionary cursors.
-     - Failure modes: Missing dictionaries produce the Android-style download fallback for Strong's
-       links. Missing morphology definitions are skipped.
+     - Failure modes: Automatic discovery with no compatible Strong's or morphology dictionary
+       produces the Android-style download fallback. Unresolved explicit selections and installed
+       dictionaries with no matching entry are omitted; `nil` is returned when nothing remains.
      */
     func buildStrongsMultiDocumentJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
         strongsDocumentBuilderLogger.info(
@@ -136,16 +186,24 @@ struct BibleReaderStrongsDocumentBuilder {
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
 
         for num in strongs {
-            let lexModules = findAllLexiconModules(for: num)
+            let lexiconResolution = findAllLexiconModules(for: num)
+            let lexModules = lexiconResolution.modules
             strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
+            guard !lexModules.isEmpty else {
+                if lexiconResolution.shouldEmitMissingModuleFallback {
+                    fragments.append(missingStrongsDictionaryFragment(for: num))
+                }
+                continue
+            }
+
             let keyOptions = Self.strongsLookupKeyOptions(for: num)
             strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: keyOptions=\(keyOptions)")
             for mod in lexModules {
                 if let lookup = mod.lookup(keyOptions) {
-                    let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
+                    let isHebrew = Self.isHebrewStrongsNumber(num)
                     let featureType = isHebrew ? "hebrew" : "greek"
                     let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let strongsLinkPrefix = Self.strongsLinkPrefix(for: num)
+                    let strongsLinkPrefix = isHebrew ? "H" : "G"
                     let xml = lookup.isNativeHtml
                         ? Self.buildDictionaryEntryHTML(
                             renderedText: lookup.renderedText,
@@ -175,8 +233,15 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         if !robinson.isEmpty {
-            let morphModules = findMorphologyModules()
+            let morphologyResolution = findMorphologyModules()
+            let morphModules = morphologyResolution.modules
             for code in robinson {
+                guard !morphModules.isEmpty else {
+                    if morphologyResolution.shouldEmitMissingModuleFallback {
+                        fragments.append(missingMorphologyDictionaryFragment(for: code))
+                    }
+                    continue
+                }
                 for mod in morphModules {
                     let morphKeys = [code, code.uppercased(), code.lowercased()]
                     if let lookup = mod.lookup(morphKeys) {
@@ -202,10 +267,6 @@ struct BibleReaderStrongsDocumentBuilder {
                     }
                 }
             }
-        }
-
-        if fragments.isEmpty, let firstStrongs = strongs.first {
-            fragments.append(missingStrongsDictionaryFragment(for: firstStrongs))
         }
 
         if fragments.isEmpty {
@@ -271,11 +332,63 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
+     Builds Android's missing-document fallback for an automatically unresolved Robinson module.
+
+     - Parameter morphologyCode: Robinson morphology code whose backing module is unavailable.
+     - Returns: A synthetic morphology fragment linking directly to the Robinson download.
+     - Side effects: Reads localized strings through the injected localization closure.
+     - Failure modes: Empty or malformed codes still produce a deterministic fallback key.
+     */
+    private func missingMorphologyDictionaryFragment(
+        for morphologyCode: String
+    ) -> BibleReaderMultiFragmentDocumentBuilder.Fragment {
+        let moduleName = "Robinson"
+        let message = Self.escapeXML(
+            localizedString(
+                "document_not_installed",
+                "Please download 'Robinson'."
+            )
+        )
+        let downloadsLabel = Self.escapeXML(
+            localizedString(
+                "downloads",
+                "Downloads"
+            )
+        )
+        let xml = """
+        <div>
+        <title type="x-gen">\(message)</title>
+        <p><a href="download://?initials=\(moduleName)">\(downloadsLabel)</a></p>
+        </div>
+        """
+        return (
+            xml: xml,
+            key: "\(moduleName)--\(morphologyCode)--missing",
+            keyName: morphologyCode,
+            bookInitials: moduleName,
+            bookAbbreviation: moduleName,
+            v11n: nil,
+            language: "en",
+            direction: "ltr",
+            features: OsisFeatures(),
+            isNativeHtml: false
+        )
+    }
+
+    /**
      Returns Strong's key variants using the same families Android tries for dictionary lookup.
 
      Android parity matters here because installed Strong's dictionaries do not all expose the same
      key shape. Some expect zero-padded numeric keys, some want a prefixed category key such as
-     `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
+     `G1234` / `H1234`, and some zLD modules require a trailing carriage return. Unpadded links also
+     receive Android's five-digit numeric and carriage-return variants, so lookup does not depend on
+     whether the caller supplied canonical zero padding.
+
+     - Parameter strongsNumber: Raw external Strong's value to classify and normalize into keys.
+     - Returns: Ordered, de-duplicated lookup candidates for the Android-selected dictionary family.
+     - Side effects: None.
+     - Failure modes: Empty input returns no candidates; malformed input remains deterministic and
+       may produce only its trimmed original value.
      */
     static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
         let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -283,7 +396,7 @@ struct BibleReaderStrongsDocumentBuilder {
         let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
         let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
 
-        let categoryPrefix = isHebrewStrongsNumber(original) ? "H" : "G"
+        let categoryPrefix = isHebrewStrongsNumber(strongsNumber) ? "H" : "G"
 
         var keys: [String] = []
 
@@ -307,19 +420,32 @@ struct BibleReaderStrongsDocumentBuilder {
         }
         appendUnique(sanitizedBase)
 
+        if !sanitizedBase.isEmpty,
+           sanitizedBase.allSatisfy(\.isNumber),
+           sanitizedBase.count < 5 {
+            let padded = String(repeating: "0", count: 5 - sanitizedBase.count) + sanitizedBase
+            appendUnique(padded)
+            appendUnique(padded + "\r")
+        }
+
         return keys
     }
 
     /**
-     Mirrors Android's heuristic for inferring Hebrew-vs-Greek when the prefix is omitted.
+     Mirrors Android's external Strong's URI category rule.
+
+     Android reads the raw first UTF-16 `Char` without trimming or case folding and treats only code
+     unit `0x0047` (`G`) as Greek. This differs from Swift grapheme clustering when `G` is followed
+     by a combining mark. `H`-prefixed, prefixless numeric, lowercase `g`, leading-space, and legacy
+     non-`G` values all route to the Hebrew key family.
+
+     - Parameter strongsNumber: External Strong's value before dictionary-key normalization.
+     - Returns: `false` only when the raw first UTF-16 code unit is uppercase `G` (`0x0047`).
+     - Side effects: None.
+     - Failure modes: Empty or malformed values deterministically classify as Hebrew.
      */
     static func isHebrewStrongsNumber(_ strongsNumber: String) -> Bool {
-        let normalized = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if normalized.hasPrefix("H") { return true }
-        if normalized.hasPrefix("G") { return false }
-
-        let digits = String(normalized.drop(while: { $0.isLetter || $0 == "0" }))
-        return (Int(digits) ?? 0) > 5624
+        strongsNumber.utf16.first != 0x0047
     }
 
     /**
@@ -805,9 +931,16 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Finds all dictionary/glossary modules that can look up a given Strong's number.
+     Resolves the dictionary/glossary modules eligible for one Strong's number.
+
+     - Parameter strongsNumber: External Strong's value used to choose Greek or Hebrew preferences.
+     - Returns: Explicitly selected candidates when that preference is nonempty, including an empty
+       resolution, or automatically discovered compatible candidates when no selection exists.
+     - Side effects: Reads current preferences and installed SWORD/restored dictionary metadata.
+     - Failure modes: Missing explicit modules remain an authoritative empty explicit resolution;
+       absent automatic candidates return an empty automatic resolution that licenses a fallback.
      */
-    private func findAllLexiconModules(for strongsNumber: String) -> [LexiconModule] {
+    private func findAllLexiconModules(for strongsNumber: String) -> LexiconModuleResolution {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let feature: ModuleFeatures = isHebrew ? .hebrewDef : .greekDef
 
@@ -824,9 +957,7 @@ struct BibleReaderStrongsDocumentBuilder {
                     result.append(mod)
                 }
             }
-            if !result.isEmpty {
-                return result
-            }
+            return .explicit(result)
         }
 
         for mod in Self.sortLexiconModulesForAndroidTabs(candidates) {
@@ -836,20 +967,20 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         if !result.isEmpty {
-            return result
+            return .automatic(result)
         }
 
         let lexiconNames = isHebrew
             ? ["StrongsHebrew", "OSHB", "BDB"]
             : ["StrongsGreek", "StrongsRealGreek", "Thayer", "ISBE"]
-        guard let mgr = swordManager else { return result }
+        guard let mgr = swordManager else { return .automatic(result) }
         for name in lexiconNames {
             if seen.insert(name).inserted, let mod = mgr.module(named: name) {
                 result.append(swordLexiconModule(mod))
             }
         }
 
-        return result
+        return .automatic(result)
     }
 
     /**
@@ -1018,9 +1149,15 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Finds installed morphology dictionaries using Android's selected-first fallback order.
+     Resolves morphology dictionaries while preserving Android's explicit-selection authority.
+
+     - Returns: Explicitly selected candidates when the morphology preference is nonempty, including
+       an empty resolution, or automatically discovered `GreekParse` candidates otherwise.
+     - Side effects: Reads current preferences and installed dictionary metadata.
+     - Failure modes: Missing explicit modules remain an authoritative empty explicit resolution;
+       absent automatic candidates return an empty automatic resolution that licenses a fallback.
      */
-    private func findMorphologyModules() -> [LexiconModule] {
+    private func findMorphologyModules() -> LexiconModuleResolution {
         let candidates: [LexiconModule]
         if let installedDictionarySources {
             candidates = installedDictionarySources().compactMap { source in
@@ -1054,9 +1191,7 @@ struct BibleReaderStrongsDocumentBuilder {
                     result.append(mod)
                 }
             }
-            if !result.isEmpty {
-                return result
-            }
+            return .explicit(result)
         }
 
         for mod in candidates {
@@ -1066,7 +1201,7 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         if !result.isEmpty {
-            return result
+            return .automatic(result)
         }
 
         for name in ["Robinson"] where seen.insert(name).inserted {
@@ -1075,7 +1210,7 @@ struct BibleReaderStrongsDocumentBuilder {
             }
         }
 
-        return result
+        return .automatic(result)
     }
 
     /**

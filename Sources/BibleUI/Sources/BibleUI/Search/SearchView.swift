@@ -1334,7 +1334,7 @@ public struct SearchView: View {
                             .font(.system(size: 17))
                             .foregroundStyle(surfacePalette.foregroundColor)
 
-                            Text(SearchIndexService.cleanText(firstMatch.snippet))
+                            Text(firstMatch.snippet)
                                 .font(.system(size: 14))
                                 .foregroundStyle(surfacePalette.secondaryForegroundColor)
                                 .lineLimit(isSingleMatch ? nil : 2)
@@ -1377,7 +1377,7 @@ public struct SearchView: View {
                         Button(action: { navigateTo(hit) }) {
                             (
                                 Text("\(hit.moduleName): ").bold()
-                                    + Text(SearchIndexService.cleanText(hit.snippet))
+                                    + Text(hit.snippet)
                             )
                                 .font(.system(size: 15))
                                 .foregroundStyle(surfacePalette.foregroundColor)
@@ -1946,10 +1946,10 @@ public struct SearchView: View {
      Resolves one selected backend without substituting the active or another translation.
 
      - Parameter moduleName: Persisted selected initials or JSword-compatible full name.
-     - Returns: Exact SWORD/SQLite source from the presentation snapshot, with the historical SWORD
-       fallback retained for standalone Search construction.
-     - Side effects: None.
-     - Failure modes: Missing, stale, and category-incompatible identities return nil.
+     - Returns: Exact readable SWORD/SQLite source from the presentation snapshot, with a
+       manager-authorized native fallback for standalone Search construction.
+     - Side effects: Standalone fallback reads one fresh native access snapshot.
+     - Failure modes: Missing, stale, locked, and category-incompatible identities return nil.
      */
     private func resolveSearchIndexSource(
         named moduleName: String
@@ -1957,10 +1957,45 @@ public struct SearchView: View {
         if let searchIndexSourceRegistry {
             return searchIndexSourceRegistry.source(named: moduleName)
         }
-        if swordModule?.info.name == moduleName {
-            return swordModule
+        return Self.resolveStandaloneSearchIndexSource(
+            named: moduleName,
+            primaryModule: swordModule,
+            manager: swordManager
+        )
+    }
+
+    /**
+     Resolves the public standalone Search fallback without bypassing native access state.
+
+     - Parameters:
+       - moduleName: Exact selected initials.
+       - primaryModule: Optional directly supplied primary module for manager-less construction.
+       - manager: Optional manager able to validate fresh readable state.
+     - Returns: The exact readable Bible source, or nil when authorization cannot be proven.
+     - Side effects: A manager-backed lookup reads one fresh installed snapshot and resolves at most
+       one native handle. A manager-less unencrypted primary is retained without I/O.
+     - Failure modes: Locked, missing, wrong-category, stale encrypted, and non-exact manager-less
+       primary identities fail closed.
+     */
+    static func resolveStandaloneSearchIndexSource(
+        named moduleName: String,
+        primaryModule: SwordModule?,
+        manager: SwordManager?
+    ) -> (any BibleSearchIndexSource)? {
+        if let manager {
+            guard let module = manager.readableModule(named: moduleName),
+                  module.info.category == .bible else {
+                return nil
+            }
+            return module
         }
-        return swordManager?.module(named: moduleName)
+        guard let primaryModule,
+              primaryModule.info.name == moduleName,
+              primaryModule.info.category == .bible,
+              !primaryModule.info.isEncrypted else {
+            return nil
+        }
+        return primaryModule
     }
 
     /**

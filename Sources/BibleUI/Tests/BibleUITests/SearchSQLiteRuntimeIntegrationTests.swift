@@ -60,6 +60,57 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies locked native ownership cannot be bypassed through a colliding SQLite Search source.
+
+     - Setup: Adds a locked native Bible whose full description equals one MyBible initials token,
+       plus an unrelated readable MyBible source, beside the normal readable KJV fixture.
+     - Expected result: The locked native stays in inclusive reader inventory, both it and its
+       shadowed SQLite collision are absent from Search, and the unrelated SQLite source remains.
+     - Failure meaning: Search can index/navigate a backend identity that the global registry routes
+       to an unlock-required native owner, or can hide unrelated readable SQLite content.
+     - Side effects: Writes isolated SWORD/MyBible fixtures and reads their metadata through a fresh
+       manager/controller snapshot; it does not attempt an unlock.
+     */
+    @MainActor
+    func testLockedNativeOwnerShadowsSQLiteCollisionWithoutHidingUnrelatedSearchSource() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "LOCKEDSEARCH",
+            description: "SQLLOCKED",
+            in: modulePath
+        )
+        let lockedConfigURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/lockedsearch.conf")
+        var lockedConfig = try String(contentsOf: lockedConfigURL, encoding: .utf8)
+        lockedConfig += "\nCipherKey=\n"
+        try lockedConfig.write(to: lockedConfigURL, atomically: true, encoding: .utf8)
+        try installMyBiblePackage(
+            initials: "SQLLOCKED",
+            directoryName: "locked-full-name-collision",
+            in: modulePath
+        )
+        try installMyBiblePackage(
+            initials: "SQLUNRELATED",
+            directoryName: "unrelated-readable-source",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDSEARCH"), .locked)
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let registry = try XCTUnwrap(controller.makeSearchIndexSourceRegistry())
+
+        XCTAssertTrue(controller.installedBibleModules.contains { $0.name == "LOCKEDSEARCH" })
+        XCTAssertFalse(controller.installedBibleModules.contains { $0.name == "SQLLOCKED" })
+        XCTAssertNil(registry.source(named: "LOCKEDSEARCH"))
+        XCTAssertNil(registry.source(named: "SQLLOCKED"))
+        XCTAssertTrue(registry.source(named: "SQLUNRELATED") is SQLiteDocumentModule)
+        XCTAssertTrue(registry.source(named: "KJV") is SwordModule)
+    }
+
+    /**
      Navigates a non-active SQLite Search result without falling through to the current SWORD Bible.
 
      - Setup: Starts on fixture KJV and installs a package-owned MyBible source with Genesis 1:2.

@@ -133,6 +133,74 @@ final class AIReaderBridgeRouteTests: BibleUISwordFixtureTestCase {
   }
 
   /**
+   Rejects regeneration before persisted plaintext can be reused when its Bible is unreadable.
+
+   - Setup: Persists a resolvable prompt and presents a valid cached Bible context while the injected
+     fresh-readable predicate rejects the source initials.
+   - Expected result: Regeneration consults the exact source once, keeps the options route available
+     for correction or cancellation, and publishes `sourceUnavailable` without starting tool or
+     provider execution.
+   - Failure meaning: A generated page can reuse selected plaintext after its encrypted source is
+     relocked, bypassing the same authorization applied to live reader content.
+   - Side effects: Uses only the fixture's in-memory AI settings and records one local toast.
+   */
+  @MainActor
+  func testRegenerationRejectsPersistedContextWhenSourceIsNoLongerReadable() throws {
+    var requestedInitials: [String] = []
+    let fixture = try makeRouteFixture(isReadableBible: { initials in
+      requestedInitials.append(initials)
+      return false
+    })
+    let prompt = AgentPrompt(
+      name: "Explain locked source",
+      promptTemplate: "Explain",
+      showIn: [.verseSelection]
+    )
+    try AISettingsStore(modelContext: fixture.modelContext).insertPrompt(prompt)
+    let ordinal = try XCTUnwrap(
+      JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1)
+    )
+    let sourceData = try JSONEncoder().encode(CacheableContext(
+      kjvOrdinalStart: ordinal,
+      kjvOrdinalEnd: ordinal,
+      activeDocumentInitials: "LOCKED",
+      selectedContent: "<verse>Persisted plaintext</verse>",
+      selectedText: "Persisted plaintext",
+      highlightedText: nil,
+      selectionStartOffset: nil,
+      selectionEndOffset: nil
+    ))
+    let context = MyDocumentAIPageActionContext(
+      pageId: UUID(),
+      documentId: UUID(),
+      bookInitials: "AIDocuments",
+      documentName: "AI Documents",
+      pageKey: "locked-source",
+      pageTitle: "Locked source",
+      sourcePromptId: prompt.id,
+      sourceContext: String(decoding: sourceData, as: UTF8.self),
+      kjvOrdinalStart: ordinal,
+      kjvOrdinalEnd: ordinal,
+      contextHash: "locked-source",
+      usedWriteTools: false,
+      sourceModelName: nil,
+      sourceBookInitials: "LOCKED",
+      sourceBookKey: "Gen.1.1"
+    )
+
+    fixture.coordinator.presentRegeneration(context, workspaceID: nil, windowID: nil)
+    fixture.coordinator.startRegeneration()
+
+    let expectedFailure = AIReaderRunError.sourceUnavailable.localizedDescription
+    XCTAssertEqual(requestedInitials, ["LOCKED"])
+    guard case .regeneration = fixture.coordinator.presentation else {
+      return XCTFail("Unreadable-source failure must preserve the regeneration options route.")
+    }
+    XCTAssertEqual(fixture.coordinator.failureMessage, expectedFailure)
+    XCTAssertEqual(fixture.recorder.toasts.last, expectedFailure)
+  }
+
+  /**
    Creates one coordinator fixture with every persistence and app-domain dependency isolated.
 
    - Returns: Coordinator, context, and recording presentation boundaries retained by one fixture.
@@ -140,7 +208,9 @@ final class AIReaderBridgeRouteTests: BibleUISwordFixtureTestCase {
    - Failure modes: Throws SwiftData, fixture-copy, or SWORD-manager construction failures.
    */
   @MainActor
-  private func makeRouteFixture() throws -> AIReaderBridgeRouteFixture {
+  private func makeRouteFixture(
+    isReadableBible: @escaping (String) -> Bool = { _ in false }
+  ) throws -> AIReaderBridgeRouteFixture {
     let models =
       AIModelRegistration.cloudSyncableModels
       + AIModelRegistration.localOnlyModels
@@ -164,7 +234,7 @@ final class AIReaderBridgeRouteTests: BibleUISwordFixtureTestCase {
       domain: AIReaderBridgeRouteAgentDomain(),
       myDocumentStore: MyDocumentStore(modelContext: modelContext),
       textTargetBacking: AIReaderBridgeRouteTextBacking(),
-      isInstalledBible: { _ in false },
+      isReadableBible: isReadableBible,
       openMyDocument: { documentInitials, pageKey in
         recorder.openedDocuments.append(
           AIReaderOpenedDocument(documentInitials: documentInitials, pageKey: pageKey)

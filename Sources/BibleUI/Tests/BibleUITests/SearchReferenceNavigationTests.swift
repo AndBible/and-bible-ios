@@ -45,6 +45,34 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Guards the final Android-visible Search preview against a second UI cleanup pass.
+
+     - Setup: Reads the private Search result-row source after structured ingestion has persisted
+       annotation-free `htmlToSpan`-compatible snippets.
+     - Expected result: Single and expanded rows render each complete stored snippet directly;
+       only a collapsed multi-translation header receives a two-line visual limit. The former regex
+       cleanup and character-prefix APIs are absent so exact long previews survive expansion.
+     - Failure meaning: Search UI can mutate the final preview, reintroducing backend-specific
+       stripping or Foundation whitespace drift after the index parity boundary.
+     - Side effects: Reads one checked-out Swift source file.
+     */
+    func testSearchRowsRenderStoredPreviewWithoutLegacyCleanup() throws {
+        let searchSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
+        )
+        let resultGroup = try BibleUITestSourceLocator.extractFunction(
+            named: "searchResultGroup",
+            from: searchSource
+        )
+
+        XCTAssertTrue(resultGroup.contains("Text(firstMatch.snippet)"))
+        XCTAssertTrue(resultGroup.contains("Text(hit.snippet)"))
+        XCTAssertTrue(resultGroup.contains(".lineLimit(isSingleMatch ? nil : 2)"))
+        XCTAssertFalse(resultGroup.contains("SearchIndexService.cleanText"))
+        XCTAssertFalse(resultGroup.contains(".prefix("))
+    }
+
+    /**
      Verifies a human-readable verse range uses the full parser and retains its complete ordinal span.
 
      The controller is made bridge-ready so the emitted setup payload proves both endpoints survive

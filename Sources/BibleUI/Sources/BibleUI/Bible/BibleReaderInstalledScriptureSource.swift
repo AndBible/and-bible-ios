@@ -531,6 +531,21 @@ enum BibleReaderInstalledModuleSource: @unchecked Sendable {
         }
     }
 
+    /**
+     Projects one readable Bible as an index source after global ownership authorization.
+
+     - Returns: The selected native or SQLite Bible backend, or nil for a non-Bible category.
+     - Side effects: None; the resolver already captured and authorized the backend handle.
+     - Failure modes: Wrong-category sources fail closed without substituting another module.
+     */
+    var searchIndexSource: (any BibleSearchIndexSource)? {
+        guard info.category == .bible else { return nil }
+        switch self {
+        case .sword(let module): return module
+        case .sqlite(let module): return module.searchIndexSource
+        }
+    }
+
     /// Projects a Bible only after global lookup has selected this exact module.
     var scripture: BibleReaderInstalledScriptureSource? {
         guard info.category == .bible else { return nil }
@@ -559,8 +574,17 @@ enum BibleReaderInstalledModuleSource: @unchecked Sendable {
  so an exact wrong-category book fails closed instead of falling through to a namesake.
  */
 struct BibleReaderInstalledModuleResolver {
-    /// Genuine readable SWORD modules in manager registration order.
-    private let swordModules: [SwordModule]
+    /** One inclusive native owner plus its independently authorized content handle. */
+    private struct NativeRegistration {
+        /// Fresh installed metadata used for JSword global ownership precedence.
+        let info: ModuleInfo
+
+        /// Native content handle exposed only after the manager reports `.readable`.
+        let readableModule: SwordModule?
+    }
+
+    /// Inclusive native registrations in manager order, including locked ownership rows.
+    private let nativeRegistrations: [NativeRegistration]
 
     /// Unshadowed readable SQLite modules in Android registration order.
     private let sqliteModules: [BibleReaderSQLiteModuleHandle]
@@ -569,28 +593,71 @@ struct BibleReaderInstalledModuleResolver {
      Captures the current installed registry from one configured reader runtime.
 
      - Parameters:
-       - swordManager: Manager used to enumerate and prove genuine readable SWORD modules.
+       - swordManager: Manager used to enumerate inclusive native ownership and authorize content.
        - sqliteModules: Runtime-filtered SQLite modules not shadowed during registration.
-     - Side effects: Enumerates installed SWORD metadata and resolves each genuine module once.
-     - Failure modes: Missing/unreadable modules are omitted; later lookup fails closed.
+     - Side effects: Enumerates one fresh, session-adjusted installed SWORD snapshot and resolves a
+       native module only when that same row reports readable access.
+     - Failure modes: Missing managers produce no native registrations. Locked/unavailable native
+       rows retain global ownership but have no content handle, so lookup fails closed without
+       falling through to a colliding SQLite module.
      */
     init(
         swordManager: SwordManager?,
         sqliteModules: [BibleReaderSQLiteModuleHandle]
     ) {
-        self.swordModules = swordManager?.installedModules().compactMap { info in
+        let installedSnapshot = swordManager?.installedModules() ?? []
+        self.nativeRegistrations = installedSnapshot.compactMap { info in
             guard !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) else { return nil }
-            return swordManager?.module(named: info.name)
-        } ?? []
+            let readableModule = !info.isEncrypted || info.isUnlocked
+                ? swordManager?.module(named: info.name)
+                : nil
+            return NativeRegistration(info: info, readableModule: readableModule)
+        }
         self.sqliteModules = sqliteModules
     }
 
-    /** Creates an explicit deterministic registry for focused tests. */
+    /**
+     Captures one complete readable-content registry from the app's installed backend libraries.
+
+     - Parameters:
+       - swordManager: Manager supplying inclusive native ownership and fresh access state.
+       - sqliteLibrary: Android-compatible SQLite discovery snapshot registered after native rows.
+     - Side effects: Enumerates native inventory once and wraps already-discovered SQLite modules;
+       no SQLite content query occurs.
+     - Failure modes: Locked native owners retain precedence without a readable handle or SQLite
+       fallthrough. Missing native managers produce a SQLite-only registry.
+     */
+    init(
+        swordManager: SwordManager?,
+        sqliteLibrary: SQLiteDocumentModuleLibrary
+    ) {
+        self.init(
+            swordManager: swordManager,
+            sqliteModules: sqliteLibrary.modules.map(BibleReaderSQLiteModuleHandle.init(module:))
+        )
+    }
+
+    /**
+     Creates an explicit deterministic registry for focused tests and pure builders.
+
+     - Parameters:
+       - swordModules: Native handles in registration order.
+       - sqliteModules: SQLite handles in registration order.
+     - Side effects: None.
+     - Failure modes: Encrypted handles whose immutable metadata is still locked retain ownership
+       but are not exposed for content. Callers that need fresh live-unlock state must use the
+       manager-backed initializer.
+     */
     init(
         swordModules: [SwordModule],
         sqliteModules: [BibleReaderSQLiteModuleHandle]
     ) {
-        self.swordModules = swordModules
+        self.nativeRegistrations = swordModules.map { module in
+            NativeRegistration(
+                info: module.info,
+                readableModule: module.info.isEncrypted && !module.info.isUnlocked ? nil : module
+            )
+        }
         self.sqliteModules = sqliteModules
     }
 
@@ -598,18 +665,38 @@ struct BibleReaderInstalledModuleResolver {
      Resolves one global installed-book token using JSword precedence.
 
      - Parameter name: Initials or full book name; exact UTF-16 identity is preserved.
-     - Returns: Genuine SWORD first, then SQLite, or nil when no global book matches.
+     - Returns: The readable native owner, then an unshadowed SQLite owner, or nil when no readable
+       globally owned book matches.
      - Side effects: None after resolver construction.
-     - Failure modes: Empty, absent, and shadowed identities return nil.
+     - Failure modes: Empty, absent, locked-native, and shadowed identities return nil. A locked
+       native match never falls through to a colliding readable SQLite module.
      */
     func module(named name: String) -> BibleReaderInstalledModuleSource? {
-        if let module = Self.lookup(name, in: swordModules, info: { $0.info }) {
-            return .sword(module)
+        if let registration = Self.lookup(
+            name,
+            in: nativeRegistrations,
+            info: { $0.info }
+        ) {
+            return registration.readableModule.map(BibleReaderInstalledModuleSource.sword)
         }
-        if let module = Self.lookup(name, in: sqliteModules, info: { $0.info }) {
+        if let module = Self.lookup(name, in: sqliteModules, info: { $0.info }),
+           !isOwnedByNativeRegistration(module.info.name) {
             return .sqlite(module)
         }
         return nil
+    }
+
+    /**
+     Reports whether inclusive native registration owns one global lookup token.
+
+     - Parameter name: Initials or full module name resolved with JSword lookup precedence.
+     - Returns: `true` when any native row owns the identity, including a currently locked row.
+     - Side effects: None after resolver construction.
+     - Failure modes: Empty and unmatched values return `false`; authorization does not affect
+       ownership, so callers can prevent SQLite, My Documents, or EPUB collision fallthrough.
+     */
+    func hasNativeRegistration(named name: String) -> Bool {
+        isOwnedByNativeRegistration(name)
     }
 
     /** Returns an exact Bible projection after global resolution and category validation. */
@@ -620,6 +707,11 @@ struct BibleReaderInstalledModuleResolver {
     /** Returns an exact dictionary/glossary projection after global resolution. */
     func dictionary(named name: String) -> BibleReaderInstalledDictionarySource? {
         module(named: name)?.dictionary
+    }
+
+    /** Returns an authorized Bible index source after global category and ownership resolution. */
+    func searchIndexSource(named name: String) -> (any BibleSearchIndexSource)? {
+        module(named: name)?.searchIndexSource
     }
 
     /**
@@ -649,15 +741,32 @@ struct BibleReaderInstalledModuleResolver {
 
     /** Returns globally registered modules for the requested categories in backend order. */
     func modules(categories: Set<ModuleCategory>) -> [BibleReaderInstalledModuleSource] {
-        let sword = swordModules.compactMap { module -> BibleReaderInstalledModuleSource? in
+        let sword = nativeRegistrations.compactMap { registration -> BibleReaderInstalledModuleSource? in
+            guard let module = registration.readableModule else { return nil }
             guard categories.contains(module.info.category) else { return nil }
             return .sword(module)
         }
         let sqlite = sqliteModules.compactMap { module -> BibleReaderInstalledModuleSource? in
-            guard categories.contains(module.info.category) else { return nil }
+            guard !isOwnedByNativeRegistration(module.info.name),
+                  categories.contains(module.info.category) else {
+                return nil
+            }
             return .sqlite(module)
         }
         return sword + sqlite
+    }
+
+    /**
+     Reports whether inclusive native registration owns one token before SQLite registration.
+
+     - Parameter name: SQLite initials or another global lookup token.
+     - Returns: `true` when JSword's exact/full-name/case precedence selects any native row,
+       regardless of that row's current authorization state.
+     - Side effects: None.
+     - Failure modes: Empty and unmatched values return `false`.
+     */
+    private func isOwnedByNativeRegistration(_ name: String) -> Bool {
+        Self.lookup(name, in: nativeRegistrations, info: { $0.info }) != nil
     }
 
     /** Applies JSword exact-initials, exact-full-name, then case-insensitive lookup precedence. */

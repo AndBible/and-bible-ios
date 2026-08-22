@@ -1274,11 +1274,11 @@ struct BibleWindowPane: View {
           aiSettingsStore: aiSettingsStore
         )
       },
-      isInstalledBible: { initials in
-        if let module = swordManager.module(named: initials) {
-          return module.info.category == .bible
-        }
-        return sqliteLibrary.module(named: initials)?.info.category == .bible
+      isReadableBible: { initials in
+        BibleReaderInstalledModuleResolver(
+          swordManager: swordManager,
+          sqliteLibrary: sqliteLibrary
+        ).scripture(named: initials) != nil
       },
       openMyDocument: { [weak ctrl] initials, pageKey in
         _ = ctrl?.loadMyDocumentPage(bookInitials: initials, pageKey: pageKey)

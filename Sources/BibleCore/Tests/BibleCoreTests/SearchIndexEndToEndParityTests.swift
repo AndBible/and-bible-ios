@@ -7,6 +7,73 @@ import SwordKit
 /** Exercises analyzer storage and multi-source failure behavior through the production index service. */
 final class SearchIndexEndToEndParityTests: XCTestCase {
     /**
+     Retains a lexical-only JSword document whose analyzed body is empty.
+
+     - Setup: Builds one default-policy source with empty index/preview text and a Strong's lemma in
+       source markup.
+     - Expected result: Exact Strong's search returns the verse with an empty complete preview.
+     - Failure meaning: iOS discarded the row before independently extracting JSword's lexical field.
+     - Side effects: Creates and removes one isolated generated-index database.
+     */
+    func testStrongsOnlyEntrySurvivesEmptyBodyIndexPolicy() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-strongs-only-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        let source = InMemorySearchIndexSource(
+            moduleName: "LEXICALONLY",
+            language: "en",
+            storageRevision: "lexical-only",
+            visibleText: "",
+            strongToken: "H0430"
+        )
+
+        try await service.createIndex(source: source)
+
+        XCTAssertTrue(service.hasIndex(for: source.searchIndexSourceIdentity))
+        XCTAssertTrue(service.hasStrongsIndex(for: source.searchIndexSourceIdentity))
+        let hits = try service.searchStrongs(
+            canonicalTokens: ["H0430"],
+            sourceIdentity: source.searchIndexSourceIdentity
+        ).hits
+        XCTAssertEqual(hits.map(\.key), ["Genesis 1:1"])
+        XCTAssertEqual(hits.map(\.snippet), [""])
+    }
+
+    /**
+     Preserves the complete projection stored for Search result presentation.
+
+     - Setup: Indexes one preview longer than the former 240-character service truncation boundary.
+     - Expected result: An exact-generation text query returns every persisted character unchanged.
+     - Failure meaning: Search storage/query code is pre-truncating content that Android exposes when
+       a single result or expanded translation row is rendered.
+     - Side effects: Creates and removes one isolated generated-index database.
+     */
+    func testSearchHitReturnsCompletePreviewBeyondFormerCharacterLimit() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-full-preview-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        let fullPreview = "searchneedle " + String(repeating: "complete preview segment ", count: 20)
+        let source = InMemorySearchIndexSource(
+            moduleName: "FULLPREVIEW",
+            language: "en",
+            storageRevision: "full-preview",
+            visibleText: fullPreview
+        )
+
+        XCTAssertGreaterThan(fullPreview.count, 240)
+        try await service.createIndex(source: source)
+
+        let hit = try XCTUnwrap(service.search(
+            query: "searchneedle",
+            sourceIdentity: source.searchIndexSourceIdentity,
+            wordMode: .anyWord
+        ).hits.first)
+        XCTAssertEqual(hit.snippet, fullPreview)
+    }
+
+    /**
      Verifies the production default identity changes for version and backend storage generations.
 
      - Setup: Creates same-initials in-memory sources that differ only by version or storage revision.
@@ -291,7 +358,8 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
             ?? visibleText
         _ = try consume(BibleSearchIndexEntry(
             displayKey: "Genesis 1:1",
-            visibleText: visibleText,
+            indexText: visibleText,
+            previewText: visibleText,
             sourceMarkup: markup,
             taggedText: markup,
             entryOrder: 0,

@@ -252,6 +252,30 @@ public struct BibleReaderView: View {
         }
     }
 
+    /**
+     Retains one Android-order locked-Bible snapshot and the manager that owns its unlock session.
+
+     The UUID gives SwiftUI one stable queue identity while credentials are processed. The manager
+     must remain alive through completion because accepted keys update its in-memory access state in
+     addition to persisted SWORD configuration. The immutable installed snapshot prevents a first
+     success or controller refresh from truncating Android's original full queue.
+
+     Side effects: None; this value only retains startup input.
+
+     Failure modes: Callers create a request only when the snapshot contains a locked Bible; an
+     unexpectedly empty snapshot remains fail-closed in the startup evaluator.
+     */
+    private struct StartupLockedBibleUnlockRequest: Identifiable {
+        /// Stable presentation identity for this one startup queue run.
+        let id = UUID()
+
+        /// Manager that validates and persists each queued credential.
+        let manager: SwordManager
+
+        /// Inclusive installed snapshot from which the queue filters locked Bibles in place.
+        let installedModules: [ModuleInfo]
+    }
+
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
     private enum ReaderOverflowPresentation {
         case labelManager
@@ -335,6 +359,9 @@ public struct BibleReaderView: View {
 
     /// Reason the startup document-setup prompt should be visible.
     @State private var startupDownloadPromptReason: StartupDocumentSetupPromptPolicy.PromptReason?
+
+    /// Android-parity automatic credential queue shown before locked-only startup setup.
+    @State private var startupLockedBibleUnlockRequest: StartupLockedBibleUnlockRequest?
 
     /// Startup restore/import target passed to Backup & Restore for direct Android-style pickers.
     @State private var startupRestoreImportTarget: RestoreWorkflowTarget?
@@ -1027,6 +1054,24 @@ public struct BibleReaderView: View {
                 genericQuickModuleSwitchRetryDialog(retry)
             }
         }
+        .overlay {
+            if let request = startupLockedBibleUnlockRequest {
+                StartupLockedBibleUnlockQueueView(
+                    installedModules: request.installedModules,
+                    unlockModule: { moduleName, cipherKey in
+                        request.manager.unlockModule(
+                            named: moduleName,
+                            withCipherKey: cipherKey
+                        )
+                    },
+                    onComplete: {
+                        completeStartupLockedBibleUnlockQueue(request)
+                    }
+                )
+                .id(request.id)
+                .zIndex(50)
+            }
+        }
     }
 
     /**
@@ -1478,7 +1523,7 @@ public struct BibleReaderView: View {
             swordManager: controller?.swordManager,
             searchIndexService: searchIndexService,
             searchIndexSourceRegistry: controller?.makeSearchIndexSourceRegistry(),
-            installedBibleModules: controller?.installedBibleModules ?? [],
+            installedBibleModules: controller?.readableBibleModules ?? [],
             currentBook: controller?.currentBook ?? "Genesis",
             currentOsisBookId: searchSheetCurrentOsisBookId,
             selectionPreferences: SearchSelectionPreferences(
@@ -3303,17 +3348,16 @@ public struct BibleReaderView: View {
     /**
      Handles an unexpected close of the startup setup route.
 
-     The no-Bible setup screen is blocking in Android, so if SwiftUI reports that it was closed
-     without a setup action, iOS immediately re-evaluates startup state.
+     Startup setup is blocking in Android, so if SwiftUI reports that either no-Bible or locked-only
+     setup closed without a setup action, iOS immediately re-evaluates fresh inventory state.
 
-     Side effects:
-     - may re-present startup setup when no Bible is installed
+     - Side effects: May re-present startup setup when no readable Bible is available.
+     - Failure modes: A cleared prompt reason means setup already completed and needs no retry.
      */
     private func handleStartupDocumentSetupClosed() {
-        if startupDownloadPromptReason == .noBibleModules {
-            didEvaluateStartupDownloadPrompt = false
-            evaluateStartupDownloadPromptIfNeeded()
-        }
+        guard startupDownloadPromptReason != nil else { return }
+        didEvaluateStartupDownloadPrompt = false
+        evaluateStartupDownloadPromptIfNeeded()
     }
 
     /**
@@ -3370,22 +3414,27 @@ public struct BibleReaderView: View {
      reader controllers that own visible picker state. Those controllers must rebuild their
      `SwordManager` instances because SWORD and the C bridge cache module lists per manager.
 
-     Side effects:
-     - recreates SWORD managers inside every open `BibleReaderController`
-     - hides the no-Bible startup prompt when a newly restored or installed Bible is now available
-
-     Failure modes:
-     - controllers that cannot create a replacement `SwordManager` retain their existing state.
+     - Side effects:
+       - recreates SWORD managers inside every open `BibleReaderController`
+       - updates either blocking startup reason or hides setup when a Bible becomes readable
+     - Failure modes: Controllers that cannot create a replacement `SwordManager` retain their
+       existing state; unresolved inventory preserves the current blocking reason.
      */
     private func handleModuleStoreDidChange() {
+        // Keep Android's initial locked snapshot immutable. Any concurrent store mutation is picked
+        // up by the queue's single final refresh instead of changing its length or reader state.
+        guard startupLockedBibleUnlockRequest == nil else { return }
         for (_, ctrl) in windowManager.controllers {
             (ctrl as? BibleReaderController)?.refreshInstalledModules()
         }
-        if startupDownloadPromptReason == .noBibleModules, startupHasNoBibleModules() == false {
-            startupDownloadPromptReason = nil
-            if activeReaderDestination == .startupDocumentSetup {
-                activeReaderDestination = nil
-            }
+        guard startupDownloadPromptReason != nil else { return }
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
+            modules: startupInstalledModules()
+        )
+        guard evaluation.didEvaluateInventory else { return }
+        startupDownloadPromptReason = evaluation.promptReason
+        if evaluation.promptReason == nil, activeReaderDestination == .startupDocumentSetup {
+            activeReaderDestination = nil
         }
     }
 
@@ -3523,20 +3572,22 @@ public struct BibleReaderView: View {
 
      Android's `DocumentControl.suggestedBible` returns the active window's current Bible document
      when Bible is not the visible document type. iOS stores that same pane-scoped choice on
-     `PageManager.bibleDocument`; if it is absent or no longer installed, the installed Bible list
-     provides the same default fallback established when the reader is initialized.
+     `PageManager.bibleDocument`; if it is absent, locked, or no longer installed, the readable
+     Bible list provides the same default fallback established when the reader is initialized.
 
      - Parameter controller: Pane controller that owns the toolbar action.
-     - Returns: Installed Bible module abbreviation to show, or `nil` when no Bible module exists.
-     - Side effects: none.
-     - Failure modes: returns `nil` when the pane has no installed Bible modules.
+     - Returns: Readable Bible module abbreviation to show, or `nil` when no readable Bible exists.
+     - Side effects: Reads fresh native module access state through the controller.
+     - Failure modes: Returns `nil` when the pane has no readable Bible modules; the saved locked
+       identity remains unchanged for a future app-owned unlock workflow.
      */
     private func suggestedBibleDocumentName(for controller: BibleReaderController) -> String? {
+        let readableModules = controller.readableBibleModules
         if let saved = controller.activeWindow?.pageManager?.bibleDocument,
-           controller.installedBibleModules.contains(where: { $0.name == saved }) {
+           readableModules.contains(where: { $0.name == saved }) {
             return saved
         }
-        return controller.installedBibleModules.first?.name
+        return readableModules.first?.name
     }
 
     /**
@@ -3753,29 +3804,41 @@ public struct BibleReaderView: View {
     /**
      Shows the startup document-setup prompt once when setup requires user attention.
 
-     Android `StartupActivity` stops on its first-download layout whenever `SwordDocumentFacade`
-     has no Bibles. iOS mirrors that predicate directly and does not create a separate bundled-KJV
-     fallback or first-run marker path.
+     Android `StartupActivity` stops on its first-download layout whenever no readable Bible remains
+     after its locked-document unlock queue. iOS classifies empty and locked-only inventory
+     separately so locked startup first snapshots and presents the same complete sequential queue,
+     without introducing a bundled-KJV fallback or first-run marker path.
 
-     Side effects:
-     - reads installed modules through the focused controller or a temporary `SwordManager`
-     - mutates `didEvaluateStartupDownloadPrompt` and `startupDownloadPromptReason`
-
-     Failure modes:
-     - if installed-module inventory is unavailable, evaluation remains pending for a later
-       controller-registration pass
+     - Side effects:
+       - reads installed modules through the focused controller or a temporary `SwordManager`
+       - mutates `didEvaluateStartupDownloadPrompt` and `startupDownloadPromptReason`
+     - Failure modes: If installed-module inventory is unavailable, evaluation remains pending for
+       a later controller-registration pass.
      */
     private func evaluateStartupDownloadPromptIfNeeded() {
         guard !didEvaluateStartupDownloadPrompt,
-              activeReaderDestination == nil else {
+              activeReaderDestination == nil,
+              startupLockedBibleUnlockRequest == nil else {
             return
         }
+        let manager = focusedController?.swordManager ?? SwordManager()
+        let installedModules = manager.map {
+            StartupDocumentSetupModuleInventory.modules(manager: $0)
+        } ?? focusedController?.installedBibleModules
         let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
-            hasNoBibleModules: startupHasNoBibleModules()
+            modules: installedModules
         )
         guard evaluation.didEvaluateInventory else { return }
         didEvaluateStartupDownloadPrompt = true
         let promptReason = evaluation.promptReason
+        if beginStartupLockedBibleUnlockQueueIfNeeded(
+            promptReason: promptReason,
+            manager: manager,
+            installedModules: installedModules ?? []
+        ) {
+            startupDownloadPromptReason = nil
+            return
+        }
         startupDownloadPromptReason = promptReason
         if promptReason != nil {
             presentReaderDestination(.startupDocumentSetup, from: windowManager.activeWindow?.id)
@@ -3783,33 +3846,136 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Re-runs the no-Bible startup prompt after Downloads closes.
+     Re-runs the startup prompt after Downloads or import closes.
 
      Android's `afterDownload()` returns to the first-download layout when the user leaves
      Downloads without installing a Bible. This mirrors that behavior without prompting again when a
-     Bible is now present.
+     readable Bible is now present; locked-only inventory starts the same automatic queue before
+     setup is allowed to reappear.
 
-     Side effects:
-     - may reset the startup-prompt guard
-     - may show the required no-Bible startup prompt again
-
-     Failure modes:
-     - if installed-module inventory is unavailable, evaluation remains pending
+     - Side effects:
+       - may reset the startup-prompt guard
+       - may show the required no-Bible or locked-only startup prompt again
+     - Failure modes: If installed-module inventory is unavailable, evaluation remains pending.
      */
     private func reevaluateStartupDownloadPromptAfterDownloads() {
-        guard let hasNoBibleModules = startupHasNoBibleModules() else {
+        guard startupLockedBibleUnlockRequest == nil else { return }
+        let manager = focusedController?.swordManager ?? SwordManager()
+        let installedModules = manager.map {
+            StartupDocumentSetupModuleInventory.modules(manager: $0)
+        } ?? focusedController?.installedBibleModules
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
+            modules: installedModules
+        )
+        guard evaluation.didEvaluateInventory else {
             didEvaluateStartupDownloadPrompt = false
             return
         }
-        guard hasNoBibleModules else {
+        didEvaluateStartupDownloadPrompt = true
+        let promptReason = evaluation.promptReason
+        if beginStartupLockedBibleUnlockQueueIfNeeded(
+            promptReason: promptReason,
+            manager: manager,
+            installedModules: installedModules ?? []
+        ) {
             startupDownloadPromptReason = nil
             if activeReaderDestination == .startupDocumentSetup {
                 activeReaderDestination = nil
             }
             return
         }
-        didEvaluateStartupDownloadPrompt = false
-        evaluateStartupDownloadPromptIfNeeded()
+        startupDownloadPromptReason = promptReason
+        guard promptReason != nil else {
+            if activeReaderDestination == .startupDocumentSetup {
+                activeReaderDestination = nil
+            }
+            return
+        }
+        if activeReaderDestination == nil {
+            presentReaderDestination(.startupDocumentSetup, from: windowManager.activeWindow?.id)
+        }
+    }
+
+    /**
+     Starts Android's automatic locked-only passphrase queue from one resolved startup snapshot.
+
+     - Parameters:
+       - promptReason: Fresh startup policy result for the inclusive snapshot.
+       - manager: Manager that produced native access state and will validate queued credentials.
+       - installedModules: Inclusive native-plus-SQLite snapshot in installed registration order.
+     - Returns: `true` only when a non-empty locked-Bible queue was retained for presentation.
+     - Side effects: Assigns `startupLockedBibleUnlockRequest`; it does not change navigation,
+       select a document, refresh controllers, or re-read inventory.
+     - Failure modes: Non-locked reasons, unavailable managers, and inconsistent empty locked
+       snapshots return `false`, allowing the caller's existing fail-closed setup route to continue.
+     */
+    private func beginStartupLockedBibleUnlockQueueIfNeeded(
+        promptReason: StartupDocumentSetupPromptPolicy.PromptReason?,
+        manager: SwordManager?,
+        installedModules: [ModuleInfo]
+    ) -> Bool {
+        guard promptReason == .lockedBibleModules,
+              let manager,
+              !StartupLockedBibleUnlockQueue.lockedBibleModules(
+                in: installedModules
+              ).isEmpty else {
+            return false
+        }
+        startupLockedBibleUnlockRequest = StartupLockedBibleUnlockRequest(
+            manager: manager,
+            installedModules: installedModules
+        )
+        return true
+    }
+
+    /**
+     Finishes the full initial queue with exactly one fresh readability reconciliation.
+
+     Android continues through every locked Bible even after a successful credential. Only after
+     that immutable queue is exhausted does startup ask the installed registry whether any Bible is
+     readable. iOS first rebuilds open reader managers so persisted accepted keys become available,
+     then evaluates one fresh native-plus-SQLite snapshot without selecting any queued module.
+
+     - Parameter request: Queue request whose identity and manager own this completion callback.
+     - Side effects:
+       - dismisses the queue and refreshes every open reader controller once
+       - clears startup setup and enters the existing reader state when any Bible is readable
+       - otherwise presents the existing blocking setup route with the fresh reason
+     - Failure modes: Stale callbacks are ignored by request identity. If a refreshed controller
+       manager is unavailable, a new manager at the request path is attempted before falling back to
+       the retained session manager; unresolved inventory fails closed through policy evaluation.
+     */
+    private func completeStartupLockedBibleUnlockQueue(
+        _ request: StartupLockedBibleUnlockRequest
+    ) {
+        guard startupLockedBibleUnlockRequest?.id == request.id else { return }
+        startupLockedBibleUnlockRequest = nil
+
+        for (_, ctrl) in windowManager.controllers {
+            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+        }
+
+        let reconciliationManager = focusedController?.swordManager
+            ?? SwordManager(modulePath: request.manager.modulePath)
+            ?? request.manager
+        let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
+            modules: StartupDocumentSetupModuleInventory.modules(
+                manager: reconciliationManager
+            )
+        )
+        didEvaluateStartupDownloadPrompt = true
+        startupDownloadPromptReason = evaluation.promptReason
+
+        guard evaluation.promptReason != nil else {
+            readerDestinationBackStack.removeAll()
+            if activeReaderDestination == .startupDocumentSetup {
+                activeReaderDestination = nil
+            }
+            return
+        }
+        if activeReaderDestination == nil {
+            presentReaderDestination(.startupDocumentSetup, from: windowManager.activeWindow?.id)
+        }
     }
 
     /**
@@ -3841,39 +4007,22 @@ public struct BibleReaderView: View {
     /**
      Returns the current local module inventory used for startup setup decisions.
 
-     - Returns: Focused-controller `SwordManager` modules when available, temporary
-       `SwordManager` modules otherwise, or the focused controller's Bible cache as a final
-       fallback when module discovery fails.
-     - Side effects: May create a temporary `SwordManager` if the focused controller has not
-       registered yet.
+     - Returns: Fresh native modules plus validated, unshadowed Android SQLite Bibles from the
+       focused controller's module root, the default root otherwise, or the focused controller's
+       Bible cache as a final fallback when manager creation fails.
+     - Side effects: May create a temporary `SwordManager`; resolved managers enumerate and validate
+       ordinary SQLite Bible files read-only through the shared startup inventory boundary.
      - Failure modes: Returns `nil` if no focused controller exists and `SwordManager` creation
        fails.
      */
     private func startupInstalledModules() -> [ModuleInfo]? {
         if let manager = focusedController?.swordManager {
-            return manager.installedModules()
+            return StartupDocumentSetupModuleInventory.modules(manager: manager)
         }
         if let manager = SwordManager() {
-            return manager.installedModules()
+            return StartupDocumentSetupModuleInventory.modules(manager: manager)
         }
         return focusedController?.installedBibleModules
-    }
-
-    /**
-     Tests whether the current local module store lacks installed Bible modules.
-
-     - Returns: `true` when resolved inventory has no installed Bible module, `false` when it has
-       at least one Bible module, or `nil` when inventory cannot be resolved yet.
-     - Side effects: may create a temporary `SwordManager` if the focused controller has not
-       registered yet.
-     - Failure modes: returns `nil` if `SwordManager` creation fails and no focused-controller
-       cache is available.
-     */
-    private func startupHasNoBibleModules() -> Bool? {
-        guard let modules = startupInstalledModules() else {
-            return nil
-        }
-        return !modules.contains { $0.category == .bible }
     }
 
     /// Loads persisted display, behavior, and fullscreen preferences used by the reader shell.
@@ -5549,16 +5698,17 @@ public struct BibleReaderView: View {
     /**
      Handles the Android `menuForDocs` Bible action.
 
-     When exactly two Bible modules are installed, this mirrors Android's auto-cycle shortcut.
-     Every other non-empty module list shows the compact anchored popup instead of the full document
-     picker sheet.
+     When exactly two readable Bible modules are installed, this mirrors Android's auto-cycle
+     shortcut over `SwordDocumentFacade.unlockedBibles`. Every other non-empty readable list shows
+     the compact anchored popup; the full document picker remains inclusive so locked rows can use
+     its passphrase workflow.
 
      - Parameter controller: Focused pane controller, if one is currently registered.
      */
     private func performBibleMenuAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         switch BibleReaderQuickModuleSelectorPresentation.action(
-            for: controller.installedBibleModules,
+            for: controller.readableBibleModules,
             activeModuleName: currentBibleQuickSelectorModuleName(for: controller)
         ) {
         case .none:
@@ -5580,9 +5730,13 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Cycles to the next Bible module or switches back into Bible mode.
+     Cycles to the next readable Bible module or switches back into Bible mode.
 
      - Parameter controller: Focused pane controller, if one is currently registered.
+     - Side effects: Reads fresh native module access state and switches through the shared
+       controller preflight when a readable candidate exists.
+     - Failure modes: Locked-only inventories perform no switch; their inclusive rows remain in the
+       full picker for the existing unlock workflow.
      */
     private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
@@ -5592,7 +5746,7 @@ public struct BibleReaderView: View {
             return
         }
         cycleToNextModule(
-            modules: controller.installedBibleModules,
+            modules: controller.readableBibleModules,
             activeName: controller.activeModuleName
         ) { nextName in
             controller.switchBibleDocument(to: nextName)

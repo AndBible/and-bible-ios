@@ -23,10 +23,39 @@ struct BibleChapterDocumentBuilder {
         let addChapter: Bool
     }
 
-    private struct VerseEntry {
+    /**
+     Stores one exact native verse before chapter-level OSIS reconstruction.
+
+     Entries are immutable, ordered by the caller, and retain source XML without trimming so the
+     shared projector can preserve Android-significant edge whitespace. Construction performs no
+     I/O and cannot fail; `buildVerseChunkXML` owns structural repair and wrapper emission.
+     */
+    struct VerseEntry {
+        /// One-based source verse number used by the synthetic OSIS wrapper.
         let verse: Int
+
+        /// Active-versification ordinal emitted for Android-compatible reader navigation.
         let ordinal: Int
+
+        /// Exact native OSIS entry supplied to the shared structural projection boundary.
         let xml: String
+
+        /**
+         Creates one immutable captured verse for reconstruction and focused contract tests.
+
+         - Parameters:
+           - verse: One-based source verse number.
+           - ordinal: Active-versification ordinal used by reader navigation.
+           - xml: Exact native OSIS fragment, including meaningful edge whitespace.
+         - Side effects: None.
+         - Failure modes: Inputs are retained verbatim; the later projection boundary handles
+           malformed XML without throwing.
+         */
+        init(verse: Int, ordinal: Int, xml: String) {
+            self.verse = verse
+            self.ordinal = ordinal
+            self.xml = xml
+        }
     }
 
     let module: SwordModule
@@ -189,16 +218,45 @@ struct BibleChapterDocumentBuilder {
                                          verseChunk: inout [VerseEntry],
                                          xmlParts: inout [String]) {
         guard !verseChunk.isEmpty else { return }
-        appendOsisContent(buildVerseChunkXML(osisBookId: osisBookId, chapter: chapter, verses: verseChunk), to: &xmlParts)
+        appendOsisContent(
+            Self.buildVerseChunkXML(
+                osisBookId: osisBookId,
+                chapter: chapter,
+                verses: verseChunk
+            ),
+            to: &xmlParts
+        )
         verseChunk.removeAll(keepingCapacity: true)
     }
 
-    private func buildVerseChunkXML(osisBookId: String, chapter: Int, verses: [VerseEntry]) -> String {
+    /**
+     Builds one structurally projected run of native SWORD verse entries.
+
+     - Parameters:
+       - osisBookId: Canonical OSIS book identifier shared by the chunk.
+       - chapter: One-based chapter number shared by the chunk.
+       - verses: Ordered exact raw entries with their source verse/ordinal identities.
+     - Returns: One wrapper containing chapter-level preambles and synthetic verse elements.
+     - Side effects: Parses each bounded verse fragment in memory.
+     - Failure modes: The shared projection preserves malformed input in the verse body; no caller
+       pre-trim may discard Java-significant NBSP before that compatibility boundary.
+     */
+    static func buildVerseChunkXML(
+        osisBookId: String,
+        chapter: Int,
+        verses: [VerseEntry]
+    ) -> String {
         var xml = "<div>"
         for verse in verses {
-            let cleanText = verse.xml.trimmingCharacters(in: .whitespacesAndNewlines)
-            let projection = SwordVerseOSISProjection.project(cleanText)
+            let projection = SwordVerseOSISProjection.project(
+                verse.xml,
+                verseOrdinal: verse.ordinal
+            )
             xml += projection.preVerseXML
+            if projection.isAlreadyWrapped {
+                xml += projection.verseBodyXML
+                continue
+            }
             xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verse.verse)\" verseOrdinal=\"\(verse.ordinal)\">"
             xml += "\(projection.verseBodyXML) "
             xml += "</verse>"

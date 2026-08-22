@@ -99,6 +99,87 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(service.currentPosition?.osisRef, "Gen.1.2")
     }
 
+    /**
+     Rejects a persisted Bible speech checkpoint when its source becomes locked before restore.
+
+     - Setup: Builds a real readable provider/checkpoint, then marks the same installed alias locked
+       and reconstructs through a fresh manager and reader controller.
+     - Expected result: Readable resolution succeeds before relock; both the shared source resolver
+       and controller reconstruction fail closed afterward without borrowing active KJV content.
+     - Failure meaning: Remote Play or paused-session restore can enumerate and speak a cached native
+       handle after the source's content authorization has been revoked.
+     - Side effects: Rewrites only an inherited temporary fixture descriptor.
+     */
+    @MainActor
+    func testPersistedBibleSpeechCheckpointFailsAfterSourceRelock() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleName = "SpeechRelock"
+        try seedBibleAliasModule(
+            named: moduleName,
+            description: "Speech relock Bible",
+            in: modulePath
+        )
+        let readableManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let readableModule = try XCTUnwrap(readableManager.readableModule(named: moduleName))
+        let ordinal = try XCTUnwrap(readableModule.verseOrdinal(
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 1
+        ))
+        let build = try BibleReaderSpeechProviderFactory.bible(
+            request: SpeakSelectionRequest(
+                category: .bible,
+                bookInitials: moduleName,
+                key: "Gen.1.1",
+                startOrdinal: ordinal,
+                endOrdinal: ordinal,
+                versification: "KJV"
+            ),
+            manager: readableManager,
+            displaySettings: TextDisplaySettings(),
+            advancedSettings: AdvancedSpeakSettings()
+        )
+        let checkpoint = try XCTUnwrap(build.provider.checkpoint())
+        XCTAssertEqual(
+            try BibleSpeakSourceResolver.resolve(
+                checkpoint: checkpoint,
+                manager: readableManager
+            ).module.info.name,
+            moduleName
+        )
+
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        let moduleCacheURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/modules-conf.cache")
+        if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
+            try FileManager.default.removeItem(at: moduleCacheURL)
+        }
+        let lockedManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNil(lockedManager.readableModule(named: moduleName))
+        XCTAssertThrowsError(try BibleSpeakSourceResolver.resolve(
+            checkpoint: checkpoint,
+            manager: lockedManager
+        )) { error in
+            XCTAssertEqual(
+                error as? BibleSpeakSourceResolutionError,
+                .moduleUnavailable(moduleName)
+            )
+        }
+
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: lockedManager
+        )
+        XCTAssertNil(controller.reconstructSpeechSession(
+            from: checkpoint,
+            service: makeSpeechService()
+        ))
+    }
+
     /** Verifies typed native selection routing, atomic metadata, and stale-session rejection. */
     @MainActor
     func testNativeSelectionRoutesMyDocumentAndRejectsPartialOrStaleIdentity() throws {
@@ -467,6 +548,134 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         XCTAssertNil(controller.activeGeneralBookModuleName)
     }
 
+    /**
+     Routes readable generic SWORD speech and rejects a sibling locked source before provider build.
+
+     - Setup: Installs one readable and one plaintext-but-locked RawLD dictionary, starts speech from
+       the readable entry, then requests the locked entry through the same bridge route.
+     - Expected result: Readable speech owns the dictionary identity and cursor; the locked request
+       creates no provider, performs no replacement speech, and leaves the active generation intact.
+     - Failure meaning: Generic bridge, checkpoint, or bookmark speech can read an inclusive native
+       handle after its content credentials are unavailable.
+     - Side effects: Writes only inherited temporary SWORD fixtures and records synthetic speech.
+     */
+    @MainActor
+    func testGenericSwordSpeechRequiresFreshReadableSource() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeSpeechRawLDModule(
+            named: "SpeechReadable",
+            entryKey: "ENTRY",
+            xml: "<div><p>Readable generic speech.</p></div>",
+            in: modulePath
+        )
+        try writeSpeechRawLDModule(
+            named: "SpeechLocked",
+            entryKey: "ENTRY",
+            xml: "<div><p>Locked generic speech must not play.</p></div>",
+            in: modulePath,
+            locked: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNotNil(manager.module(named: "SpeechLocked"))
+        XCTAssertNil(manager.readableModule(named: "SpeechLocked"))
+        let controller = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        let service = makeSpeechService()
+        controller.speakService = service
+
+        controller.bridge(
+            controller.bridge,
+            speakGeneric: "SpeechReadable",
+            osisRef: "ENTRY",
+            startOrdinal: 0,
+            endOrdinal: 0
+        )
+        XCTAssertEqual(service.activeProviderCategory, .dictionary)
+        XCTAssertEqual(service.currentPosition?.bookInitials, "SpeechReadable")
+        XCTAssertEqual(service.currentPosition?.key, "ENTRY")
+        let readableGeneration = service.currentSessionGeneration
+
+        controller.bridge(
+            controller.bridge,
+            speakGeneric: "SpeechLocked",
+            osisRef: "ENTRY",
+            startOrdinal: 0,
+            endOrdinal: 0
+        )
+        XCTAssertEqual(service.currentSessionGeneration, readableGeneration)
+        XCTAssertEqual(service.activeProviderCategory, .dictionary)
+        XCTAssertEqual(service.currentPosition?.bookInitials, "SpeechReadable")
+        XCTAssertEqual(service.currentPosition?.key, "ENTRY")
+    }
+
+    /**
+     Preserves locked native speech ownership over a colliding My Documents identity.
+
+     - Setup: Installs a locked RawLD dictionary and a readable My Documents page with the same
+       initials/key, while retaining a known readable SWORD speech session as mutation baseline.
+     - Expected result: The native registration blocks local-document/EPUB fallback and the bridge
+       leaves provider generation, category, and cursor unchanged.
+     - Failure meaning: Locking a native book can redirect persisted Speak content to a different
+       backend that happens to reuse its initials.
+     - Side effects: Writes an inherited temporary module and an in-memory SwiftData document.
+     */
+    @MainActor
+    func testLockedNativeGenericSpeechDoesNotFallThroughToMyDocument() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeSpeechRawLDModule(
+            named: "SpeechBaseline",
+            entryKey: "ENTRY",
+            xml: "<div><p>Baseline speech.</p></div>",
+            in: modulePath
+        )
+        try writeSpeechRawLDModule(
+            named: "SpeechCollision",
+            entryKey: "ENTRY",
+            xml: "<div><p>Locked native collision.</p></div>",
+            in: modulePath,
+            locked: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let document = MyDocument(name: "Speech Collision", initials: "SpeechCollision")
+        let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
+        let content = MyDocumentPageContent(pageId: page.id, content: "Local collision speech")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        let controller = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        let service = makeSpeechService()
+        controller.speakService = service
+        controller.bridge(
+            controller.bridge,
+            speakGeneric: "SpeechBaseline",
+            osisRef: "ENTRY",
+            startOrdinal: 0,
+            endOrdinal: 0
+        )
+        let baselineGeneration = service.currentSessionGeneration
+        XCTAssertEqual(service.currentPosition?.bookInitials, "SpeechBaseline")
+
+        controller.bridge(
+            controller.bridge,
+            speakGeneric: "SpeechCollision",
+            osisRef: "ENTRY",
+            startOrdinal: 0,
+            endOrdinal: 0
+        )
+
+        XCTAssertEqual(service.currentSessionGeneration, baselineGeneration)
+        XCTAssertEqual(service.activeProviderCategory, .dictionary)
+        XCTAssertEqual(service.currentPosition?.bookInitials, "SpeechBaseline")
+        XCTAssertEqual(service.currentPosition?.key, "ENTRY")
+    }
+
     /** Verifies a MyDocument process checkpoint retains exact page and local ordinal identity. */
     @MainActor
     func testMyDocumentCheckpointReconstructsExactGenericCursor() throws {
@@ -567,6 +776,76 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
             .appendingPathComponent("mods.d", isDirectory: true)
             .appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false)
         try conf.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+/** Errors raised while writing test-only generic speech fixtures. */
+private enum SpeechRoutingFixtureError: Error {
+    /// RawLD index widths cannot represent the generated record.
+    case recordTooLarge
+}
+
+/**
+ Writes one exact RawLD entry for generic speech authorization tests.
+
+ - Parameters:
+   - moduleName: Stable module initials.
+   - entryKey: Exact lexical entry key.
+   - xml: Structural entry body consumed by the generic speech projector.
+   - modulePath: Existing inherited temporary SWORD root.
+   - locked: Whether the descriptor should expose installed ownership without readable access.
+ - Side effects: Writes one descriptor plus RawLD data/index files under the temporary root.
+ - Failure modes: Propagates filesystem errors and rejects records outside RawLD index widths.
+ */
+private func writeSpeechRawLDModule(
+    named moduleName: String,
+    entryKey: String,
+    xml: String,
+    in modulePath: String,
+    locked: Bool = false
+) throws {
+    let moduleKey = moduleName.lowercased()
+    let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+    let dataDirectory = moduleRoot.appendingPathComponent(
+        "modules/lexdict/rawld/\(moduleKey)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+    let record = Data("\(entryKey)\r\n\(xml)".utf8)
+    guard record.count <= Int(UInt16.max) else {
+        throw SpeechRoutingFixtureError.recordTooLarge
+    }
+    var data = record
+    data.append(0x0A)
+    try data.write(to: dataDirectory.appendingPathComponent("\(moduleKey).dat"))
+    var index = Data()
+    index.appendSpeechRoutingLittleEndian(UInt32(0))
+    index.appendSpeechRoutingLittleEndian(UInt16(record.count))
+    try index.write(to: dataDirectory.appendingPathComponent("\(moduleKey).idx"))
+    let cipherLine = locked ? "CipherKey=" : ""
+    try """
+    [\(moduleName)]
+    Description=Speech Routing Dictionary
+    Abbreviation=\(moduleName)
+    Category=Lexicons / Dictionaries
+    DataPath=./modules/lexdict/rawld/\(moduleKey)/\(moduleKey)
+    ModDrv=RawLD
+    SourceType=OSIS
+    Encoding=UTF-8
+    Lang=en
+    \(cipherLine)
+    """.write(
+        to: moduleRoot.appendingPathComponent("mods.d/\(moduleKey).conf"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private extension Data {
+    /** Appends one RawLD speech-fixture integer in little-endian order. */
+    mutating func appendSpeechRoutingLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
     }
 }
 

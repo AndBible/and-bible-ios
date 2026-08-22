@@ -97,7 +97,7 @@ public enum SwordOSISFragmentProcessor {
      - Failure modes: None; malformed XML outside JSword's exact `MapM` workaround is left for the
        parser to reject explicitly.
      */
-    private static func androidSourceRepair(
+    static func androidSourceRepair(
         _ sourceXML: String,
         moduleInitials: String?
     ) -> String {

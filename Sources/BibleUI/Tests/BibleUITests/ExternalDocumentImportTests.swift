@@ -364,18 +364,42 @@ final class ExternalDocumentImportTests: XCTestCase {
     }
 
     /**
+     Creates an isolated ordinary-ZIP input that cannot inherit archive contents from another test.
+
+     - Parameter label: Human-readable scenario prefix used only in the temporary filename.
+     - Returns: A unique `.zip` URL whose path does not exist when returned.
+     - Side effects: Reads filesystem existence once for the XCTest invariant; it creates no file.
+     - Failure modes: Records an XCTest failure if a UUID collision unexpectedly resolves to an
+       existing path, because default archive detectors would then observe unowned input.
+     - Note: UUID uniqueness keeps parallel and repeated suite runs independent without cleanup.
+     */
+    private func makeUniqueNonexistentZIPURL(label: String) -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(label)-\(UUID().uuidString)")
+            .appendingPathExtension("zip")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: url.path),
+            "Expected an unowned ZIP fixture path."
+        )
+        return url
+    }
+
+    /**
      ZIP files are Android's SWORD module package path and must call only the module installer.
 
-     Android reports successful `InstallZip` work through the generic `install_zip_successfull`
-     short toast, not through a blocking module-specific alert. Failure indicates that Files/Mail
-     opens could drift from the Backup & Restore document import behavior, that arbitrary ZIP
-     handling stopped using the SWORD repository path, or that iOS reintroduced an install-success
-     presentation that does not match Android.
+     - Setup: Uses a unique nonexistent temporary ZIP URL so the production default archive
+       detectors classify only this test input and cannot consume a real archive left in shared
+       `/tmp` by another suite.
+     - Expected result: Android's SWORD module installer alone receives the URL and reports the
+       generic `install_zip_successfull` short-toast contract.
+     - Failure meaning: Files/Mail routing drifted from Backup & Restore, arbitrary ZIP handling no
+       longer uses the SWORD repository path, or the test again depends on shared filesystem state.
+     - Side effects: None; the unique URL is never created and the installers are in-memory probes.
      */
     func testExternalDocumentImportZipUsesModuleInstaller() {
         let probe = ExternalDocumentImportProbe()
         let service = makeExternalDocumentImportService(probe: probe)
-        let url = URL(fileURLWithPath: "/tmp/FinRK.zip")
+        let url = makeUniqueNonexistentZIPURL(label: "ordinary-sword-module")
 
         let result = service.importDocument(at: url)
 
@@ -1016,8 +1040,12 @@ final class ExternalDocumentImportTests: XCTestCase {
     /**
      ZIP archive classification is cached during a single module-install attempt.
 
-     The default detector reads archive metadata from disk. A failed SWORD install must not trigger a
-     second identical ZIP scan before returning the module installer error.
+     - Setup: Uses an isolated nonexistent ZIP, a rejecting module installer, and an instrumented
+       non-EPUB detector so a real shared Android backup cannot intercept the request.
+     - Expected result: The module error is returned and archive classification runs exactly once.
+     - Failure meaning: A failed SWORD install rescans the same ZIP, falls through to EPUB, or the
+       test has regained shared-filesystem dependence.
+     - Side effects: None; the unique URL is never created and all collaborators are in-memory.
      */
     func testExternalDocumentImportZipModuleFailureDoesNotReinspectArchive() {
         let probe = ExternalDocumentImportProbe()
@@ -1028,7 +1056,9 @@ final class ExternalDocumentImportTests: XCTestCase {
             epubArchiveDetector: { url in probe.detectNonEpubArchive(url) }
         )
 
-        let result = service.importDocument(at: URL(fileURLWithPath: "/tmp/FinRK.zip"))
+        let result = service.importDocument(
+            at: makeUniqueNonexistentZIPURL(label: "rejected-sword-module")
+        )
 
         XCTAssertEqual(result, .failed(message: "installer rejected file"))
         XCTAssertFalse(result.usesAndroidInstallToastFeedback)
@@ -1039,14 +1069,20 @@ final class ExternalDocumentImportTests: XCTestCase {
     /**
      Multiple import requests are processed in Android `ACTION_SEND_MULTIPLE` order.
 
-     Failure indicates that a multi-file share/open flow could reorder side effects or stop after
-     the first handled file.
+     - Setup: Starts with an isolated nonexistent ordinary ZIP, followed by font and EPUB requests,
+       so a shared Android backup archive cannot take ownership of the first item.
+     - Expected result: Module, font, and EPUB installers run once in request order.
+     - Failure meaning: A multi-file share/open flow reorders side effects, stops after the first
+       handled file, or depends on unrelated temporary archive contents.
+     - Side effects: None; the unique ZIP is never created and installers are in-memory probes.
      */
     func testExternalDocumentImportMultipleDocumentsPreservesOrder() {
         let probe = ExternalDocumentImportProbe()
         let service = makeExternalDocumentImportService(probe: probe)
         let requests = [
-            ExternalDocumentImportRequest(url: URL(fileURLWithPath: "/tmp/FinRK.zip")),
+            ExternalDocumentImportRequest(
+                url: makeUniqueNonexistentZIPURL(label: "shared-ordinary-sword-module")
+            ),
             ExternalDocumentImportRequest(url: URL(fileURLWithPath: "/tmp/custom.ttf")),
             ExternalDocumentImportRequest(url: URL(fileURLWithPath: "/tmp/StudyNotes.epub")),
         ]
