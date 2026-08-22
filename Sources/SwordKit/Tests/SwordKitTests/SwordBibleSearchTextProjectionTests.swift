@@ -459,6 +459,31 @@ final class SwordBibleSearchTextProjectionTests: XCTestCase {
     }
 
     /**
+     Verifies the public reader boundary repairs NETtext's split chapter-section entries.
+
+     - Setup: Supplies the independently malformed verse-zero opener and last-verse terminal close
+       used by the installed NETtext Daniel chapter that reproduced issue 389.
+     - Expected result: The opener is balanced inside its entry and the orphan terminal close is
+       removed while visible last-verse prose remains, matching pinned JSword `OSISFilter`.
+     - Failure meaning: Search may stay safe through its private parser while the native reader
+       still emits a malformed Vue template and displays a blank chapter.
+     - Side effects: Performs two bounded in-memory source repairs.
+     */
+    func testPublicSourceCompatibilityRepairsSplitNETtextSectionEntries() {
+        let opener = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+            "<div type=\"section\" scope=\"Dan.1\">",
+            moduleInitials: "NETtext"
+        )
+        let terminal = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+            "Last verse</div>",
+            moduleInitials: "NETtext"
+        )
+
+        XCTAssertEqual(opener, "<div scope=\"Dan.1\" type=\"section\"/>")
+        XCTAssertEqual(terminal, "Last verse")
+    }
+
+    /**
      Ensures a repairable malformed annotation remains a verse without leaking its note text.
 
      - Setup: Supplies an unclosed OSIS note matching the native SWORD adapter regression fixture.

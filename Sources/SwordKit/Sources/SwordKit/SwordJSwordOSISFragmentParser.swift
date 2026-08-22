@@ -3,6 +3,39 @@
 import Foundation
 
 /**
+ Exposes pinned JSword's source-level OSIS repair as a backend-neutral string contract.
+
+ SWORD stores some historical modules with entry-local markup that is not independently balanced,
+ including `NETtext` chapter-section openers in verse zero and terminal closes in the last verse.
+ Android runs every entry through `OSISFilter` before `SwordBook.addOSIS`; reader, Search, and other
+ iOS consumers must share that same boundary instead of passing malformed source to Vue or inventing
+ a rendered-text fallback.
+ */
+public enum SwordJSwordOSISSourceCompatibility {
+    /**
+     Repairs and serializes one raw OSIS entry through the pinned JSword filter ladder.
+
+     - Parameters:
+       - sourceXML: Exact source-level OSIS entry returned by a native or SQLite backend.
+       - moduleInitials: Exact installed initials controlling JSword's module-specific repair.
+     - Returns: Structurally valid child XML in original node order, or an empty string when every
+       pinned repair stage rejects the entry.
+     - Side effects: Performs bounded in-memory XML parsing with external entities disabled.
+     - Failure modes: Never throws and never substitutes stripped/rendered text; irreparable source
+       returns an empty string exactly like JSword's empty fallback paragraph content.
+     */
+    public static func repairedSourceXML(
+        _ sourceXML: String,
+        moduleInitials: String? = nil
+    ) -> String {
+        SwordJSwordOSISFragmentParser.parse(
+            sourceXML,
+            moduleInitials: moduleInitials
+        ).children.map { $0.serializedXML() }.joined()
+    }
+}
+
+/**
  Parses source-level OSIS fragments with the repair ladder used by AndBible's pinned JSword.
 
  `OSISFilter` first applies its exact MapM structural workaround, parses the fragment, then retries

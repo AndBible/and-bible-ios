@@ -7,9 +7,10 @@ private let chapterBuilderLogger = Logger(subsystem: "org.andbible", category: "
 /**
  Reconstructs one Bible chapter OSIS payload from a SWORD verse-key module.
 
- Android reads a whole OSIS fragment for a rendered chapter range. iOS does not currently expose the
- same low-level SWORD fragment API, so this builder centralizes the best available approximation:
- preserve verse-level raw OSIS, stitch in verse-0 intro material when enabled, and insert a real
+ Android filters every raw key through JSword `OSISFilter`, applies `SwordBook.addOSIS`, and then
+ aggregates the repaired entries for a rendered chapter range. iOS does not expose that range API,
+ so this builder owns the equivalent sequence: apply the pinned repair ladder per entry, project
+ verse/pre-verse ownership, stitch in verse-0 intro material when enabled, and insert a real
  `<chapter>` marker when the source fragment does not already provide one.
 
  The raw OSIS stream is the authoritative source for headings. Some modules surface the same heading
@@ -182,6 +183,20 @@ struct BibleChapterDocumentBuilder {
         )
     }
 
+    /**
+     Loads and repairs one exact verse-zero introduction through JSword's source filter boundary.
+
+     - Parameters:
+       - osisBookId: Exact OSIS book identifier used to position and validate the native cursor.
+       - chapter: Chapter component of the requested introduction key.
+       - verse: Verse component, normally zero for book/chapter pre-verse material.
+     - Returns: One structurally valid wrapper around repaired source children, or nil when the key
+       is absent, its raw entry is empty, or every pinned repair stage rejects the entry.
+     - Side effects: Moves the shared native module cursor to the requested exact key and parses one
+       bounded source fragment in memory.
+     - Failure modes: Never substitutes stripped/rendered text; invalid or irreparable source is
+       omitted so it cannot invalidate the complete Vue chapter template.
+     */
     private func rawEntryFragment(osisBookId: String, chapter: Int, verse: Int) -> String? {
         module.setKey("=\(osisBookId).\(chapter).\(verse)")
         guard let key = module.currentVerseKeyChildren(),
@@ -191,9 +206,14 @@ struct BibleChapterDocumentBuilder {
             return nil
         }
 
-        let raw = module.rawEntry().trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = module.rawEntry()
         guard !raw.isEmpty else { return nil }
-        return normalizedOsisSegment(raw)
+        let repaired = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+            raw,
+            moduleInitials: module.info.name
+        )
+        guard !repaired.isEmpty else { return nil }
+        return "<div>\(repaired)</div>"
     }
 
     private func osisFragmentBody(_ xml: String) -> String {
@@ -222,7 +242,8 @@ struct BibleChapterDocumentBuilder {
             Self.buildVerseChunkXML(
                 osisBookId: osisBookId,
                 chapter: chapter,
-                verses: verseChunk
+                verses: verseChunk,
+                moduleInitials: module.info.name
             ),
             to: &xmlParts
         )
@@ -236,20 +257,28 @@ struct BibleChapterDocumentBuilder {
        - osisBookId: Canonical OSIS book identifier shared by the chunk.
        - chapter: One-based chapter number shared by the chunk.
        - verses: Ordered exact raw entries with their source verse/ordinal identities.
+       - moduleInitials: Exact installed initials controlling pinned module-specific source repair.
      - Returns: One wrapper containing chapter-level preambles and synthetic verse elements.
      - Side effects: Parses each bounded verse fragment in memory.
-     - Failure modes: The shared projection preserves malformed input in the verse body; no caller
+     - Failure modes: Every raw entry first follows pinned JSword's structural repair ladder;
+       irreparable entries are omitted rather than emitting malformed Vue templates. No caller
        pre-trim may discard Java-significant NBSP before that compatibility boundary.
      */
     static func buildVerseChunkXML(
         osisBookId: String,
         chapter: Int,
-        verses: [VerseEntry]
+        verses: [VerseEntry],
+        moduleInitials: String? = nil
     ) -> String {
         var xml = "<div>"
         for verse in verses {
-            let projection = SwordVerseOSISProjection.project(
+            let repairedSource = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
                 verse.xml,
+                moduleInitials: moduleInitials
+            )
+            guard !repairedSource.isEmpty else { continue }
+            let projection = SwordVerseOSISProjection.project(
+                repairedSource,
                 verseOrdinal: verse.ordinal
             )
             xml += projection.preVerseXML
