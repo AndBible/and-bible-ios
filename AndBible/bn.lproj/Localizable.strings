@@ -1546,3 +1546,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "ফুলস্ক্রিন থেকে প্রস্থান করতে স্ক্রীনে ডবল-ট্যাপ করুন";
+
+/* Android shared translations */
+"try_again_passphrase" = "পাসফ্রেজ কাজ করেনি, আবার চেষ্টা করুন?";

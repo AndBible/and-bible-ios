@@ -1520,3 +1520,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dubbeltryck på skärmen för att avbryta helskärmsläge";
+
+/* Android shared translations */
+"try_again_passphrase" = "Lösenordsfras fungerade inte, försök igen?";

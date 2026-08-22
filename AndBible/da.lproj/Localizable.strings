@@ -1683,3 +1683,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dobbelttryk på skærmen for at afslutte fuldskærm";
+
+/* Android shared translations */
+"try_again_passphrase" = "Adgangskoden virkede ikke, prøv igen?";

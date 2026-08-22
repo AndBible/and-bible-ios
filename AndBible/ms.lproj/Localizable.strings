@@ -1685,3 +1685,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Ketuk dua kali skrin untuk keluar skrin penuh";
+
+/* Android shared translations */
+"try_again_passphrase" = "Kata laluan tidak berfungsi, cuba lagi?";

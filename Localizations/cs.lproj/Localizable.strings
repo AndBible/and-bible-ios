@@ -1522,3 +1522,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvojklik ukončí režim celé obrazovky";
+
+/* Android shared translations */
+"try_again_passphrase" = "Heslo je nefunkční, zkustt znovu?";

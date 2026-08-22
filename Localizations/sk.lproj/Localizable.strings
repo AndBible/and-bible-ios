@@ -1523,3 +1523,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvojitým klepnutím opustiť režim celej obrazovky";
+
+/* Android shared translations */
+"try_again_passphrase" = "Heslo nefungovalo, skúsiť znova?";

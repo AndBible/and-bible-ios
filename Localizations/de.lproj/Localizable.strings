@@ -1518,3 +1518,6 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 
 /* Android shared translations */
 "exit_fullscreen" = "Doppelt Antippen, um den Vollbildschirm zu verlassen";
+
+/* Android shared translations */
+"try_again_passphrase" = "Passwort fehlerhaft, neu probieren?";

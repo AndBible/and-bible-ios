@@ -1543,3 +1543,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "두 번 탭하여 전체 화면 종료";
+
+/* Android shared translations */
+"try_again_passphrase" = "비밀번호가 맞지 않습니다. 재시도해 보시겠어요?";

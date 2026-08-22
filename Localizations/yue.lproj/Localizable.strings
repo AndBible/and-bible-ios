@@ -972,3 +972,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "雙點以離開全螢幕模式";
+
+/* Android shared translations */
+"try_again_passphrase" = "密碼無效，要再試嗎？";

@@ -1693,3 +1693,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Nhấn đúp màn hình để thoát toàn màn hình";
+
+/* Android shared translations */
+"try_again_passphrase" = "Mật khẩu không đúng, thử lại?";

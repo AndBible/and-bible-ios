@@ -1547,3 +1547,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Duoble frapetu por eliri plenekranan reĝimon";
+
+/* Android shared translations */
+"try_again_passphrase" = "Erara pasvorto; ĉu reprovi?";

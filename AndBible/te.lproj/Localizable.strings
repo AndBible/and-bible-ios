@@ -1548,3 +1548,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "పూర్తి స్క్రీన్ నుండి నిష్క్రమించడానికి స్క్రీన్‌పై రెండుసార్లు నొక్కండి";
+
+/* Android shared translations */
+"try_again_passphrase" = "పాస్‌ఫ్రేజ్ పని చేయలేదు, మళ్లీ ప్రయత్నించాలా?";

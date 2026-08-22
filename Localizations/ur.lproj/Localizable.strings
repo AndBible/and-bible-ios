@@ -1667,3 +1667,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "فل اسکرین سے باہر نکلنے کے لیے اسکرین ڈبل ٹیپ کریں";
+
+/* Android shared translations */
+"try_again_passphrase" = "پاس فریز کام نہیں کیا، دوبارہ کوشش کریں؟";

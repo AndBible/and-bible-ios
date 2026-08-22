@@ -1696,3 +1696,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "แตะหน้าจอสองครั้งเพื่อออกจากโหมดเต็มหน้าจอ";
+
+/* Android shared translations */
+"try_again_passphrase" = "รหัสผ่านไม่ถูกต้อง ลองอีกครั้งหรือไม่?";

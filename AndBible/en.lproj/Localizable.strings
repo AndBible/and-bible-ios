@@ -1693,3 +1693,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Double-tap screen to exit fullscreen";
+
+/* Android shared translations */
+"try_again_passphrase" = "Passphrase did not work, try again?";

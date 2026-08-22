@@ -1523,3 +1523,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Apasă de două ori pentru a reduce";
+
+/* Android shared translations */
+"try_again_passphrase" = "Parola nu a funcționat, încerci din nou?";

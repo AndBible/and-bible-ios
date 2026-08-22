@@ -1533,3 +1533,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Tupla-napauta ruutua sulkeaksesi kokoruututilan";
+
+/* Android shared translations */
+"try_again_passphrase" = "Salasana ei toiminut, yritä uudelleen?";

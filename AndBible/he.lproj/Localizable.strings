@@ -1548,3 +1548,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "הקשה כפולה כדי לצאת ממסך מלא";
+
+/* Android shared translations */
+"try_again_passphrase" = "הסיסמה לא עבדה, לנסות שוב?";

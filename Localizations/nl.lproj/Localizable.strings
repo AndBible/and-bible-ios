@@ -1510,3 +1510,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dubbeltikken om volledig scherm te verlaten";
+
+/* Android shared translations */
+"try_again_passphrase" = "Wachtwoordzin werkte niet, nog eens proberen?";

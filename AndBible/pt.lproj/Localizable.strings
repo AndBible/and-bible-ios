@@ -1544,3 +1544,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Toque duas vezes para sair de ecran inteiro";
+
+/* Android shared translations */
+"try_again_passphrase" = "A Palavra passe não foi reconhecida, tentar de novo?";

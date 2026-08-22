@@ -1526,3 +1526,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dobbel-tap for å gå ut av fullskjermmodus";
+
+/* Android shared translations */
+"try_again_passphrase" = "Passord fungerte ikke, prøve igjen?";

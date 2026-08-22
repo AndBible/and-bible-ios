@@ -1697,3 +1697,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Gonga mara mbili skrini kutoka hali ya skrini nzima";
+
+/* Android shared translations */
+"try_again_passphrase" = "Neno la siri halikufanya kazi, jaribu tena?";

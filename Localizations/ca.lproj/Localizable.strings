@@ -1658,3 +1658,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Fes doble toc a la pantalla per sortir de la pantalla completa";
+
+/* Android shared translations */
+"try_again_passphrase" = "La contrasenya no ha funcionat, vols tornar-ho a intentar?";

@@ -1549,3 +1549,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Двойно докосване на екрана за изход от цял екран";
+
+/* Android shared translations */
+"try_again_passphrase" = "Паролата не работи, опитайте отново?";

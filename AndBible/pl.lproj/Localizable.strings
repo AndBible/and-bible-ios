@@ -1541,3 +1541,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Stuknij podwójnie, aby wyjść z trybu pełnoekranowego";
+
+/* Android shared translations */
+"try_again_passphrase" = "Błędne hasło, czy spróbować ponownie?";

@@ -1528,3 +1528,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Tam ekrandan çıkmak için ekrana iki kez dokunun";
+
+/* Android shared translations */
+"try_again_passphrase" = "Parola çalışmadı, tekrar dener misiniz?";

@@ -1693,3 +1693,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "पूर्णस्क्रिन बाहिर निस्कन स्क्रिन दोहोरो ट्याप गर्नुहोस्";
+
+/* Android shared translations */
+"try_again_passphrase" = "पासफ्रेज काम गरेन, पुनः प्रयास गर्ने?";

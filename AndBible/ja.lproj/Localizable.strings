@@ -1696,3 +1696,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "画面をダブルタップして全画面表示を終了";
+
+/* Android shared translations */
+"try_again_passphrase" = "パスフレーズが正しくありませんでした。もう一度試しますか？";

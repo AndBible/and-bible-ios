@@ -1530,3 +1530,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Διπλό πάτημα για έξοδο από πλήρη οθόνη";
+
+/* Android shared translations */
+"try_again_passphrase" = "Η φράση πρόσβασης δεν έγινε δεκτή, άλλη μια προσπάθεια?";

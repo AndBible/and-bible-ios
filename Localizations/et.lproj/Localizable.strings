@@ -1531,3 +1531,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Topeltpuudutus täisekraani sulgemiseks";
+
+/* Android shared translations */
+"try_again_passphrase" = "Salasõna ei sobinud, proovi uuesti?";

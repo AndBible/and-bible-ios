@@ -992,3 +992,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Толық бейне бетінен шығу үшін бейне бетін екі рез түртіңіз";
+
+/* Android shared translations */
+"try_again_passphrase" = "Құпия сөзді қабылдамады, қайталап көрдіңіз бе?";

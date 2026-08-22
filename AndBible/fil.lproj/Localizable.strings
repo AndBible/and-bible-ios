@@ -1662,3 +1662,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "I-double-tap ang screen para lumabas sa fullscreen";
+
+/* Android shared translations */
+"try_again_passphrase" = "Hindi gumana ang passphrase, subukan muli?";

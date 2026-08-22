@@ -1533,3 +1533,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Дважды коснитесь экрана, чтобы выйти из полноэкранного режима";
+
+/* Android shared translations */
+"try_again_passphrase" = "Парольная фраза не сработала, попробовать еще раз?";

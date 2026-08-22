@@ -1545,3 +1545,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvaput dodirnite ekran za izlaz iz Celog Ekrana";
+
+/* Android shared translations */
+"try_again_passphrase" = "Lozinka nije urodila plodom, pokušajte ponovo?";

@@ -1533,3 +1533,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "双击以退出全屏幕模式";
+
+/* Android shared translations */
+"try_again_passphrase" = "密码无效，再试一次吗？";

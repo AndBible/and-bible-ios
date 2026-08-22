@@ -923,3 +923,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "မျက်နှာပြင်အပြည့်မှထွက်ရန် မျက်နှာပြင်ကို နှစ်ချက်နှိပ်ပါ";
+
+/* Android shared translations */
+"try_again_passphrase" = "သော့ဖွင့်ခြင်း မအောင်မြင်ပါ၊ ထပ်လုပ်မှာလား။";

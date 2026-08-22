@@ -1523,3 +1523,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Appuyez deux fois sur l’écran pour quitter le mode plein écran";
+
+/* Android shared translations */
+"try_again_passphrase" = "La phrase de passe n’a pas fonctionné, essayez à nouveau ?";

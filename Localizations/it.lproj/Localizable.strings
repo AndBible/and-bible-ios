@@ -1526,3 +1526,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Tocca due volte per uscire dallo schermo intero";
+
+/* Android shared translations */
+"try_again_passphrase" = "La password non ha funzionato, vuoi riprovare?";

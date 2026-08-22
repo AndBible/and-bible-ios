@@ -1535,3 +1535,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Двапут додирните екран за излаз из Целог Екрана";
+
+/* Android shared translations */
+"try_again_passphrase" = "Лозинка није уродила плодом, покушајте поново?";

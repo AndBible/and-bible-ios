@@ -1536,3 +1536,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "نقراً مزدوجاً على الشاشة للخروج من وضع ملء الشاشة";
+
+/* Android shared translations */
+"try_again_passphrase" = "كلمة المرور لم تعمل، جرب مجدداً؟";

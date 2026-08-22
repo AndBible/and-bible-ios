@@ -1544,3 +1544,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dupla koppintás a teljes képernyős mód bezárásához";
+
+/* Android shared translations */
+"try_again_passphrase" = "A jelszó nem működött, újra próbálja?";

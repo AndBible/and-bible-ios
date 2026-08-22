@@ -1531,3 +1531,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "फ़ुलस्क्रीन से बाहर निकलने के लिए स्क्रीन पर दो बार टैप करें";
+
+/* Android shared translations */
+"try_again_passphrase" = "पासफ़्रेज़ काम नहीं किया, पुन: प्रयास करें?";

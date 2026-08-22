@@ -1518,3 +1518,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Ketuk dua kali layar untuk keluar dari layar penuh";
+
+/* Android shared translations */
+"try_again_passphrase" = "Kata sandi tidak berhasil, coba lagi?";

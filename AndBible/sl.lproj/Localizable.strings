@@ -1541,3 +1541,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvakrat tapnite za izhod iz celozaslonskega načina";
+
+/* Android shared translations */
+"try_again_passphrase" = "Geslo ni bilo pravo, boste znova poskusiii?";

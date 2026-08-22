@@ -1528,3 +1528,6 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Duplo toque para sair da tela cheia";
+
+/* Android shared translations */
+"try_again_passphrase" = "A senha não foi reconhecida, tentar novamente?";
