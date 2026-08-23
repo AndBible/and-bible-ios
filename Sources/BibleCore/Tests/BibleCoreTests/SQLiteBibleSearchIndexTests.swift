@@ -16,13 +16,34 @@ private let sqliteBibleSearchTransient = unsafeBitCast(-1, to: sqlite3_destructo
  */
 final class SQLiteBibleSearchIndexTests: XCTestCase {
     /**
-     Fail-safe budget for semaphore-backed concurrency checkpoints on loaded CI runners.
+     Fail-safe budget for semaphore-backed concurrency checkpoints.
 
-     These tests synchronize on explicit production events rather than elapsed time. The deadline
-     only prevents a genuine deadlock from hanging the suite and allows simulator task scheduling to
-     exceed the former two-second bound without changing the event ordering under test.
+     The tests synchronize on explicit production events rather than elapsed time. Blocking work is
+     dispatched outside Swift's cooperative executor; this deadline prevents a missing checkpoint
+     from blocking its semaphore wait indefinitely and records that missing event as a test failure.
      */
     private static let synchronizationTimeout: DispatchTimeInterval = .seconds(20)
+
+    /**
+     Runs an intentionally synchronous test operation without occupying Swift's cooperative executor.
+
+     - Parameter operation: Blocking Search call or semaphore checkpoint executed on a GCD worker.
+     - Returns: The exact value produced after the blocking operation finishes.
+     - Side effects: Suspends the calling test task and occupies one GCD worker until the operation
+       returns; the continuation is resumed exactly once by that worker.
+     - Throws: Re-throws the operation's error without retrying or changing synchronization order.
+     - Concurrency: Prevents semaphore-backed fixture reads from starving the async writer task on
+       lower-core CI runners.
+     */
+    private static func performBlockingTestOperation<Value: Sendable>(
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .default).async {
+                continuation.resume(with: Result { try operation() })
+            }
+        }
+    }
 
     /**
      Indexes sparse MyBible rows with canonical metadata, visible text, scopes, and Strong's tokens.
@@ -370,7 +391,11 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
 
         let reachedWriterPause = DispatchSemaphore(value: 0)
         let releaseWriterPause = DispatchSemaphore(value: 0)
-        defer { releaseWriterPause.signal() }
+        defer {
+            DispatchQueue.global(qos: .userInitiated).async {
+                releaseWriterPause.signal()
+            }
+        }
         let service = SearchIndexService(databasePath: databaseURL.path)
         let composedOriginal = FixtureBibleSearchSource(
             name: composedName,
@@ -398,10 +423,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         let rebuild = Task {
             try await service.createIndex(source: composedReplacement)
         }
-        XCTAssertEqual(
-            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let writerPauseResult = try await Self.performBlockingTestOperation {
+            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(writerPauseResult, .success)
 
         XCTAssertFalse(service.hasIndex(for: composedIdentity))
         XCTAssertTrue(service.hasIndex(for: decomposedIdentity))
@@ -418,7 +443,9 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
             1
         )
 
-        releaseWriterPause.signal()
+        DispatchQueue.global(qos: .userInitiated).async {
+            releaseWriterPause.signal()
+        }
         try await rebuild.value
         XCTAssertTrue(service.hasIndex(for: composedReplacement.searchIndexSourceIdentity))
         XCTAssertTrue(service.hasIndex(for: decomposedIdentity))
@@ -726,30 +753,35 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         try await service.createIndex(source: unrelated)
         let originalIdentity = original.searchIndexSourceIdentity
 
-        let admittedTextRead = Task.detached {
-            try service.search(
-                query: "durableold",
-                sourceIdentity: originalIdentity,
-                wordMode: .allWords
-            )
+        let admittedTextRead = Task {
+            try await Self.performBlockingTestOperation {
+                try service.search(
+                    query: "durableold",
+                    sourceIdentity: originalIdentity,
+                    wordMode: .allWords
+                )
+            }
         }
-        let admittedStrongsRead = Task.detached {
-            try service.searchStrongs(
-                canonicalTokens: ["H0430"],
-                sourceIdentity: originalIdentity
-            )
+        let admittedStrongsRead = Task {
+            try await Self.performBlockingTestOperation {
+                try service.searchStrongs(
+                    canonicalTokens: ["H0430"],
+                    sourceIdentity: originalIdentity
+                )
+            }
         }
-        XCTAssertTrue(
+        let readersReached = try await Self.performBlockingTestOperation {
             readBarrier.waitForReaders(timeout: .now() + Self.synchronizationTimeout)
-        )
+        }
+        XCTAssertTrue(readersReached)
 
         let rebuild = Task {
             try await service.createIndex(source: failingReplacement)
         }
-        XCTAssertEqual(
-            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let writerPauseResult = try await Self.performBlockingTestOperation {
+            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(writerPauseResult, .success)
 
         XCTAssertFalse(service.hasIndex(for: originalIdentity))
         XCTAssertThrowsError(
@@ -872,22 +904,27 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         try await service.createIndex(source: source)
         let sourceIdentity = source.searchIndexSourceIdentity
 
-        let pinnedTextRead = Task.detached {
-            try service.search(
-                query: "invalidatedold",
-                sourceIdentity: sourceIdentity,
-                wordMode: .allWords
-            )
+        let pinnedTextRead = Task {
+            try await Self.performBlockingTestOperation {
+                try service.search(
+                    query: "invalidatedold",
+                    sourceIdentity: sourceIdentity,
+                    wordMode: .allWords
+                )
+            }
         }
-        let pinnedStrongsRead = Task.detached {
-            try service.searchStrongs(
-                canonicalTokens: ["H0430"],
-                sourceIdentity: sourceIdentity
-            )
+        let pinnedStrongsRead = Task {
+            try await Self.performBlockingTestOperation {
+                try service.searchStrongs(
+                    canonicalTokens: ["H0430"],
+                    sourceIdentity: sourceIdentity
+                )
+            }
         }
-        XCTAssertTrue(
+        let readersReached = try await Self.performBlockingTestOperation {
             readBarrier.waitForReaders(timeout: .now() + Self.synchronizationTimeout)
-        )
+        }
+        XCTAssertTrue(readersReached)
 
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         readBarrier.releaseReaders()
@@ -990,10 +1027,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 authorization: firstCapture.authorization
             )
         }
-        XCTAssertEqual(
-            reachedFirstBuildPause.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let firstBuildPauseResult = try await Self.performBlockingTestOperation {
+            reachedFirstBuildPause.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(firstBuildPauseResult, .success)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseFirstBuildPause.signal()
         }
@@ -1152,7 +1189,7 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
      - Failure meaning: Search can omit newly stale A, rebuild only B, declare the selection ready, and
        expose A as a partial-module failure instead of preserving Android's all-selected-books gate.
      - Side effects: Uses semaphores rather than sleeps, advances one isolated store generation, and
-       removes the generated database after the detached readiness task completes.
+       removes the generated database after the GCD-backed readiness operation completes.
      */
     func testAggregateReadinessFailsClosedWhenStoreGenerationChangesBetweenModules() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
@@ -1192,19 +1229,21 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
             secondSource.searchIndexSourceIdentity,
         ]
 
-        let aggregate = Task.detached {
-            service.modulesNeedingIndex(from: identities)
+        let aggregate = Task {
+            try await Self.performBlockingTestOperation {
+                service.modulesNeedingIndex(from: identities)
+            }
         }
-        XCTAssertEqual(
-            reachedFirstCandidate.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let firstCandidateResult = try await Self.performBlockingTestOperation {
+            reachedFirstCandidate.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(firstCandidateResult, .success)
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
         }
 
-        let missingAfterMutation = await aggregate.value
+        let missingAfterMutation = try await aggregate.value
         XCTAssertEqual(missingAfterMutation, identities)
     }
 
@@ -1264,17 +1303,19 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         try await service.createIndex(source: firstSource)
         try await service.createIndex(source: secondSource)
 
-        let textAggregate = Task.detached {
-            try service.searchMultiple(
-                query: "aggregatequery",
-                sourceIdentities: identities,
-                wordMode: .allWords
-            )
+        let textAggregate = Task {
+            try await Self.performBlockingTestOperation {
+                try service.searchMultiple(
+                    query: "aggregatequery",
+                    sourceIdentities: identities,
+                    wordMode: .allWords
+                )
+            }
         }
-        XCTAssertEqual(
-            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let textFirstModuleResult = try await Self.performBlockingTestOperation {
+            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(textFirstModuleResult, .success)
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
@@ -1288,16 +1329,18 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
 
         try await service.createIndex(source: firstSource)
         try await service.createIndex(source: secondSource)
-        let strongsAggregate = Task.detached {
-            try service.searchStrongsMultiple(
-                canonicalTokens: ["H0430"],
-                sourceIdentities: identities
-            )
+        let strongsAggregate = Task {
+            try await Self.performBlockingTestOperation {
+                try service.searchStrongsMultiple(
+                    canonicalTokens: ["H0430"],
+                    sourceIdentities: identities
+                )
+            }
         }
-        XCTAssertEqual(
-            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let strongsFirstModuleResult = try await Self.performBlockingTestOperation {
+            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(strongsFirstModuleResult, .success)
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
@@ -1532,10 +1575,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         let task = Task {
             try await service.createIndex(source: source)
         }
-        XCTAssertEqual(
-            reachedPause.wait(timeout: .now() + Self.synchronizationTimeout),
-            .success
-        )
+        let pauseResult = try await Self.performBlockingTestOperation {
+            reachedPause.wait(timeout: .now() + Self.synchronizationTimeout)
+        }
+        XCTAssertEqual(pauseResult, .success)
 
         task.cancel()
         DispatchQueue.global(qos: .userInitiated).async {
@@ -1685,7 +1728,7 @@ private final class SearchReadAuthorizationBarrier: @unchecked Sendable {
     /// Number of readers the test must pause before starting its writer.
     private let expectedReaders: Int
 
-    /// Protects remaining-reader and one-shot-release state across detached Search tasks.
+    /// Protects remaining-reader and one-shot-release state across background Search operations.
     private let lock = NSLock()
 
     /// Signals once for every reader whose committed snapshot has been established.
@@ -1719,10 +1762,12 @@ private final class SearchReadAuthorizationBarrier: @unchecked Sendable {
      Pauses one eligible target-module read after signaling that its snapshot is established.
 
      - Parameter moduleName: Module authorized by the production read path.
-     - Side effects: Atomically consumes one slot, signals the test thread, then waits for release.
+     - Side effects: Atomically consumes one slot, signals the owning test checkpoint, then waits for
+       release.
      - Failure modes: Non-target and excess calls return immediately; the owning test always releases
        paused readers through normal flow or `defer` cleanup.
-     - Important: The callback runs on independent Search tasks and never holds `lock` while waiting.
+     - Important: The callback runs on independent GCD-backed Search operations and never holds
+       `lock` while waiting.
      */
     func checkpoint(moduleName: String) {
         guard moduleName == self.moduleName else { return }
