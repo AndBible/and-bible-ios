@@ -1152,6 +1152,89 @@ final class AndroidDatabaseBackupTests: XCTestCase {
     }
 
     /**
+     Preserves Java-distinct canonical spellings during Android My Documents Import.
+
+     - Setup: Seeds a local document/page with composed initials and page key, then imports a
+       backup containing a canonically equivalent decomposed document plus a decomposed page key
+       under the existing document id.
+     - Expected result: Import retains both document initials and both page keys because Android
+       SQLite BINARY and Java `String.equals` treat their UTF-16 sequences as distinct.
+     - Failure meaning: Swift canonical-equivalence collapsed a valid imported document or page
+       before the authoritative restore service could publish the merged graph.
+     - Side effects: Creates two in-memory SwiftData graphs and one temporary backup archive tree.
+     */
+    func testAndroidDatabaseBackupImportPreservesJavaDistinctMyDocumentIdentities() throws {
+        let localContainer = try makeAndroidDatabaseBackupExportModelContainer()
+        let localContext = ModelContext(localContainer)
+        let importedContainer = try makeAndroidDatabaseBackupExportModelContainer()
+        let importedContext = ModelContext(importedContainer)
+        let composed = "Manual-Caf\u{00E9}"
+        let decomposed = "Manual-Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+
+        let existingDocumentID = UUID()
+        let localDocument = MyDocument(
+            id: existingDocumentID,
+            name: "Local",
+            initials: composed
+        )
+        let localPage = MyDocumentPage(id: UUID(), title: "Local", pageKey: composed)
+        localPage.document = localDocument
+        localDocument.pages = [localPage]
+        localContext.insert(localDocument)
+        localContext.insert(localPage)
+        try localContext.save()
+
+        let importedExistingDocument = MyDocument(
+            id: existingDocumentID,
+            name: "Imported existing",
+            initials: composed
+        )
+        let importedPage = MyDocumentPage(id: UUID(), title: "Imported", pageKey: decomposed)
+        importedPage.document = importedExistingDocument
+        importedExistingDocument.pages = [importedPage]
+        let importedDistinctDocument = MyDocument(
+            id: UUID(),
+            name: "Imported distinct",
+            initials: decomposed
+        )
+        importedContext.insert(importedExistingDocument)
+        importedContext.insert(importedPage)
+        importedContext.insert(importedDistinctDocument)
+        try importedContext.save()
+
+        let repositoryRoot = try temporaryRepositorySourceBaseURL()
+        let service = AndroidDatabaseBackupService(
+            repositorySourceManager: RepositorySourceManager(basePath: repositoryRoot.path)
+        )
+        let export = try service.exportArchive(
+            modelContext: importedContext,
+            settingsStore: SettingsStore(modelContext: importedContext)
+        )
+        let archive = try service.loadArchive(from: export.data)
+        defer { service.cleanup(archive) }
+        _ = try service.apply(
+            archive: archive,
+            selections: [.init(category: .myDocuments, mode: .import)],
+            modelContext: localContext,
+            settingsStore: SettingsStore(modelContext: localContext)
+        )
+
+        let documents = try localContext.fetch(FetchDescriptor<MyDocument>())
+        XCTAssertEqual(Set(documents.map { Array($0.initials.utf16) }), Set([
+            Array(composed.utf16),
+            Array(decomposed.utf16),
+        ]))
+        let existing = try XCTUnwrap(documents.first { $0.id == existingDocumentID })
+        let existingPages = existing.pages ?? []
+        XCTAssertEqual(Set(existingPages.map { Array($0.pageKey.utf16) }), Set([
+            Array(composed.utf16),
+            Array(decomposed.utf16),
+        ]))
+    }
+
+    /**
      Verifies Android settings database restore replaces the registered iOS application preferences.
 
      Setup:

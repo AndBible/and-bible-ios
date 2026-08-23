@@ -47,6 +47,95 @@ private final class SearchIndexSourceTransfer: @unchecked Sendable {
 }
 
 /**
+ Opaque proof that one installed Search source was captured in a specific module-store generation.
+
+ Search queues may retain source objects while earlier modules build. The token binds that retained
+ source identity to the service instance, durable store generation, and monotonic in-memory
+ invalidation epoch that were current at discovery. Callers can store and return the value only to
+ the issuing `SearchIndexService`; they cannot construct or inspect its authorization fields.
+ */
+public struct SearchIndexSourceAuthorization: Sendable {
+    /// Service instance that issued the authorization and is allowed to consume it.
+    fileprivate let serviceIdentifier: UUID
+
+    /// Exact source identity observed when the queue captured the source object.
+    fileprivate let sourceIdentity: SearchIndexSourceIdentity
+
+    /// Durable module-store generation observed with the source capture.
+    fileprivate let storeGeneration: Int64
+
+    /// In-memory invalidation epoch that detects a replacement even across an old SQLite snapshot.
+    fileprivate let invalidationEpoch: UInt64
+}
+
+/**
+ Tracks Android-compatible per-module Search mutation status across asynchronous queue handoffs.
+
+ Android exposes a book as `SCHEDULED`/`CREATING`, rather than `DONE`, from the moment indexing is
+ requested until its terminal outcome. Counts preserve that contract when duplicate requests for the
+ same initials are queued: finishing the first request cannot make the module readable while another
+ mutation remains scheduled.
+ */
+private final class SearchIndexModuleMutationState: @unchecked Sendable {
+    /// Protects reference counts shared by callers, the mutation queue, Search tasks, and agent work.
+    private let lock = NSLock()
+
+    /// Number of scheduled or active mutations for each exact module initials value.
+    private var countsByModule: [SwordJavaExactStringIdentity: Int] = [:]
+
+    /**
+     Marks one module unavailable before its mutation is handed to the serial SQLite queue.
+
+     - Parameter moduleName: Exact generated-index owner entering scheduled/creating state.
+     - Side effects: Increments one lock-protected reference count.
+     - Failure modes: None; duplicate requests intentionally retain independent counts.
+     - Important: Every call must be paired with `finishMutation(for:)` on every terminal path.
+     */
+    func beginMutation(for moduleName: String) {
+        let identity = SwordJavaExactStringIdentity(moduleName)
+        lock.lock()
+        countsByModule[identity, default: 0] += 1
+        lock.unlock()
+    }
+
+    /**
+     Releases one scheduled/active mutation without clearing a later duplicate request.
+
+     - Parameter moduleName: Exact generated-index owner reaching success, failure, or cancellation.
+     - Side effects: Decrements or removes one lock-protected reference count.
+     - Failure modes: An unmatched release is ignored defensively and cannot create a negative count.
+     */
+    func finishMutation(for moduleName: String) {
+        let identity = SwordJavaExactStringIdentity(moduleName)
+        lock.lock()
+        if let count = countsByModule[identity] {
+            if count > 1 {
+                countsByModule[identity] = count - 1
+            } else {
+                countsByModule.removeValue(forKey: identity)
+            }
+        }
+        lock.unlock()
+    }
+
+    /**
+     Returns whether Android would currently expose one module as scheduled or creating.
+
+     - Parameter moduleName: Exact generated-index owner queried by Search or agent code.
+     - Returns: `true` while at least one mutation request remains pending or active.
+     - Side effects: Acquires the state lock briefly; no database or observable state is changed.
+     - Failure modes: None.
+     */
+    func isMutating(_ moduleName: String) -> Bool {
+        let identity = SwordJavaExactStringIdentity(moduleName)
+        lock.lock()
+        let mutating = countsByModule[identity] != nil
+        lock.unlock()
+        return mutating
+    }
+}
+
+/**
  Builds and queries Android-compatible Bible search indexes.
 
  Each indexed row stores localized display text alongside canonical OSIS identity, JSword book
@@ -70,17 +159,43 @@ public final class SearchIndexService: @unchecked Sendable {
     )
     @ObservationIgnored private let indexMutationQueueSpecificKey = DispatchSpecificKey<Bool>()
 
+    /// Unique owner embedded in opaque source authorizations so tokens cannot cross service instances.
+    @ObservationIgnored private let sourceAuthorizationServiceIdentifier = UUID()
+
+    /// Per-module scheduled/creating state that rejects newly admitted reads for the affected book.
+    @ObservationIgnored private let moduleMutationState = SearchIndexModuleMutationState()
+
+    /**
+     Deterministic package-test checkpoint after metadata establishes a read snapshot.
+
+     Runtime initializers leave this nil. Concurrency tests pause an already-authorized logical read
+     while a writer rebuilds the same module, proving the result remains on one committed generation.
+     */
+    @ObservationIgnored private let readAuthorizationCheckpoint: (@Sendable (String) -> Void)?
+
+    /** Deterministic package-test checkpoint after one aggregate readiness candidate is evaluated. */
+    @ObservationIgnored private let aggregateReadinessCheckpoint: (@Sendable (String) -> Void)?
+
+    /** Deterministic package-test checkpoint after one multi-module query operation completes. */
+    @ObservationIgnored private let aggregateSearchCheckpoint: (@Sendable (String) -> Void)?
+
     /// Notification center carrying process-wide installed-module mutation events.
     @ObservationIgnored private let notificationCenter: NotificationCenter
 
     /// Observer token removed during service teardown.
     @ObservationIgnored private var moduleStoreObserver: NSObjectProtocol?
 
-    /// Protects the fail-closed readiness bit while a module-store generation is being persisted.
+    /// Protects the fail-closed readiness bit and monotonic invalidation epoch across all readers.
     @ObservationIgnored private let moduleStoreInvalidationLock = NSLock()
 
-    /// Blocks readiness immediately when durable module-store invalidation has not completed.
-    @ObservationIgnored private var moduleStoreInvalidationPendingOrFailed = false
+    /// Number of overlapping notification handlers whose durable generation updates have not finished.
+    @ObservationIgnored private var moduleStoreInvalidationsPending = 0
+
+    /// Permanently retains fail-closed state when any durable invalidation cannot be persisted.
+    @ObservationIgnored private var moduleStoreInvalidationFailed = false
+
+    /// Advances before every store invalidation so already-pinned SQLite snapshots fail closed.
+    @ObservationIgnored private var moduleStoreInvalidationEpoch: UInt64 = 0
 
     /// Main-thread generation that prevents a cancelled build from overwriting newer progress state.
     @ObservationIgnored private var indexingGeneration: UInt64 = 0
@@ -104,6 +219,9 @@ public final class SearchIndexService: @unchecked Sendable {
     public init() {
         dbPath = Self.defaultDatabasePath()
         notificationCenter = .default
+        readAuthorizationCheckpoint = nil
+        aggregateReadinessCheckpoint = nil
+        aggregateSearchCheckpoint = nil
         configureIndexMutationQueue()
         openDatabase()
         observeModuleStoreMutations()
@@ -114,10 +232,32 @@ public final class SearchIndexService: @unchecked Sendable {
 
      Tests use this initializer for isolated fixtures and failure injection. Runtime callers use
      `init()`.
+
+     - Parameters:
+       - databasePath: Isolated generated-index SQLite path to open or create.
+       - notificationCenter: Center that publishes installed-module mutation events.
+       - readAuthorizationCheckpoint: Optional deterministic pause after a logical query snapshot is
+         authorized; runtime callers leave it nil.
+       - aggregateReadinessCheckpoint: Optional deterministic pause after one multi-module readiness
+         candidate is evaluated; runtime callers leave it nil.
+       - aggregateSearchCheckpoint: Optional deterministic pause after one multi-module query completes;
+         runtime callers leave it nil.
+     - Side effects: Opens/migrates SQLite and registers one module-store observer.
+     - Failure modes: Database initialization failure leaves the service fail-closed and publishes its
+       diagnostic through `lastFailureDescription`; test checkpoints never run when nil.
      */
-    init(databasePath: String, notificationCenter: NotificationCenter = .default) {
+    init(
+        databasePath: String,
+        notificationCenter: NotificationCenter = .default,
+        readAuthorizationCheckpoint: (@Sendable (String) -> Void)? = nil,
+        aggregateReadinessCheckpoint: (@Sendable (String) -> Void)? = nil,
+        aggregateSearchCheckpoint: (@Sendable (String) -> Void)? = nil
+    ) {
         dbPath = databasePath
         self.notificationCenter = notificationCenter
+        self.readAuthorizationCheckpoint = readAuthorizationCheckpoint
+        self.aggregateReadinessCheckpoint = aggregateReadinessCheckpoint
+        self.aggregateSearchCheckpoint = aggregateSearchCheckpoint
         configureIndexMutationQueue()
         openDatabase()
         observeModuleStoreMutations()
@@ -172,7 +312,7 @@ public final class SearchIndexService: @unchecked Sendable {
      - Important: This method is synchronous so notification return implies stale readiness is blocked.
      */
     private func invalidateReadinessAfterModuleStoreMutation() {
-        setModuleStoreInvalidationBlocked(true)
+        beginModuleStoreInvalidation()
         var invalidationError: Error?
         let mutation = {
             guard let db = self.db else {
@@ -198,27 +338,90 @@ public final class SearchIndexService: @unchecked Sendable {
         }
 
         guard let invalidationError else {
-            setModuleStoreInvalidationBlocked(false)
+            completeModuleStoreInvalidation(succeeded: true)
             return
         }
+        completeModuleStoreInvalidation(succeeded: false)
         DispatchQueue.main.async { [weak self] in
             self?.lastFailureDescription = invalidationError.localizedDescription
         }
     }
 
-    /** Updates or reads the lock-protected fail-closed module-store invalidation state. */
-    private func setModuleStoreInvalidationBlocked(_ blocked: Bool) {
+    /**
+     Starts one store invalidation and permanently advances the in-memory read epoch.
+
+     The epoch changes before durable work enters the mutation queue. A logical reader that already
+     pinned the previous WAL snapshot can therefore detect the event even after durable invalidation
+     succeeds and the transient blocked bit clears.
+
+     - Side effects: Increments the lock-protected epoch and marks all readiness/read paths blocked.
+     - Failure modes: None; the epoch intentionally remains advanced if durable persistence later fails.
+     */
+    private func beginModuleStoreInvalidation() {
         moduleStoreInvalidationLock.lock()
-        moduleStoreInvalidationPendingOrFailed = blocked
+        moduleStoreInvalidationEpoch &+= 1
+        moduleStoreInvalidationsPending += 1
+        moduleStoreInvalidationLock.unlock()
+    }
+
+    /**
+     Completes one overlapping durable invalidation without clearing another pending or failed event.
+
+     - Parameter succeeded: Whether this notification's generation update committed durably.
+     - Side effects: Decrements the pending count, permanently records failure when needed, and allows
+       readers only after every overlapping update succeeds.
+     - Failure modes: An unmatched completion cannot make the count negative; a failed completion keeps
+       the service fail-closed for the rest of its lifetime.
+     */
+    private func completeModuleStoreInvalidation(succeeded: Bool) {
+        moduleStoreInvalidationLock.lock()
+        if moduleStoreInvalidationsPending > 0 {
+            moduleStoreInvalidationsPending -= 1
+        }
+        if !succeeded {
+            moduleStoreInvalidationFailed = true
+        }
         moduleStoreInvalidationLock.unlock()
     }
 
     /** Returns whether readiness checks must fail while durable invalidation is pending or failed. */
     private func isModuleStoreInvalidationBlocked() -> Bool {
         moduleStoreInvalidationLock.lock()
-        let blocked = moduleStoreInvalidationPendingOrFailed
+        let blocked = moduleStoreInvalidationFailed || moduleStoreInvalidationsPending > 0
         moduleStoreInvalidationLock.unlock()
         return blocked
+    }
+
+    /**
+     Captures the monotonic store epoch that authorizes one newly admitted logical read.
+
+     - Returns: Current epoch when durable invalidation is settled, otherwise `nil` to fail closed.
+     - Side effects: Acquires the invalidation lock briefly without reading SQLite.
+     - Failure modes: Returns `nil` while persistence is pending or permanently failed.
+     */
+    private func captureModuleStoreReadEpoch() -> UInt64? {
+        moduleStoreInvalidationLock.lock()
+        defer { moduleStoreInvalidationLock.unlock() }
+        guard !moduleStoreInvalidationFailed,
+              moduleStoreInvalidationsPending == 0 else { return nil }
+        return moduleStoreInvalidationEpoch
+    }
+
+    /**
+     Validates that no module-store mutation overlapped an admitted logical read.
+
+     - Parameter expectedEpoch: Epoch captured before the read-only SQLite snapshot opened.
+     - Returns: `true` only when the epoch is unchanged and no durable invalidation remains blocked.
+     - Side effects: Acquires the invalidation lock briefly without changing readiness state.
+     - Failure modes: Returns false for any intervening, pending, or failed store mutation.
+     */
+    private func moduleStoreReadEpochIsCurrent(_ expectedEpoch: UInt64) -> Bool {
+        moduleStoreInvalidationLock.lock()
+        let current = !moduleStoreInvalidationFailed
+            && moduleStoreInvalidationsPending == 0
+            && moduleStoreInvalidationEpoch == expectedEpoch
+        moduleStoreInvalidationLock.unlock()
+        return current
     }
 
     /**
@@ -420,14 +623,51 @@ public final class SearchIndexService: @unchecked Sendable {
        - moduleName: Exact metadata owner.
        - expectedIdentity: Installed generation to compare, or `nil` for lifecycle-protected callers.
      - Returns: Whether metadata is complete and belongs to the active store generation.
-     - Side effects: Executes a read-only SQLite statement on the serialized connection.
-     - Failure modes: Every database, schema, identity, or concurrent-invalidation failure returns false.
+     - Side effects: Opens and closes one operation-owned read snapshot.
+     - Failure modes: Scheduled/active mutation, database, schema, identity, or invalidation failures
+       return false instead of reading the writer connection's uncommitted transaction.
      */
     private func hasIndex(
         moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity?
     ) -> Bool {
-        guard !isModuleStoreInvalidationBlocked(), let db else { return false }
+        do {
+            return try withReadSnapshot(
+                for: moduleName,
+                operation: "checking \(moduleName) index"
+            ) { readDatabase in
+                indexIsReady(
+                    db: readDatabase,
+                    moduleName: moduleName,
+                    expectedIdentity: expectedIdentity
+                )
+            }
+        } catch {
+            return false
+        }
+    }
+
+    /**
+     Validates completion metadata on a caller-owned SQLite connection.
+
+     Public readiness calls supply a committed read snapshot; build verification supplies the writer
+     before `COMMIT`, so a failed row-count or metadata check can roll back without publishing corrupt
+     state. Keeping the SQL connection-explicit prevents reads from silently falling back to the writer.
+
+     - Parameters:
+       - db: Operation-owned read snapshot or pre-commit build writer connection.
+       - moduleName: Exact metadata owner.
+       - expectedIdentity: Installed generation to compare, or `nil` for lifecycle-protected callers.
+     - Returns: Whether complete metadata matches schema, source identity, and store generation.
+     - Side effects: Executes metadata and generation reads on `db`.
+     - Failure modes: SQL, identity, schema, or concurrent module-store invalidation returns false.
+     */
+    private func indexIsReady(
+        db: OpaquePointer,
+        moduleName: String,
+        expectedIdentity: SearchIndexSourceIdentity?
+    ) -> Bool {
+        guard !isModuleStoreInvalidationBlocked() else { return false }
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         let sql = """
@@ -446,7 +686,7 @@ public final class SearchIndexService: @unchecked Sendable {
         }
         let storedGeneration = sqlite3_column_int64(statement, 3)
         if let expectedIdentity,
-           (expectedIdentity.moduleName != moduleName
+           (!SwordJavaStringIdentity.equals(expectedIdentity.moduleName, moduleName)
                 || expectedIdentity.version != sourceVersion
                 || expectedIdentity.fingerprint != sourceFingerprint) {
             return false
@@ -495,42 +735,69 @@ public final class SearchIndexService: @unchecked Sendable {
         moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity?
     ) -> Bool {
-        let textReady = expectedIdentity.map(hasIndex(for:)) ?? hasIndex(for: moduleName)
-        guard textReady, !isModuleStoreInvalidationBlocked(), let db else { return false }
-        var statement: OpaquePointer?
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_prepare_v2(
-            db,
-            """
-            SELECT m.strongs_complete,
-                   EXISTS(SELECT 1 FROM verse_strongs WHERE module_name = ? LIMIT 1)
-            FROM indexed_modules m
-            JOIN search_index_state s ON s.id = 1 AND s.store_generation = m.store_generation
-            WHERE m.module_name = ? AND m.schema_version = ? AND m.verse_count > 0
-            """,
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK else { return false }
-        sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
-        sqlite3_bind_text(statement, 2, moduleName, -1, sqliteTransient)
-        sqlite3_bind_int(statement, 3, Int32(Self.currentSchemaVersion))
-        guard sqlite3_step(statement) == SQLITE_ROW else { return false }
-        guard !isModuleStoreInvalidationBlocked() else { return false }
-        return sqlite3_column_int(statement, 0) != 0 || sqlite3_column_int(statement, 1) != 0
+        do {
+            return try withReadSnapshot(
+                for: moduleName,
+                operation: "checking \(moduleName) Strong's index"
+            ) { readDatabase in
+                guard indexIsReady(
+                    db: readDatabase,
+                    moduleName: moduleName,
+                    expectedIdentity: expectedIdentity
+                ) else {
+                    return false
+                }
+                var statement: OpaquePointer?
+                defer { sqlite3_finalize(statement) }
+                guard sqlite3_prepare_v2(
+                    readDatabase,
+                    """
+                    SELECT m.strongs_complete,
+                           EXISTS(SELECT 1 FROM verse_strongs WHERE module_name = ? LIMIT 1)
+                    FROM indexed_modules m
+                    JOIN search_index_state s ON s.id = 1 AND s.store_generation = m.store_generation
+                    WHERE m.module_name = ? AND m.schema_version = ? AND m.verse_count > 0
+                    """,
+                    -1,
+                    &statement,
+                    nil
+                ) == SQLITE_OK else { return false }
+                sqlite3_bind_text(statement, 1, moduleName, -1, sqliteTransient)
+                sqlite3_bind_text(statement, 2, moduleName, -1, sqliteTransient)
+                sqlite3_bind_int(statement, 3, Int32(Self.currentSchemaVersion))
+                guard sqlite3_step(statement) == SQLITE_ROW else { return false }
+                guard !isModuleStoreInvalidationBlocked() else { return false }
+                return sqlite3_column_int(statement, 0) != 0
+                    || sqlite3_column_int(statement, 1) != 0
+            }
+        } catch {
+            return false
+        }
     }
 
-    /** Returns requested module names whose required current-schema facet is incomplete. */
+    /**
+     Returns module names whose requested facet is incomplete within one stable store epoch.
+
+     - Parameters:
+       - moduleNames: Exact generated-index owners in caller order.
+       - requirement: Text or Strong's completion contract to inspect.
+     - Returns: Unready names in input order. If store invalidation overlaps the aggregate, every
+       input is returned so no module observed ready in an older generation can be omitted.
+     - Side effects: Performs one committed readiness lookup per name.
+     - Failure modes: Database, mutation, or cross-generation aggregate failures classify affected
+       inputs, or the complete input after invalidation, as needing an index.
+     */
     public func modulesNeedingIndex(
         from moduleNames: [String],
         requirement: SearchIndexRequirement = .text
     ) -> [String] {
-        moduleNames.filter { moduleName in
+        valuesNeedingIndexAcrossStableStoreEpoch(
+            moduleNames,
+            moduleName: { $0 }
+        ) { moduleName in
             switch requirement {
-            case .text:
-                return !hasIndex(for: moduleName)
-            case .strongs:
-                return !hasStrongsIndex(for: moduleName)
+            case .text: return hasIndex(for: moduleName)
+            case .strongs: return hasStrongsIndex(for: moduleName)
             }
         }
     }
@@ -541,45 +808,300 @@ public final class SearchIndexService: @unchecked Sendable {
      - Parameters:
        - sourceIdentities: Selected source generations in caller order.
        - requirement: Text or Strong's completion contract to inspect.
-     - Returns: Unready identities in the same order, including duplicate inputs when supplied.
+     - Returns: Unready identities in input order, including duplicates. If store invalidation
+       overlaps the aggregate, every input is returned rather than mixing readiness generations.
      - Side effects: Performs one or more read-only SQLite readiness queries per source.
-     - Failure modes: Database and identity failures classify the affected source as needing an index.
+     - Failure modes: Database and identity failures classify the affected source as needing an index;
+       cross-generation aggregation fails closed for the complete selection.
      */
     public func modulesNeedingIndex(
         from sourceIdentities: [SearchIndexSourceIdentity],
         requirement: SearchIndexRequirement = .text
     ) -> [SearchIndexSourceIdentity] {
-        sourceIdentities.filter { sourceIdentity in
+        valuesNeedingIndexAcrossStableStoreEpoch(
+            sourceIdentities,
+            moduleName: \.moduleName
+        ) { sourceIdentity in
             switch requirement {
-            case .text:
-                return !hasIndex(for: sourceIdentity)
-            case .strongs:
-                return !hasStrongsIndex(for: sourceIdentity)
+            case .text: return hasIndex(for: sourceIdentity)
+            case .strongs: return hasStrongsIndex(for: sourceIdentity)
             }
         }
     }
 
     /**
-     Builds and verifies one backend-neutral Bible index transactionally.
+     Evaluates a multi-module readiness set without mixing module-store generations.
+
+     Each item still owns an independent committed WAL snapshot so module-local mutations remain
+     isolated. A surrounding in-memory epoch binds those snapshots into one logical aggregate: if a
+     store notification occurs between any two checks, the helper returns the complete input and lets
+     the caller retry or rebuild instead of omitting values observed ready in the old generation.
+
+     - Parameters:
+       - values: Ordered module names or exact source identities to evaluate.
+       - moduleName: Extracts the exact initials used by the deterministic checkpoint.
+       - isReady: Performs the requirement-specific committed readiness lookup.
+     - Returns: Values that are not ready, or all values when invalidation is pending, failed, or
+       overlaps the aggregate.
+     - Side effects: Captures and validates the invalidation epoch and invokes the package-test
+       checkpoint after each candidate without retaining a SQLite transaction.
+     - Failure modes: The helper itself does not throw; readiness failures are reported by `isReady`
+       as false and invalidation fails closed for the complete input.
+     */
+    private func valuesNeedingIndexAcrossStableStoreEpoch<Value>(
+        _ values: [Value],
+        moduleName: (Value) -> String,
+        isReady: (Value) -> Bool
+    ) -> [Value] {
+        guard !values.isEmpty else { return [] }
+        guard let aggregateEpoch = captureModuleStoreReadEpoch() else { return values }
+        var missing: [Value] = []
+        missing.reserveCapacity(values.count)
+        for value in values {
+            if !isReady(value) { missing.append(value) }
+            aggregateReadinessCheckpoint?(moduleName(value))
+        }
+        guard moduleStoreReadEpochIsCurrent(aggregateEpoch) else { return values }
+        return missing
+    }
+
+    /**
+     Captures an opaque authorization for one source admitted immediately by `createIndex(source:)`.
+
+     Queued production sources use the public resolver handshakes below so the epoch is captured
+     before source discovery. This private compatibility path is safe only because its caller obtains
+     the token and admits the same source in one uninterrupted method call.
+
+     - Parameter source: Exact source passed directly to the immediate creation API.
+     - Returns: Service-owned token consumed by that same creation invocation.
+     - Side effects: Opens one operation-owned read snapshot to capture the durable store generation.
+     - Throws: Invalid source identity, affected-module mutation, unavailable SQLite, or any module-store
+       invalidation overlapping authorization capture.
+     - Important: Callers that resolved or retained a source earlier must use
+       `captureIndexCreationSource(named:resolving:)` or its batch form instead.
+     */
+    private func captureIndexCreationAuthorization(
+        for source: any BibleSearchIndexSource
+    ) throws -> SearchIndexSourceAuthorization {
+        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+            throw SearchIndexError.indexUnavailable(
+                moduleName: source.searchIndexModuleInfo.name
+            )
+        }
+        return try captureIndexCreationAuthorization(
+            for: source,
+            expectedInvalidationEpoch: invalidationEpoch
+        )
+    }
+
+    /**
+     Resolves and authorizes a queued source inside one module-store epoch handshake.
+
+     The epoch is captured before `resolve` executes and validated after both source inspection and
+     durable generation capture. A replacement that completes after an old native handle is resolved
+     but before it receives a token therefore rejects that handle even when its metadata fingerprint
+     is identical to the replacement.
+
+     - Parameters:
+       - moduleName: Exact selected initials the resolver must return.
+       - resolve: Synchronous current-store resolver. It is executed once and never retained.
+     - Returns: Resolved source plus opaque authorization, or nil when the resolver has no exact source.
+     - Side effects: Executes caller resolution and opens one committed SQLite generation snapshot.
+     - Throws: Pending/overlapping store invalidation, mismatched source initials, invalid identity, or
+       SQLite failure. No source content is streamed or generated rows mutated.
+     - Important: Callers retaining sources across other builds must use this handshake instead of
+       resolving first and calling `captureIndexCreationAuthorization(for:)` afterward.
+     */
+    public func captureIndexCreationSource(
+        named moduleName: String,
+        resolving resolve: () -> (any BibleSearchIndexSource)?
+    ) throws -> (
+        source: any BibleSearchIndexSource,
+        authorization: SearchIndexSourceAuthorization
+    )? {
+        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+        guard let source = resolve() else { return nil }
+        guard SwordJavaStringIdentity.equals(
+            source.searchIndexModuleInfo.name,
+            moduleName
+        ) else {
+            throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
+        }
+        let authorization = try captureIndexCreationAuthorization(
+            for: source,
+            expectedInvalidationEpoch: invalidationEpoch
+        )
+        return (source, authorization)
+    }
+
+    /**
+     Resolves and authorizes one ordered batch of queued sources inside a single store epoch.
+
+     Search first checks immutable presentation identities to determine which selected translations
+     are missing an index. It then calls this method once for that missing subset, allowing the
+     resolver to open one current native inventory and share its owner across every queued source.
+     Capturing the epoch before the batch resolver executes prevents either a pre-resolution or an
+     intra-batch module replacement from blessing retained stale handles.
+
+     - Parameters:
+       - moduleNames: Ordered exact initials requiring current-store source resolution.
+       - resolve: Synchronous batch resolver executed exactly once for a non-empty input. It must
+         return one exact source per requested name in the same order, or nil when current ownership
+         cannot be established for the complete batch.
+     - Returns: Ordered sources paired with service-owned authorizations, an empty array for empty
+       input, or nil when the resolver cannot prove the complete current batch.
+     - Side effects: Executes caller resolution once and opens one committed SQLite generation
+       snapshot per resolved source; it does not stream content or mutate generated index rows.
+     - Throws: Pending/overlapping store invalidation, incomplete or reordered resolver output,
+       mismatched source identity, affected-module mutation, or SQLite failure. A failure returns no
+       partial authorized batch.
+     - Important: Every returned authorization shares the epoch captured before resolution. A queued
+       build still validates its token before admission, inside its transaction, and before commit.
+     */
+    public func captureIndexCreationSources(
+        named moduleNames: [String],
+        resolving resolve: () -> [(name: String, source: any BibleSearchIndexSource)]?
+    ) throws -> [(
+        name: String,
+        source: any BibleSearchIndexSource,
+        authorization: SearchIndexSourceAuthorization
+    )]? {
+        guard !moduleNames.isEmpty else { return [] }
+        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
+        }
+        guard let resolved = resolve() else { return nil }
+        guard resolved.count == moduleNames.count else {
+            throw SearchIndexError.indexVerificationFailed(moduleName: moduleNames[0])
+        }
+
+        var authorized: [(
+            name: String,
+            source: any BibleSearchIndexSource,
+            authorization: SearchIndexSourceAuthorization
+        )] = []
+        authorized.reserveCapacity(resolved.count)
+        for (expectedName, resolvedItem) in zip(moduleNames, resolved) {
+            guard SwordJavaStringIdentity.equals(resolvedItem.name, expectedName),
+                  SwordJavaStringIdentity.equals(
+                    resolvedItem.source.searchIndexModuleInfo.name,
+                    expectedName
+                  ) else {
+                throw SearchIndexError.indexVerificationFailed(moduleName: expectedName)
+            }
+            let authorization = try captureIndexCreationAuthorization(
+                for: resolvedItem.source,
+                expectedInvalidationEpoch: invalidationEpoch
+            )
+            authorized.append((expectedName, resolvedItem.source, authorization))
+        }
+        guard moduleStoreReadEpochIsCurrent(invalidationEpoch) else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
+        }
+        return authorized
+    }
+
+    /**
+     Binds one already-resolved source to a caller-captured invalidation epoch and durable generation.
+
+     - Parameters:
+       - source: Exact source object whose identity will be retained in the authorization.
+       - expectedInvalidationEpoch: Epoch captured before source discovery or immediate admission.
+     - Returns: Opaque authorization owned by this service and source identity.
+     - Side effects: Opens one committed generation snapshot.
+     - Throws: Identity mismatch, SQLite failure, or any invalidation since the supplied epoch.
+     - Important: The epoch is checked before and after the SQLite snapshot so resolution and token
+       creation form one optimistic, fail-closed handshake without holding a lock across caller code.
+     */
+    private func captureIndexCreationAuthorization(
+        for source: any BibleSearchIndexSource,
+        expectedInvalidationEpoch: UInt64
+    ) throws -> SearchIndexSourceAuthorization {
+        let sourceIdentity = source.searchIndexSourceIdentity
+        let moduleName = source.searchIndexModuleInfo.name
+        guard SwordJavaStringIdentity.equals(sourceIdentity.moduleName, moduleName),
+              !sourceIdentity.fingerprint.isEmpty else {
+            throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
+        }
+        guard moduleStoreReadEpochIsCurrent(expectedInvalidationEpoch) else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+        let storeGeneration = try withReadSnapshot(
+            for: moduleName,
+            operation: "authorizing \(moduleName) index creation"
+        ) { readDatabase in
+            try currentStoreGeneration(db: readDatabase)
+        }
+        guard moduleStoreReadEpochIsCurrent(expectedInvalidationEpoch) else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+        return SearchIndexSourceAuthorization(
+            serviceIdentifier: sourceAuthorizationServiceIdentifier,
+            sourceIdentity: sourceIdentity,
+            storeGeneration: storeGeneration,
+            invalidationEpoch: expectedInvalidationEpoch
+        )
+    }
+
+    /**
+     Builds and verifies one immediately admitted backend-neutral Bible index transactionally.
 
      The source streams canonical verse values while this service owns analyzer application, Strong's
      extraction, SQLite writes, cancellation checkpoints, and completion metadata. A cancellation or
      source failure rolls back all generated rows, so a partial index can never be advertised ready.
+     Production queues that retain sources across other builds use the authorization overload below.
 
      - Parameter source: Installed SWORD or Android-compatible SQLite Bible source.
      - Side effects: Mutates the generated Search database on its serial queue and publishes guarded
        progress state on the main actor.
      - Throws: Cancellation, source failures, unavailable SQLite, statement/transaction failures, a
-       source with no searchable verses, or failed post-commit verification.
+       source with no searchable verses, failed authorization, or failed pre-commit verification.
+     - Important: Authorization is captured immediately. Callers that retained `source` before this
+       method was entered must instead capture and pass a queue-discovery authorization explicitly.
      */
     public func createIndex(source: any BibleSearchIndexSource) async throws {
+        let authorization = try captureIndexCreationAuthorization(for: source)
+        try await createIndex(source: source, authorization: authorization)
+    }
+
+    /**
+     Builds one retained source only while its queue-discovery authorization remains current.
+
+     Android resolves the book scheduled for indexing from the current installed-book state. iOS can
+     retain multiple backend objects while building them serially, so the authorization makes that
+     equivalent contract explicit and prevents a stale queued object from being blessed by a newer
+     store generation.
+
+     - Parameters:
+       - source: Exact source object retained when `authorization` was captured.
+       - authorization: Opaque token issued by this service for the same identity and store generation.
+     - Side effects: Marks only the source module scheduled/creating, mutates its generated rows on the
+       serial writer, and publishes guarded progress state on the main actor.
+     - Throws: Stale, mismatched, or foreign authorization; cancellation; source failure; unavailable
+       SQLite; transaction failure; empty source; or failed pre-commit verification.
+     - Important: Authorization is checked before queue admission, after writer handoff, and before
+       `COMMIT`. Any module-store notification overlapping those phases rolls back or rejects the build.
+     */
+    public func createIndex(
+        source: any BibleSearchIndexSource,
+        authorization: SearchIndexSourceAuthorization
+    ) async throws {
         let moduleInfo = source.searchIndexModuleInfo
         let moduleName = moduleInfo.name
         let sourceIdentity = source.searchIndexSourceIdentity
+        try validateIndexCreationAuthorization(
+            authorization,
+            sourceIdentity: sourceIdentity,
+            moduleName: moduleName
+        )
         let languageCode = moduleInfo.language
         let analyzer = SearchTextAnalyzer.profile(for: languageCode)
         let cancellationProbe = SearchIndexCancellationProbe()
         let sourceTransfer = SearchIndexSourceTransfer(source)
+        moduleMutationState.beginMutation(for: moduleName)
+        defer { moduleMutationState.finishMutation(for: moduleName) }
 
         let generation = await MainActor.run {
             indexingGeneration &+= 1
@@ -604,6 +1126,7 @@ public final class SearchIndexService: @unchecked Sendable {
                                 db: db,
                                 source: sourceTransfer.value,
                                 sourceIdentity: sourceIdentity,
+                                authorization: authorization,
                                 analyzer: analyzer,
                                 languageCode: languageCode,
                                 cancellationProbe: cancellationProbe,
@@ -657,6 +1180,38 @@ public final class SearchIndexService: @unchecked Sendable {
     }
 
     /**
+     Validates that one opaque source authorization still belongs to the current installed generation.
+
+     - Parameters:
+       - authorization: Token issued when the source object entered a creation queue.
+       - sourceIdentity: Identity read again from the exact source object being submitted.
+       - moduleName: Exact generated-index owner read from that source's module metadata.
+       - db: Optional writer transaction whose durable generation must match the captured generation.
+     - Side effects: Reads lock-protected invalidation state and, when supplied, one SQLite generation.
+     - Throws: `indexUnavailable` for a foreign, mismatched, stale, pending, or durably superseded token.
+     - Important: Callers validate before queue admission and again inside the writer transaction so a
+       notification cannot race either scheduling or publication.
+     */
+    private func validateIndexCreationAuthorization(
+        _ authorization: SearchIndexSourceAuthorization,
+        sourceIdentity: SearchIndexSourceIdentity,
+        moduleName: String,
+        db: OpaquePointer? = nil
+    ) throws {
+        guard authorization.serviceIdentifier == sourceAuthorizationServiceIdentifier,
+              authorization.sourceIdentity == sourceIdentity,
+              SwordJavaStringIdentity.equals(sourceIdentity.moduleName, moduleName),
+              !sourceIdentity.fingerprint.isEmpty,
+              moduleStoreReadEpochIsCurrent(authorization.invalidationEpoch) else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+        if let db,
+           try currentStoreGeneration(db: db) != authorization.storeGeneration {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+    }
+
+    /**
      Writes one streamed source into the current transaction and records completion atomically.
 
      Canonical `indexText` is analyzed into FTS `search_text`; independently projected `previewText`
@@ -669,6 +1224,7 @@ public final class SearchIndexService: @unchecked Sendable {
        - db: Service-owned generated Search database.
        - source: Backend-neutral Bible source streamed in canonical verse order.
        - sourceIdentity: Exact installed source generation recorded with completion metadata.
+       - authorization: Queue-discovery generation that must remain current through publication.
        - analyzer: Language profile used to derive searchable FTS text.
        - languageCode: Exact module language recorded with completion metadata.
        - cancellationProbe: Cross-executor cancellation state checked before source reads and writes.
@@ -680,19 +1236,27 @@ public final class SearchIndexService: @unchecked Sendable {
         db: OpaquePointer,
         source: any BibleSearchIndexSource,
         sourceIdentity: SearchIndexSourceIdentity,
+        authorization: SearchIndexSourceAuthorization,
         analyzer: SearchAnalyzerProfile,
         languageCode: String,
         cancellationProbe: SearchIndexCancellationProbe,
         generation: UInt64
     ) throws {
         let moduleName = source.searchIndexModuleInfo.name
-        guard sourceIdentity.moduleName == moduleName, !sourceIdentity.fingerprint.isEmpty else {
+        guard SwordJavaStringIdentity.equals(sourceIdentity.moduleName, moduleName),
+              !sourceIdentity.fingerprint.isEmpty else {
             throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
         }
         try cancellationProbe.checkCancellation()
         try Self.execute(db: db, sql: "BEGIN IMMEDIATE TRANSACTION", operation: "starting \(moduleName) index")
         let storeGeneration = try currentStoreGeneration(db: db)
-        try deleteIndexData(db: db, moduleName: moduleName, strict: true)
+        try validateIndexCreationAuthorization(
+            authorization,
+            sourceIdentity: sourceIdentity,
+            moduleName: moduleName,
+            db: db
+        )
+        try deleteIndexData(db: db, moduleName: moduleName)
 
         var verseStatement: OpaquePointer?
         var strongsStatement: OpaquePointer?
@@ -822,23 +1386,45 @@ public final class SearchIndexService: @unchecked Sendable {
         sqlite3_bind_int64(metadataStatement, 8, storeGeneration)
         try cancellationProbe.checkCancellation()
         try stepDone(db: db, statement: metadataStatement, operation: "recording \(moduleName) completion")
-        try cancellationProbe.checkCancellation()
-        try Self.execute(db: db, sql: "COMMIT", operation: "committing \(moduleName) index")
-
-        guard hasIndex(for: sourceIdentity),
+        guard indexIsReady(
+            db: db,
+            moduleName: moduleName,
+            expectedIdentity: sourceIdentity
+        ),
               indexedVerseCount(db: db, moduleName: moduleName) == insertedVerseCount else {
-            try? deleteIndexData(db: db, moduleName: moduleName, strict: false)
             throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
         }
+        try validateIndexCreationAuthorization(
+            authorization,
+            sourceIdentity: sourceIdentity,
+            moduleName: moduleName,
+            db: db
+        )
+        try cancellationProbe.checkCancellation()
+        try Self.execute(db: db, sql: "COMMIT", operation: "committing \(moduleName) index")
     }
 
-    /** Deletes one module's generated search rows after earlier queued mutations complete. */
+    /**
+     Deletes one module's published index after every earlier queued mutation completes.
+
+     - Parameter moduleName: Exact generated-index owner whose text, Strong's, and metadata rows are
+       removed together.
+     - Side effects: Marks only `moduleName` unavailable before queue handoff, executes one atomic
+       deletion transaction on the serial writer, publishes SQLite failure text, then always clears the
+       per-module mutation gate.
+     - Failure modes: This async API is intentionally nonthrowing. SQLite failures roll back every facet and
+       update `lastFailureDescription`; an unavailable writer leaves its initialization failure intact.
+     - Concurrency: Suspension replaces caller blocking, while the gate prevents Search and agent reads
+       from observing either the queued or active deletion. Unrelated modules remain readable.
+     */
     public func deleteIndex(for moduleName: String) async {
+        moduleMutationState.beginMutation(for: moduleName)
+        defer { moduleMutationState.finishMutation(for: moduleName) }
         await withCheckedContinuation { continuation in
             indexMutationQueue.async { [weak self] in
                 if let self, let db = self.db {
                     do {
-                        try self.deleteIndexData(db: db, moduleName: moduleName, strict: true)
+                        try self.deleteCommittedIndexData(db: db, moduleName: moduleName)
                     } catch {
                         DispatchQueue.main.async { self.lastFailureDescription = error.localizedDescription }
                     }
@@ -848,12 +1434,26 @@ public final class SearchIndexService: @unchecked Sendable {
         }
     }
 
-    /** Synchronous compatibility deletion; new callers should use the async overload. */
+    /**
+     Deletes one module synchronously for legacy callers while preserving atomic publication.
+
+     - Parameter moduleName: Exact generated-index owner whose text, Strong's, and metadata rows are
+       removed together.
+     - Side effects: Applies the same per-module unavailable gate and atomic writer transaction as the
+       async overload, blocking the caller until queued mutations finish unless already on the writer.
+     - Failure modes: Database and transaction errors are intentionally suppressed for source
+       compatibility; rollback preserves the prior complete index. New code should use the async API so
+       failures can remain observable through `lastFailureDescription`.
+     - Concurrency: Detects re-entry on `indexMutationQueue` to avoid synchronous self-deadlock and
+       always clears the module gate after the deletion attempt. Unrelated modules remain readable.
+     */
     @available(*, deprecated, message: "Use await deleteIndex(for:) so deletion can suspend instead of blocking.")
     public func deleteIndex(for moduleName: String) {
+        moduleMutationState.beginMutation(for: moduleName)
+        defer { moduleMutationState.finishMutation(for: moduleName) }
         let mutation = {
             guard let db = self.db else { return }
-            try? self.deleteIndexData(db: db, moduleName: moduleName, strict: false)
+            try? self.deleteCommittedIndexData(db: db, moduleName: moduleName)
         }
         if DispatchQueue.getSpecific(key: indexMutationQueueSpecificKey) == true {
             mutation()
@@ -889,10 +1489,58 @@ public final class SearchIndexService: @unchecked Sendable {
     }
     #endif
 
+    /**
+     Removes one published module index as an all-or-nothing transaction.
+
+     Standalone deletion runs after any build transaction has ended. The Strong's rows, FTS rows, and
+     readiness metadata must therefore commit together: retaining metadata after only one generated
+     facet was removed would publish a corrupt index as Android-compatible `DONE` state. Build
+     verification runs before its original transaction commits and never needs post-publication cleanup.
+
+     - Parameters:
+       - db: Service-owned writer connection, currently outside another transaction.
+       - moduleName: Exact owner whose generated rows and completion metadata are removed.
+     - Side effects: Begins an immediate transaction, deletes every generated facet, and commits it.
+     - Throws: Explicit begin, delete, or commit errors. Every failure rolls back before returning.
+     - Important: Transactional replacement calls `deleteIndexData` directly inside its existing build
+       transaction and must not call this wrapper.
+     */
+    private func deleteCommittedIndexData(
+        db: OpaquePointer,
+        moduleName: String
+    ) throws {
+        try Self.execute(
+            db: db,
+            sql: "BEGIN IMMEDIATE TRANSACTION",
+            operation: "starting \(moduleName) index deletion"
+        )
+        do {
+            try deleteIndexData(db: db, moduleName: moduleName)
+            try Self.execute(
+                db: db,
+                sql: "COMMIT",
+                operation: "committing \(moduleName) index deletion"
+            )
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
+    /**
+     Deletes each generated facet using the caller's existing SQLite transaction boundary.
+
+     - Parameters:
+       - db: Service-owned writer connection.
+       - moduleName: Exact generated-index owner to remove.
+     - Side effects: Deletes lexical rows, text rows, then completion metadata on `db`.
+     - Throws: The first SQLite prepare or execution failure.
+     - Important: Callers publishing deletion must provide a transaction or use
+       `deleteCommittedIndexData`; build replacement already owns its encompassing transaction.
+     */
     private func deleteIndexData(
         db: OpaquePointer,
-        moduleName: String,
-        strict: Bool
+        moduleName: String
     ) throws {
         for (sql, operation) in [
             ("DELETE FROM verse_strongs WHERE module_name = ?", "deleting Strong's rows"),
@@ -901,14 +1549,10 @@ public final class SearchIndexService: @unchecked Sendable {
         ] {
             var statement: OpaquePointer?
             defer { sqlite3_finalize(statement) }
-            do {
-                try prepare(db: db, sql: sql, statement: &statement, operation: operation)
-                guard let statement else { continue }
-                bind(moduleName, to: statement, at: 1)
-                try stepDone(db: db, statement: statement, operation: operation)
-            } catch {
-                if strict { throw error }
-            }
+            try prepare(db: db, sql: sql, statement: &statement, operation: operation)
+            guard let statement else { continue }
+            bind(moduleName, to: statement, at: 1)
+            try stepDone(db: db, statement: statement, operation: operation)
         }
     }
 
@@ -958,7 +1602,20 @@ public final class SearchIndexService: @unchecked Sendable {
         )
     }
 
-    /** Compiles and executes one text query after optional exact source validation. */
+    /**
+     Compiles and executes one text query inside a single committed SQLite read snapshot.
+
+     - Parameters:
+       - query: Raw Search query compiled with the persisted module analyzer.
+       - moduleName: Exact generated-index owner.
+       - expectedIdentity: Installed source generation required by production callers, when known.
+       - wordMode: Android word decoration mode.
+       - scope: Canonical book/canon restriction.
+     - Returns: Bounded results from one committed index generation.
+     - Side effects: Opens and closes an operation-owned read-only SQLite connection.
+     - Throws: Scheduled/active indexing, source mismatch, query compilation, SQLite, or module-store
+       invalidation errors. A writer's uncommitted rows are never visible.
+     */
     private func search(
         query: String,
         moduleName: String,
@@ -966,19 +1623,38 @@ public final class SearchIndexService: @unchecked Sendable {
         wordMode: SearchWordMode,
         scope: SearchCanonicalScope
     ) throws -> SearchModuleResults {
-        let metadata = try indexMetadata(for: moduleName, expectedIdentity: expectedIdentity)
-        let analyzer = SearchTextAnalyzer.profile(for: metadata.languageCode)
-        guard analyzer.identifier == metadata.analyzerIdentifier else {
-            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        try withReadSnapshot(
+            for: moduleName,
+            operation: "checking \(moduleName) index"
+        ) { readDatabase in
+            let metadata = try indexMetadata(
+                db: readDatabase,
+                for: moduleName,
+                expectedIdentity: expectedIdentity
+            )
+            readAuthorizationCheckpoint?(moduleName)
+            let analyzer = SearchTextAnalyzer.profile(for: metadata.languageCode)
+            guard analyzer.identifier == metadata.analyzerIdentifier else {
+                throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+            }
+            let ftsQuery = try SearchQueryCompiler.compile(
+                query: query,
+                wordMode: wordMode,
+                analyzer: analyzer
+            )
+            let results = try executeTextSearch(
+                db: readDatabase,
+                ftsQuery: ftsQuery,
+                moduleName: moduleName,
+                scope: scope
+            )
+            try validateCurrentStoreGeneration(
+                metadata.storeGeneration,
+                moduleName: moduleName,
+                db: readDatabase
+            )
+            return results
         }
-        let ftsQuery = try SearchQueryCompiler.compile(query: query, wordMode: wordMode, analyzer: analyzer)
-        let results = try executeTextSearch(
-            ftsQuery: ftsQuery,
-            moduleName: moduleName,
-            scope: scope
-        )
-        try validateCurrentStoreGeneration(metadata.storeGeneration, moduleName: moduleName)
-        return results
     }
 
     /**
@@ -1024,54 +1700,90 @@ public final class SearchIndexService: @unchecked Sendable {
         )
     }
 
-    /** Executes one Strong's query after optional exact source validation. */
+    /**
+     Executes one Strong's query inside the same committed snapshot that authorized its metadata.
+
+     - Parameters:
+       - canonicalTokens: Canonical Strong's identifiers, all required.
+       - moduleName: Exact generated-index owner.
+       - expectedIdentity: Installed source generation required by production callers, when known.
+       - scope: Canonical book/canon restriction.
+     - Returns: Bounded lexical matches from one committed index generation.
+     - Side effects: Opens and closes an operation-owned read-only SQLite connection.
+     - Throws: Scheduled/active indexing, empty tokens, source mismatch, SQLite, or module-store
+       invalidation errors. Staged lexical/text rows are never exposed.
+     */
     private func searchStrongs(
         canonicalTokens: [String],
         moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity?,
         scope: SearchCanonicalScope
     ) throws -> SearchModuleResults {
-        let db = try requireDatabase(operation: "searching Strong's numbers")
-        let metadata = try indexMetadata(for: moduleName, expectedIdentity: expectedIdentity)
-        let tokens = Self.orderedUnique(canonicalTokens).filter { !$0.isEmpty }
-        guard !tokens.isEmpty else { throw SearchIndexError.emptyQuery }
+        try withReadSnapshot(
+            for: moduleName,
+            operation: "checking \(moduleName) index"
+        ) { readDatabase in
+            let metadata = try indexMetadata(
+                db: readDatabase,
+                for: moduleName,
+                expectedIdentity: expectedIdentity
+            )
+            readAuthorizationCheckpoint?(moduleName)
+            let tokens = Self.orderedUnique(canonicalTokens).filter { !$0.isEmpty }
+            guard !tokens.isEmpty else { throw SearchIndexError.emptyQuery }
 
-        let placeholders = Array(repeating: "?", count: tokens.count).joined(separator: ",")
-        let scopeSQL = Self.scopeSQL(scope, tableAlias: "f")
-        let sql = """
-            SELECT f.verse_key, f.plain_text, f.module_name, f.osis_book, f.display_book,
-                   CAST(f.chapter AS INTEGER), CAST(f.verse AS INTEGER), CAST(f.book_order AS INTEGER),
-                   f.display_book_mode, MIN(CAST(s.entry_order AS INTEGER)) AS sort_order
-            FROM verse_strongs s
-            JOIN verse_fts f ON f.verse_key = s.verse_key AND f.module_name = s.module_name
-            WHERE s.module_name = ? AND s.token IN (\(placeholders)) \(scopeSQL.clause)
-            GROUP BY f.module_name, f.osis_book, f.chapter, f.verse
-            HAVING COUNT(DISTINCT s.token) = ?
-            ORDER BY CAST(f.book_order AS INTEGER), CAST(f.chapter AS INTEGER),
-                     CAST(f.verse AS INTEGER), sort_order
-            LIMIT ?
-        """
+            let placeholders = Array(repeating: "?", count: tokens.count).joined(separator: ",")
+            let scopeSQL = Self.scopeSQL(scope, tableAlias: "f")
+            let sql = """
+                SELECT f.verse_key, f.plain_text, f.module_name, f.osis_book, f.display_book,
+                       CAST(f.chapter AS INTEGER), CAST(f.verse AS INTEGER), CAST(f.book_order AS INTEGER),
+                       f.display_book_mode, MIN(CAST(s.entry_order AS INTEGER)) AS sort_order
+                FROM verse_strongs s
+                JOIN verse_fts f ON f.verse_key = s.verse_key AND f.module_name = s.module_name
+                WHERE s.module_name = ? AND s.token IN (\(placeholders)) \(scopeSQL.clause)
+                GROUP BY f.module_name, f.osis_book, f.chapter, f.verse
+                HAVING COUNT(DISTINCT s.token) = ?
+                ORDER BY CAST(f.book_order AS INTEGER), CAST(f.chapter AS INTEGER),
+                         CAST(f.verse AS INTEGER), sort_order
+                LIMIT ?
+            """
 
-        var statement: OpaquePointer?
-        defer { sqlite3_finalize(statement) }
-        try prepare(db: db, sql: sql, statement: &statement, operation: "preparing Strong's search")
-        guard let statement else { throw SearchIndexError.databaseUnavailable(operation: "searching Strong's numbers") }
-        var binding: Int32 = 1
-        bind(moduleName, to: statement, at: binding)
-        binding += 1
-        for token in tokens {
-            bind(token, to: statement, at: binding)
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            try prepare(
+                db: readDatabase,
+                sql: sql,
+                statement: &statement,
+                operation: "preparing Strong's search"
+            )
+            guard let statement else {
+                throw SearchIndexError.databaseUnavailable(operation: "searching Strong's numbers")
+            }
+            var binding: Int32 = 1
+            bind(moduleName, to: statement, at: binding)
             binding += 1
+            for token in tokens {
+                bind(token, to: statement, at: binding)
+                binding += 1
+            }
+            for value in scopeSQL.bindings {
+                bind(value, to: statement, at: binding)
+                binding += 1
+            }
+            sqlite3_bind_int(statement, binding, Int32(tokens.count))
+            sqlite3_bind_int(statement, binding + 1, Int32(Self.maximumResultsPerModule + 1))
+            let results = try readSearchResults(
+                db: readDatabase,
+                statement: statement,
+                moduleName: moduleName
+            )
+            try validateCurrentStoreGeneration(
+                metadata.storeGeneration,
+                moduleName: moduleName,
+                db: readDatabase
+            )
+            return results
         }
-        for value in scopeSQL.bindings {
-            bind(value, to: statement, at: binding)
-            binding += 1
-        }
-        sqlite3_bind_int(statement, binding, Int32(tokens.count))
-        sqlite3_bind_int(statement, binding + 1, Int32(Self.maximumResultsPerModule + 1))
-        let results = try readSearchResults(db: db, statement: statement, moduleName: moduleName)
-        try validateCurrentStoreGeneration(metadata.storeGeneration, moduleName: moduleName)
-        return results
     }
 
     /** Searches selected modules and groups equivalent localized keys by canonical OSIS verse. */
@@ -1081,7 +1793,7 @@ public final class SearchIndexService: @unchecked Sendable {
         wordMode: SearchWordMode,
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedNames = Self.orderedUnique(moduleNames)
+        let orderedNames = Self.orderedUniqueModuleNames(moduleNames)
         return try collectGroupedResults(moduleNames: orderedNames) { moduleName in
             try search(query: query, moduleName: moduleName, wordMode: wordMode, scope: scope)
         }
@@ -1107,10 +1819,12 @@ public final class SearchIndexService: @unchecked Sendable {
     ) throws -> SearchGroupedResults {
         let orderedIdentities = Self.orderedUniqueIdentities(sourceIdentities)
         let identitiesByName = Dictionary(
-            uniqueKeysWithValues: orderedIdentities.map { ($0.moduleName, $0) }
+            uniqueKeysWithValues: orderedIdentities.map {
+                (SwordJavaExactStringIdentity($0.moduleName), $0)
+            }
         )
         return try collectGroupedResults(moduleNames: orderedIdentities.map(\.moduleName)) { moduleName in
-            guard let identity = identitiesByName[moduleName] else {
+            guard let identity = identitiesByName[SwordJavaExactStringIdentity(moduleName)] else {
                 throw SearchIndexError.indexUnavailable(moduleName: moduleName)
             }
             return try search(
@@ -1128,7 +1842,7 @@ public final class SearchIndexService: @unchecked Sendable {
         moduleNames: [String],
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedNames = Self.orderedUnique(moduleNames)
+        let orderedNames = Self.orderedUniqueModuleNames(moduleNames)
         return try collectGroupedResults(moduleNames: orderedNames) { moduleName in
             try searchStrongs(canonicalTokens: canonicalTokens, moduleName: moduleName, scope: scope)
         }
@@ -1152,10 +1866,12 @@ public final class SearchIndexService: @unchecked Sendable {
     ) throws -> SearchGroupedResults {
         let orderedIdentities = Self.orderedUniqueIdentities(sourceIdentities)
         let identitiesByName = Dictionary(
-            uniqueKeysWithValues: orderedIdentities.map { ($0.moduleName, $0) }
+            uniqueKeysWithValues: orderedIdentities.map {
+                (SwordJavaExactStringIdentity($0.moduleName), $0)
+            }
         )
         return try collectGroupedResults(moduleNames: orderedIdentities.map(\.moduleName)) { moduleName in
-            guard let identity = identitiesByName[moduleName] else {
+            guard let identity = identitiesByName[SwordJavaExactStringIdentity(moduleName)] else {
                 throw SearchIndexError.indexUnavailable(moduleName: moduleName)
             }
             return try searchStrongs(
@@ -1167,19 +1883,37 @@ public final class SearchIndexService: @unchecked Sendable {
     }
 
     /**
-     Executes selected modules independently and groups every successful result.
+     Executes selected modules independently while binding the aggregate to one store epoch.
+
+     Per-module failures remain visible when installed storage is stable, preserving Android-style
+     partial diagnostics for a corrupt individual index. A module-store replacement or uninstall is
+     different: if it overlaps any two snapshots, every accumulated result is discarded because an
+     earlier successful bucket may now belong to removed source content.
 
      - Parameters:
        - moduleNames: De-duplicated selected order.
        - operation: Throwing single-module query operation.
-     - Returns: Grouped successful results plus ordered module failure descriptions.
-     - Side effects: Executes the supplied read-only query once per selected module.
-     - Throws: Re-throws the first module error only when every non-empty selected module fails.
+     - Returns: Grouped successful results plus ordered module failure descriptions from one stable
+       module-store epoch.
+     - Side effects: Executes the supplied read-only query once per selected module and invokes the
+       package-test aggregate checkpoint after each operation.
+     - Throws: Re-throws the first module error when every non-empty selected module fails, or
+       `indexUnavailable` for the complete aggregate when store invalidation overlaps collection.
      */
     private func collectGroupedResults(
         moduleNames: [String],
         operation: (String) throws -> SearchModuleResults
     ) throws -> SearchGroupedResults {
+        guard !moduleNames.isEmpty else {
+            return SearchGroupedResults(
+                moduleResults: [],
+                moduleOrder: [],
+                moduleFailures: []
+            )
+        }
+        guard let aggregateEpoch = captureModuleStoreReadEpoch() else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
+        }
         var moduleResults: [SearchModuleResults] = []
         var moduleFailures: [SearchModuleFailure] = []
         var firstFailure: Error?
@@ -1194,8 +1928,12 @@ public final class SearchIndexService: @unchecked Sendable {
                     message: error.localizedDescription
                 ))
             }
+            aggregateSearchCheckpoint?(moduleName)
         }
-        if !moduleNames.isEmpty, moduleResults.isEmpty, let firstFailure {
+        guard moduleStoreReadEpochIsCurrent(aggregateEpoch) else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
+        }
+        if moduleResults.isEmpty, let firstFailure {
             throw firstFailure
         }
         return SearchGroupedResults(
@@ -1205,12 +1943,24 @@ public final class SearchIndexService: @unchecked Sendable {
         )
     }
 
+    /**
+     Executes one compiled FTS query on the snapshot that authorized its module metadata.
+
+     - Parameters:
+       - db: Operation-owned committed read snapshot.
+       - ftsQuery: Validated FTS5 expression produced by `SearchQueryCompiler`.
+       - moduleName: Exact generated-index owner.
+       - scope: Canonical book/canon restriction.
+     - Returns: Ordered, capped results from the snapshot.
+     - Side effects: Prepares, binds, advances, and finalizes one read-only SQLite statement.
+     - Throws: Explicit SQLite or malformed-row errors; no fallback query is attempted.
+     */
     private func executeTextSearch(
+        db: OpaquePointer,
         ftsQuery: String,
         moduleName: String,
         scope: SearchCanonicalScope
     ) throws -> SearchModuleResults {
-        let db = try requireDatabase(operation: "searching \(moduleName)")
         let scopeSQL = Self.scopeSQL(scope, tableAlias: "verse_fts")
         let sql = """
             SELECT verse_key, plain_text, module_name, osis_book, display_book,
@@ -1289,11 +2039,21 @@ public final class SearchIndexService: @unchecked Sendable {
         return SearchModuleResults(moduleName: moduleName, hits: hits, isTruncated: truncated)
     }
 
+    /// Metadata that authorizes analyzer selection and one exact committed index generation.
     private struct IndexMetadata {
+        /// Module language used to reconstruct the analyzer profile.
         let languageCode: String
+
+        /// Persisted analyzer contract that must match the current profile.
         let analyzerIdentifier: String
+
+        /// Installed source version recorded when the index committed.
         let sourceVersion: String
+
+        /// Durable installed-source fingerprint recorded when the index committed.
         let sourceFingerprint: String
+
+        /// Module-store generation shared with the result rows in the current read snapshot.
         let storeGeneration: sqlite3_int64
     }
 
@@ -1301,6 +2061,7 @@ public final class SearchIndexService: @unchecked Sendable {
      Loads completion metadata in the active module-store generation and optionally matches a source.
 
      - Parameters:
+       - db: Operation-owned SQLite read snapshot established before metadata authorization.
        - moduleName: Exact generated-index owner.
        - expectedIdentity: Installed source generation required by production Search, or `nil` for
          compatibility callers protected by central generation invalidation.
@@ -1309,13 +2070,13 @@ public final class SearchIndexService: @unchecked Sendable {
      - Throws: `indexUnavailable` for stale, mismatched, missing, or concurrently invalidated metadata.
      */
     private func indexMetadata(
+        db: OpaquePointer,
         for moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity? = nil
     ) throws -> IndexMetadata {
         guard !isModuleStoreInvalidationBlocked() else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
-        let db = try requireDatabase(operation: "checking \(moduleName) index")
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         try prepare(
@@ -1342,12 +2103,16 @@ public final class SearchIndexService: @unchecked Sendable {
         }
         let storeGeneration = sqlite3_column_int64(statement, 4)
         if let expectedIdentity,
-           (expectedIdentity.moduleName != moduleName
+           (!SwordJavaStringIdentity.equals(expectedIdentity.moduleName, moduleName)
                 || expectedIdentity.version != sourceVersion
                 || expectedIdentity.fingerprint != sourceFingerprint) {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
-        try validateCurrentStoreGeneration(storeGeneration, moduleName: moduleName)
+        try validateCurrentStoreGeneration(
+            storeGeneration,
+            moduleName: moduleName,
+            db: db
+        )
         return IndexMetadata(
             languageCode: language,
             analyzerIdentifier: analyzer,
@@ -1357,12 +2122,22 @@ public final class SearchIndexService: @unchecked Sendable {
         )
     }
 
-    /** Rejects results if the installed module store changed during metadata/query execution. */
+    /**
+     Rejects a snapshot whose durable module-store generation does not match authorized metadata.
+
+     - Parameters:
+       - expectedGeneration: Generation persisted with the selected module metadata.
+       - moduleName: Exact index owner used for the typed unavailable error.
+       - db: Same read snapshot used for metadata and result rows.
+     - Side effects: Reads the singleton store-generation row and the in-memory invalidation bit.
+     - Throws: `indexUnavailable` when notification invalidation is active or generations differ.
+     */
     private func validateCurrentStoreGeneration(
         _ expectedGeneration: sqlite3_int64,
-        moduleName: String
+        moduleName: String,
+        db: OpaquePointer
     ) throws {
-        guard !isModuleStoreInvalidationBlocked(), let db,
+        guard !isModuleStoreInvalidationBlocked(),
               try currentStoreGeneration(db: db) == expectedGeneration else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
@@ -1392,9 +2167,98 @@ public final class SearchIndexService: @unchecked Sendable {
         unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     }
 
-    private func requireDatabase(operation: String) throws -> OpaquePointer {
-        guard let db else { throw SearchIndexError.databaseUnavailable(operation: operation) }
-        return db
+    /**
+     Runs one logical readiness or Search operation against a committed SQLite snapshot.
+
+     A separate read-only connection is essential: `SQLITE_OPEN_FULLMUTEX` only serializes calls on
+     the writer connection and does not hide that connection's own uncommitted transaction. WAL lets
+     an already-admitted read retain its old committed snapshot while the writer builds a new one.
+
+     - Parameters:
+       - moduleName: Exact index owner whose scheduled/creating state gates new reads.
+       - operation: Diagnostic operation used when the backing database is unavailable.
+       - body: Complete logical metadata/result read; all statements must use the supplied connection.
+     - Returns: Value produced from one committed snapshot.
+     - Side effects: Opens a read-only connection, begins/commits a read transaction, and closes it.
+     - Throws: `indexUnavailable` while the affected module is scheduled/creating or store invalidation
+       is active or when the monotonic store epoch changes during the read; otherwise explicit database,
+       transaction, or body errors. Failures roll back an active read transaction before closing it.
+     - Important: A mutation beginning after admission does not cancel the reader; the independent WAL
+       snapshot remains complete. A module-store mutation is different because its installed source is
+       already authoritative; even a complete old snapshot must be rejected through the in-memory epoch.
+     */
+    private func withReadSnapshot<Result>(
+        for moduleName: String,
+        operation: String,
+        _ body: (OpaquePointer) throws -> Result
+    ) throws -> Result {
+        guard !moduleMutationState.isMutating(moduleName),
+              let readEpoch = captureModuleStoreReadEpoch() else {
+            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+        }
+        let readDatabase = try openReadDatabase(operation: operation)
+        defer { sqlite3_close(readDatabase) }
+        var transactionIsOpen = false
+        try Self.execute(
+            db: readDatabase,
+            sql: "BEGIN DEFERRED TRANSACTION",
+            operation: "starting read snapshot for \(moduleName)"
+        )
+        transactionIsOpen = true
+        do {
+            let result = try body(readDatabase)
+            guard moduleStoreReadEpochIsCurrent(readEpoch) else {
+                throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+            }
+            try Self.execute(
+                db: readDatabase,
+                sql: "COMMIT",
+                operation: "committing read snapshot for \(moduleName)"
+            )
+            transactionIsOpen = false
+            guard moduleStoreReadEpochIsCurrent(readEpoch) else {
+                throw SearchIndexError.indexUnavailable(moduleName: moduleName)
+            }
+            return result
+        } catch {
+            if transactionIsOpen {
+                sqlite3_exec(readDatabase, "ROLLBACK", nil, nil, nil)
+            }
+            throw error
+        }
+    }
+
+    /**
+     Opens one operation-owned read-only connection to the generated Search database.
+
+     - Parameter operation: Caller-facing diagnostic operation preserved for unavailable-database errors.
+     - Returns: Independent SQLite handle whose caller must close after its logical snapshot ends.
+     - Side effects: Opens the database file read-only with serialized SQLite call protection.
+     - Throws: `databaseUnavailable` when initialization never produced a writer, or a typed SQLite
+       open error when the existing database cannot be reopened read-only.
+     */
+    private func openReadDatabase(operation: String) throws -> OpaquePointer {
+        guard db != nil else {
+            throw SearchIndexError.databaseUnavailable(operation: operation)
+        }
+        var handle: OpaquePointer?
+        let openCode = sqlite3_open_v2(
+            dbPath,
+            &handle,
+            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
+            nil
+        )
+        guard openCode == SQLITE_OK, let handle else {
+            let message = handle.flatMap { sqlite3_errmsg($0) }.map(String.init(cString:))
+                ?? "SQLite error \(openCode)"
+            if let handle { sqlite3_close(handle) }
+            throw SearchIndexError.sqlite(
+                operation: "opening a read snapshot for \(operation)",
+                code: openCode,
+                message: message
+            )
+        }
+        return handle
     }
 
     /**
@@ -1479,11 +2343,36 @@ public final class SearchIndexService: @unchecked Sendable {
         return values.filter { seen.insert($0).inserted }
     }
 
-    /** Keeps the first exact source identity for each selected module name. */
+    /**
+     Keeps the first selected module for each exact Java UTF-16 initials value.
+
+     - Parameter values: Caller-ordered installed module names.
+     - Returns: First-occurrence order with only Java `String.equals` duplicates removed.
+     - Side effects: None.
+     - Failure modes: None; canonically equivalent Swift strings intentionally remain separate.
+     */
+    private static func orderedUniqueModuleNames(_ values: [String]) -> [String] {
+        var seen = Set<SwordJavaExactStringIdentity>()
+        return values.filter {
+            seen.insert(SwordJavaExactStringIdentity($0)).inserted
+        }
+    }
+
+    /**
+     Keeps the first exact source identity for each selected Java module name.
+
+     - Parameter values: Caller-ordered installed source generations.
+     - Returns: First source for each code-unit-identical module initials value.
+     - Side effects: None.
+     - Failure modes: None; different generations of the same exact initials keep the first, while
+       canonically equivalent Java-distinct initials both remain selected.
+     */
     private static func orderedUniqueIdentities(
         _ values: [SearchIndexSourceIdentity]
     ) -> [SearchIndexSourceIdentity] {
-        var seen = Set<String>()
-        return values.filter { seen.insert($0.moduleName).inserted }
+        var seen = Set<SwordJavaExactStringIdentity>()
+        return values.filter {
+            seen.insert(SwordJavaExactStringIdentity($0.moduleName)).inserted
+        }
     }
 }

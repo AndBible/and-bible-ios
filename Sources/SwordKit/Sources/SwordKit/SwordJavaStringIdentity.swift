@@ -1,4 +1,33 @@
 /**
+ Hashable Java `String.equals` identity over the exact UTF-16 code-unit sequence.
+
+ Swift `String` equality deliberately treats canonically equivalent Unicode spellings as equal,
+ while Java `String.equals`, `HashMap`, and `HashSet` compare the stored UTF-16 `char` sequence.
+ Installed-book registries and persisted Android fields use this value whenever normalization or
+ locale-sensitive comparison would merge identities that Java keeps distinct.
+
+ The identity retains no original `String`; callers that serialize or display a value keep that
+ string alongside this key. Construction and equality are deterministic for a supplied UTF-16
+ sequence. Swift supplies process-local `Hashable` seeding, while equal identities always hash
+ equally within that process. Construction has no side effects and cannot fail for a valid string.
+ */
+public struct SwordJavaExactStringIdentity: Hashable, Sendable {
+    /// Exact unsigned Java `char` sequence, exposed for Java-compatible ordering and serialization.
+    public let utf16CodeUnits: [UInt16]
+
+    /**
+     Creates an exact Java string key without normalization, trimming, or case folding.
+
+     - Parameter value: Swift string whose current UTF-16 representation defines the Java identity.
+     - Side effects: None.
+     - Failure modes: None; every Swift string exposes a valid UTF-16 view.
+     */
+    public init(_ value: String) {
+        utf16CodeUnits = Array(value.utf16)
+    }
+}
+
+/**
  Hashable Android 37 `String.equalsIgnoreCase` identity over Java UTF-16 `char` units.
 
  Android compares equal-length strings one UTF-16 unit at a time, applying non-expanding
@@ -25,6 +54,21 @@ public struct SwordJavaStringIdentity: Hashable, Sendable {
             "Missing pinned Android 37 Java character compatibility table"
         )
         foldedUTF16 = value.utf16.map(SwordJavaTextCompatibility.equalsIgnoreCaseFold)
+    }
+
+    /**
+     Compares two strings with Java `String.equals` UTF-16 identity semantics.
+
+     - Parameters:
+       - lhs: First exact Java string identity.
+       - rhs: Second exact Java string identity.
+     - Returns: True only when both strings contain the same UTF-16 code units; unlike Swift
+       `String ==`, canonically equivalent composed and decomposed spellings remain distinct.
+     - Side effects: None.
+     - Failure modes: None; Swift strings expose a valid UTF-16 view for exact comparison.
+     */
+    public static func equals(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.utf16.elementsEqual(rhs.utf16)
     }
 
     /**

@@ -42,6 +42,73 @@ enum UITestSearchQuerySeed {
 }
 
 /**
+ Retains a freshly opened native SWORD manager for one authorized Search indexing source.
+
+ `SwordModule` contains a manager-owned native pointer but does not retain its manager. Search must
+ recreate the manager after module-store mutation so an immutable presentation registry cannot
+ return an old native handle; this adapter keeps that fresh owner alive through the complete streamed
+ build while delegating the backend-neutral source contract to its resolved module.
+ */
+private final class CurrentSwordSearchIndexSource: BibleSearchIndexSource {
+    /// Fresh manager whose native lifetime owns `module` for the complete indexing operation.
+    private let manager: SwordManager
+
+    /// Current readable Bible resolved from the fresh manager snapshot.
+    private let module: SwordModule
+
+    /**
+     Retains a current native module and the fresh manager that owns its pointer.
+
+     - Parameters:
+       - moduleName: Exact selected native initials.
+       - manager: Already-created current manager retained as the module's native owner.
+       - module: Native handle resolved from the same manager's authoritative inventory.
+     - Side effects: None; manager creation and inventory resolution happen in the batch resolver.
+     - Failure modes: Category mismatch or non-exact initials return nil without retaining the handle.
+     */
+    init?(moduleName: String, manager: SwordManager, module: SwordModule) {
+        guard SwordJavaStringIdentity.equals(module.info.name, moduleName),
+              module.info.category == .bible else {
+            return nil
+        }
+        self.manager = manager
+        self.module = module
+    }
+
+    /// Current native module metadata used for analyzer and generated-row ownership.
+    var searchIndexModuleInfo: ModuleInfo { module.searchIndexModuleInfo }
+
+    /// Native sources rely on the central store epoch rather than a backend-local revision.
+    var searchIndexStorageRevision: String { module.searchIndexStorageRevision }
+
+    /// Exact metadata identity derived by the freshly resolved native module.
+    var searchIndexSourceIdentity: SearchIndexSourceIdentity {
+        module.searchIndexSourceIdentity
+    }
+
+    /// SWORD-compatible bounded progress denominator delegated to the native adapter.
+    var searchIndexProgressTotal: Int { module.searchIndexProgressTotal }
+
+    /// Native empty-row inclusion policy delegated to the SWORD adapter.
+    var searchIndexIncludesEmptyIndexText: Bool { module.searchIndexIncludesEmptyIndexText }
+
+    /**
+     Streams the current native module while retaining its fresh manager owner.
+
+     - Parameter consume: Synchronous Search entry consumer; false stops traversal.
+     - Side effects: Traverses and restores the fresh module cursor under `SwordRuntime`.
+     - Throws: Re-throws native projection and consumer errors; the manager remains retained until
+       the complete operation unwinds.
+     */
+    func forEachSearchIndexEntry(
+        _ consume: (BibleSearchIndexEntry) throws -> Bool
+    ) throws {
+        _ = manager
+        try module.forEachSearchIndexEntry(consume)
+    }
+}
+
+/**
  Full-text search interface with index management, scope filters, and multi-translation support.
 
  State machine:
@@ -1385,7 +1452,9 @@ public struct SearchView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("searchExpandedResult::\(sanitizedAccessibilitySegment(hit.id))")
+                        .accessibilityIdentifier(
+                            "searchExpandedResult::\(sanitizedAccessibilitySegment(hit.id.rawValue))"
+                        )
                     }
                 }
                 .padding(.leading, 40)
@@ -1738,10 +1807,13 @@ public struct SearchView: View {
      - Returns: Module description when available, otherwise the module abbreviation.
      */
     private func moduleDescription(for moduleName: String) -> String {
-        if let info = installedBibleModules.first(where: { $0.name == moduleName }) {
+        if let info = installedBibleModules.first(where: {
+            SwordJavaStringIdentity.equals($0.name, moduleName)
+        }) {
             return info.description.isEmpty ? info.name : info.description
         }
-        if let mod = swordModule, mod.info.name == moduleName {
+        if let mod = swordModule,
+           SwordJavaStringIdentity.equals(mod.info.name, moduleName) {
             return mod.info.description.isEmpty ? mod.info.name : mod.info.description
         }
         if let mod = swordManager?.module(named: moduleName) {
@@ -1791,11 +1863,14 @@ public struct SearchView: View {
      Side effects:
      - mutates `viewState` to `.creatingIndex` and later back to `.ready`
      - queries `SearchIndexService` and the backend-neutral registry for sources requiring indexes
+     - resolves the missing subset from one fresh native inventory inside a service-owned store epoch
+     - captures one store-generation authorization for each source returned by that batch resolution
      - launches asynchronous index creation work for each queued module
 
      Failure modes:
-     - a missing service, unresolved selected module, thrown creation error, or failed post-create
-       verification transitions to `.indexFailure` and never exposes stale Search results
+     - a missing service, unresolved selected module, stale source authorization, thrown creation
+       error, or failed post-create verification transitions to `.indexFailure` and never exposes
+       stale Search results
      */
     private func startIndexCreation() {
         if let forcedRebuildModuleName {
@@ -1817,26 +1892,97 @@ public struct SearchView: View {
         }
 
         let selectedNames = orderedSelectedModuleNames
-        guard let selectedSources = resolveSearchIndexSources(named: selectedNames) else {
+        guard let presentationSources = resolveSearchIndexSources(named: selectedNames) else {
             viewState = .indexFailure(
                 moduleName: fallbackModuleName,
                 moduleDescription: moduleDescription(for: fallbackModuleName),
-                message: "A selected translation could not be opened for indexing."
+                message: "A selected translation could not be opened for index verification."
             )
             return
         }
         let requirement = Self.indexRequirement(for: query)
-        let missingIdentities = service.modulesNeedingIndex(
-            from: selectedSources.map { $0.source.searchIndexSourceIdentity },
+        let presentationIdentities = presentationSources.map {
+            $0.source.searchIndexSourceIdentity
+        }
+        let initiallyMissingIdentities = service.modulesNeedingIndex(
+            from: presentationIdentities,
             requirement: requirement
         )
-        let missingNames = missingIdentities.map(\.moduleName)
-        var sourcesToIndex: [(source: any BibleSearchIndexSource, name: String)] = []
-        for identity in missingIdentities {
-            guard let source = selectedSources.first(where: {
-                $0.name == identity.moduleName
+        let initiallyMissingNames = initiallyMissingIdentities.map(\.moduleName)
+        let capturedMissingSources: [(
+            name: String,
+            source: any BibleSearchIndexSource,
+            authorization: SearchIndexSourceAuthorization
+        )]
+        do {
+            guard let captured = try service.captureIndexCreationSources(
+                named: initiallyMissingNames,
+                resolving: {
+                    resolveCurrentSearchIndexSourcesForCreation(named: initiallyMissingNames)
+                }
+            ) else {
+                let missingName = initiallyMissingNames.first ?? fallbackModuleName
+                viewState = .indexFailure(
+                    moduleName: missingName,
+                    moduleDescription: moduleDescription(for: missingName),
+                    message: "The selected translation could not be opened for indexing."
+                )
+                return
+            }
+            capturedMissingSources = captured
+        } catch {
+            let missingName = initiallyMissingNames.first ?? fallbackModuleName
+            viewState = .indexFailure(
+                moduleName: missingName,
+                moduleDescription: moduleDescription(for: missingName),
+                message: error.localizedDescription
+            )
+            return
+        }
+
+        let capturedIdentityByName = Dictionary(
+            uniqueKeysWithValues: capturedMissingSources.map {
+                (
+                    SwordJavaExactStringIdentity($0.name),
+                    $0.source.searchIndexSourceIdentity
+                )
+            }
+        )
+        let presentationIdentityByName = Dictionary(
+            uniqueKeysWithValues: presentationSources.map {
+                (
+                    SwordJavaExactStringIdentity($0.name),
+                    $0.source.searchIndexSourceIdentity
+                )
+            }
+        )
+        let selectedIdentities = selectedNames.compactMap {
+            let exactName = SwordJavaExactStringIdentity($0)
+            return capturedIdentityByName[exactName] ?? presentationIdentityByName[exactName]
+        }
+        guard selectedIdentities.count == selectedNames.count else {
+            viewState = .indexFailure(
+                moduleName: fallbackModuleName,
+                moduleDescription: moduleDescription(for: fallbackModuleName),
+                message: "A selected translation could not be opened for index verification."
+            )
+            return
+        }
+
+        let missingCurrentIdentities = service.modulesNeedingIndex(
+            from: capturedMissingSources.map { $0.source.searchIndexSourceIdentity },
+            requirement: requirement
+        )
+        var sourcesToIndex: [(
+            source: any BibleSearchIndexSource,
+            name: String,
+            authorization: SearchIndexSourceAuthorization
+        )] = []
+        for identity in missingCurrentIdentities {
+            guard let selectedSource = capturedMissingSources.first(where: {
+                SwordJavaStringIdentity.equals($0.name, identity.moduleName)
                     && $0.source.searchIndexSourceIdentity == identity
-            })?.source else {
+            }) else {
                 viewState = .indexFailure(
                     moduleName: identity.moduleName,
                     moduleDescription: moduleDescription(for: identity.moduleName),
@@ -1844,8 +1990,13 @@ public struct SearchView: View {
                 )
                 return
             }
-            sourcesToIndex.append((source, identity.moduleName))
+            sourcesToIndex.append((
+                selectedSource.source,
+                identity.moduleName,
+                selectedSource.authorization
+            ))
         }
+        let missingNames = sourcesToIndex.map(\.name)
 
         let requestToken = indexRequestGate.begin()
         viewState = .creatingIndex
@@ -1856,7 +2007,10 @@ public struct SearchView: View {
                 for item in sourcesToIndex {
                     try Task.checkCancellation()
                     activeModuleName = item.name
-                    try await service.createIndex(source: item.source)
+                    try await service.createIndex(
+                        source: item.source,
+                        authorization: item.authorization
+                    )
                     try Task.checkCancellation()
                     guard indexRequestGate.accepts(requestToken) else { return }
                     guard service.modulesNeedingIndex(
@@ -1868,6 +2022,14 @@ public struct SearchView: View {
                 }
                 try Task.checkCancellation()
                 guard indexRequestGate.accepts(requestToken) else { return }
+                if let newlyMissing = service.modulesNeedingIndex(
+                    from: selectedIdentities,
+                    requirement: requirement
+                ).first {
+                    throw SearchIndexError.indexVerificationFailed(
+                        moduleName: newlyMissing.moduleName
+                    )
+                }
                 indexTask = nil
                 viewState = .ready
                 resumeSearchAfterIndexIfNeeded()
@@ -1889,16 +2051,17 @@ public struct SearchView: View {
      Deletes and recreates one existing primary-document index after explicit Android confirmation.
 
      - Parameter moduleName: Exact current document initials captured when the rebuild flow opened.
-     - Side effects: Deletes only that generated index, recreates it from the exact source snapshot,
-       verifies readiness, and returns to preserved Search criteria.
-     - Failure modes: Missing service/source, cancellation, build errors, and failed verification
-       transition to the existing retryable index failure state; source content is never deleted.
+     - Side effects: Captures the source's current store authorization, deletes only that generated
+       index, recreates it from the authorized source snapshot, verifies readiness, and returns to
+       preserved Search criteria.
+     - Failure modes: Missing service/source, stale authorization, cancellation, build errors, and
+       failed verification transition to the existing retryable index failure state; source content
+       is never deleted.
      */
     private func startForcedIndexRebuild(moduleName: String) {
         cancelSearchWork(clearPublishedState: true)
         cancelIndexWork()
-        guard let service = searchIndexService,
-              let source = resolveSearchIndexSource(named: moduleName) else {
+        guard let service = searchIndexService else {
             forcedRebuildModuleName = nil
             viewState = .indexFailure(
                 moduleName: moduleName,
@@ -1906,6 +2069,34 @@ public struct SearchView: View {
                 message: SearchIndexError.databaseUnavailable(
                     operation: "rebuilding \(moduleName)"
                 ).localizedDescription
+            )
+            return
+        }
+        let source: any BibleSearchIndexSource
+        let authorization: SearchIndexSourceAuthorization
+        do {
+            guard let captured = try service.captureIndexCreationSource(
+                named: moduleName,
+                resolving: {
+                    resolveCurrentSearchIndexSourceForCreation(named: moduleName)
+                }
+            ) else {
+                forcedRebuildModuleName = nil
+                viewState = .indexFailure(
+                    moduleName: moduleName,
+                    moduleDescription: moduleDescription(for: moduleName),
+                    message: "The selected translation could not be opened for indexing."
+                )
+                return
+            }
+            source = captured.source
+            authorization = captured.authorization
+        } catch {
+            forcedRebuildModuleName = moduleName
+            viewState = .indexFailure(
+                moduleName: moduleName,
+                moduleDescription: moduleDescription(for: moduleName),
+                message: error.localizedDescription
             )
             return
         }
@@ -1917,7 +2108,10 @@ public struct SearchView: View {
                 await service.deleteIndex(for: moduleName)
                 try Task.checkCancellation()
                 guard indexRequestGate.accepts(requestToken) else { return }
-                try await service.createIndex(source: source)
+                try await service.createIndex(
+                    source: source,
+                    authorization: authorization
+                )
                 try Task.checkCancellation()
                 guard indexRequestGate.accepts(requestToken) else { return }
                 guard service.hasIndex(for: source.searchIndexSourceIdentity) else {
@@ -1940,6 +2134,122 @@ public struct SearchView: View {
                 )
             }
         }
+    }
+
+    /**
+     Resolves one index-creation source from current storage inside the service epoch handshake.
+
+     - Parameter moduleName: Exact selected Bible initials.
+     - Returns: Fresh native source, current path-backed SQLite source, or nil when current ownership
+       and readability cannot be proven.
+     - Side effects: Delegates to the batch resolver, creating and enumerating at most one fresh
+       manager for this forced-rebuild operation.
+     - Failure modes: Fresh-manager failure, locked ownership, stale native registry entries, and
+       non-exact identities fail closed. Manager-less Search retains its exact standalone fallback.
+     - Important: The caller must execute this resolver only inside
+       `SearchIndexService.captureIndexCreationSource(named:resolving:)`.
+     */
+    private func resolveCurrentSearchIndexSourceForCreation(
+        named moduleName: String
+    ) -> (any BibleSearchIndexSource)? {
+        resolveCurrentSearchIndexSourcesForCreation(named: [moduleName])?.first?.source
+    }
+
+    /**
+     Resolves an ordered creation batch from one authoritative current-store snapshot.
+
+     Presentation registries are immutable and can predate a module replacement. Configured Search
+     therefore opens one fresh SWORD manager for the complete missing-module batch, enumerates its
+     inclusive native ownership once, and retains that shared manager through every native source.
+     A non-native registry source remains eligible only after the fresh inventory proves no native
+     owner, preserving Android's SWORD-first collision behavior without one inventory per selection.
+
+     - Parameter moduleNames: Ordered exact initials currently missing a required Search index.
+     - Returns: One exact source per name in the same order, or nil when any current owner cannot be
+       proven readable.
+     - Side effects: Configured Search creates one operation-owned manager and performs one complete
+       installed-module inventory. Manager-less Search performs exact snapshot lookups only.
+     - Failure modes: Manager construction failure, locked/unreadable native ownership, stale native
+       registry handles, category mismatch, and missing identities fail the complete batch closed.
+     - Important: The caller must execute this resolver only inside
+       `SearchIndexService.captureIndexCreationSources(named:resolving:)`.
+     */
+    private func resolveCurrentSearchIndexSourcesForCreation(
+        named moduleNames: [String]
+    ) -> [(name: String, source: any BibleSearchIndexSource)]? {
+        guard let swordManager else {
+            return resolveSearchIndexSources(named: moduleNames)
+        }
+        return Self.resolveCurrentSearchIndexSourcesForCreation(
+            named: moduleNames,
+            modulePath: swordManager.modulePath,
+            registrySource: { searchIndexSourceRegistry?.source(named: $0) }
+        )
+    }
+
+    /**
+     Performs one injectable current-manager resolution pass for a Search creation batch.
+
+     - Parameters:
+       - moduleNames: Ordered exact selected initials requiring an index.
+       - modulePath: Active SWORD installation root used to open an independent current manager.
+       - registrySource: Immutable presentation lookup used only for a non-native fallback after
+         current native ownership has been excluded.
+       - managerFactory: Factory seam invoked once for non-empty input; production opens a fresh
+         manager and tests can prove construction failure and invocation count deterministically.
+     - Returns: Ordered exact current sources, or nil when ownership/readability is not provable for
+       the complete batch.
+     - Side effects: Invokes `managerFactory` once, enumerates its full inventory once, and resolves
+       at most one native handle per requested native source. It does not stream module content.
+     - Failure modes: Manager construction failure aborts before SQLite fallback. Locked, unsupported,
+       aliased, removed, stale-native, and wrong-category sources fail the entire batch closed.
+     */
+    static func resolveCurrentSearchIndexSourcesForCreation(
+        named moduleNames: [String],
+        modulePath: String,
+        registrySource: (String) -> (any BibleSearchIndexSource)?,
+        managerFactory: (String) -> SwordManager? = { SwordManager(modulePath: $0) }
+    ) -> [(name: String, source: any BibleSearchIndexSource)]? {
+        guard !moduleNames.isEmpty else { return [] }
+        guard let manager = managerFactory(modulePath) else { return nil }
+        let nativeInventory = manager.installedModules().filter {
+            !BibleReaderSQLiteModuleCatalog.isSQLiteProjection($0)
+        }
+
+        var resolved: [(name: String, source: any BibleSearchIndexSource)] = []
+        resolved.reserveCapacity(moduleNames.count)
+        for moduleName in moduleNames {
+            if let nativeOwner = BibleReaderInstalledModuleLookup.module(
+                named: moduleName,
+                in: nativeInventory
+            ) {
+                guard SwordJavaStringIdentity.equals(nativeOwner.name, moduleName),
+                      nativeOwner.category == .bible,
+                      !nativeOwner.isEncrypted || nativeOwner.isUnlocked,
+                      let module = manager.module(named: nativeOwner.name),
+                      let source = CurrentSwordSearchIndexSource(
+                        moduleName: moduleName,
+                        manager: manager,
+                        module: module
+                      ) else {
+                    return nil
+                }
+                resolved.append((moduleName, source))
+                continue
+            }
+
+            guard let source = registrySource(moduleName),
+                  !(source is SwordModule),
+                  SwordJavaStringIdentity.equals(
+                    source.searchIndexModuleInfo.name,
+                    moduleName
+                  ),
+                  source.searchIndexModuleInfo.category == .bible else {
+                return nil
+            }
+            resolved.append((moduleName, source))
+        }
+        return resolved
     }
 
     /**
@@ -1990,7 +2300,7 @@ public struct SearchView: View {
             return module
         }
         guard let primaryModule,
-              primaryModule.info.name == moduleName,
+              SwordJavaStringIdentity.equals(primaryModule.info.name, moduleName),
               primaryModule.info.category == .bible,
               !primaryModule.info.isEncrypted else {
             return nil
@@ -2013,7 +2323,10 @@ public struct SearchView: View {
         resolved.reserveCapacity(moduleNames.count)
         for moduleName in moduleNames {
             guard let source = resolveSearchIndexSource(named: moduleName),
-                  source.searchIndexModuleInfo.name == moduleName else {
+                  SwordJavaStringIdentity.equals(
+                    source.searchIndexModuleInfo.name,
+                    moduleName
+                  ) else {
                 return nil
             }
             resolved.append((moduleName, source))

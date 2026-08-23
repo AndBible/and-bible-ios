@@ -183,7 +183,7 @@ struct ReaderSetupContentPayload: Encodable {
  The range identifies the complete linked commentary block even when the selected verse is inside
  it. Vue uses the exact OSIS endpoints for annotation and navigation context.
  */
-struct ReaderCommentaryRangePayload: Encodable, Equatable {
+struct ReaderCommentaryRangePayload: Encodable, Equatable, Sendable {
     /// First OSIS verse represented by the commentary block.
     let startOsisRef: String
     /// Last OSIS verse represented by the commentary block.

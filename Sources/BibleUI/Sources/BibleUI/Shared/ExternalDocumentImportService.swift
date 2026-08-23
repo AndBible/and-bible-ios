@@ -3,6 +3,7 @@
 import Foundation
 import UniformTypeIdentifiers
 import BibleCore
+import SwiftData
 import SwordKit
 
 /**
@@ -72,6 +73,25 @@ public struct ExternalDocumentImportRequest: Equatable, Sendable {
     }
 }
 
+/** Fail-closed identity conflicts detected before an external document mutates local storage. */
+private enum ExternalDocumentRegistryAdmissionError: LocalizedError {
+    /// Android's complete installed-book registry already resolves the candidate EPUB initials.
+    case epubIdentityOwned(String)
+
+    /// One current registry source could not be read completely enough to make a safe decision.
+    case registryUnavailable(String)
+
+    /// User-facing failure surfaced by every external import entry point.
+    var errorDescription: String? {
+        switch self {
+        case .epubIdentityOwned(let initials):
+            return "Cannot import this EPUB because an installed document already owns module identity \(initials)."
+        case .registryUnavailable(let message):
+            return "Cannot import this EPUB because the installed document registry could not be read: \(message)"
+        }
+    }
+}
+
 /**
  Installs user-selected documents that Android exposes through its external document intents.
 
@@ -107,6 +127,35 @@ public struct ExternalDocumentImportService: Sendable {
 
     /// Closure used to install EPUB archives; injectable for focused tests.
     public typealias EpubInstaller = @Sendable (URL) throws -> String
+
+    /// Legacy initials-only predicate retained for source-compatible focused installer tests.
+    public typealias EpubInitialsUnavailable = @Sendable (String) -> Bool
+
+    /**
+     Throwing live admission that can distinguish an exact EPUB update from another owner.
+
+     - Parameter candidate: Stable source identifier plus Android-compatible EPUB initials.
+     - Side effects: Production implementations read native, SQLite, EPUB, and My Documents state.
+     - Throws: Identity ownership or registry availability errors before candidate mutation.
+     */
+    public typealias EpubCandidateAdmission = @Sendable (
+        EpubReader.InstallCandidate
+    ) throws -> Void
+
+    /**
+     Installs one EPUB using the resolved legacy or lock-aware production path.
+
+     - Parameters:
+       - url: Candidate archive URL.
+       - admission: Live combined-registry validator evaluated before candidate mutation.
+     - Returns: Installed title, falling back to the stable identifier when reopening fails.
+     - Side effects: The production path stages and publishes one EPUB after admission.
+     - Throws: Propagates registry-admission, validation, indexing, and filesystem errors.
+     */
+    private typealias RegistryAdmittingEpubInstaller = @Sendable (
+        URL,
+        EpubCandidateAdmission
+    ) throws -> String
 
     /// Closure used to install Android-style app-owned TTF font files; injectable for tests.
     public typealias FontInstaller = @Sendable (URL, String?) throws -> String
@@ -172,8 +221,17 @@ public struct ExternalDocumentImportService: Sendable {
     /// SWORD module installer called for `.zip` files after preflight.
     private let moduleInstaller: ModuleInstallerWithPolicy
 
-    /// EPUB installer called for `.epub` files.
-    private let epubInstaller: EpubInstaller
+    /**
+     EPUB installer that evaluates complete-registry admission at its mutation boundary.
+
+     The production implementation delegates to `EpubReader`'s library-lock-owned admission API.
+     A legacy injected `EpubInstaller` is wrapped with a synchronous precheck immediately before
+     invocation; that compatibility path does not promise cross-call serialization.
+     */
+    private let epubInstaller: RegistryAdmittingEpubInstaller
+
+    /// Complete installed/local registry admission check evaluated before EPUB file mutation.
+    private let epubCandidateAdmission: EpubCandidateAdmission
 
     /// TTF font installer called for Android's font import path.
     private let fontInstaller: FontInstaller
@@ -202,9 +260,17 @@ public struct ExternalDocumentImportService: Sendable {
           - moduleInspector: Read-only inspector for ZIP-backed SWORD modules.
           - moduleInstallerWithPolicy: Optional policy-aware installer. The default mutates the
               app's SWORD module storage, reports durable phases, and returns the module identifier.
-          - epubInstaller: Installer for EPUB archives. The default mutates the app's EPUB storage and
-              returns the installed EPUB title, falling back to the stable identifier when metadata cannot
-              be reopened.
+          - epubInstaller: Optional legacy installer for isolated routing tests. When supplied, the
+              resolved typed admission runs synchronously immediately before this closure, but the
+              injected closure owns serialization. This compatibility boundary cannot make a
+              caller-provided installer atomic across concurrent invocations.
+          - epubCandidateAdmission: Preferred throwing complete-registry validator. Production
+              callers use `androidRegistryAware(modelContext:swordManager:)`, which rebuilds live
+              ownership on every invocation and permits only an exact same-identifier EPUB update.
+          - epubInitialsUnavailable: Legacy initials-only validator wrapped as a typed rejecting
+              admission when `epubCandidateAdmission` is absent.
+          - moduleStoreRootURL: Canonical SWORD root whose global coordinator serializes the
+              production EPUB admission, staging, pointer publication, and rollback boundary.
           - fontInstaller: Installer for TTF font files. The default copies the font into the SWORD
               `ttf` directory and writes Android-style addon metadata.
           - androidFamilyFileInstaller: Installer for image, prompt, MyBible, MySword, and e-Sword
@@ -229,10 +295,13 @@ public struct ExternalDocumentImportService: Sendable {
             try ModuleRepository().inspectLocalSwordZip(at: url)
         },
         moduleInstallerWithPolicy: ModuleInstallerWithPolicy? = nil,
-        epubInstaller: @escaping EpubInstaller = { url in
-            let identifier = try EpubReader.install(epubURL: url)
-            return EpubReader(identifier: identifier)?.title ?? identifier
-        },
+        epubInstaller: EpubInstaller? = nil,
+        epubCandidateAdmission: EpubCandidateAdmission? = nil,
+        epubInitialsUnavailable: @escaping EpubInitialsUnavailable = { _ in false },
+        moduleStoreRootURL: URL = URL(
+            fileURLWithPath: SwordManager.defaultModulePath(),
+            isDirectory: true
+        ),
         fontInstaller: @escaping FontInstaller = { url, displayName in
             try TtfFontRepository().installFont(from: url, displayName: displayName).fontName
         },
@@ -261,7 +330,27 @@ public struct ExternalDocumentImportService: Sendable {
                 )
             }
         }
-        self.epubInstaller = epubInstaller
+        let resolvedEpubAdmission: EpubCandidateAdmission = epubCandidateAdmission ?? { candidate in
+            guard !epubInitialsUnavailable(candidate.initials) else {
+                throw ExternalDocumentRegistryAdmissionError.epubIdentityOwned(candidate.initials)
+            }
+        }
+        if let epubInstaller {
+            self.epubInstaller = { url, admission in
+                try admission(EpubReader.installCandidate(forEpubURL: url))
+                return try epubInstaller(url)
+            }
+        } else {
+            self.epubInstaller = { url, admission in
+                let identifier = try EpubReader.install(
+                    epubURL: url,
+                    moduleStoreRootURL: moduleStoreRootURL,
+                    admittingCandidateWith: admission
+                )
+                return EpubReader(identifier: identifier)?.title ?? identifier
+            }
+        }
+        self.epubCandidateAdmission = resolvedEpubAdmission
         self.fontInstaller = fontInstaller
         self.androidFamilyFileInstaller = androidFamilyFileInstaller ?? { url, fileName, family, policy in
             let report = try AndroidModuleBackupService().restoreExternalFile(
@@ -296,6 +385,60 @@ public struct ExternalDocumentImportService: Sendable {
         self.epubArchiveDetector = epubArchiveDetector ?? { url in
             Self.defaultEpubArchiveDetector(url)
         }
+    }
+
+    /**
+     Creates the production importer with Android's complete live EPUB registration admission.
+
+     - Parameters:
+       - modelContext: SwiftData context whose container owns current My Documents metadata.
+       - swordManager: Manager whose module-storage path identifies the native registry. The
+         supplied manager is not snapshotted; admission opens a fresh manager at that path.
+     - Returns: Import service whose EPUB branch rejects any candidate initials currently resolved
+       by native, SQLite, admitted EPUB, or admitted My Documents books, except an exact stable-ID
+       reinstall of the EPUB that already owns the identity.
+     - Side effects: Captures only the SwiftData container and SWORD module path; every EPUB
+       admission opens fresh native, SQLite, EPUB, and My Documents snapshots in Android order
+       while the global module-store lease and EPUB library lock are held. Later successful import
+       calls perform their documented file writes.
+     - Failure modes: Any existing registry read failure closes EPUB admission before candidate
+       staging. Other document kinds preserve the default importer behavior.
+     */
+    @MainActor
+    public static func androidRegistryAware(
+        modelContext: ModelContext,
+        swordManager: SwordManager? = nil
+    ) -> ExternalDocumentImportService {
+        let modelContainer = modelContext.container
+        let modulePath = swordManager?.modulePath
+            ?? SwordManager.defaultModulePath()
+        let moduleRootURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+        return ExternalDocumentImportService(
+            epubCandidateAdmission: { candidate in
+                do {
+                    let snapshot = try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+                        modelContainer: modelContainer,
+                        modulePath: modulePath
+                    )
+                    guard snapshot.admitsEpub(candidate) else {
+                        throw ExternalDocumentRegistryAdmissionError.epubIdentityOwned(
+                            candidate.initials
+                        )
+                    }
+                } catch let error as ExternalDocumentRegistryAdmissionError {
+                    throw error
+                } catch let error as BibleReaderInstalledDocumentRegistrySnapshotError {
+                    throw ExternalDocumentRegistryAdmissionError.registryUnavailable(
+                        error.detail
+                    )
+                } catch {
+                    throw ExternalDocumentRegistryAdmissionError.registryUnavailable(
+                        error.localizedDescription
+                    )
+                }
+            },
+            moduleStoreRootURL: moduleRootURL
+        )
     }
 
     /**
@@ -589,12 +732,14 @@ public struct ExternalDocumentImportService: Sendable {
       - Parameter url: URL for a candidate EPUB archive.
       - Returns: `.installedEpub` on success or `.failed` with the installer error description.
       - Side effects: Mutates local EPUB extracted storage and index files through `EpubReader`.
-      - Failure modes: EPUB validation, ZIP parsing, index creation, and file-I/O errors are captured
-          in the returned failure result.
+      - Failure modes: A complete-registry identity owner rejects the candidate before production
+          staging; EPUB validation, ZIP parsing, index creation, and file-I/O errors are captured in
+          the returned failure result. Legacy injected installers receive a pre-invocation check but
+          retain responsibility for cross-call serialization.
       */
     private func installEpub(at url: URL) -> ExternalDocumentImportResult {
         do {
-            let title = try epubInstaller(url)
+            let title = try epubInstaller(url, epubCandidateAdmission)
             return .installedEpub(title: title)
         } catch {
             return .failed(message: error.localizedDescription)

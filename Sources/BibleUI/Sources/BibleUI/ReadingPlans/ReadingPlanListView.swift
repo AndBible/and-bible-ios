@@ -463,7 +463,9 @@ public struct ReadingPlanListView: View {
      */
     private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
         externalImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext
+        )
         Task { @MainActor in
             let preflight = await Task.detached(priority: .userInitiated) {
                 service.preflightDocument(request)
@@ -503,7 +505,9 @@ public struct ReadingPlanListView: View {
         overwritePolicy: LocalSwordZipOverwritePolicy
     ) {
         externalImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext
+        )
         Task { @MainActor in
             let importResult = await Task.detached(priority: .userInitiated) {
                 service.importDocument(

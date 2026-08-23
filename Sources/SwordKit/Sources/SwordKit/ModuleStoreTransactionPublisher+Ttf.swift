@@ -203,7 +203,7 @@ extension ModuleStoreTransactionPublisher {
               config.name.caseInsensitiveCompare(moduleName) == .orderedSame,
               config.modDrv.caseInsensitiveCompare("RawGenBook") == .orderedSame,
               config.dataPath == expectedDataPath,
-              let provider = config.values["andbibleprovidesfont"]?.first else {
+              let provider = config.values["AndBibleProvidesFont"]?.first else {
             throw ModuleStoreMutationError.invalidConfiguration(
                 "mods.d/\(moduleName.lowercased()).conf"
             )

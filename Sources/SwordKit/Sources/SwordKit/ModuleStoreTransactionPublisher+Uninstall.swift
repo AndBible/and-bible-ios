@@ -21,25 +21,33 @@ extension ModuleStoreTransactionPublisher {
     public func uninstall(moduleName: String) throws {
         let safeName = try resolver.safeModuleName(moduleName)
         try coordinator.withExclusiveTransaction(kind: .uninstall, prepare: {
+            let hasRegisteredConfigIdentity = SwordModuleConfig.readAll(
+                modulePath: canonicalRootURL.path
+            ).contains {
+                SwordJavaStringIdentity.equalsIgnoreCase($0.name, safeName)
+            }
+            if hasRegisteredConfigIdentity {
+                let installed = try installedConfigRecords(requiredModuleNames: [safeName])
+                if let target = installed.first(where: {
+                    $0.layout.moduleName.caseInsensitiveCompare(safeName) == .orderedSame
+                }) {
+                    for other in installed where
+                        other.layout.moduleName.caseInsensitiveCompare(target.layout.moduleName)
+                            != .orderedSame
+                        && resolver.layoutsOverlap(other.layout, target.layout) {
+                        throw ModuleStoreMutationError.installedOwnershipConflict(
+                            moduleName: target.layout.moduleName,
+                            owner: other.layout.moduleName
+                        )
+                    }
+                    return PreparedModuleStoreUninstall.sword(target)
+                }
+            }
+
             if let moduleURL = try myBibleModuleURLIfPresent(moduleName: safeName) {
                 return PreparedModuleStoreUninstall.myBible(moduleURL)
             }
-
-            let installed = try installedConfigRecords(requiredModuleNames: [safeName])
-            guard let target = installed.first(where: {
-                $0.layout.moduleName.caseInsensitiveCompare(safeName) == .orderedSame
-            }) else {
-                throw ModuleStoreMutationError.moduleNotFound(safeName)
-            }
-            for other in installed where
-                other.layout.moduleName.caseInsensitiveCompare(target.layout.moduleName) != .orderedSame
-                && resolver.layoutsOverlap(other.layout, target.layout) {
-                throw ModuleStoreMutationError.installedOwnershipConflict(
-                    moduleName: target.layout.moduleName,
-                    owner: other.layout.moduleName
-                )
-            }
-            return PreparedModuleStoreUninstall.sword(target)
+            throw ModuleStoreMutationError.moduleNotFound(safeName)
         }, commit: { target in
             switch target {
             case .myBible(let moduleURL):

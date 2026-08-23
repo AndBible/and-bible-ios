@@ -2053,9 +2053,10 @@ public final class AndroidDatabaseBackupService {
     /**
      Merges My Documents snapshots with Android Import's local-first uniqueness behavior.
 
-     Document IDs, document initials, page IDs, page keys, content page IDs, and cache page IDs are
-     treated as Android uniqueness boundaries. Imported children whose parent rows are not present
-     after the merge are skipped to preserve Android foreign-key safety.
+     Document IDs, Java-exact UTF-16 document initials, page IDs, Java-exact per-document page keys,
+     content page IDs, and cache page IDs are treated as Android uniqueness boundaries. Imported
+     children whose parent rows are not present after the merge are skipped to preserve Android
+     foreign-key safety without Swift canonical-equivalence data loss.
 
      - Parameters:
        - local: Current local My Documents rows projected into Android form.
@@ -2071,21 +2072,31 @@ public final class AndroidDatabaseBackupService {
         imported: RemoteSyncAndroidMyDocumentSnapshot
     ) throws -> RemoteSyncAndroidMyDocumentSnapshot {
         var documentsByID = Dictionary(uniqueKeysWithValues: local.documents.map { ($0.id, $0) })
-        var documentInitials = Set(local.documents.map(\.initials))
-        for document in imported.documents where documentsByID[document.id] == nil && !documentInitials.contains(document.initials) {
+        var documentInitials = Set(
+            local.documents.map { SwordJavaExactStringIdentity($0.initials) }
+        )
+        for document in imported.documents
+            where documentsByID[document.id] == nil
+                && !documentInitials.contains(SwordJavaExactStringIdentity(document.initials)) {
             documentsByID[document.id] = document
-            documentInitials.insert(document.initials)
+            documentInitials.insert(SwordJavaExactStringIdentity(document.initials))
         }
 
         var pagesByID = Dictionary(uniqueKeysWithValues: local.pages.map { ($0.id, $0) })
-        var pageKeys = Set(local.pages.map { "\($0.documentId.uuidString)#\($0.pageKey)" })
+        var pageKeys = Set(local.pages.map {
+            SwordJavaExactStringIdentity("\($0.documentId.uuidString)#\($0.pageKey)")
+        })
         let validDocumentIDs = Set(documentsByID.keys)
         for page in imported.pages
             where pagesByID[page.id] == nil
                 && validDocumentIDs.contains(page.documentId)
-                && !pageKeys.contains("\(page.documentId.uuidString)#\(page.pageKey)") {
+                && !pageKeys.contains(SwordJavaExactStringIdentity(
+                    "\(page.documentId.uuidString)#\(page.pageKey)"
+                )) {
             pagesByID[page.id] = page
-            pageKeys.insert("\(page.documentId.uuidString)#\(page.pageKey)")
+            pageKeys.insert(SwordJavaExactStringIdentity(
+                "\(page.documentId.uuidString)#\(page.pageKey)"
+            ))
         }
 
         var contentsByPageID = Dictionary(uniqueKeysWithValues: local.pageContents.map { ($0.pageId, $0) })

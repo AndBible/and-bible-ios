@@ -1,6 +1,7 @@
 import XCTest
-import BibleCore
+@testable import BibleCore
 @testable import BibleUI
+import SwiftData
 import SwordKit
 import UniformTypeIdentifiers
 
@@ -326,6 +327,110 @@ private enum ExternalDocumentImportTestError: LocalizedError {
 }
 
 /**
+ Two-party barrier that forces concurrent import workers to begin from the same caller-visible state.
+
+ The condition protects arrival count and releases both workers only after both have arrived. A
+ bounded deadline prevents a scheduler failure from hanging the test process; timeout is reported
+ through the return value rather than mutating XCTest state from a background queue.
+ */
+private final class ConcurrentExternalDocumentImportStartGate: @unchecked Sendable {
+    /// Condition protecting participant arrival and release.
+    private let condition = NSCondition()
+
+    /// Required arrivals before every waiting worker is released.
+    private let participantCount: Int
+
+    /// Number of workers that reached the gate.
+    private var arrivedCount = 0
+
+    /**
+     Creates a barrier for a fixed positive participant count.
+
+     - Parameter participantCount: Number of workers that must arrive before release.
+     - Side effects: Allocates one in-memory synchronization primitive.
+     - Failure modes: Non-positive values violate the test helper precondition.
+     */
+    init(participantCount: Int) {
+        precondition(participantCount > 0)
+        self.participantCount = participantCount
+    }
+
+    /**
+     Records one arrival and waits for all participants with a bounded deadline.
+
+     - Parameter timeout: Maximum wait after this worker arrives.
+     - Returns: `true` when every participant arrived, or `false` after timeout.
+     - Side effects: Blocks only the calling test worker and broadcasts once the barrier fills.
+     - Failure modes: Scheduler starvation returns `false`; no worker remains permanently blocked.
+     */
+    func arriveAndWait(timeout: TimeInterval = 10) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        arrivedCount += 1
+        if arrivedCount == participantCount {
+            condition.broadcast()
+            return true
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while arrivedCount < participantCount {
+            guard condition.wait(until: deadline) else { return false }
+        }
+        return true
+    }
+}
+
+/**
+ Thread-safe ordered result log for concurrent external document imports.
+
+ The log records completion order only; it deliberately adds no ordering between installers and
+ performs no assertions from worker queues. Callers take one locked snapshot after joining workers.
+ */
+private final class ConcurrentExternalDocumentImportResultLog: @unchecked Sendable {
+    /** One source/result pair recorded after an import returns. */
+    struct Record: Sendable {
+        /// Exact archive URL passed to the service.
+        let url: URL
+
+        /// Structured import result returned for that archive.
+        let result: ExternalDocumentImportResult
+    }
+
+    /// Lock protecting `records` across concurrent worker completion.
+    private let lock = NSLock()
+
+    /// Completion-order result storage.
+    private var records: [Record] = []
+
+    /**
+     Records one completed import under the result lock.
+
+     - Parameters:
+       - url: Exact candidate URL whose import completed.
+       - result: Structured service result returned for the candidate.
+     - Side effects: Appends one entry to the in-memory completion-order log.
+     - Failure modes: This helper cannot fail.
+     */
+    func append(url: URL, result: ExternalDocumentImportResult) {
+        lock.lock()
+        records.append(Record(url: url, result: result))
+        lock.unlock()
+    }
+
+    /**
+     Returns a coherent completion-order result snapshot.
+
+     - Returns: Copy of all recorded entries in lock-observed completion order.
+     - Side effects: Briefly acquires the result lock without mutating the log.
+     - Failure modes: This helper cannot fail.
+     */
+    func snapshot() -> [Record] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records
+    }
+}
+
+/**
  Package-level tests for Android-parity external document import routing.
 
  The suite validates the BibleUI service that classifies documents opened from Files, share sheets,
@@ -333,7 +438,7 @@ private enum ExternalDocumentImportTestError: LocalizedError {
  `SwordKitTests`; this suite owns routing, feedback, provider metadata normalization, and installer
  selection.
  */
-final class ExternalDocumentImportTests: XCTestCase {
+final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
     /**
      Creates an external-document import service wired to a thread-safe test probe.
 
@@ -344,6 +449,7 @@ final class ExternalDocumentImportTests: XCTestCase {
        - probe: Probe that records module, EPUB, and TTF installer calls.
        - androidModuleBackupDetector: Optional archive classifier override for renamed backup ZIPs.
        - epubArchiveDetector: Optional ZIP classifier override for EPUB fallback tests.
+       - epubInitialsUnavailable: Complete-registry EPUB admission predicate.
      - Returns: Service instance with deterministic installer outputs.
      - Side effects: none during construction.
      - Failure modes: This helper cannot fail.
@@ -351,16 +457,905 @@ final class ExternalDocumentImportTests: XCTestCase {
     private func makeExternalDocumentImportService(
         probe: ExternalDocumentImportProbe,
         androidModuleBackupDetector: ExternalDocumentImportService.AndroidModuleBackupDetector? = nil,
-        epubArchiveDetector: ExternalDocumentImportService.EpubArchiveDetector? = nil
+        epubArchiveDetector: ExternalDocumentImportService.EpubArchiveDetector? = nil,
+        epubInitialsUnavailable: @escaping ExternalDocumentImportService.EpubInitialsUnavailable = {
+            _ in false
+        }
     ) -> ExternalDocumentImportService {
         ExternalDocumentImportService(
             moduleInstaller: { url in try probe.installModule(from: url) },
             epubInstaller: { url in try probe.installEpub(from: url) },
+            epubInitialsUnavailable: epubInitialsUnavailable,
             fontInstaller: { url, displayName in try probe.installFont(from: url, displayName: displayName) },
             androidModuleBackupInstaller: { url in try probe.installAndroidModuleBackup(from: url) },
             androidModuleBackupDetector: androidModuleBackupDetector,
             epubArchiveDetector: epubArchiveDetector
         )
+    }
+
+    /**
+     Rejects an EPUB owned by Android's complete book registry before installer mutation.
+
+     - Setup: The admission predicate owns the exact initials generated from a decomposed provider
+       filename and the injected installer records every invocation.
+     - Expected: Import returns a stable identity failure and the EPUB installer is never called.
+     - Failure meaning: A native, SQLite, EPUB, or My Documents owner can be bypassed by importing a
+       hidden colliding EPUB, or canonical filename normalization drifts from `EpubReader`.
+     - Side effects: Uses only an in-memory installer probe; no archive or library file is written.
+     */
+    func testExternalDocumentImportRejectsGloballyOwnedEpubBeforeInstallerRuns() {
+        let probe = ExternalDocumentImportProbe()
+        let url = URL(fileURLWithPath: "/tmp/Cafe\u{301}.epub")
+        let expectedInitials = EpubReader.initials(
+            forDisplayFileName: url.lastPathComponent.precomposedStringWithCanonicalMapping
+        )
+        let service = makeExternalDocumentImportService(
+            probe: probe,
+            epubInitialsUnavailable: { $0 == expectedInitials }
+        )
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(
+            result,
+            .failed(
+                message: "Cannot import this EPUB because an installed document already owns module identity \(expectedInitials)."
+            )
+        )
+        XCTAssertEqual(probe.snapshot().epubURLs, [])
+    }
+
+    /**
+     Wires the production importer to current My Documents ownership rather than an opt-in caller.
+
+     - Setup: Persists a My Documents row whose initials equal a unique incoming EPUB filename's
+       Android identity, then constructs the same registry-aware service used by every UI boundary.
+     - Expected: The nonexistent EPUB is rejected for identity ownership before archive access.
+     - Failure meaning: Production factory/call-site wiring can install a hidden EPUB even though the
+       pure admission predicate works in isolation.
+     - Side effects: Writes only to an in-memory SwiftData container; no EPUB installer is reached.
+     */
+    @MainActor
+    func testRegistryAwareExternalImportRejectsMyDocumentOwnedEpubInitials() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let url = URL(fileURLWithPath: "/tmp/Owned-\(UUID().uuidString).epub")
+        let initials = EpubReader.initials(
+            forDisplayFileName: url.lastPathComponent.precomposedStringWithCanonicalMapping
+        )
+        context.insert(MyDocument(name: "Existing owner", initials: initials))
+        try context.save()
+        let service = ExternalDocumentImportService.androidRegistryAware(modelContext: context)
+
+        let result = service.importDocument(at: url)
+
+        XCTAssertEqual(
+            result,
+            .failed(
+                message: "Cannot import this EPUB because an installed document already owns module identity \(initials)."
+            )
+        )
+    }
+
+    /**
+     Allows an exact stable-identifier EPUB reinstall while retaining one published identity.
+
+     - Setup: Imports a uniquely named valid EPUB, rewrites the same source URL with different
+       package metadata, and imports it again through the production registry-aware service.
+     - Expected: Both imports succeed, the stable identifier is unchanged, and one current EPUB
+       registration exposes the replacement title.
+     - Failure meaning: Treating every existing initials owner as foreign blocks Android-compatible
+       updates of the same source, or replacement publishes a duplicate registration.
+     - Side effects: Writes one temporary archive and one default-library generation, both removed
+       during cleanup.
+     */
+    @MainActor
+    func testRegistryAwareExactIdentifierEpubReinstallIsAdmittedAsUpdate() throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let archiveURL = try makeMinimalEpubArchive(
+            fileName: "SameID\(token).epub",
+            title: "First same-ID title"
+        )
+        let candidate = EpubReader.installCandidate(forEpubURL: archiveURL)
+        defer {
+            if EpubReader.installedEpubs().contains(where: {
+                $0.identifier == candidate.identifier
+            }) {
+                try? EpubReader.delete(identifier: candidate.identifier)
+            }
+            try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent())
+        }
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: manager
+        )
+
+        XCTAssertEqual(
+            service.importDocument(at: archiveURL),
+            .installedEpub(title: "First same-ID title")
+        )
+        try writeMinimalEpubArchive(at: archiveURL, title: "Replacement same-ID title")
+        XCTAssertEqual(
+            service.importDocument(at: archiveURL),
+            .installedEpub(title: "Replacement same-ID title")
+        )
+
+        let matching = EpubReader.installedEpubs().filter {
+            $0.identifier == candidate.identifier
+        }
+        XCTAssertEqual(matching.count, 1)
+        XCTAssertEqual(matching.first?.title, "Replacement same-ID title")
+    }
+
+    /**
+     Rejects a different stable EPUB identifier that generates the exact same Android initials.
+
+     - Setup: Imports `A-B.epub`, then attempts the punctuation-variant `A_B.epub`; Android's
+       sanitizer maps both filenames to the same initials while the exact-source digest differs.
+     - Expected: The first book remains installed and the second is rejected before its manifest,
+       generation container, legacy package, or index path exists.
+     - Failure meaning: Same-ID update allowance was widened into same-initials replacement and can
+       hide or overwrite an unrelated Android book.
+     - Side effects: Writes two temporary archives and removes the winning default-library EPUB.
+     */
+    @MainActor
+    func testRegistryAwareDifferentIdentifierWithSameInitialsIsRejected() throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let firstURL = try makeMinimalEpubArchive(
+            fileName: "Exact-\(token).epub",
+            title: "Exact initials owner"
+        )
+        let secondURL = try makeMinimalEpubArchive(
+            fileName: "Exact_\(token).epub",
+            title: "Different stable identity"
+        )
+        let firstCandidate = EpubReader.installCandidate(forEpubURL: firstURL)
+        let secondCandidate = EpubReader.installCandidate(forEpubURL: secondURL)
+        XCTAssertNotEqual(firstCandidate.identifier, secondCandidate.identifier)
+        XCTAssertEqual(firstCandidate.initials, secondCandidate.initials)
+        defer {
+            for candidate in [firstCandidate, secondCandidate]
+            where EpubReader.installedEpubs().contains(where: {
+                $0.identifier == candidate.identifier
+            }) {
+                try? EpubReader.delete(identifier: candidate.identifier)
+            }
+            try? FileManager.default.removeItem(at: firstURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: secondURL.deletingLastPathComponent())
+        }
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: manager
+        )
+
+        XCTAssertEqual(
+            service.importDocument(at: firstURL),
+            .installedEpub(title: "Exact initials owner")
+        )
+        XCTAssertEqual(
+            service.importDocument(at: secondURL),
+            .failed(
+                message: "Cannot import this EPUB because an installed document already owns module identity \(secondCandidate.initials)."
+            )
+        )
+
+        let libraryRoot = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("epub", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationManifestURL(
+            identifier: secondCandidate.identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationContainerURL(
+            identifier: secondCandidate.identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+    }
+
+    /**
+     Serializes concurrent case-variant EPUB admission through publication like Android `Books`.
+
+     - Setup: Creates two valid EPUBs whose filenames generate Java-case-equivalent but exact-
+       distinct initials, constructs one production registry-aware service, and releases two
+       background imports from a two-party barrier.
+     - Expected: Exactly one archive publishes. The second sees the first in a fresh combined
+       registry while holding the EPUB library lock and fails before receiving any manifest,
+       generation container, legacy package, or index path.
+     - Failure meaning: Detached callers can validate one stale registry snapshot, publish two
+       case-equivalent Android books, and leave one installed archive hidden by JSword lookup.
+     - Side effects: Writes two temporary EPUB archives and one uniquely named default-library
+       generation, then deletes every candidate identity during cleanup.
+     - Note: The barrier controls caller start only; the production library lock deliberately
+       determines which candidate wins, so assertions are symmetric in the two filenames.
+     */
+    @MainActor
+    func testRegistryAwareConcurrentCaseVariantEpubImportsPublishExactlyOne() throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let upperURL = try makeMinimalEpubArchive(
+            fileName: "Atomic\(token).epub",
+            title: "Upper atomic import"
+        )
+        let lowerURL = try makeMinimalEpubArchive(
+            fileName: "atomic\(token.lowercased()).epub",
+            title: "Lower atomic import"
+        )
+        let urls = [upperURL, lowerURL]
+        let identifiers = Dictionary(uniqueKeysWithValues: urls.map { url in
+            (
+                url,
+                EpubReader.stableIdentifier(
+                    forSourceFileName: url.lastPathComponent.precomposedStringWithCanonicalMapping
+                )
+            )
+        })
+        defer {
+            for identifier in identifiers.values
+            where EpubReader.installedEpubs().contains(where: { $0.identifier == identifier }) {
+                try? EpubReader.delete(identifier: identifier)
+            }
+            for url in urls {
+                try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            }
+        }
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: manager
+        )
+        let gate = ConcurrentExternalDocumentImportStartGate(participantCount: urls.count)
+        let resultLog = ConcurrentExternalDocumentImportResultLog()
+        let completion = DispatchGroup()
+        let queue = DispatchQueue(
+            label: "org.andbible.tests.concurrent-epub-admission",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
+
+        for url in urls {
+            completion.enter()
+            queue.async {
+                defer { completion.leave() }
+                guard gate.arriveAndWait() else {
+                    resultLog.append(
+                        url: url,
+                        result: .failed(message: "concurrent import start barrier timed out")
+                    )
+                    return
+                }
+                resultLog.append(url: url, result: service.importDocument(at: url))
+            }
+        }
+
+        XCTAssertEqual(completion.wait(timeout: .now() + 45), .success)
+        let records = resultLog.snapshot()
+        let successes = records.filter {
+            if case .installedEpub = $0.result { return true }
+            return false
+        }
+        let failures = records.filter {
+            if case .failed = $0.result { return true }
+            return false
+        }
+        XCTAssertEqual(records.count, 2)
+        XCTAssertEqual(successes.count, 1)
+        XCTAssertEqual(failures.count, 1)
+
+        let losingRecord = try XCTUnwrap(failures.first)
+        let losingInitials = EpubReader.initials(
+            forDisplayFileName: losingRecord.url.lastPathComponent.precomposedStringWithCanonicalMapping
+        )
+        XCTAssertEqual(
+            losingRecord.result,
+            .failed(
+                message: "Cannot import this EPUB because an installed document already owns module identity \(losingInitials)."
+            )
+        )
+        let losingIdentifier = try XCTUnwrap(identifiers[losingRecord.url])
+        let winningIdentifier = try XCTUnwrap(identifiers[try XCTUnwrap(successes.first).url])
+        let installedCandidateIDs = Set(
+            EpubReader.installedEpubs()
+                .map(\.identifier)
+                .filter { identifiers.values.contains($0) }
+        )
+        XCTAssertEqual(installedCandidateIDs, Set([winningIdentifier]))
+
+        let libraryRoot = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("epub", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationManifestURL(
+            identifier: losingIdentifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationContainerURL(
+            identifier: losingIdentifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.legacyIndexURL(
+            identifier: losingIdentifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: libraryRoot.appendingPathComponent(
+            losingIdentifier,
+            isDirectory: true
+        ).path))
+    }
+
+    /**
+     Rechecks native exact-full-name ownership added after importer construction.
+
+     - Setup: Constructs the production service from an empty native snapshot, then publishes a
+       valid native descriptor whose `Description` exactly equals the candidate EPUB initials before
+       running the import in the same detached shape used by app entry points.
+     - Expected: A fresh manager and combined registry reject the EPUB before manifest/generation
+       paths exist, even though the original service instance predates the native owner.
+     - Failure meaning: EPUB admission still captures factory-time native metadata and can publish a
+       local book that Android's later `Books.getBook(candidate.initials)` resolves to native.
+     - Side effects: Writes one temporary SWORD alias and EPUB archive; no EPUB library candidate
+       survives, and cleanup removes one accidental publication if the regression returns.
+     */
+    @MainActor
+    func testRegistryAwareImportRejectsNativeFullNameAddedAfterServiceConstruction() async throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let archiveURL = try makeMinimalEpubArchive(
+            fileName: "LateOwner\(token).epub",
+            title: "Late native ownership candidate"
+        )
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let sourceFileName = archiveURL.lastPathComponent.precomposedStringWithCanonicalMapping
+        let initials = EpubReader.initials(forDisplayFileName: sourceFileName)
+        let identifier = EpubReader.stableIdentifier(forSourceFileName: sourceFileName)
+        defer {
+            if EpubReader.installedEpubs().contains(where: { $0.identifier == identifier }) {
+                try? EpubReader.delete(identifier: identifier)
+            }
+        }
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        let originalManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: originalManager
+        )
+        try seedBibleAliasModule(
+            named: "LateNative\(token)",
+            description: initials,
+            in: modulePath
+        )
+        let moduleCacheURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/modules-conf.cache", isDirectory: false)
+        if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
+            try FileManager.default.removeItem(at: moduleCacheURL)
+        }
+        let refreshedManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertTrue(refreshedManager.installedModules().contains {
+            $0.description == initials
+        })
+
+        let result = await Task.detached(priority: .userInitiated) {
+            service.importDocument(at: archiveURL)
+        }.value
+
+        XCTAssertEqual(
+            result,
+            .failed(
+                message: "Cannot import this EPUB because an installed document already owns module identity \(initials)."
+            )
+        )
+        let libraryRoot = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("epub", isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationManifestURL(
+            identifier: identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationContainerURL(
+            identifier: identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+    }
+
+    /**
+     Fails EPUB admission closed when one discovered SQLite registration is malformed.
+
+     - Setup: Places an unreadable MyBible candidate beneath the live SWORD root, then imports an
+       otherwise valid uniquely identified EPUB through the production registry-aware service.
+     - Expected: Strict SQLite discovery surfaces its diagnostic and the candidate receives no
+       manifest, generation container, legacy package, or index artifact.
+     - Failure meaning: Suppressing a broken SQLite registration can admit an EPUB identity without
+       proving whether Android's earlier SQLite driver would own it.
+     - Side effects: Writes and removes one temporary malformed database plus one EPUB archive; the
+       default EPUB library is read only.
+     */
+    @MainActor
+    func testRegistryAwareImportRejectsUnreadableSQLiteRegistryWithoutArtifacts() throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let archiveURL = try makeMinimalEpubArchive(
+            fileName: "UnreadableSQLite\(token).epub",
+            title: "Strict SQLite admission candidate"
+        )
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let candidate = EpubReader.installCandidate(forEpubURL: archiveURL)
+        defer {
+            if EpubReader.installedEpubs().contains(where: {
+                $0.identifier == candidate.identifier
+            }) {
+                try? EpubReader.delete(identifier: candidate.identifier)
+            }
+        }
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        let myBibleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: myBibleRoot,
+            withIntermediateDirectories: true
+        )
+        let malformedDatabase = myBibleRoot.appendingPathComponent("Broken.SQLite3")
+        try Data("not a SQLite database".utf8).write(to: malformedDatabase)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: manager
+        )
+        let libraryRoot = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("epub", isDirectory: true)
+        let libraryRootExistedBefore = FileManager.default.fileExists(atPath: libraryRoot.path)
+
+        let result = service.importDocument(at: archiveURL)
+
+        guard case .failed(let message) = result else {
+            return XCTFail("Expected strict SQLite registration failure, received \(result)")
+        }
+        XCTAssertTrue(message.contains("installed document registry could not be read"))
+        XCTAssertTrue(message.contains(malformedDatabase.lastPathComponent))
+        XCTAssertEqual(
+            FileManager.default.fileExists(atPath: libraryRoot.path),
+            libraryRootExistedBefore
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationManifestURL(
+            identifier: candidate.identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.generationContainerURL(
+            identifier: candidate.identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: EpubReader.legacyIndexURL(
+            identifier: candidate.identifier,
+            libraryRootURL: libraryRoot
+        ).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: libraryRoot.appendingPathComponent(
+            candidate.identifier,
+            isDirectory: true
+        ).path))
+    }
+
+    /**
+     Allows EPUB publication when valid SQLite siblings collide only during Android replay.
+
+     - Setup: Installs the matching `.bblx`/`.bbli` fixtures that produce one deterministic
+       duplicate diagnostic, then imports a uniquely identified EPUB through production wiring.
+     - Expected result: Strict discovery retains both candidates, replay omits the later duplicate,
+       and the unrelated EPUB publishes successfully.
+     - Failure meaning: A normal Android-resolved duplicate makes strict iOS admission globally
+       unusable even though no SQLite ownership is uncertain.
+     - Side effects: Copies two SQLite fixtures and publishes/removes one default-library EPUB.
+     */
+    @MainActor
+    func testRegistryAwareImportAllowsDeterministicSQLiteDuplicateDiagnostic() throws {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let archiveURL = try makeMinimalEpubArchive(
+            fileName: "ValidDuplicate\(token).epub",
+            title: "Valid duplicate SQLite registry"
+        )
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let candidate = EpubReader.installCandidate(forEpubURL: archiveURL)
+        defer {
+            if EpubReader.installedEpubs().contains(where: {
+                $0.identifier == candidate.identifier
+            }) {
+                try? EpubReader.delete(identifier: candidate.identifier)
+            }
+        }
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installDeterministicDuplicateSQLiteFixtures(modulePath: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeMyDocumentModelContainer()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(container),
+            swordManager: manager
+        )
+
+        XCTAssertEqual(
+            service.importDocument(at: archiveURL),
+            .installedEpub(title: "Valid duplicate SQLite registry")
+        )
+        XCTAssertTrue(EpubReader.installedEpubs().contains {
+            $0.identifier == candidate.identifier
+        })
+    }
+
+    /**
+     Allows strict My Documents publication beside an Android-resolved SQLite duplicate.
+
+     - Setup: Installs two readable same-identity e-Sword fixtures and prepares one unique draft.
+     - Expected result: Combined strict replay admits the draft and commits exactly one row.
+     - Failure meaning: Typed non-blocking duplicate diagnostics are not propagated through the
+       production My Documents admission path.
+     - Side effects: Copies fixtures and writes one row to an in-memory SwiftData container.
+     */
+    @MainActor
+    func testStrictRegistryMyDocumentSaveAllowsDeterministicSQLiteDuplicateDiagnostic() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installDeterministicDuplicateSQLiteFixtures(modulePath: modulePath)
+        let container = try makeMyDocumentModelContainer()
+        let store = MyDocumentLibraryStore(
+            modelContext: ModelContext(container),
+            moduleStoreRootURL: URL(fileURLWithPath: modulePath, isDirectory: true)
+        )
+        var session = try store.loadSession()
+        let initials = "DuplicateSafeMyDoc\(UUID().uuidString)"
+        _ = try session.createDocument(name: "Duplicate-safe My Document", initials: initials)
+
+        try saveMyDocumentThroughStrictRegistry(
+            &session,
+            store: store,
+            modelContainer: container,
+            modulePath: modulePath
+        )
+
+        XCTAssertEqual(try store.loadSession().documents.map(\.initials), [initials])
+    }
+
+    /**
+     Allows first-time AI Documents publication beside an Android-resolved SQLite duplicate.
+
+     - Setup: Installs two readable same-identity e-Sword fixtures and wires the generated-page
+       store to the same strict combined snapshot used by the app.
+     - Expected result: The AI Documents row, page, content, and cache entry commit together.
+     - Failure meaning: Deterministic duplicate diagnostics remain an accidental global outage for
+       an identity publisher other than EPUB or interactive My Documents.
+     - Side effects: Copies fixtures and writes one generated graph to in-memory SwiftData.
+     */
+    @MainActor
+    func testStrictRegistryAIDocumentsSaveAllowsDeterministicSQLiteDuplicateDiagnostic() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installDeterministicDuplicateSQLiteFixtures(modulePath: modulePath)
+        let container = try makeMyDocumentModelContainer()
+        let store = AIGeneratedPageStore(
+            modelContext: ModelContext(container),
+            moduleStoreRootURL: URL(fileURLWithPath: modulePath, isDirectory: true),
+            isDocumentInitialsUnavailable: { initials in
+                try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+                    modelContainer: container,
+                    modulePath: modulePath
+                ).ownsDocument(named: initials)
+            }
+        )
+
+        let location = try store.save(
+            content: "Generated beside a deterministic SQLite duplicate",
+            title: "Generated",
+            promptID: UUID(),
+            context: CacheableContext(
+                kjvOrdinalStart: nil,
+                kjvOrdinalEnd: nil,
+                activeDocumentInitials: "KJV",
+                selectedContent: nil,
+                selectedText: nil,
+                highlightedText: nil,
+                selectionStartOffset: nil,
+                selectionEndOffset: nil
+            ),
+            usedWriteTools: false,
+            sourceModelName: nil
+        )
+
+        let verification = ModelContext(container)
+        XCTAssertEqual(
+            try verification.fetch(FetchDescriptor<MyDocument>()).map(\.initials),
+            [AIGeneratedPageStore.documentInitials]
+        )
+        XCTAssertEqual(
+            try verification.fetch(FetchDescriptor<MyDocumentPage>()).map(\.id),
+            [location.pageID]
+        )
+        XCTAssertEqual(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).count, 1)
+    }
+
+    /**
+     Publishes a new My Documents identity when every Android registry source is readable.
+
+     - Setup: Creates one uniquely identified draft against an isolated healthy SWORD root and an
+       empty in-memory My Documents store, then saves through the production strict snapshot.
+     - Expected: The save commits exactly one row and advances the editable session baseline.
+     - Failure meaning: Fail-closed admission blocks ordinary My Documents creation even though the
+       complete native, SQLite, EPUB, and My Documents registry can be captured.
+     - Side effects: Persists one row only in an in-memory SwiftData container.
+     */
+    @MainActor
+    func testStrictRegistryMyDocumentSavePublishesWhenEverySourceIsReadable() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let container = try makeMyDocumentModelContainer()
+        let store = MyDocumentLibraryStore(
+            modelContext: ModelContext(container),
+            moduleStoreRootURL: URL(fileURLWithPath: modulePath, isDirectory: true)
+        )
+        var session = try store.loadSession()
+        let initials = "StrictMyDoc\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        _ = try session.createDocument(name: "Strict registry document", initials: initials)
+
+        try saveMyDocumentThroughStrictRegistry(
+            &session,
+            store: store,
+            modelContainer: container,
+            modulePath: modulePath
+        )
+
+        XCTAssertFalse(session.isDirty)
+        XCTAssertEqual(try store.loadSession().documents.map(\.initials), [initials])
+    }
+
+    /**
+     Rejects a My Documents publication when SQLite ownership cannot be enumerated completely.
+
+     - Setup: Adds one malformed MyBible database to an isolated live SWORD root and prepares one
+       new My Documents draft before invoking the production strict snapshot under the global gate.
+     - Expected: Save throws a typed registry error naming the malformed file, leaves the session
+       dirty, preserves the corrupt fixture byte-for-byte, and persists no document.
+     - Failure meaning: My Documents can claim an identity while an earlier Android SQLite driver
+       has unknown ownership, or validation mutates storage before it knows admission is safe.
+     - Side effects: Writes one temporary malformed SQLite fixture; SwiftData remains empty.
+     */
+    @MainActor
+    func testStrictRegistryMyDocumentSaveRejectsMalformedSQLiteWithoutPersistence() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let myBibleRoot = moduleRoot.appendingPathComponent("mybible", isDirectory: true)
+        try FileManager.default.createDirectory(at: myBibleRoot, withIntermediateDirectories: true)
+        let malformedDatabase = myBibleRoot.appendingPathComponent(
+            "Broken-MyDocument-\(UUID().uuidString).SQLite3"
+        )
+        let malformedBytes = Data("not a SQLite database".utf8)
+        try malformedBytes.write(to: malformedDatabase)
+
+        let container = try makeMyDocumentModelContainer()
+        let store = MyDocumentLibraryStore(
+            modelContext: ModelContext(container),
+            moduleStoreRootURL: moduleRoot
+        )
+        var session = try store.loadSession()
+        _ = try session.createDocument(
+            name: "Rejected SQLite uncertainty",
+            initials: "RejectedSQLite\(UUID().uuidString)"
+        )
+
+        XCTAssertThrowsError(try saveMyDocumentThroughStrictRegistry(
+            &session,
+            store: store,
+            modelContainer: container,
+            modulePath: modulePath
+        )) { error in
+            guard let registryError = error as? BibleReaderInstalledDocumentRegistrySnapshotError
+            else {
+                return XCTFail("Expected strict registry error, received \(error)")
+            }
+            XCTAssertTrue(registryError.detail.contains(malformedDatabase.lastPathComponent))
+        }
+
+        XCTAssertTrue(session.isDirty)
+        XCTAssertTrue(try store.loadSession().documents.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: malformedDatabase), malformedBytes)
+    }
+
+    /**
+     Rejects a My Documents publication when the current EPUB registry is corrupt.
+
+     - Setup: Writes one uniquely named malformed generation pointer into the app EPUB library and
+       prepares one new draft against an otherwise healthy isolated SWORD root.
+     - Expected: Strict admission throws before the SwiftData delta is applied, leaves the draft
+       dirty, keeps the malformed pointer unchanged, and persists no document or page.
+     - Failure meaning: A corrupt earlier EPUB registration can be treated as missing and allow a
+       hidden My Documents owner, or failed admission can leak a partial durable graph.
+     - Side effects: Temporarily writes one malformed pointer and removes only that exact fixture;
+       the in-memory SwiftData container remains empty.
+     */
+    @MainActor
+    func testStrictRegistryMyDocumentSaveRejectsCorruptEpubWithoutPersistence() throws {
+        let fileManager = FileManager.default
+        let libraryRoot = fileManager.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0].appendingPathComponent("epub", isDirectory: true)
+        let libraryRootExistedBefore = fileManager.fileExists(atPath: libraryRoot.path)
+        try fileManager.createDirectory(at: libraryRoot, withIntermediateDirectories: true)
+        let corruptIdentifier = "corrupt-mydoc-\(UUID().uuidString)"
+        let corruptPointer = EpubReader.generationManifestURL(
+            identifier: corruptIdentifier,
+            libraryRootURL: libraryRoot
+        )
+        let corruptBytes = Data("not a generation manifest".utf8)
+        XCTAssertFalse(fileManager.fileExists(atPath: corruptPointer.path))
+        try corruptBytes.write(to: corruptPointer)
+        defer {
+            try? fileManager.removeItem(at: corruptPointer)
+            if !libraryRootExistedBefore,
+               let remainingChildren = try? fileManager.contentsOfDirectory(
+                   at: libraryRoot,
+                   includingPropertiesForKeys: nil
+               ),
+               remainingChildren.isEmpty {
+                try? fileManager.removeItem(at: libraryRoot)
+            }
+        }
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        let container = try makeMyDocumentModelContainer()
+        let store = MyDocumentLibraryStore(
+            modelContext: ModelContext(container),
+            moduleStoreRootURL: URL(fileURLWithPath: modulePath, isDirectory: true)
+        )
+        var session = try store.loadSession()
+        _ = try session.createDocument(
+            name: "Rejected EPUB uncertainty",
+            initials: "RejectedEpub\(UUID().uuidString)"
+        )
+
+        XCTAssertThrowsError(try saveMyDocumentThroughStrictRegistry(
+            &session,
+            store: store,
+            modelContainer: container,
+            modulePath: modulePath
+        )) { error in
+            XCTAssertTrue(error is BibleReaderInstalledDocumentRegistrySnapshotError)
+        }
+
+        XCTAssertTrue(session.isDirty)
+        XCTAssertTrue(try store.loadSession().documents.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: corruptPointer), corruptBytes)
+    }
+
+    /**
+     Installs the readable e-Sword fixtures whose shared identity yields one Android omission.
+
+     - Parameter modulePath: Isolated SWORD root that receives an `esword` family directory.
+     - Side effects: Creates the family root and copies the checked-in `.bblx` and `.bbli` files.
+     - Throws: Filesystem discovery, directory creation, or copy failures.
+     */
+    private func installDeterministicDuplicateSQLiteFixtures(modulePath: String) throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fixtureRoot = repositoryRoot
+            .appendingPathComponent("Sources/BibleCore/Tests/Fixtures/SQLiteDocumentReaders")
+        let destinationRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("esword", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: destinationRoot,
+            withIntermediateDirectories: true
+        )
+        for name in ["sample.bblx", "sample.bbli"] {
+            try FileManager.default.copyItem(
+                at: fixtureRoot.appendingPathComponent(name),
+                to: destinationRoot.appendingPathComponent(name)
+            )
+        }
+    }
+
+    /**
+     Saves one management session through the production complete-registry admission contract.
+
+     - Parameters:
+       - session: Editable My Documents graph to validate and publish.
+       - store: Transactional publisher configured for the same `modulePath` root.
+       - modelContainer: Current My Documents storage included in registry replay.
+       - modulePath: Canonical SWORD root containing native and SQLite registrations.
+     - Side effects: Acquires the global book mutation lease, captures every registry source for
+       each new initials candidate, and commits the session only when no owner resolves.
+     - Throws: Strict native, SQLite, EPUB, My Documents, validation, or persistence failures.
+     */
+    @MainActor
+    private func saveMyDocumentThroughStrictRegistry(
+        _ session: inout MyDocumentManagementSession,
+        store: MyDocumentLibraryStore,
+        modelContainer: ModelContainer,
+        modulePath: String
+    ) throws {
+        try store.save(&session, checkingInitialsWith: { initials in
+            try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+                modelContainer: modelContainer,
+                modulePath: modulePath
+            ).ownsDocument(named: initials)
+        })
+    }
+
+    /**
+     Writes one minimal valid EPUB 3 archive at a caller-controlled identity-bearing filename.
+
+     - Parameters:
+       - fileName: Basename whose exact spelling drives stable identifier and Android initials.
+       - title: Package title used to distinguish concurrent success results.
+     - Returns: Archive URL inside a unique caller-owned temporary directory.
+     - Side effects: Creates the directory and writes one stored ZIP containing OCF, OPF, nav, and
+       XHTML spine entries.
+     - Throws: Filesystem and deterministic ZIP-writer errors.
+     */
+    private func makeMinimalEpubArchive(fileName: String, title: String) throws -> URL {
+        precondition((fileName as NSString).lastPathComponent == fileName)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "external-epub-admission-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let archiveURL = directory.appendingPathComponent(fileName)
+        try writeMinimalEpubArchive(at: archiveURL, title: title)
+        return archiveURL
+    }
+
+    /**
+     Writes the minimal valid EPUB fixture at an exact caller-owned source URL.
+
+     - Parameters:
+       - archiveURL: Exact archive path whose basename controls EPUB identity.
+       - title: Package title persisted into the generated index.
+     - Side effects: Atomically creates or replaces one stored ZIP archive.
+     - Throws: Deterministic ZIP serialization or filesystem write errors.
+     */
+    private func writeMinimalEpubArchive(at archiveURL: URL, title: String) throws {
+        let entries: [(String, String)] = [
+            ("mimetype", "application/epub+zip"),
+            ("META-INF/container.xml", """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+              <rootfiles>
+                <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+            """),
+            ("OPS/package.opf", """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>\(title)</dc:title><dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                <item id="page" href="page.xhtml" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine><itemref idref="page"/></spine>
+            </package>
+            """),
+            ("OPS/nav.xhtml", """
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <body><nav epub:type="toc"><ol><li><a href="page.xhtml">Page</a></li></ol></nav></body>
+            </html>
+            """),
+            ("OPS/page.xhtml", """
+            <html xmlns="http://www.w3.org/1999/xhtml"><body><p>Atomic admission body.</p></body></html>
+            """),
+        ]
+        try ZipArchiveWriter.storedArchive(entries: entries.map {
+            ZipArchiveWriterEntry(name: $0.0, data: Data($0.1.utf8))
+        }).write(to: archiveURL, options: .atomic)
     }
 
     /**

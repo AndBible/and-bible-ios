@@ -218,7 +218,7 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Builds a Vue `MultiDocument` payload from Strong's numbers and Robinson morphology codes.
+     Builds a Vue `MultiDocument` payload from an ordered Android definition-link sequence.
 
      Android opens these results as a special `Multi` general-book document. Real Strong's or
      morphology definitions set `contentType: "strongs"`; fake missing-module fragments and empty
@@ -229,85 +229,95 @@ struct BibleReaderStrongsDocumentBuilder {
      when their selected module is unavailable.
 
      - Parameters:
-       - strongs: Strong's numbers parsed from `ab-w://` query items.
-       - robinson: Morphology codes parsed from `ab-w://` query items.
+       - items: Ordered Strong's and morphology children collected by Android-style link routing.
        - stateJSON: Optional opaque Vue state to restore into the result document.
+       - emitsEmptyMultiOnMiss: Whether Android dispatched the request through `openMulti`, which
+         still opens an empty `MultiDocument` when every child lookup misses.
      - Returns: Serialized Vue `MultiDocument` JSON, including Android's empty `Multi` for a handled
-       Robinson miss, or `nil` for a Strong-only installed-entry miss.
+       Robinson miss or multi-link miss, or `nil` for a single Strong-only installed-entry miss.
      - Side effects: Reads installed SWORD modules and temporarily moves dictionary cursors.
      - Failure modes: Automatic discovery with no compatible Strong's or morphology dictionary
        produces the Android-style download fallback. Unresolved explicit selections and installed
-       Strong dictionaries with no matching entry are omitted. Robinson misses retain Android's
-       empty `Multi` navigation contract.
+       Strong dictionaries with no matching entry are omitted. Robinson and multi-link misses retain
+       Android's empty `Multi` navigation contract.
      */
-    func buildStrongsMultiDocumentJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
+    func buildStrongsMultiDocumentJSON(
+        items: [BibleReaderDefinitionItem],
+        stateJSON: String? = nil,
+        emitsEmptyMultiOnMiss: Bool = false
+    ) -> String? {
         strongsDocumentBuilderLogger.info(
-            "buildStrongsMultiDocumentJSON: strongs=\(strongs), robinson=\(robinson), swordManager=\(self.swordManager == nil ? "nil" : "alive")"
+            "buildStrongsMultiDocumentJSON: items=\(String(describing: items)), swordManager=\(self.swordManager == nil ? "nil" : "alive")"
         )
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
         var containsStrongsOrMorphologyContent = false
-
-        for num in strongs {
-            let lexiconResolution = findAllLexiconModules(for: num)
-            let lexModules = lexiconResolution.modules
-            strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
-            guard !lexModules.isEmpty else {
-                if lexiconResolution.shouldEmitMissingModuleFallback {
-                    fragments.append(missingStrongsDictionaryFragment(for: num))
-                }
-                continue
+        let containsRobinsonRequest = items.contains { item in
+            if case .robinson = item {
+                return true
             }
-
-            let keyCandidates = Self.strongsLookupKeyCandidates(for: num)
-            strongsDocumentBuilderLogger.info(
-                "buildStrongsMultiDocumentJSON: keyOptions=\(keyCandidates.map(\.value))"
-            )
-            for mod in lexModules {
-                if let lookup = lookupStrongs(in: mod, candidates: keyCandidates) {
-                    let isHebrew = Self.isHebrewStrongsNumber(num)
-                    let keyName = lookup.actualKey
-                    let strongsLinkPrefix = isHebrew ? "H" : "G"
-                    let xml = dictionaryEntryXML(
-                        for: lookup,
-                        moduleInitials: mod.name,
-                        strongsLinkPrefix: strongsLinkPrefix
-                    )
-                    let features = AndroidDictionaryFragmentMetadata.features(
-                        from: mod.features,
-                        keyName: keyName
-                    )
-                    containsStrongsOrMorphologyContent =
-                        containsStrongsOrMorphologyContent
-                        || AndroidDictionaryFragmentMetadata.usesStrongsContentType(mod.features)
-
-                    fragments.append((
-                        xml: xml,
-                        key: AndroidDictionaryFragmentMetadata.fragmentKey(
-                            bookInitials: mod.name,
-                            keyOsisID: lookup.osisID
-                        ),
-                        keyName: keyName,
-                        osisRef: lookup.osisRef,
-                        bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
-                            for: mod.category
-                        ),
-                        bookInitials: mod.name,
-                        bookAbbreviation: mod.abbreviation,
-                        v11n: mod.v11n,
-                        language: mod.language,
-                        direction: mod.direction,
-                        features: features,
-                        hasStrongs: mod.features.contains(.strongsNumbers),
-                        isNativeHtml: lookup.isNativeHtml
-                    ))
-                }
-            }
+            return false
         }
 
-        if !robinson.isEmpty {
-            let morphologyResolution = findMorphologyModules()
-            let morphModules = morphologyResolution.modules
-            for code in robinson {
+        for item in items {
+            switch item {
+            case .strong(let num):
+                let lexiconResolution = findAllLexiconModules(for: num)
+                let lexModules = lexiconResolution.modules
+                strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
+                guard !lexModules.isEmpty else {
+                    if lexiconResolution.shouldEmitMissingModuleFallback {
+                        fragments.append(missingStrongsDictionaryFragment(for: num))
+                    }
+                    continue
+                }
+
+                let keyCandidates = Self.strongsLookupKeyCandidates(for: num)
+                strongsDocumentBuilderLogger.info(
+                    "buildStrongsMultiDocumentJSON: keyOptions=\(keyCandidates.map(\.value))"
+                )
+                for mod in lexModules {
+                    if let lookup = lookupStrongs(in: mod, candidates: keyCandidates) {
+                        let isHebrew = Self.isHebrewStrongsNumber(num)
+                        let keyName = lookup.actualKey
+                        let strongsLinkPrefix = isHebrew ? "H" : "G"
+                        let xml = dictionaryEntryXML(
+                            for: lookup,
+                            moduleInitials: mod.name,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
+                        let features = AndroidDictionaryFragmentMetadata.features(
+                            from: mod.features,
+                            keyName: keyName
+                        )
+                        containsStrongsOrMorphologyContent =
+                            containsStrongsOrMorphologyContent
+                            || AndroidDictionaryFragmentMetadata.usesStrongsContentType(mod.features)
+
+                        fragments.append((
+                            xml: xml,
+                            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                                bookInitials: mod.name,
+                                keyOsisID: lookup.osisID
+                            ),
+                            keyName: keyName,
+                            osisRef: lookup.osisRef,
+                            bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
+                                for: mod.category
+                            ),
+                            bookInitials: mod.name,
+                            bookAbbreviation: mod.abbreviation,
+                            v11n: mod.v11n,
+                            language: mod.language,
+                            direction: mod.direction,
+                            features: features,
+                            hasStrongs: mod.features.contains(.strongsNumbers),
+                            isNativeHtml: lookup.isNativeHtml
+                        ))
+                    }
+                }
+            case .robinson(let code):
+                let morphologyResolution = findMorphologyModules()
+                let morphModules = morphologyResolution.modules
                 guard !morphModules.isEmpty else {
                     if morphologyResolution.shouldEmitMissingModuleFallback {
                         fragments.append(missingMorphologyDictionaryFragment(for: code))
@@ -355,12 +365,36 @@ struct BibleReaderStrongsDocumentBuilder {
 
         if fragments.isEmpty {
             strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: no definitions found")
-            guard !robinson.isEmpty else { return nil }
+            guard containsRobinsonRequest || emitsEmptyMultiOnMiss else { return nil }
         }
 
         return BibleReaderMultiFragmentDocumentBuilder.buildJSON(
             fragments: fragments,
             contentType: containsStrongsOrMorphologyContent ? "strongs" : nil,
+            stateJSON: stateJSON
+        )
+    }
+
+    /**
+     Builds a grouped definition payload for existing direct callers.
+
+     - Parameters:
+       - strongs: Strong's values appended first in their supplied order.
+       - robinson: Robinson morphology values appended after Strong's values in supplied order.
+       - stateJSON: Optional opaque Vue state to restore into the result document.
+     - Returns: The same serialized document as the ordered-item API.
+     - Side effects: Reads installed dictionaries and may update preferred Strong's key families.
+     - Failure modes: Delegates missing-book, missing-entry, read, and serialization behavior to the
+       ordered-item API.
+     */
+    func buildStrongsMultiDocumentJSON(
+        strongs: [String],
+        robinson: [String],
+        stateJSON: String? = nil
+    ) -> String? {
+        buildStrongsMultiDocumentJSON(
+            items: strongs.map(BibleReaderDefinitionItem.strong)
+                + robinson.map(BibleReaderDefinitionItem.robinson),
             stateJSON: stateJSON
         )
     }

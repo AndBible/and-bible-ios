@@ -1,6 +1,7 @@
 // SpeakTextProvider.swift -- Category-aware speech streams and transport
 
 import Foundation
+import SwordKit
 
 /** Android transport distances used by the Speak widget. */
 public enum SpeakRewindAmount: Sendable, Equatable {
@@ -175,10 +176,22 @@ public struct SpeakStreamCursor: Codable, Sendable, Equatable, Hashable {
         versification = position.versification
     }
 
-    /** Returns whether this cursor identifies one exact provider position. */
+    /**
+     Returns whether this cursor identifies one exact provider position.
+
+     Module initials use Java `String.equals` UTF-16 identity because Android persists and resolves
+     speech cursors as Java strings; Swift's canonical Unicode equality must not authorize a
+     composed spelling against a decomposed module owner.
+
+     - Parameter position: Fresh provider-owned position to verify before reconstruction.
+     - Returns: True only when category, Java-exact module initials, key, ordinals, and
+       versification all match.
+     - Side effects: None.
+     - Failure modes: Any stale or Java-distinct field returns false without reading source text.
+     */
     public func matches(_ position: SpeakStreamPosition) -> Bool {
         category == position.category
-            && bookInitials == position.bookInitials
+            && SwordJavaStringIdentity.equals(bookInitials, position.bookInitials)
             && key == position.key
             && ordinalStart == position.ordinalStart
             && ordinalEnd == position.ordinalEnd
@@ -877,7 +890,8 @@ public final class BibleSpeakTextProvider: IndexedSpeakTextProvider {
         }
         guard let previous else { return commands }
         let movedBackward = (current.ordinalStart ?? 0) < (previous.ordinalStart ?? 0)
-        if previous.bookInitials != current.bookInitials || previous.bookName != current.bookName {
+        if !SwordJavaStringIdentity.equals(previous.bookInitials, current.bookInitials)
+            || previous.bookName != current.bookName {
             let book = String(localized: "speak_book_changed", defaultValue: "Book")
             let chapter = String(localized: "speak_chapter_changed", defaultValue: "Chapter")
             commands.insert(.pause(milliseconds: 500), at: 0)

@@ -184,6 +184,157 @@ final class AIGeneratedPageStoreTests: XCTestCase {
   }
 
   /**
+   Documents the intentional fail-closed first-time AI Documents identity safety divergence.
+
+   - Setup: Persists one ordinary My Documents row, injects a complete-registry predicate that owns
+     `AIDocuments`, and attempts to save the first generated page under a unique coordinator root.
+   - Expected result: Save throws the typed ownership error; the prior row retains its order and no
+     AI document, page, content, cache row, marker, or partial reorder is committed.
+   - Failure meaning: iOS either bypasses global ownership or silently changes the accepted safety
+     policy. Android persists this row/page before JSword skips its hidden registration; iOS
+     intentionally rejects the entire graph so generated content cannot become reader-invisible.
+   - Side effects: Writes only to an in-memory SwiftData container.
+   */
+  func testFirstGeneratedPageRejectsOwnedAIDocumentsIdentityWithoutPartialGraph() throws {
+    let container = try makeContainer()
+    let setup = ModelContext(container)
+    let prior = MyDocument(name: "Prior", initials: "Prior", orderNumber: 0)
+    setup.insert(prior)
+    try setup.save()
+    let events = LockedMarkerEvents()
+    let center = MyDocumentAIDocMarkerEventCenter()
+    let observation = center.observe { events.append($0) }
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      markerEventCenter: center,
+      moduleStoreRootURL: uniqueModuleStoreRootURL(),
+      isDocumentInitialsUnavailable: { initials in
+        initials == AIGeneratedPageStore.documentInitials
+      }
+    )
+
+    XCTAssertThrowsError(try store.save(
+      content: "Must not persist",
+      title: "Rejected",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "collision"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )) { error in
+      XCTAssertEqual(
+        error as? AIGeneratedPageStoreError,
+        .documentIdentityOwned(AIGeneratedPageStore.documentInitials)
+      )
+    }
+
+    let verification = ModelContext(container)
+    let documents = try verification.fetch(FetchDescriptor<MyDocument>())
+    XCTAssertEqual(documents.map(\.initials), ["Prior"])
+    XCTAssertEqual(documents.map(\.orderNumber), [0])
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPage>()).isEmpty)
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPageContent>()).isEmpty)
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).isEmpty)
+    XCTAssertTrue(events.values.isEmpty)
+    withExtendedLifetime(observation) {}
+  }
+
+  /**
+   Fails first-time AI Documents publication closed when registry capture itself throws.
+
+   - Setup: Persists one ordinary row and injects a deterministic registry-read failure before the
+     store attempts to create Android's reserved generated-page container.
+   - Expected result: The public error is typed as registry unavailable and every existing and
+     candidate graph row remains byte-for-byte equivalent at the observable model boundary.
+   - Failure meaning: Metadata uncertainty can be converted into apparent availability, or the
+     store can stage reordering/content before completing strict admission.
+   - Side effects: Reads and verifies only an in-memory SwiftData container.
+   */
+  func testFirstGeneratedPageRegistryFailureLeavesEveryGraphTableUnchanged() throws {
+    let container = try makeContainer()
+    let setup = ModelContext(container)
+    let prior = MyDocument(name: "Prior", initials: "Prior", orderNumber: 0)
+    setup.insert(prior)
+    try setup.save()
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      moduleStoreRootURL: uniqueModuleStoreRootURL(),
+      isDocumentInitialsUnavailable: { _ in
+        throw AIGeneratedPageAdmissionTestError.registryUnreadable
+      }
+    )
+
+    XCTAssertThrowsError(try store.save(
+      content: "Must not persist",
+      title: "Rejected",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "unreadable"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )) { error in
+      guard case .registryUnavailable(let detail) = error as? AIGeneratedPageStoreError else {
+        return XCTFail("Expected typed registry failure, received \(error)")
+      }
+      XCTAssertTrue(detail.contains("registryUnreadable"))
+    }
+
+    let verification = ModelContext(container)
+    let documents = try verification.fetch(FetchDescriptor<MyDocument>())
+    XCTAssertEqual(documents.map(\.initials), ["Prior"])
+    XCTAssertEqual(documents.map(\.orderNumber), [0])
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPage>()).isEmpty)
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPageContent>()).isEmpty)
+    XCTAssertTrue(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).isEmpty)
+  }
+
+  /**
+   Preserves generated-page writes for an already published AI Documents container.
+
+   - Setup: Seeds the exact reserved row, then supplies a registry callback that would throw if
+     first-publication admission were incorrectly repeated for an existing owner.
+   - Expected result: One page/content/cache graph commits under the coordinator without invoking
+     the callback or changing the reserved document identity.
+   - Failure meaning: The global gate widened into a behavioral regression that blocks ordinary
+     subsequent generation or regeneration after AI Documents already exists.
+   - Side effects: Writes one document and generated page graph to in-memory SwiftData.
+   */
+  func testExistingAIDocumentsSaveDoesNotRepeatFirstPublicationAdmission() throws {
+    let container = try makeContainer()
+    let setup = ModelContext(container)
+    setup.insert(MyDocument(
+      name: "AI Documents",
+      documentDescription: "Automatically generated documents from AI",
+      initials: AIGeneratedPageStore.documentInitials,
+      orderNumber: 0
+    ))
+    try setup.save()
+    var admissionCallCount = 0
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      moduleStoreRootURL: uniqueModuleStoreRootURL(),
+      isDocumentInitialsUnavailable: { _ in
+        admissionCallCount += 1
+        throw AIGeneratedPageAdmissionTestError.registryUnreadable
+      }
+    )
+
+    _ = try store.save(
+      content: "Existing owner content",
+      title: "Existing owner",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "existing"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )
+
+    let verification = ModelContext(container)
+    XCTAssertEqual(admissionCallCount, 0)
+    XCTAssertEqual(try verification.fetch(FetchDescriptor<MyDocument>()).count, 1)
+    XCTAssertEqual(try verification.fetch(FetchDescriptor<MyDocumentPage>()).count, 1)
+    XCTAssertEqual(try verification.fetch(FetchDescriptor<MyDocumentPageContent>()).count, 1)
+    XCTAssertEqual(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).count, 1)
+  }
+
+  /**
    Verifies replacement regeneration keeps the successful source until final content commits.
 
    - Setup: Saves one cached generated page, validates it without mutation, then completes a
@@ -389,6 +540,30 @@ final class AIGeneratedPageStoreTests: XCTestCase {
       configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
     )
   }
+
+  /**
+   Returns a unique canonical coordinator key without creating filesystem artifacts.
+
+   - Returns: UUID-scoped path below the process temporary directory.
+   - Side effects: None; `ModuleStoreMutationCoordinator` uses the standardized path as an in-memory
+     serialization key and does not create the directory.
+   - Failure modes: This deterministic path construction cannot fail.
+   */
+  private func uniqueModuleStoreRootURL() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent(
+      "ai-generated-page-store-\(UUID().uuidString)",
+      isDirectory: true
+    )
+  }
+}
+
+/** Deterministic injected failure proving strict registry uncertainty remains distinguishable. */
+private enum AIGeneratedPageAdmissionTestError: LocalizedError {
+  /// Simulated metadata/enumeration failure before any candidate graph mutation.
+  case registryUnreadable
+
+  /// Stable detail retained inside the production typed registry failure.
+  var errorDescription: String? { "registryUnreadable" }
 }
 
 /// Lock-backed marker recorder because the event center's callback is not actor isolated.

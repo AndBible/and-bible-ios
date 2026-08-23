@@ -2,6 +2,7 @@
 
 import BibleCore
 import Foundation
+import SwordKit
 
 @MainActor
 extension BibleUIAgentDomainAdapter {
@@ -88,10 +89,13 @@ extension BibleUIAgentDomainAdapter {
             documentID = try session.createDocument(
                 name: name,
                 documentDescription: description,
-                reservedInitials: reservedDocumentInitials,
+                isInitialsUnavailable: draftMyDocumentInitialsUnavailable,
                 sourcePromptId: context.promptId
             )
-            try myDocumentLibraryStore.save(&session, reservedInitials: reservedDocumentInitials)
+            try myDocumentLibraryStore.save(
+                &session,
+                checkingInitialsWith: isDocumentInitialsUnavailable
+            )
         } catch {
             throw myDocumentDomainError("CREATE_ERROR", "The document could not be created.")
         }
@@ -143,7 +147,10 @@ extension BibleUIAgentDomainAdapter {
                 content: normalizedContent,
                 sourcePromptId: context.promptId
             )
-            try myDocumentLibraryStore.save(&session, reservedInitials: reservedDocumentInitials)
+            try myDocumentLibraryStore.save(
+                &session,
+                checkingInitialsWith: isDocumentInitialsUnavailable
+            )
         } catch let error as BibleUIAgentDomainError {
             throw error
         } catch {
@@ -205,7 +212,10 @@ extension BibleUIAgentDomainAdapter {
                     )
                 }
             }
-            try myDocumentLibraryStore.save(&session, reservedInitials: reservedDocumentInitials)
+            try myDocumentLibraryStore.save(
+                &session,
+                checkingInitialsWith: isDocumentInitialsUnavailable
+            )
         } catch {
             throw myDocumentDomainError("EDIT_ERROR", "The page could not be edited.")
         }
@@ -233,7 +243,10 @@ extension BibleUIAgentDomainAdapter {
         let pageTitle = location.page.title
         do {
             try session.deletePage(documentID: location.document.id, pageID: pageID)
-            try myDocumentLibraryStore.save(&session, reservedInitials: reservedDocumentInitials)
+            try myDocumentLibraryStore.save(
+                &session,
+                checkingInitialsWith: isDocumentInitialsUnavailable
+            )
         } catch {
             throw myDocumentDomainError("DELETE_ERROR", "The page could not be deleted.")
         }
@@ -291,6 +304,18 @@ extension BibleUIAgentDomainAdapter {
         return nil
     }
 
+    /**
+     Resolves one managed My Documents row by its explicit management identity.
+
+     - Parameters:
+       - session: Fresh transactional My Documents snapshot.
+       - documentID: Preferred stable database identifier.
+       - initials: Exact Android/Java UTF-16 initials used only when no identifier is supplied.
+     - Returns: The uniquely selected draft, or `nil` when the requested identity is absent.
+     - Side effects: None; the supplied session is not mutated.
+     - Failure modes: Canonically equivalent but Java-distinct initials do not substitute for one
+       another, preventing a composed spelling from selecting the decomposed row (or vice versa).
+     */
     private func resolveMyDocument(
         in session: MyDocumentManagementSession,
         documentID: UUID?,
@@ -300,7 +325,9 @@ extension BibleUIAgentDomainAdapter {
             return session.documents.first { $0.id == documentID }
         }
         if let initials {
-            return session.documents.first { $0.initials == initials }
+            return session.documents.first {
+                SwordJavaStringIdentity.equals($0.initials, initials)
+            }
         }
         return nil
     }
@@ -310,7 +337,10 @@ extension BibleUIAgentDomainAdapter {
         promptID: UUID
     ) throws -> MyDocumentDraft {
         if let existing = session.documents.first(where: {
-            $0.initials == MyDocumentManagementSession.aiDocumentsInitials
+            SwordJavaStringIdentity.equals(
+                $0.initials,
+                MyDocumentManagementSession.aiDocumentsInitials
+            )
         }) {
             return existing
         }
@@ -318,7 +348,7 @@ extension BibleUIAgentDomainAdapter {
         do {
             id = try session.createDocument(
                 name: "AI Documents",
-                reservedInitials: reservedDocumentInitials,
+                isInitialsUnavailable: draftMyDocumentInitialsUnavailable,
                 initials: MyDocumentManagementSession.aiDocumentsInitials,
                 sourcePromptId: promptID
             )
@@ -337,6 +367,35 @@ extension BibleUIAgentDomainAdapter {
         } catch {
             throw myDocumentDomainError(code, "My Documents could not be read.")
         }
+    }
+
+    /**
+     Applies Android's complete `Books.getBook(candidateInitials)` creation preflight.
+
+     - Parameter initials: Explicit or generated My Documents candidate initials.
+     - Returns: True when installed, EPUB, or existing My Documents registration owns the token;
+       metadata failures also return true so creation and persistence fail closed.
+     - Side effects: Reads current installed/local metadata without opening document content.
+     - Failure modes: None exposed; persistence failures conservatively reserve the candidate.
+     */
+    private func isDocumentInitialsUnavailable(_ initials: String) throws -> Bool {
+        if let strictMyDocumentInitialsUnavailable {
+            return try strictMyDocumentInitialsUnavailable(initials)
+        }
+        guard let session = try? myDocumentLibraryStore.loadSession() else { return true }
+        let registrations = localGeneralBookRegistrations(
+            documents: session.documents,
+            epubs: EpubReader.installedEpubs()
+        )
+        return readableInstalledModuleResolver().hasRegisteredDocument(
+            named: initials,
+            localRegistrations: registrations
+        )
+    }
+
+    /** Maps throwing production registry preflight to conservative draft-time availability. */
+    private func draftMyDocumentInitialsUnavailable(_ initials: String) -> Bool {
+        (try? isDocumentInitialsUnavailable(initials)) ?? true
     }
 
     private func myDocumentContentType(

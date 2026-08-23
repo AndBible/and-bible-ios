@@ -599,6 +599,44 @@ final class EpubReaderParityTests: XCTestCase {
     }
 
     /**
+     Verifies registry admission precedes every candidate-owned filesystem mutation.
+
+     - Setup: Targets a nonexistent library root with a valid EPUB and an admission probe that
+       always rejects while recording whether the root already exists.
+     - Expected: The callback observes the Android initials exactly once before the root exists;
+       its error propagates and the entire library path remains absent.
+     - Failure meaning: A fail-closed native/SQLite/EPUB/My Documents registry error can still
+       create staging, generation, or manifest artifacts before rejecting the candidate.
+     - Side effects: Creates only the source archive fixture; the rejected library is never made.
+     */
+    func testRegistryAdmissionRejectsBeforeCreatingLibraryArtifacts() throws {
+        let parent = try makeTemporaryDirectory(named: "admission-rejection-parent")
+        let library = parent.appendingPathComponent("epub", isDirectory: true)
+        let archive = try writeArchive(named: "Admission Blocked.epub", entries: epub3Entries(
+            title: "Admission Blocked",
+            firstBody: #"<p>Never staged.</p>"#,
+            secondBody: #"<p>Never published.</p>"#
+        ))
+        let probe = EpubAdmissionRejectionProbe(libraryRootURL: library)
+
+        XCTAssertThrowsError(try EpubReader.install(
+            epubURL: archive,
+            libraryRootURL: library,
+            admittingCandidateWith: probe.reject
+        )) { error in
+            XCTAssertEqual(error as? EpubAdmissionTestError, .rejected)
+        }
+        let snapshot = probe.snapshot()
+        XCTAssertEqual(snapshot.callCount, 1)
+        XCTAssertEqual(
+            snapshot.initials,
+            EpubReader.initials(forDisplayFileName: archive.lastPathComponent)
+        )
+        XCTAssertFalse(snapshot.libraryExistedAtAdmission)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: library.path))
+    }
+
+    /**
      Verifies an exact-name reinstall cannot make an existing reader span package generations.
 
      The first reader stays open while a second archive with the same Android/stable identity is
@@ -1342,6 +1380,75 @@ final class EpubReaderParityTests: XCTestCase {
         entries.map { name, value in
             (name, binaryOverrides[name] ?? Data(value.utf8))
         }
+    }
+}
+
+/** Deterministic error thrown by the lock-owned EPUB registry admission test probe. */
+private enum EpubAdmissionTestError: Error, Equatable {
+    /// Admission rejects before candidate-owned paths may be created.
+    case rejected
+}
+
+/**
+ Thread-safe recorder for the synchronous EPUB install-admission callback.
+
+ The production callback is `@Sendable` even though the library invokes it synchronously. This
+ probe keeps test observations behind a lock so the test does not rely on an unsafe captured local.
+ */
+private final class EpubAdmissionRejectionProbe: @unchecked Sendable {
+    /// Lock protecting callback observations.
+    private let lock = NSLock()
+
+    /// Candidate library root whose pre-mutation absence is recorded.
+    private let libraryRootURL: URL
+
+    /// Number of admission invocations.
+    private var callCount = 0
+
+    /// Most recently observed Android initials.
+    private var initials: String?
+
+    /// Whether candidate storage existed when admission ran.
+    private var libraryExistedAtAdmission = false
+
+    /**
+     Creates a rejection probe for one candidate library root.
+
+     - Parameter libraryRootURL: Path whose absence admission must observe.
+     - Side effects: Stores the URL; no filesystem access occurs during initialization.
+     - Failure modes: This helper cannot fail.
+     */
+    init(libraryRootURL: URL) {
+        self.libraryRootURL = libraryRootURL
+    }
+
+    /**
+     Records callback state and rejects the candidate.
+
+     - Parameter candidate: Stable identifier and Android initials generated from the source URL.
+     - Side effects: Records one invocation and reads whether the candidate library path exists.
+     - Throws: Always throws `EpubAdmissionTestError.rejected` after recording.
+     */
+    func reject(_ candidate: EpubReader.InstallCandidate) throws {
+        lock.lock()
+        callCount += 1
+        self.initials = candidate.initials
+        libraryExistedAtAdmission = FileManager.default.fileExists(atPath: libraryRootURL.path)
+        lock.unlock()
+        throw EpubAdmissionTestError.rejected
+    }
+
+    /**
+     Returns an immutable snapshot of all recorded admission observations.
+
+     - Returns: Callback count, last initials, and root-existence state captured by `reject`.
+     - Side effects: Briefly acquires the observation lock without changing recorded state.
+     - Failure modes: This helper cannot fail.
+     */
+    func snapshot() -> (callCount: Int, initials: String?, libraryExistedAtAdmission: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (callCount, initials, libraryExistedAtAdmission)
     }
 }
 

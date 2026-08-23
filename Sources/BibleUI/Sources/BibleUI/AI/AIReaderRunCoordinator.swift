@@ -402,6 +402,7 @@ final class AIReaderRunCoordinator {
   private let runGate: AIReaderWorkspaceRunGate
   private let referenceEnvironmentProvider:
     @MainActor () -> AIReaderReferenceEnvironmentResolver.Environment
+  /// Fresh installed-owner check that prevents AI runs from reading a locked or shadowed Bible.
   private let isReadableBible: (String) -> Bool
   private let openMyDocument: (String, String) -> Void
   private let openStudyPad: (UUID, UUID?) -> Void
@@ -478,7 +479,20 @@ final class AIReaderRunCoordinator {
     )
     self.client = client
     self.domain = domain
-    generatedPageStore = AIGeneratedPageStore(modelContext: modelContext)
+    generatedPageStore = AIGeneratedPageStore(
+      modelContext: modelContext,
+      moduleStoreRootURL: URL(
+        fileURLWithPath: swordManager.modulePath,
+        isDirectory: true
+      ),
+      isDocumentInitialsUnavailable: {
+        [modelContainer = modelContext.container, modulePath = swordManager.modulePath] initials in
+        try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+          modelContainer: modelContainer,
+          modulePath: modulePath
+        ).ownsDocument(named: initials)
+      }
+    )
     textTargetStore = AITextTargetStore(backing: textTargetBacking)
     self.myDocumentStore = myDocumentStore
     self.runGate = runGate

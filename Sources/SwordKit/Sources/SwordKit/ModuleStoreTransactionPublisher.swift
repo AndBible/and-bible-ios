@@ -314,7 +314,7 @@ public final class ModuleStoreTransactionPublisher: @unchecked Sendable {
                 }
                 records.append(InstalledConfigRecord(layout: layout, actualConfigURL: fileURL))
             } catch let error as ModuleStoreMutationError {
-                let rawDataPath = rawConfigValue("datapath", content: content)
+                let rawDataPath = rawConfigValue("DataPath", content: content)
                 let beginsInModules = rawDataPath.map { value in
                     var path = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     if path.hasPrefix("./") { path.removeFirst(2) }
@@ -673,7 +673,7 @@ public final class ModuleStoreTransactionPublisher: @unchecked Sendable {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let equals = line.firstIndex(of: "=") else { continue }
             let candidate = line[..<equals].trimmingCharacters(in: .whitespacesAndNewlines)
-            if candidate.caseInsensitiveCompare(key) == .orderedSame {
+            if candidate == key {
                 return line[line.index(after: equals)...]
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }

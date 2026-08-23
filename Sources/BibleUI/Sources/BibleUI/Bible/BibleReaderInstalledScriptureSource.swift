@@ -662,6 +662,68 @@ enum BibleReaderInstalledModuleSource: @unchecked Sendable {
 }
 
 /**
+ One globally resolved installed owner or a lower-priority local-document fallback.
+
+ Android resolves the complete installed-book registry before local My Documents or EPUB adapters
+ may claim an identity. The installed case deliberately carries metadata even when its content
+ handle is nil so a locked native owner cannot redirect a read to unrelated local content.
+ */
+enum BibleReaderInstalledOrLocalDocumentOwner<LocalDocument> {
+    /// Native or SQLite global owner; `readableSource` is nil only for an unreadable native owner.
+    case installed(info: ModuleInfo, readableSource: BibleReaderInstalledModuleSource?)
+
+    /// Exactly one caller-supplied local candidate, admitted only when the global registry is empty.
+    case local(LocalDocument)
+
+    /// Neither the global registry nor the caller's local inventory owns the requested identity.
+    case missing
+
+}
+
+/** One Android custom-book registration backed by an iOS-local document adapter. */
+struct BibleReaderLocalDocumentRegistration<LocalDocument> {
+    /// Caller-owned metadata/content adapter retained without reading an entry.
+    let document: LocalDocument
+
+    /// Android `Book.initials` used for candidate admission and exact-initials lookup.
+    let initials: String
+
+    /// Android `Book.name` used by the exact-name and case-insensitive lookup tiers.
+    let fullName: String
+
+    /// JSword `Book.getAbbreviation()` used by installed TreeSet ordering.
+    let abbreviation: String
+
+    /// JSword category ordinal used as the first installed TreeSet comparison field.
+    let category: ModuleCategory
+
+    /**
+     Creates one local registration after Android generated-config parsing.
+
+     - Parameters describe the caller-owned adapter and raw generated config values.
+     - Side effects: None.
+     - Failure modes: Java-trimmed-empty abbreviations fall back to exact initials; full names may
+       remain empty because JSword metadata permits an empty Description value.
+     */
+    init(
+        document: LocalDocument,
+        initials: String,
+        fullName: String,
+        abbreviation: String,
+        category: ModuleCategory
+    ) {
+        self.document = document
+        self.initials = initials
+        self.fullName = SwordJavaStringIdentity.trim(fullName)
+        self.abbreviation = BibleReaderJSwordConfigValue.abbreviation(
+            abbreviation,
+            initials: initials
+        )
+        self.category = category
+    }
+}
+
+/**
  Resolves Android's single global installed-book registry across native and SQLite backends.
 
  Each custom SQLite driver first asks the current registry for its proposed initials and skips
@@ -725,6 +787,71 @@ struct BibleReaderInstalledModuleResolver {
                 return .sqlite(module)
             }
         }
+
+        /// Shared JSword BookSet registration retaining this exact backend owner.
+        var bookSetRegistration: BibleReaderInstalledBookSetRegistration<GlobalRegistration> {
+            BibleReaderInstalledBookSetRegistration(
+                value: self,
+                initials: info.name,
+                fullName: info.description,
+                abbreviation: abbreviation,
+                category: info.category
+            )
+        }
+    }
+
+    /** One combined installed or admitted local registration in Android add order. */
+    private enum CombinedRegistration<LocalDocument> {
+        /// Native/SQLite registration admitted before local custom books.
+        case installed(GlobalRegistration)
+
+        /// EPUB or My Documents adapter admitted by its initials lookup preflight.
+        case local(BibleReaderLocalDocumentRegistration<LocalDocument>)
+
+        /// Exact Android initials for maps, admission, and TreeSet comparison.
+        var initials: String {
+            switch self {
+            case .installed(let registration): return registration.info.name
+            case .local(let registration): return registration.initials
+            }
+        }
+
+        /// Exact Android full display name for name-map and case-insensitive lookup tiers.
+        var fullName: String {
+            switch self {
+            case .installed(let registration): return registration.info.description
+            case .local(let registration): return registration.fullName
+            }
+        }
+
+        /// JSword abbreviation used after category by the installed TreeSet comparator.
+        var abbreviation: String {
+            switch self {
+            case .installed(let registration): return registration.abbreviation
+            case .local(let registration): return registration.abbreviation
+            }
+        }
+
+        /// JSword category used as the first installed TreeSet comparator field.
+        var category: ModuleCategory {
+            switch self {
+            case .installed(let registration): return registration.info.category
+            case .local(let registration): return registration.category
+            }
+        }
+
+        /// Public owner projection retaining locked installed metadata without content fallback.
+        var owner: BibleReaderInstalledOrLocalDocumentOwner<LocalDocument> {
+            switch self {
+            case .installed(let registration):
+                return .installed(
+                    info: registration.info,
+                    readableSource: registration.readableSource
+                )
+            case .local(let registration):
+                return .local(registration.document)
+            }
+        }
     }
 
     /// Inclusive native registrations in manager order, including locked ownership rows.
@@ -747,7 +874,9 @@ struct BibleReaderInstalledModuleResolver {
             guard Self.lookup(module.info.name, in: registrations) == nil else { continue }
             registrations.append(.sqlite(module))
         }
-        return registrations
+        return BibleReaderInstalledBookSet.registrationOrderProjection(
+            registrations.map(\.bookSetRegistration)
+        ).map(\.value)
     }
 
     /**
@@ -760,8 +889,9 @@ struct BibleReaderInstalledModuleResolver {
        present as metadata without exposing content handles.
      */
     private var jswordSortedRegistrations: [GlobalRegistration] {
-        Self.treeSetProjection(admittedRegistrations)
-            .sorted(by: Self.precedesInJSwordBookSet)
+        BibleReaderInstalledBookSet.treeSetOrderProjection(
+            admittedRegistrations.map(\.bookSetRegistration)
+        ).map(\.value)
     }
 
     /**
@@ -784,9 +914,7 @@ struct BibleReaderInstalledModuleResolver {
         self.nativeRegistrations = installedSnapshot.compactMap { info in
             guard !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) else { return nil }
             let installedModule = swordManager?.module(named: info.name)
-            let readableModule = swordManager?.moduleAccessState(named: info.name) == .readable
-                ? installedModule
-                : nil
+            let readableModule = (!info.isEncrypted || info.isUnlocked) ? installedModule : nil
             let configuredAbbreviation = installedModule?.configEntry("Abbreviation")
             return NativeRegistration(
                 info: info,
@@ -868,6 +996,20 @@ struct BibleReaderInstalledModuleResolver {
     }
 
     /**
+     Returns inclusive metadata for the globally selected installed registration.
+
+     - Parameter name: Initials or full-name token resolved with pinned JSword lookup precedence.
+     - Returns: Canonical admitted metadata, including a currently locked native owner, or nil when
+       no installed registration owns the token.
+     - Side effects: Replays immutable custom admission; no content handle is opened or read.
+     - Failure modes: Empty, missing, and Java-distinct identities return nil. Authorization does
+       not hide locked metadata because callers use this projection to suppress local fallthrough.
+     */
+    func registeredModuleInfo(named name: String) -> ModuleInfo? {
+        selectedRegistration(named: name)?.info
+    }
+
+    /**
      Reports whether inclusive native registration owns one global lookup token.
 
      - Parameter name: Initials or full module name resolved with JSword lookup precedence.
@@ -943,6 +1085,28 @@ struct BibleReaderInstalledModuleResolver {
     }
 
     /**
+     Projects readable installed books in the TreeSet order consumed by Android automatic defaults.
+
+     - Parameter categories: Accepted actual categories after global custom-driver admission.
+     - Returns: Readable, category-correct sources after JSword comparator replacement and sorting by
+       category, abbreviation, initials, then full name.
+     - Side effects: Replays immutable registration metadata only; no document content is read.
+     - Failure modes: Locked/unreadable and wrong-category registrations are omitted while retaining
+       their ownership; exact requested lookups continue to use the resolver's map/tier APIs.
+     */
+    func readableModulesInBookSetOrder(
+        categories: Set<ModuleCategory>
+    ) -> [BibleReaderInstalledModuleSource] {
+        jswordSortedRegistrations.compactMap { registration in
+            guard let source = registration.readableSource,
+                  categories.contains(source.info.category) else {
+                return nil
+            }
+            return source
+        }
+    }
+
+    /**
      Returns every readable installed book that can implement Android's dictionary-key API.
 
      Android automatic Strong's and morphology discovery feature-filters the global `Books`
@@ -999,6 +1163,172 @@ struct BibleReaderInstalledModuleResolver {
     }
 
     /**
+     Returns the SQLite handles that survived Android's complete global registration sequence.
+
+     Runtime catalogs must consume this projection rather than `SQLiteDocumentModuleLibrary.modules`.
+     The library's ordinary module list applies only custom-to-custom admission, so a custom row
+     later rejected by a native alias can otherwise suppress a subsequent valid custom candidate.
+
+     - Returns: Admitted readable SQLite handles in MyBible, MySword, then e-Sword registration
+       order, preserving the exact handle created for each raw discovery candidate.
+     - Side effects: Replays immutable custom admission against the captured native registry; no
+       content query, rediscovery, or handle recreation occurs.
+     - Failure modes: Native-shadowed and earlier-custom-shadowed candidates are omitted. Locked
+       native registrations retain ownership and therefore reject colliding SQLite candidates.
+     */
+    func registeredSQLiteModulesInRegistrationOrder() -> [BibleReaderSQLiteModuleHandle] {
+        admittedRegistrations.compactMap { registration in
+            guard case .sqlite(let module) = registration else { return nil }
+            return module
+        }
+    }
+
+    /**
+     Resolves one document after replaying Android's EPUB/My Documents registration sequence.
+
+     - Parameters:
+       - name: Initials/full-name token resolved by exact maps then TreeSet case-insensitive scan.
+       - localRegistrations: Lazy local registrations in Android add order: EPUB before My Documents.
+     - Returns: Globally selected installed or local owner, or `.missing` when no admitted book owns
+       the token. JSword maps resolve every admitted duplicate deterministically.
+     - Side effects: Replays metadata-only registration and TreeSet projection; no content entry is
+       read. Exact installed-initials matches return without evaluating local metadata because no
+       admitted local name can outrank JSword's exact-initials map.
+     - Failure modes: Local candidates whose initials resolve to an earlier installed/local book are
+       rejected exactly like `Books.installed().getBook(candidate.initials)` before `addBook`.
+     */
+    func resolveDocumentOwner<LocalDocument>(
+        named name: String,
+        localRegistrations: () -> [BibleReaderLocalDocumentRegistration<LocalDocument>]
+    ) -> BibleReaderInstalledOrLocalDocumentOwner<LocalDocument> {
+        if let exactInstalled = admittedRegistrations.last(where: {
+            Self.javaStringEquals($0.info.name, name)
+        }) {
+            return .installed(
+                info: exactInstalled.info,
+                readableSource: exactInstalled.readableSource
+            )
+        }
+        let combined = admittedCombinedRegistrations(localRegistrations())
+        return Self.lookupCombined(name, in: combined)?.owner ?? .missing
+    }
+
+    /**
+     Returns the complete Android installed-book TreeSet after local custom-book registration.
+
+     - Parameter localRegistrations: EPUB then My Documents registrations in their source order.
+     - Returns: Installed/local owners in category, abbreviation, initials, and full-name order,
+       retaining later comparator-equal replacements exactly like JSword's `TreeSet`.
+     - Side effects: Replays metadata-only admission and sorting; no content handle is read.
+     - Failure modes: Candidate-initials collisions are omitted. Locked native owners remain as
+       installed metadata with nil readable content and still participate in lookup/admission.
+     */
+    func registeredDocumentOwners<LocalDocument>(
+        localRegistrations: [BibleReaderLocalDocumentRegistration<LocalDocument>]
+    ) -> [BibleReaderInstalledOrLocalDocumentOwner<LocalDocument>] {
+        Self.combinedTreeSetProjection(admittedCombinedRegistrations(localRegistrations))
+            .sorted(by: Self.precedesInCombinedJSwordBookSet)
+            .map(\.owner)
+    }
+
+    /**
+     Reports whether Android's complete current registry owns a proposed local initials token.
+
+     - Parameters:
+       - initials: Candidate generated by `MyDocumentBookManager.generateInitials` parity logic.
+       - localRegistrations: Existing EPUB then My Documents registrations in Android add order.
+     - Returns: True for any exact initials, exact full-name, or Java case-tier owner.
+     - Side effects: Replays metadata-only local registration; no local page or EPUB fragment read.
+     - Failure modes: Rejected local candidates cannot reserve a later token, matching startup.
+     */
+    func hasRegisteredDocument<LocalDocument>(
+        named initials: String,
+        localRegistrations: [BibleReaderLocalDocumentRegistration<LocalDocument>]
+    ) -> Bool {
+        Self.lookupCombined(
+            initials,
+            in: admittedCombinedRegistrations(localRegistrations)
+        ) != nil
+    }
+
+    /** Replays EPUB/My Documents `getBook(initials)` admission after installed registrations. */
+    private func admittedCombinedRegistrations<LocalDocument>(
+        _ localRegistrations: [BibleReaderLocalDocumentRegistration<LocalDocument>]
+    ) -> [CombinedRegistration<LocalDocument>] {
+        var combined: [CombinedRegistration<LocalDocument>] = admittedRegistrations.map {
+            .installed($0)
+        }
+        for local in localRegistrations {
+            guard Self.lookupCombined(local.initials, in: combined) == nil else { continue }
+            combined.append(.local(local))
+        }
+        return combined
+    }
+
+    /** Applies JSword exact maps and case-insensitive TreeSet scan to the combined registry. */
+    private static func lookupCombined<LocalDocument>(
+        _ name: String,
+        in registrations: [CombinedRegistration<LocalDocument>]
+    ) -> CombinedRegistration<LocalDocument>? {
+        registrations.last { javaStringEquals($0.initials, name) }
+            ?? registrations.last { javaStringEquals($0.fullName, name) }
+            ?? {
+                let identity = SQLiteDocumentIdentity(name)
+                return combinedTreeSetProjection(registrations)
+                    .sorted(by: precedesInCombinedJSwordBookSet)
+                    .first {
+                        SQLiteDocumentIdentity($0.initials) == identity
+                            || SQLiteDocumentIdentity($0.fullName) == identity
+                    }
+            }()
+    }
+
+    /** Orders combined installed/local registrations with JSword's pinned book comparator. */
+    private static func precedesInCombinedJSwordBookSet<LocalDocument>(
+        _ lhs: CombinedRegistration<LocalDocument>,
+        _ rhs: CombinedRegistration<LocalDocument>
+    ) -> Bool {
+        combinedJSwordBookSetComparison(lhs, rhs) < 0
+    }
+
+    /** Returns the JSword comparator result for two combined installed/local registrations. */
+    private static func combinedJSwordBookSetComparison<LocalDocument>(
+        _ lhs: CombinedRegistration<LocalDocument>,
+        _ rhs: CombinedRegistration<LocalDocument>
+    ) -> Int {
+        let leftCategory = jswordCategoryOrdinal(lhs.category)
+        let rightCategory = jswordCategoryOrdinal(rhs.category)
+        if leftCategory != rightCategory { return leftCategory - rightCategory }
+
+        let abbreviationOrder = SwordJavaStringIdentity.compareIgnoreCase(
+            lhs.abbreviation,
+            rhs.abbreviation
+        )
+        if abbreviationOrder != 0 { return abbreviationOrder }
+
+        let initialsOrder = javaStringCompare(lhs.initials, rhs.initials)
+        if initialsOrder != 0 { return initialsOrder }
+        return javaStringCompare(lhs.fullName, rhs.fullName)
+    }
+
+    /** Retains the later combined registration for every JSword comparator-equal identity. */
+    private static func combinedTreeSetProjection<LocalDocument>(
+        _ registrations: [CombinedRegistration<LocalDocument>]
+    ) -> [CombinedRegistration<LocalDocument>] {
+        var treeValues: [CombinedRegistration<LocalDocument>] = []
+        for registration in registrations {
+            if let existing = treeValues.firstIndex(where: {
+                combinedJSwordBookSetComparison($0, registration) == 0
+            }) {
+                treeValues[existing] = registration
+            } else {
+                treeValues.append(registration)
+            }
+        }
+        return treeValues
+    }
+
+    /**
      Applies each JSword identity tier across the one combined global registration sequence.
 
      - Parameter name: Persisted or routed installed-book initials/full-name token.
@@ -1027,94 +1357,10 @@ struct BibleReaderInstalledModuleResolver {
         _ name: String,
         in registrations: [GlobalRegistration]
     ) -> GlobalRegistration? {
-        registrations.last { Self.javaStringEquals($0.info.name, name) }
-            ?? registrations.last { Self.javaStringEquals($0.info.description, name) }
-            ?? {
-                let identity = SQLiteDocumentIdentity(name)
-                return Self.treeSetProjection(registrations)
-                    .sorted(by: Self.precedesInJSwordBookSet)
-                    .first {
-                    SQLiteDocumentIdentity($0.info.name) == identity
-                        || SQLiteDocumentIdentity($0.info.description) == identity
-                }
-            }()
-    }
-
-    /**
-     Orders registrations like `AbstractBookMetaData.compareTo` inside JSword's installed TreeSet.
-
-     - Parameters:
-       - lhs: First globally admitted installed book.
-       - rhs: Second globally admitted installed book.
-     - Returns: `true` when `lhs` sorts before `rhs` by category ordinal, abbreviation
-       compare-ignore-case, exact initials, then exact full name.
-     - Side effects: Loads SwordKit's pinned Android Java string table for abbreviation comparison.
-     - Failure modes: Comparator-equal values return `false`; `treeSetProjection` removes the earlier
-       equal row before production sorting, matching JSword replacement.
-     */
-    private static func precedesInJSwordBookSet(
-        _ lhs: GlobalRegistration,
-        _ rhs: GlobalRegistration
-    ) -> Bool {
-        jswordBookSetComparison(lhs, rhs) < 0
-    }
-
-    /**
-     Returns the pinned JSword installed-book comparator result for two registrations.
-
-     - Parameters:
-       - lhs: First admitted installed book.
-       - rhs: Second admitted installed book.
-     - Returns: A negative value when `lhs` precedes `rhs`, zero for TreeSet identity, or a positive
-       value when `rhs` precedes `lhs`.
-     - Side effects: Loads the pinned Android case-fold table for abbreviation comparison.
-     - Failure modes: None; every supported and unknown iOS category has a deterministic ordinal.
-     */
-    private static func jswordBookSetComparison(
-        _ lhs: GlobalRegistration,
-        _ rhs: GlobalRegistration
-    ) -> Int {
-        let leftCategory = jswordCategoryOrdinal(lhs.info.category)
-        let rightCategory = jswordCategoryOrdinal(rhs.info.category)
-        if leftCategory != rightCategory { return leftCategory - rightCategory }
-
-        let abbreviationOrder = SwordJavaStringIdentity.compareIgnoreCase(
-            lhs.abbreviation,
-            rhs.abbreviation
-        )
-        if abbreviationOrder != 0 { return abbreviationOrder }
-
-        let initialsOrder = javaStringCompare(lhs.info.name, rhs.info.name)
-        if initialsOrder != 0 { return initialsOrder }
-        return javaStringCompare(lhs.info.description, rhs.info.description)
-    }
-
-    /**
-     Replays TreeSet comparator-equality replacement in admitted add order.
-
-     JSword removes a comparator-equal installed book and its maps before adding the later row.
-     Keeping only the last such registration prevents automatic inventories and casefold scans from
-     exposing both rows or depending on Swift's unspecified equal-sort order.
-
-     - Parameter registrations: Books in Android registration/add order.
-     - Returns: Comparator-distinct books, retaining the last registration for every equal key.
-     - Side effects: None.
-     - Failure modes: None; an empty registry produces an empty projection.
-     */
-    private static func treeSetProjection(
-        _ registrations: [GlobalRegistration]
-    ) -> [GlobalRegistration] {
-        var treeValues: [GlobalRegistration] = []
-        for registration in registrations {
-            if let existing = treeValues.firstIndex(where: {
-                jswordBookSetComparison($0, registration) == 0
-            }) {
-                treeValues[existing] = registration
-            } else {
-                treeValues.append(registration)
-            }
-        }
-        return treeValues
+        BibleReaderInstalledBookSet.registration(
+            named: name,
+            in: registrations.map(\.bookSetRegistration)
+        )?.value
     }
 
     /**
@@ -1172,6 +1418,6 @@ struct BibleReaderInstalledModuleResolver {
      - Failure modes: None.
      */
     private static func javaStringEquals(_ lhs: String, _ rhs: String) -> Bool {
-        lhs.utf16.elementsEqual(rhs.utf16)
+        SwordJavaStringIdentity.equals(lhs, rhs)
     }
 }

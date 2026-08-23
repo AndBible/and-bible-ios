@@ -51,6 +51,57 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies generic bookmark navigation executes installed SQLite dictionary and commentary keys.
+
+     - Setup: Installs the real Android SQLite fixtures, attaches a pane, and navigates typed generic
+       targets to one exact dictionary key and one canonical dotted KJVA commentary key.
+     - Expected result: Each target is planned through the installed SQLite owner, rendered with
+       authored content, and persisted in its category without SWORD or local-document fallback.
+     - Failure meaning: Rendered SQLite pages can create bookmarks that the bookmark list cannot
+       reopen, or commit mutates a different backend/key than the exact persisted destination.
+     - Side effects: Creates temporary fixture files and records controller bridge/pane mutations.
+     */
+    @MainActor
+    func testGenericBookmarksNavigateExactSQLiteDictionaryAndCommentaryKeys() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let pageManager = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+
+        var baseline = scripts().count
+        try controller.navigate(toBookmarkTarget: .generic(.init(
+            moduleInitials: "MyBible-dictionary",
+            key: "H0430",
+            ordinalRange: nil
+        )))
+        var payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        var fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-dictionary")
+        XCTAssertEqual(payload["key"] as? String, "H0430")
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Hebrew definition") == true)
+        XCTAssertEqual(controller.currentCategory, .dictionary)
+        XCTAssertEqual(pageManager.dictionaryDocument, "MyBible-dictionary")
+        XCTAssertEqual(pageManager.dictionaryKey, "H0430")
+
+        baseline = scripts().count
+        try controller.navigate(toBookmarkTarget: .generic(.init(
+            moduleInitials: "MyBible-commentary",
+            key: "Gen.1.1",
+            ordinalRange: nil
+        )))
+        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-commentary")
+        XCTAssertEqual(payload["key"] as? String, "Gen.1.1")
+        XCTAssertFalse((fragment["xml"] as? String ?? "").isEmpty)
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(pageManager.commentaryDocument, "MyBible-commentary")
+    }
+
+    /**
      Verifies genuine SWORD precedence and canonical persistence for case-insensitive duplicates.
 
      - Setup: Installs a valid MyBible package whose sidecar initials are lowercase `kjv` beside the

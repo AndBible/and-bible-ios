@@ -14,7 +14,8 @@ let epubSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
  `identifier` remains the filesystem/library lookup token. `initials` is the Android-compatible
  document identity (`Epub-...`) persisted in `PageManager.generalBookDocument` and emitted through
- the reader bridge. Titles are presentation-only and never participate in identity.
+ the reader bridge. The Java-trimmed package title is also the generated-book Description and
+ therefore participates in Android `Books.getBook` exact-full-name and case-insensitive lookup.
  */
 public struct EpubInfo: Sendable, Equatable, Identifiable {
     /// Stable library directory identifier.
@@ -124,6 +125,51 @@ public enum EpubPersistedKeyLookupError: Error, Equatable, LocalizedError, Senda
    an instance; resource serving opens a fresh instance per request.
  */
 public final class EpubReader: @unchecked Sendable {
+    /**
+     Immutable EPUB identity proposed at the global installed-book admission boundary.
+
+     - Properties:
+       - identifier: Collision-resistant exact-source identity used for same-book replacement.
+       - initials: Android `Book.initials` token resolved against the complete current registry.
+     - Side effects: None; values are derived before candidate-owned paths are created.
+     */
+    public struct InstallCandidate: Sendable, Equatable {
+        /// Stable exact-source identifier that distinguishes updates from colliding new books.
+        public let identifier: String
+
+        /// Android-compatible initials generated from the NFC-normalized display filename.
+        public let initials: String
+
+        /**
+         Creates one immutable typed admission candidate.
+
+         - Parameters:
+           - identifier: Stable exact-source identity used to recognize a reinstall.
+           - initials: Android-compatible lookup token checked against the combined registry.
+         - Side effects: None.
+         - Failure modes: This initializer cannot fail; callers derive both values before mutation.
+         */
+        public init(identifier: String, initials: String) {
+            self.identifier = identifier
+            self.initials = initials
+        }
+    }
+
+    /**
+     Validates one proposed EPUB identity at the atomic library mutation boundary.
+
+     The callback runs synchronously while `libraryMutationLock` is held and before the candidate
+     receives a staging directory or published pointer. It may inspect the complete live book
+     registry and throw to reject installation without candidate artifacts.
+
+     - Parameter candidate: Exact-source identifier plus NFC-derived Android module initials.
+     - Side effects: Defined by the caller; the EPUB library itself is not mutated before return.
+     - Failure modes: Any thrown error aborts the install unchanged and is propagated verbatim.
+     - Important: The callback must not wait for another operation that requires the EPUB library
+       lock. Recursive EPUB metadata reads on the same thread are supported by the library lock.
+     */
+    public typealias InstallAdmission = @Sendable (_ candidate: InstallCandidate) throws -> Void
+
     /// Current on-disk index schema/transform version.
     static let indexVersion = "8"
 
@@ -259,6 +305,28 @@ public final class EpubReader: @unchecked Sendable {
         return documents.appendingPathComponent("epub", isDirectory: true)
     }
 
+    /// Canonical app SWORD root whose coordinator serializes every installed-book publication.
+    private static var defaultModuleStoreRootURL: URL {
+        URL(fileURLWithPath: SwordManager.defaultModulePath(), isDirectory: true)
+    }
+
+    /**
+     Derives the exact typed identity used by EPUB admission without touching storage.
+
+     - Parameter epubURL: Candidate source URL whose provider-visible basename owns identity.
+     - Returns: Stable source identifier plus Android-compatible generated initials.
+     - Side effects: None; the basename is NFC-normalized before both values are generated.
+     - Failure modes: This derivation cannot fail; punctuation-only names use the established
+       stable-identifier fallback and Android initials sanitizer.
+     */
+    public static func installCandidate(forEpubURL epubURL: URL) -> InstallCandidate {
+        let sourceFileName = epubURL.lastPathComponent.precomposedStringWithCanonicalMapping
+        return InstallCandidate(
+            identifier: stableIdentifier(forSourceFileName: sourceFileName),
+            initials: initials(forDisplayFileName: sourceFileName)
+        )
+    }
+
     /**
      Installs an EPUB into the default app library.
 
@@ -268,20 +336,75 @@ public final class EpubReader: @unchecked Sendable {
        prior current-generation pointer only after complete validation succeeds.
      - Throws: `EpubError`, `ZipArchiveReaderError`, or file-system errors. A failure leaves any
        previously installed package intact.
+     - Important: This compatibility entry point cannot inspect the app's SwiftData registry. App
+       import flows must use `install(epubURL:moduleStoreRootURL:admittingCandidateWith:)` so native,
+       SQLite, EPUB, and My Documents ownership is revalidated under the global publication lease.
      */
     public static func install(epubURL: URL) throws -> String {
-        try install(epubURL: epubURL, libraryRootURL: defaultLibraryRootURL)
+        try install(
+            epubURL: epubURL,
+            moduleStoreRootURL: defaultModuleStoreRootURL,
+            admittingCandidateWith: { _ in }
+        )
+    }
+
+    /**
+     Installs an EPUB only after a lock-owned live-registry admission check succeeds.
+
+     This overload is the production boundary for Android-compatible global book registration.
+     It closes the interval between a detached caller's preflight and atomic EPUB publication: a
+     concurrent import that publishes first is visible to the next callback before that next
+     candidate can create staging artifacts.
+
+     - Parameters:
+       - epubURL: User-selected local or security-scoped EPUB URL.
+       - moduleStoreRootURL: SWORD root whose canonical mutation coordinator owns global ordering.
+       - admission: Live complete-registry validator invoked with the typed EPUB identity.
+     - Returns: Stable local identifier used to reopen the package.
+     - Side effects: On admission, performs the same staged extraction, indexing, and atomic
+       publication as `install(epubURL:)`; rejection leaves the candidate unpublished and unstaged.
+     - Throws: Propagates admission, EPUB validation, ZIP, indexing, and filesystem errors.
+     - Important: Admission and all candidate file mutation execute under one library lock hold.
+     */
+    public static func install(
+        epubURL: URL,
+        moduleStoreRootURL: URL,
+        admittingCandidateWith admission: InstallAdmission
+    ) throws -> String {
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: moduleStoreRootURL)
+        return try coordinator.withExclusiveTransaction(kind: .epub, prepare: { () }, commit: { _ in
+            try install(
+                epubURL: epubURL,
+                libraryRootURL: defaultLibraryRootURL,
+                admittingCandidateWith: admission
+            )
+        })
     }
 
     /**
      Lists valid EPUB general-book adapters in the default app library.
 
-     - Returns: Metadata sorted by localized title and then initials.
+     - Returns: Metadata in native filesystem enumeration order, matching Android's raw
+       `File.listFiles()` first-owner registration replay. Presentation callers may sort only after
+       the combined registry has resolved ownership.
      - Side effects: May migrate pre-generation installs, then opens each current index read-only.
      - Failure modes: Incomplete or unreadable package rows are omitted.
      */
     public static func installedEpubs() -> [EpubInfo] {
         installedEpubs(libraryRootURL: defaultLibraryRootURL)
+    }
+
+    /**
+     Captures the default library's complete published registration state without mutation.
+
+     - Returns: Valid EPUB metadata in native filesystem enumeration order, or an empty array when
+       the library root does not yet exist.
+     - Side effects: Performs strictly read-only pointer, filesystem, and SQLite metadata access.
+     - Throws: Any existing corrupt, unsafe, legacy, or unreadable library state so identity
+       admission can fail closed.
+     */
+    public static func registrationSnapshot() throws -> [EpubInfo] {
+        try throwingReadOnlyInstalledEpubs(libraryRootURL: defaultLibraryRootURL)
     }
 
     /**
@@ -294,7 +417,12 @@ public final class EpubReader: @unchecked Sendable {
        transaction restores every path already moved aside, so the installed book remains visible.
      */
     public static func delete(identifier: String) throws {
-        try delete(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+        let coordinator = ModuleStoreMutationCoordinator.shared(
+            forModuleRoot: defaultModuleStoreRootURL
+        )
+        try coordinator.withExclusiveTransaction(kind: .epub, prepare: { () }, commit: { _ in
+            try delete(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+        })
     }
 
     /**

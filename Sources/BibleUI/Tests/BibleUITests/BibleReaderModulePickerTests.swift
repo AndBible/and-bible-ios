@@ -120,6 +120,62 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Preserves Java-distinct composed/decomposed module rows through dedupe and selection lookup.
+
+     - Setup: Supplies two visually equivalent initials with different UTF-16 spellings plus one
+       exact duplicate of the composed spelling.
+     - Expected: Only the exact duplicate is removed; each Java-distinct row has a distinct SwiftUI
+       identity and resolves only from its own exact initials token.
+     - Failure meaning: Swift canonical String equality is still collapsing or misrouting an
+       installed book that Android exposes as a separate registry identity.
+     - Side effects: None.
+     */
+    func testPickerKeepsCanonicalEquivalentJavaModuleIdentitiesSeparatelySelectable() throws {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+        let composedModule = ModuleInfo(
+            name: composed,
+            description: "Composed",
+            category: .bible,
+            language: "fr"
+        )
+        let decomposedModule = ModuleInfo(
+            name: decomposed,
+            description: "Decomposed",
+            category: .bible,
+            language: "fr"
+        )
+
+        let distinct = BibleReaderModulePicker.javaExactDistinctModules([
+            composedModule,
+            decomposedModule,
+            composedModule,
+        ])
+        let rows = BibleReaderModulePicker.allRows(from: distinct)
+            .filter { row in
+                if case .module = row { return true }
+                return false
+            }
+
+        XCTAssertEqual(distinct.count, 2)
+        XCTAssertNotEqual(try XCTUnwrap(rows.first).id, try XCTUnwrap(rows.last).id)
+        XCTAssertEqual(
+            Array(try XCTUnwrap(
+                BibleReaderModulePicker.javaExactModule(named: composed, in: distinct)
+            ).name.utf16),
+            Array(composed.utf16)
+        )
+        XCTAssertEqual(
+            Array(try XCTUnwrap(
+                BibleReaderModulePicker.javaExactModule(named: decomposed, in: distinct)
+            ).name.utf16),
+            Array(decomposed.utf16)
+        )
+    }
+
+    /**
      Guards Android `ChooseDocument` document-type parity beyond normal installed SWORD rows.
 
      Android's chooser includes visible `FakeBookFactory` pseudo-documents, hides add-ons from
@@ -194,6 +250,82 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
                 searchText: "notes"
             ).map(\.id),
             ["pseudo:myNotes"]
+        )
+    }
+
+    /**
+     Protects the picker boundary that consumes Android's combined installed-book ownership result.
+
+     The resolver separately proves exact-initials, exact-full-name, and case-insensitive TreeSet
+     lookup across native, SQLite, EPUB, and My Documents registrations. This test supplies the
+     possible ownership outcomes for several installed EPUB files and verifies the chooser retains
+     only packages that resolve back to their own immutable library identifier. A failure means a
+     rejected or shadowed EPUB can still be advertised/selectable, or the picker reordered valid
+     EPUBs. The pure projection performs no filesystem, database, simulator, or async work.
+     */
+    func testBibleReaderModulePickerOmitsEpubsRejectedByCombinedRegistryOwnership() {
+        let admittedFirst = EpubInfo(
+            identifier: "epub-admitted-first",
+            initials: "EPUBFirst",
+            sourceFileName: "first.epub",
+            title: "First EPUB",
+            description: "First EPUB",
+            author: "",
+            language: "en"
+        )
+        let installedCollision = EpubInfo(
+            identifier: "epub-installed-collision",
+            initials: "NativeExact",
+            sourceFileName: "native-collision.epub",
+            title: "Installed collision",
+            description: "Installed collision",
+            author: "",
+            language: "en"
+        )
+        let localCollision = EpubInfo(
+            identifier: "epub-local-collision",
+            initials: "my document name",
+            sourceFileName: "local-collision.epub",
+            title: "Local collision",
+            description: "Local collision",
+            author: "",
+            language: "en"
+        )
+        let admittedLast = EpubInfo(
+            identifier: "epub-admitted-last",
+            initials: "EPUBLast",
+            sourceFileName: "last.epub",
+            title: "Last EPUB",
+            description: "Last EPUB",
+            author: "",
+            language: "fr"
+        )
+
+        let admitted = BibleReaderModulePicker.admittedEpubs(
+            from: [admittedFirst, installedCollision, localCollision, admittedLast],
+            resolvedOwnerIdentifier: { epub in
+                switch epub.identifier {
+                case admittedFirst.identifier:
+                    return admittedFirst.identifier
+                case installedCollision.identifier:
+                    return nil
+                case localCollision.identifier:
+                    return admittedFirst.identifier
+                case admittedLast.identifier:
+                    return admittedLast.identifier
+                default:
+                    return nil
+                }
+            }
+        )
+
+        XCTAssertEqual(admitted.map(\.identifier), [admittedFirst.identifier, admittedLast.identifier])
+        XCTAssertEqual(
+            BibleReaderModulePicker.allRows(from: [], epubs: admitted).compactMap { row in
+                guard case .epub(let epub) = row else { return nil }
+                return epub.identifier
+            },
+            [admittedFirst.identifier, admittedLast.identifier]
         )
     }
 
@@ -810,7 +942,10 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
 
      Private SwiftUI presentation state is source-guarded here: both overflow rows must exist, module
      backup must use the shared `.abmd.zip` service, and local files must pass preflight before the
-     policy-aware importer refreshes controller inventory.
+     policy-aware importer refreshes controller inventory. Both preflight and final import must
+     create the registry-aware service with the pane's native registry and SwiftData context so a
+     delayed overwrite decision cannot install an EPUB that Android's current combined registry
+     rejects. A failure indicates route drift; this test performs no file or database writes.
      */
     func testBibleReaderModulePickerExposesBackupAndInstallZipWorkflows() throws {
         let source = try BibleUITestSourceLocator.source(
@@ -825,6 +960,12 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(source.contains(".fileImporter("))
         XCTAssertTrue(source.contains("service.preflightDocument(request)"))
         XCTAssertTrue(source.contains("moduleOverwritePolicy: overwritePolicy"))
+        XCTAssertEqual(
+            source.components(separatedBy: "ExternalDocumentImportService.androidRegistryAware(").count - 1,
+            2
+        )
+        XCTAssertTrue(source.contains("modelContext: modelContext"))
+        XCTAssertTrue(source.contains("swordManager: controller.swordManager"))
         XCTAssertTrue(source.contains("controller.refreshInstalledModules()"))
     }
 

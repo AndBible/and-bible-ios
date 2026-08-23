@@ -9,56 +9,52 @@ import SwordKit
 
  Native SWORD access state must be read fresh so a verified session unlock takes effect immediately.
  Android-compatible SQLite Bibles are discovered independently because ordinary manually installed
- databases have no SWORD configuration row and therefore never appear in `installedModules()`.
- The merge retains SWORD's global initials ownership so a SQLite book cannot surface behind a
- locked or otherwise installed native module that the reader runtime would still shadow.
+ databases have no SWORD configuration row and therefore never appear in `installedModules()`. The
+ shared installed-module resolver replays each raw SQLite candidate after native registration so
+ startup observes the same full-name/initials ownership and rejection cascades as every reader
+ content path.
  */
 enum StartupDocumentSetupModuleInventory {
     /**
      Builds one fresh, validated startup inventory from the configured module root.
 
      - Parameter manager: Manager owning native inventory and the shared SQLite module root.
-     - Returns: Fresh native metadata followed by readable, unshadowed SQLite Bible metadata in
-       Android discovery order.
+     - Returns: Fresh admitted native and SQLite metadata in Android's installed-book TreeSet order;
+       startup policy selects the Bible rows from that inclusive registry.
      - Side effects: Reads current SWORD inventory, enumerates SQLite family directories, and opens
        candidate SQLite databases read-only for format validation.
      - Failure modes: Malformed SQLite files are omitted by library discovery; native rows remain
        inclusive so locked-only startup can still expose the shared unlock workflow.
      */
     static func modules(manager: SwordManager) -> [ModuleInfo] {
-        let nativeModules = manager.installedModules()
         let sqliteLibrary = SQLiteDocumentModuleLibrary(
             moduleRootURL: URL(fileURLWithPath: manager.modulePath, isDirectory: true)
         )
-        return merge(
-            nativeModules: nativeModules,
-            sqliteBibleModules: sqliteLibrary.modules(category: .bible).map(\.info)
-        )
+        return modules(manager: manager, sqliteLibrary: sqliteLibrary)
     }
 
     /**
-     Merges validated SQLite Bibles without violating the reader's global ownership resolver.
+     Replays Android's one combined installed-book registry for startup policy evaluation.
 
      - Parameters:
-       - nativeModules: Inclusive installed manager rows in registration order, including locked
-         modules and manager-projected Android SQLite packages.
-       - sqliteBibleModules: Independently discovered, validated SQLite Bible metadata.
-     - Returns: Native rows followed by SQLite rows for which neither a native initials nor native
-       full-name lookup owns the SQLite initials token.
-     - Side effects: None.
-     - Failure modes: A locked native owner still shadows a readable SQLite collision because
-       activation resolves the native owner first and requires its credential. Duplicate SQLite
-       identities are expected to have been removed by library discovery.
+       - manager: Manager supplying inclusive native ownership and fresh encrypted-module access.
+       - sqliteLibrary: Validated raw SQLite discovery sequence before custom-only registration.
+     - Returns: Admitted native and SQLite metadata in JSword's installed-book TreeSet order.
+     - Side effects: Enumerates the manager's native registry and authorizes readable native handles;
+       no Bible content is read.
+     - Failure modes: Locked native owners remain in the inventory without exposing content. A
+       custom candidate rejected by native identity cannot suppress a later candidate because the
+       shared resolver replays each raw candidate against the complete registry in Android order.
+     - Note: This overload is internal so parity tests can supply a deterministic discovery sequence
+       without changing production filesystem traversal.
      */
-    static func merge(
-        nativeModules: [ModuleInfo],
-        sqliteBibleModules: [ModuleInfo]
+    static func modules(
+        manager: SwordManager,
+        sqliteLibrary: SQLiteDocumentModuleLibrary
     ) -> [ModuleInfo] {
-        nativeModules + sqliteBibleModules.filter { module in
-            BibleReaderInstalledModuleLookup.module(
-                named: module.name,
-                in: nativeModules
-            ) == nil
-        }
+        BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteLibrary: sqliteLibrary
+        ).registeredBookMetadata()
     }
 }

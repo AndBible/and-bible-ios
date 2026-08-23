@@ -2004,6 +2004,219 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.renderedContentState, renderedStateBeforeLookup)
     }
 
+    /**
+     Verifies Android's multi-link dispatcher still opens an empty definition document on misses.
+
+     - Setup: Installs empty Greek and Hebrew definition books, then routes two Strong's query
+       values through one `ab-w` link.
+     - Expected result: The reader emits an empty `MultiDocument` with null content type and adopts
+       Android's general-book `Multi` identity instead of treating the request as one failed link.
+     - Failure meaning: iOS has collapsed Android's `openMulti` branch into the single-link no-op
+       path and leaves users on unrelated content after a handled multi-definition request.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMultiStrongsLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsHebrew",
+            in: modulePath,
+            features: ["HebrewDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&strong=H00430"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+    }
+
+    /**
+     Verifies mixed Strong's/morphology multi-links retain Android's empty-Multi miss contract.
+
+     - Setup: Installs empty Greek-definition and Robinson books, then routes one Strong's and one
+       morphology value in a single `ab-w` request.
+     - Expected result: One empty null-content-type `MultiDocument` is emitted.
+     - Failure meaning: Definition type, rather than Android route cardinality, still controls
+       whether an all-miss multi request navigates.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMixedDefinitionMultiLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&robinson=V-PAI-3S"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+    }
+
+    /**
+     Verifies one successful child remains the complete result of an Android multi-definition link.
+
+     - Setup: Installs a Greek definition for `G243` plus an empty Hebrew definition book, then
+       requests both values in one `ab-w` link.
+     - Expected result: The emitted Multi contains only the genuine Greek fragment and Strong's
+       content type; the Hebrew entry miss does not become Downloads or an empty-document override.
+     - Failure meaning: The empty-Multi correction can replace partial results or revive issue #388's
+       misleading missing-installation fallback.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMultiStrongsLinkKeepsPartialHitWithoutMissFallback() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">another</entryFree>"#
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsHebrew",
+            in: modulePath,
+            features: ["HebrewDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&strong=H00430"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragments.first?["bookInitials"] as? String, "StrongsGreek")
+        XCTAssertEqual(fragments.first?["keyName"] as? String, "G243")
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertFalse((fragments.first?["xml"] as? String)?.contains("download://") == true)
+    }
+
+    /**
+     Verifies Android definition children retain their mixed query-type order in the emitted tabs.
+
+     - Setup: Installs matching Robinson and Greek definition entries, then requests morphology
+       before Strong's in one `ab-w` multi-link.
+     - Expected result: The Robinson fragment remains first and the Greek fragment remains second.
+     - Failure meaning: Routing or payload construction has regrouped children by definition type
+       and visibly changed Android's multi-document tab order.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testInterleavedDefinitionLinkPreservesAndroidFragmentOrder() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"],
+            entryKey: "V-PAI-3S",
+            entryXML: #"<entryFree n="V-PAI-3S">verb</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">another</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?robinson=V-PAI-3S&strong=G243"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.map { $0["bookInitials"] as? String }, ["Robinson", "StrongsGreek"])
+        XCTAssertEqual(fragments.map { $0["keyName"] as? String }, ["V-PAI-3S", "G243"])
+    }
+
+    /**
+     Verifies ignored empty query children still select Android's multi-link execution branch.
+
+     - Setup: Installs an empty Greek definition book and routes one empty unknown child before one
+       unresolved Strong's child.
+     - Expected result: Raw child cardinality selects `openMulti`, producing an empty Multi document.
+     - Failure meaning: iOS counts only recognized nonempty definitions and incorrectly treats the
+       request as Android's single-link no-op branch.
+     - Side effects: Writes an isolated SWORD fixture removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testUnknownEmptyDefinitionChildStillSelectsMultiDispatch() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?lemma.TR=&strong=G243"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+    }
+
     @MainActor
     func testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -2211,6 +2424,84 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.generalBookDocument, "Multi")
         XCTAssertEqual(pageManager.generalBookKey, "KJV:Gen.1.1||KJV:John.3.16")
         XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Rejects installed wrong-category identities in optional general-book and map restore fields.
+
+     - Setup: Registers one readable dictionary, then restores two fresh panes whose general-book
+       and map fields each point at that dictionary while their visible categories request the
+       corresponding optional document.
+     - Expected: Both restores leave controller module/key/category state, PageManager values,
+       persistence count, and bridge emissions byte-for-byte unchanged.
+     - Failure meaning: Category checks guard only the happy-path handle assignment while a fallback
+       branch still reinterprets a globally owned dictionary as a general book or map.
+     - Side effects: Writes one inherited temporary SWORD fixture and two in-memory pane models.
+     */
+    @MainActor
+    func testRestoreRejectsWrongCategoryGeneralBookAndMapWithoutMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(named: "WrongRestoreCategory", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        for (categoryName, configurePageManager) in [
+            (
+                DocumentCategory.generalBook.pageManagerKey,
+                { (pageManager: PageManager) in
+                    pageManager.generalBookDocument = "WrongRestoreCategory"
+                    pageManager.generalBookKey = "wrong-general-key"
+                }
+            ),
+            (
+                DocumentCategory.map.pageManagerKey,
+                { (pageManager: PageManager) in
+                    pageManager.mapDocument = "WrongRestoreCategory"
+                    pageManager.mapKey = "wrong-map-key"
+                }
+            ),
+        ] {
+            let (bridge, recordedScripts) = makeRecordingBridge()
+            let controller = BibleReaderController(
+                bridge: bridge,
+                swordManagerOverride: manager
+            )
+            let window = Window(isSynchronized: false, isLinksWindow: false)
+            let pageManager = PageManager(id: window.id, currentCategoryName: categoryName)
+            configurePageManager(pageManager)
+            window.pageManager = pageManager
+            controller.activeWindow = window
+            let baselineCategory = controller.currentCategory
+            let baselineGeneralBookName = controller.activeGeneralBookModuleName
+            let baselineGeneralBookKey = controller.currentGeneralBookKey
+            let baselineMapName = controller.activeMapModuleName
+            let baselineMapKey = controller.currentMapKey
+            let baselineScripts = recordedScripts().count
+            var persistCount = 0
+            controller.onPersistState = { persistCount += 1 }
+
+            controller.restoreSavedPosition()
+
+            XCTAssertEqual(controller.currentCategory, baselineCategory)
+            XCTAssertEqual(controller.activeGeneralBookModuleName, baselineGeneralBookName)
+            XCTAssertEqual(controller.currentGeneralBookKey, baselineGeneralBookKey)
+            XCTAssertEqual(controller.activeMapModuleName, baselineMapName)
+            XCTAssertEqual(controller.currentMapKey, baselineMapKey)
+            XCTAssertEqual(pageManager.currentCategoryName, categoryName)
+            XCTAssertEqual(pageManager.generalBookDocument,
+                           categoryName == DocumentCategory.generalBook.pageManagerKey
+                               ? "WrongRestoreCategory" : nil)
+            XCTAssertEqual(pageManager.generalBookKey,
+                           categoryName == DocumentCategory.generalBook.pageManagerKey
+                               ? "wrong-general-key" : nil)
+            XCTAssertEqual(pageManager.mapDocument,
+                           categoryName == DocumentCategory.map.pageManagerKey
+                               ? "WrongRestoreCategory" : nil)
+            XCTAssertEqual(pageManager.mapKey,
+                           categoryName == DocumentCategory.map.pageManagerKey
+                               ? "wrong-map-key" : nil)
+            XCTAssertEqual(persistCount, 0)
+            XCTAssertEqual(recordedScripts().count, baselineScripts)
+        }
     }
 
     /**
@@ -3321,15 +3612,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(
             router.route(for: "ab-w://?strong=H0430&robinson=N-NSM"),
-            .definition(strongs: ["H0430"], robinson: ["N-NSM"])
+            .multiDefinition(items: [.strong("H0430"), .robinson("N-NSM")])
         )
         XCTAssertEqual(
             router.route(for: "strongs://G2316"),
-            .definition(strongs: ["G2316"], robinson: [])
+            .definition(items: [.strong("G2316")])
         )
         XCTAssertEqual(
             router.route(for: "morphology://robinson/V-PAI-3S"),
-            .definition(strongs: [], robinson: ["V-PAI-3S"])
+            .definition(items: [.robinson("V-PAI-3S")])
         )
         XCTAssertEqual(
             router.route(for: "ab-find-all://?type=hebrew&name=5775"),
@@ -3382,11 +3673,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             router.route(for: "S:G2424"),
-            .definition(strongs: ["G2424"], robinson: [])
+            .definition(items: [.strong("G2424")])
         )
         XCTAssertEqual(
             router.route(for: "#dH0430"),
-            .definition(strongs: ["H0430"], robinson: [])
+            .definition(items: [.strong("H0430")])
         )
         XCTAssertEqual(
             router.route(for: "https://andbible.org"),
@@ -4647,6 +4938,186 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             MyDocumentSharePayload(subject: "Intro", body: "Raw *markdown*")
         )
         XCTAssertEqual(recordedScripts().last, "bibleView.response(3705, null);")
+    }
+
+    /**
+     Verifies local full-name aliases retain Android's canonical My Documents identity and key.
+
+     - Setup: Persists a two-page local document, loads its second page through an exact full-name
+       token, then restores a fresh pane whose saved document uses the case-insensitive full-name
+       tier accepted by `Books.getBook`.
+     - Expected result: Both paths read the requested second page through canonical initials, expose
+       canonical active state, and normalize the restored PageManager document token.
+     - Failure meaning: Global lookup can select the correct local owner while a downstream exact-
+       initials database query drops the requested key, falls back to page one, or fails to render.
+     - Side effects: Uses an in-memory SwiftData graph and bridge recorder; restore records one
+       persistence callback when it canonicalizes the saved alias.
+     */
+    @MainActor
+    func testMyDocumentFullNameAliasesLoadAndRestoreCanonicalRequestedPage() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let document = MyDocument(name: "Canonical Local Name", initials: "LOCALCANON")
+        let firstPage = MyDocumentPage(
+            title: "First",
+            pageKey: "first",
+            contentType: .markdown,
+            orderNumber: 0
+        )
+        let secondPage = MyDocumentPage(
+            title: "Second",
+            pageKey: "second",
+            contentType: .markdown,
+            orderNumber: 1
+        )
+        firstPage.pageContent = MyDocumentPageContent(
+            pageId: firstPage.id,
+            content: "First body"
+        )
+        secondPage.pageContent = MyDocumentPageContent(
+            pageId: secondPage.id,
+            content: "Second body"
+        )
+        firstPage.document = document
+        secondPage.document = document
+        document.pages = [firstPage, secondPage]
+        context.insert(document)
+        context.insert(firstPage)
+        context.insert(secondPage)
+        try context.save()
+
+        let loadedWindow = Window()
+        loadedWindow.pageManager = PageManager(id: loadedWindow.id)
+        let loadedController = BibleReaderController(bridge: bridge)
+        loadedController.myDocumentStore = store
+        loadedController.activeWindow = loadedWindow
+
+        XCTAssertTrue(
+            loadedController.loadMyDocumentPage(
+                bookInitials: document.name,
+                pageKey: secondPage.pageKey
+            )
+        )
+        XCTAssertEqual(loadedController.activeGeneralBookModuleName, document.initials)
+        XCTAssertEqual(loadedController.currentGeneralBookKey, secondPage.pageKey)
+        XCTAssertEqual(loadedWindow.pageManager?.generalBookDocument, document.initials)
+        XCTAssertEqual(loadedWindow.pageManager?.generalBookKey, secondPage.pageKey)
+        XCTAssertTrue(recordedScripts().contains { $0.contains("Second body") })
+
+        let restoredWindow = Window()
+        let restoredPageManager = PageManager(
+            id: restoredWindow.id,
+            currentCategoryName: DocumentCategory.generalBook.pageManagerKey
+        )
+        restoredPageManager.generalBookDocument = document.name.lowercased()
+        restoredPageManager.generalBookKey = secondPage.pageKey
+        restoredWindow.pageManager = restoredPageManager
+        let restoredController = BibleReaderController(bridge: BibleBridge())
+        restoredController.myDocumentStore = store
+        restoredController.activeWindow = restoredWindow
+        var persistCount = 0
+        restoredController.onPersistState = { persistCount += 1 }
+
+        restoredController.restoreSavedPosition()
+
+        XCTAssertEqual(restoredController.activeGeneralBookModuleName, document.initials)
+        XCTAssertEqual(restoredController.currentGeneralBookKey, secondPage.pageKey)
+        XCTAssertEqual(restoredPageManager.generalBookDocument, document.initials)
+        XCTAssertEqual(restoredPageManager.generalBookKey, secondPage.pageKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Rejects direct My Documents copy/share/save calls when Android's installed registry owns the
+     supplied exact-initials, full-name, or Java case-insensitive token.
+
+     - Setup: Registers the KJV fixture and colliding local documents whose initials equal each
+       supported installed lookup tier, then sends the three direct bridge actions for every page.
+     - Expected result: The shared raw-content gate rejects each token, the share callback remains
+       untouched, and every local page retains its original title/body before copy/share/save work.
+     - Failure meaning: A stale or forged My Documents payload can disclose or mutate a local page
+       after an installed book claims the same Android `Books.getBook` identity.
+     - Side effects: Uses temporary SWORD files and an in-memory SwiftData graph; inherited teardown
+       removes the module fixture and no platform pasteboard read is required.
+     */
+    @MainActor
+    func testMyDocumentContentActionsRejectEveryInstalledOwnerIdentityTier() throws {
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let installed = try XCTUnwrap(
+            manager.installedModules().first(where: { $0.name == "KJV" })
+        )
+        let ownerTokens = [installed.name, installed.description, installed.name.lowercased()]
+        XCTAssertEqual(Set(ownerTokens).count, 3)
+
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        var fixtures: [(document: MyDocument, page: MyDocumentPage)] = []
+        for (index, token) in ownerTokens.enumerated() {
+            let pageID = try XCTUnwrap(
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))
+            )
+            let document = MyDocument(name: "Local collision \(index)", initials: token)
+            let page = MyDocumentPage(
+                id: pageID,
+                title: "Original \(index)",
+                pageKey: "entry-\(index)",
+                contentType: .markdown
+            )
+            let content = MyDocumentPageContent(
+                pageId: pageID,
+                content: "Private local body \(index)"
+            )
+            page.pageContent = content
+            page.document = document
+            document.pages = [page]
+            context.insert(document)
+            context.insert(page)
+            context.insert(content)
+            fixtures.append((document, page))
+        }
+        try context.save()
+
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        var sharedPayloads: [MyDocumentSharePayload] = []
+        controller.onShareMyDocumentContent = { sharedPayloads.append($0) }
+
+        for (index, fixture) in fixtures.enumerated() {
+            XCTAssertNil(
+                controller.authorizedMyDocumentRawContentPayload(
+                    bookInitials: fixture.document.initials,
+                    pageKey: fixture.page.pageKey
+                )
+            )
+            controller.bridge(
+                bridge,
+                copyMyDocumentContent: fixture.document.initials,
+                pageKey: fixture.page.pageKey
+            )
+            controller.bridge(
+                bridge,
+                shareMyDocumentContent: fixture.document.initials,
+                pageKey: fixture.page.pageKey
+            )
+            controller.bridge(
+                bridge,
+                saveMyDocumentPageContent: fixture.document.initials,
+                pageId: fixture.page.id.uuidString,
+                content: "Leaked replacement \(index)",
+                title: "Leaked title \(index)"
+            )
+
+            XCTAssertEqual(fixture.page.title, "Original \(index)")
+            XCTAssertEqual(fixture.page.pageContent?.content, "Private local body \(index)")
+        }
+
+        XCTAssertTrue(sharedPayloads.isEmpty)
     }
 
     /**

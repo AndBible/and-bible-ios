@@ -504,6 +504,46 @@ extension EpubReader {
         return columnText(statement, index: 0)
     }
 
+    /**
+     Reads one metadata value without suppressing SQLite availability or query failures.
+
+     - Parameters:
+       - indexURL: Existing immutable EPUB companion index opened strictly read-only.
+       - key: Exact metadata key to resolve.
+     - Returns: Stored value, or `nil` only when the query succeeds and the key is absent.
+     - Side effects: Opens and closes one read-only SQLite connection and statement.
+     - Throws: `EpubError.indexingFailed` when the database cannot open, prepare, or step.
+     */
+    static func throwingMetadataValue(at indexURL: URL, key: String) throws -> String? {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(indexURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            let message = sqliteMessage(database)
+            sqlite3_close(database)
+            throw EpubError.indexingFailed(message)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            "SELECT value FROM metadata WHERE key = ?",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK else {
+            throw EpubError.indexingFailed(sqliteMessage(database))
+        }
+        defer { sqlite3_finalize(statement) }
+        bindText(key, to: statement, index: 1)
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return columnText(statement, index: 0)
+        case SQLITE_DONE:
+            return nil
+        default:
+            throw EpubError.indexingFailed(sqliteMessage(database))
+        }
+    }
+
 
     /// Binds one Swift string to a prepared SQLite statement.
     static func bindText(_ value: String, to statement: OpaquePointer?, index: Int32) {

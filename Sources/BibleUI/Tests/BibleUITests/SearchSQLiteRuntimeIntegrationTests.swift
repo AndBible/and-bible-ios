@@ -13,6 +13,147 @@ import XCTest
  */
 final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     /**
+     Verifies the current-source batch resolver rejects a canonically equivalent wrong owner.
+
+     - Setup: Installs a MyBible source whose initials use composed `É`, then deliberately returns
+       that source for a decomposed request that Swift considers equal but Java does not.
+     - Expected result: Current Search creation resolution fails closed instead of authorizing the
+       composed source for the Java-distinct requested initials.
+     - Failure meaning: SearchView can undo the service authorization boundary by canonically
+       matching a registry source before an index-creation token is captured.
+     - Side effects: Creates one isolated package fixture and opens one fresh native inventory.
+     */
+    @MainActor
+    func testCurrentIndexBatchRejectsCanonicallyEquivalentRegistryOwner() throws {
+        let composedName = "CAF\u{00C9}"
+        let decomposedName = "CAFE\u{0301}"
+        XCTAssertEqual(composedName, decomposedName)
+        XCTAssertFalse(SwordJavaStringIdentity.equals(composedName, decomposedName))
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installMyBiblePackage(
+            initials: composedName,
+            directoryName: "canonical-owner-source",
+            in: modulePath
+        )
+        let presentationManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: presentationManager
+        )
+        let registry = try XCTUnwrap(controller.makeSearchIndexSourceRegistry())
+        let composedSource = try XCTUnwrap(registry.source(named: composedName))
+
+        let resolved = SearchView.resolveCurrentSearchIndexSourcesForCreation(
+            named: [decomposedName],
+            modulePath: modulePath,
+            registrySource: { _ in composedSource },
+            managerFactory: { SwordManager(modulePath: $0) }
+        )
+
+        XCTAssertNil(resolved)
+    }
+
+    /**
+     Verifies current native ownership failure cannot fall through to an immutable SQLite source.
+
+     - Setup: Installs one readable MyBible source and captures it in Search's presentation registry,
+       then injects a current-manager factory that deterministically fails.
+     - Expected result: Batch creation resolution returns nil after exactly one factory invocation;
+       the old SQLite registry source is not authorized when native ownership cannot be checked.
+     - Failure meaning: A transient SWORD-manager failure can bless a stale or newly shadowed SQLite
+       source, contradicting Search's fail-closed current-store authorization contract.
+     - Side effects: Creates one isolated package fixture and reads its immutable registry metadata.
+     */
+    @MainActor
+    func testCurrentIndexBatchFailsClosedWhenFreshManagerCannotOpen() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installMyBiblePackage(
+            initials: "SQLFAILCLOSED",
+            directoryName: "manager-failure-source",
+            in: modulePath
+        )
+        let presentationManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: presentationManager
+        )
+        let registry = try XCTUnwrap(controller.makeSearchIndexSourceRegistry())
+        XCTAssertTrue(registry.source(named: "SQLFAILCLOSED") is SQLiteDocumentModule)
+        var managerFactoryInvocationCount = 0
+
+        let resolved = SearchView.resolveCurrentSearchIndexSourcesForCreation(
+            named: ["SQLFAILCLOSED"],
+            modulePath: modulePath,
+            registrySource: { registry.source(named: $0) },
+            managerFactory: { _ in
+                managerFactoryInvocationCount += 1
+                return nil
+            }
+        )
+
+        XCTAssertNil(resolved)
+        XCTAssertEqual(managerFactoryInvocationCount, 1)
+    }
+
+    /**
+     Verifies mixed multi-select creation shares one authoritative native inventory.
+
+     - Setup: Uses fixture KJV plus two native-absent MyBible sources, captures the presentation
+       registry, and injects a counting factory that opens a real fresh manager.
+     - Expected result: Fresh native KJV and both exact SQLite fallbacks resolve in requested order
+       while the manager factory runs once for the complete batch.
+     - Failure meaning: Search either rejects valid Android SQLite books or regresses to one full
+       native inventory/manager lifetime per selected translation on the UI path.
+     - Side effects: Creates two isolated package fixtures and one operation-owned SWORD manager.
+    */
+    @MainActor
+    func testCurrentIndexBatchUsesOneManagerForMixedNativeAndSQLiteSources() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installMyBiblePackage(
+            initials: "SQLBATCHA",
+            directoryName: "batch-source-a",
+            in: modulePath
+        )
+        try installMyBiblePackage(
+            initials: "SQLBATCHB",
+            directoryName: "batch-source-b",
+            in: modulePath
+        )
+        let presentationManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: presentationManager
+        )
+        let registry = try XCTUnwrap(controller.makeSearchIndexSourceRegistry())
+        var managerFactoryInvocationCount = 0
+
+        let resolved = try XCTUnwrap(
+            SearchView.resolveCurrentSearchIndexSourcesForCreation(
+                named: ["KJV", "SQLBATCHA", "SQLBATCHB"],
+                modulePath: modulePath,
+                registrySource: { registry.source(named: $0) },
+                managerFactory: { path in
+                    managerFactoryInvocationCount += 1
+                    return SwordManager(modulePath: path)
+                }
+            )
+        )
+
+        XCTAssertEqual(managerFactoryInvocationCount, 1)
+        XCTAssertEqual(resolved.map(\.name), ["KJV", "SQLBATCHA", "SQLBATCHB"])
+        XCTAssertEqual(
+            resolved.map { $0.source.searchIndexModuleInfo.name },
+            ["KJV", "SQLBATCHA", "SQLBATCHB"]
+        )
+        XCTAssertFalse(resolved[0].source is SwordModule)
+        XCTAssertFalse(resolved[0].source is SQLiteDocumentModule)
+        XCTAssertTrue(resolved.dropFirst().allSatisfy {
+            $0.source is SQLiteDocumentModule
+        })
+    }
+
+    /**
      Pins Search source resolution to JSword lookup precedence rather than the initials-only UI catalog.
 
      - Setup: Installs one uniquely named MyBible package and one lowercase KJV collision beside the

@@ -1,50 +1,54 @@
 import Foundation
 import XCTest
 
+@testable import BibleCore
 @testable import BibleUI
 import SwordKit
 
 /** Cross-backend integration coverage for the reader's fresh startup module inventory. */
-final class StartupDocumentSetupModuleInventoryTests: XCTestCase {
+final class StartupDocumentSetupModuleInventoryTests: BibleUISwordFixtureTestCase {
     /**
-     Verifies native full-name ownership shadows a colliding readable SQLite Bible at startup.
+     Protects startup inventory from custom-only duplicate-admission cascades.
 
-     - Setup: Supplies one locked native Bible whose full description equals a readable SQLite
-       Bible's initials, reproducing the global lookup path that differs from initials-only merging.
-     - Expected result: The merge keeps only the native row and startup remains classified as
-       locked-only instead of treating the runtime-shadowed SQLite row as readable.
-     - Failure meaning: Startup can enter the reader with a Bible that later resolves to the locked
-       native owner, producing an unlock or navigation failure after setup was dismissed.
-     - Side effects: None.
+     - Setup: A native full name owns SQLite A's initials; A's full name then equals SQLite B's
+       initials. The custom-only catalog admits A and suppresses B, while Android's combined
+       registry rejects A first and therefore admits B.
+     - Expected result: Production startup inventory retains the native owner, omits A, and includes
+       B from the raw discovery sequence.
+     - Failure meaning: Startup consulted the prefiltered SQLite catalog instead of the shared
+       Android registry, so it can queue unlock/setup even though a valid readable Bible exists.
+     - Side effects: Writes one isolated native descriptor and retains two in-memory SQLite readers;
+       inherited teardown removes the temporary SWORD tree.
      */
-    func testLockedNativeFullNameShadowsReadableSQLiteStartupCollision() {
-        let lockedNative = ModuleInfo(
-            name: "NET",
-            description: "MyBible-CollisionToken",
-            category: .bible,
-            language: "en",
-            moduleDriver: "RawText",
-            isEncrypted: true,
-            isUnlocked: false
+    func testStartupInventoryReplaysRawSQLiteCandidatesAfterNativeCascadeRejection() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "NativeCascadeOwner",
+            description: "AliasA",
+            in: modulePath
         )
-        let readableSQLite = ModuleInfo(
-            name: "MyBible-CollisionToken",
-            description: "Manual SQLite Bible",
-            category: .bible,
-            language: "en",
-            moduleDriver: "MyBibleBible"
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let candidateA = makeSQLiteModule(
+            initials: "AliasA",
+            title: "AliasB"
         )
-
-        let inventory = StartupDocumentSetupModuleInventory.merge(
-            nativeModules: [lockedNative],
-            sqliteBibleModules: [readableSQLite]
+        let candidateB = makeSQLiteModule(
+            initials: "AliasB",
+            title: "Surviving SQLite"
+        )
+        let sqliteLibrary = SQLiteDocumentModuleLibrary(
+            discoveredModules: [candidateA, candidateB]
         )
 
-        XCTAssertEqual(inventory.map(\.name), ["NET"])
-        XCTAssertEqual(
-            StartupDocumentSetupPromptPolicy.promptReason(in: inventory),
-            .lockedBibleModules
+        let inventory = StartupDocumentSetupModuleInventory.modules(
+            manager: manager,
+            sqliteLibrary: sqliteLibrary
         )
+
+        XCTAssertEqual(sqliteLibrary.modules.map(\.info.name), ["AliasA"])
+        XCTAssertTrue(inventory.contains { $0.name == "NativeCascadeOwner" })
+        XCTAssertFalse(inventory.contains { $0.name == "AliasA" })
+        XCTAssertTrue(inventory.contains { $0.name == "AliasB" })
     }
 
     /**
@@ -83,6 +87,90 @@ final class StartupDocumentSetupModuleInventoryTests: XCTestCase {
             named: "\u{10428}",
             in: [modernBMP, supplementary]
         ))
+    }
+
+    /**
+     Pins the case-insensitive lookup tier to JSword TreeSet order rather than registration order.
+
+     - Setup: Adds two case-alias native registrations with the registration-first owner sorted
+       last by configured abbreviation and requests a spelling that is exact for neither owner.
+     - Expected result: The later registered but TreeSet-first `Alpha` book owns the alias.
+     - Failure meaning: Controller, speech, or startup lookup scanned manager/custom add order and
+       can select a different backend than Android's `Books.getBook`.
+     - Side effects: Loads only the bundled Android character compatibility table.
+     */
+    func testInstalledBookSetCaseAliasUsesTreeSetInsteadOfRegistrationOrder() {
+        let registrationFirst = BibleReaderInstalledBookSetRegistration(
+            value: "registration-first",
+            initials: "casealias",
+            fullName: "Registration First",
+            abbreviation: "Zulu",
+            category: .bible
+        )
+        let treeSetFirst = BibleReaderInstalledBookSetRegistration(
+            value: "tree-set-first",
+            initials: "CaseAlias",
+            fullName: "TreeSet First",
+            abbreviation: "Alpha",
+            category: .bible
+        )
+        let registrations = [registrationFirst, treeSetFirst]
+
+        XCTAssertEqual(
+            BibleReaderInstalledBookSet.treeSetOrderProjection(registrations).map(\.value),
+            ["tree-set-first", "registration-first"]
+        )
+        XCTAssertEqual(
+            BibleReaderInstalledBookSet.registration(
+                named: "CASEALIAS",
+                in: registrations
+            )?.value,
+            "tree-set-first"
+        )
+    }
+
+    /**
+     Preserves canonically equivalent native identities as separate Java BookSet registrations.
+
+     - Setup: Registers composed and decomposed spellings with otherwise identical BookSet fields.
+     - Expected result: Both survive the TreeSet comparator and each exact token resolves its own
+       owner; neither spelling is normalized into the other.
+     - Failure meaning: A Swift dictionary/set or host Unicode comparison collapsed Java-distinct
+       native modules before picker, restore, or speech routing.
+     - Side effects: Loads only the bundled Android character compatibility table.
+     */
+    func testInstalledBookSetPreservesComposedAndDecomposedNativeIdentities() {
+        let composed = "Caf\u{00E9}Native"
+        let decomposed = "Cafe\u{0301}Native"
+        let registrations = [
+            BibleReaderInstalledBookSetRegistration(
+                value: "composed",
+                initials: composed,
+                fullName: "Composed native",
+                abbreviation: "Native",
+                category: .bible
+            ),
+            BibleReaderInstalledBookSetRegistration(
+                value: "decomposed",
+                initials: decomposed,
+                fullName: "Decomposed native",
+                abbreviation: "Native",
+                category: .bible
+            ),
+        ]
+
+        XCTAssertEqual(
+            BibleReaderInstalledBookSet.registrationOrderProjection(registrations).count,
+            2
+        )
+        XCTAssertEqual(
+            BibleReaderInstalledBookSet.registration(named: composed, in: registrations)?.value,
+            "composed"
+        )
+        XCTAssertEqual(
+            BibleReaderInstalledBookSet.registration(named: decomposed, in: registrations)?.value,
+            "decomposed"
+        )
     }
 
     /**
@@ -126,5 +214,62 @@ final class StartupDocumentSetupModuleInventoryTests: XCTestCase {
             }
         )
         XCTAssertNil(StartupDocumentSetupPromptPolicy.promptReason(in: inventory))
+    }
+
+    /**
+     Creates one raw custom-driver candidate before combined installed-book admission.
+
+     - Parameters:
+       - initials: Proposed Android book initials.
+       - title: Proposed full-name identity used by later collision tiers.
+     - Returns: Readable manual MyBible module retaining an in-memory source reader.
+     - Side effects: Retains one deterministic reader; no database or filesystem is opened.
+     - Failure modes: None; fixed fixture metadata and one verse are accepted verbatim.
+     */
+    private func makeSQLiteModule(initials: String, title: String) -> SQLiteDocumentModule {
+        let metadata = SQLiteDocumentMetadata(
+            sourceURL: URL(fileURLWithPath: "/tmp/startup-\(initials).SQLite3"),
+            format: .myBible,
+            initials: initials,
+            abbreviation: initials,
+            title: title,
+            description: title,
+            language: "en",
+            version: "1",
+            category: .bible,
+            direction: .ltr,
+            hasStrongs: false,
+            isStrongsDictionary: false,
+            hasWordsOfChrist: false
+        )
+        return SQLiteDocumentModule(
+            reader: StartupInventorySQLiteReader(metadata: metadata),
+            origin: .manual
+        )
+    }
+}
+
+/** In-memory readable Bible used only to exercise startup's combined registration boundary. */
+private final class StartupInventorySQLiteReader: SQLiteDocumentReading {
+    /// Immutable custom-driver identity proposed to the installed-book registry.
+    let metadata: SQLiteDocumentMetadata
+
+    /// Fixed Bible category matching the supplied metadata.
+    var category: DocumentCategory { .bible }
+
+    /** Creates one deterministic reader without opening an external database. */
+    init(metadata: SQLiteDocumentMetadata) {
+        self.metadata = metadata
+    }
+
+    /** Returns the one addressable fixture verse. */
+    func keys() throws -> [SQLiteDocumentKey] {
+        [.verse(book: 10, chapter: 1, verse: 1)]
+    }
+
+    /** Returns readable content only for the fixture's exact verse coordinate. */
+    func content(for key: SQLiteDocumentKey) throws -> SQLiteDocumentContent? {
+        guard key == .verse(book: 10, chapter: 1, verse: 1) else { return nil }
+        return SQLiteDocumentContent(key: key, text: "Readable startup Bible")
     }
 }

@@ -292,9 +292,9 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
         let installed = repository.loadInstalledMyBibleModules()
         let installedModule = try XCTUnwrap(
-            installed.first(where: { $0.name == "MyBible-finrk_SQLite3" })
+            installed.first(where: { $0.name == "MyBible-finrk" })
         )
-        XCTAssertEqual(Set(installed.map(\.name)), ["MyBible-companion", "MyBible-finrk_SQLite3"])
+        XCTAssertEqual(Set(installed.map(\.name)), ["MyBible-companion", "MyBible-finrk"])
         XCTAssertEqual(installedModule.description, "Finnish RK")
         XCTAssertEqual(installedModule.language, "fi")
 
@@ -305,7 +305,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: installedDatabaseURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: moduleDir.appendingPathComponent("module.json").path))
         try assertMyBibleFixtureDatabase(at: installedDatabaseURL, expectedDescription: "Finnish RK", expectedLanguage: "fi")
-        try repository.uninstallModule(named: "MyBible-finrk_SQLite3")
+        try repository.uninstallModule(named: "MyBible-finrk")
         XCTAssertFalse(FileManager.default.fileExists(atPath: moduleDir.path))
         XCTAssertEqual(repository.loadInstalledMyBibleModules().map(\.name), ["MyBible-companion"])
         await fulfillment(of: [notificationExpectation], timeout: 0.2)

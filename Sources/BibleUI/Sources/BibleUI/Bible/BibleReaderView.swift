@@ -1796,19 +1796,24 @@ public struct BibleReaderView: View {
                 readerRenderedContentStateExport
             }
         case .myDocuments:
-            let reservedInitials = Set(
-                [
-                    DocumentCategory.bible,
-                    .commentary,
-                    .dictionary,
-                    .generalBook,
-                    .map,
-                ]
-                .flatMap { panePresentationController?.installedModules(for: $0) ?? [] }
-                .map(\.name)
-            )
             MyDocumentsListView(
-                reservedInitials: reservedInitials,
+                reservedInitials: [],
+                isInitialsUnavailable: { initials in
+                    guard let swordManager = panePresentationController?.swordManager else {
+                        throw BibleReaderInstalledDocumentRegistrySnapshotError(
+                            detail: "the native module registry is unavailable"
+                        )
+                    }
+                    return try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+                        modelContainer: modelContext.container,
+                        modulePath: swordManager.modulePath
+                    ).ownsDocument(named: initials)
+                },
+                moduleStoreRootURL: URL(
+                    fileURLWithPath: panePresentationController?.swordManager?.modulePath
+                        ?? SwordManager.defaultModulePath(),
+                    isDirectory: true
+                ),
                 surfacePalette: readerThemeSurfacePalette,
                 onDismiss: { activeReaderDestination = nil },
                 onLibrarySaved: refreshMyDocumentStores

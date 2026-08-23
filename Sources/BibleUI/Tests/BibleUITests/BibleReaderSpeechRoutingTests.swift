@@ -180,6 +180,81 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         ))
     }
 
+    /**
+     Rejects Bible and memorization checkpoints whose readable initials own a non-Bible module.
+
+     - Setup: Registers a readable map, pins its mutable SWORD cursor to a sentinel key, and builds
+       Bible/memorization checkpoints that falsely name the map as their source while a speech
+       service already owns a baseline selection session.
+     - Expected: Both reconstructions return nil without moving the map cursor or changing reader,
+       PageManager-independent persistence, bridge, or speech-service state.
+     - Failure meaning: Checkpoint restore validates readability but not category, allowing a
+       generic module handle to enter Bible provider construction and consume the wrong key domain.
+     - Side effects: Writes one inherited temporary SWORD fixture and one synthetic speech session;
+       no platform utterance is required for the assertions.
+     */
+    @MainActor
+    func testBibleSpeechCheckpointRejectsWrongCategoryWithoutReadOrStateMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawMapModule(named: "WrongSpeechCategory", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let wrongModule = try XCTUnwrap(manager.module(named: "WrongSpeechCategory"))
+        wrongModule.setKey("sentinel-map-key")
+        let baselineCursor = wrongModule.currentKey()
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let service = makeSpeechService()
+        service.currentTitle = "Existing selection"
+        service.currentSubtitle = "Must survive"
+        service.speak(text: "Existing selection text", language: "en-US")
+        let baselineGeneration = service.currentSessionGeneration
+        let baselineServiceCategory = service.activeProviderCategory
+        let baselineServicePosition = service.currentPosition
+        let baselineTitle = service.currentTitle
+        let baselineSubtitle = service.currentSubtitle
+        let baselineReaderCategory = controller.currentCategory
+        let baselineBible = controller.activeModuleName
+        let baselineBook = controller.currentBook
+        let baselineChapter = controller.currentChapter
+        let baselineVerse = controller.currentVerse
+        let baselineScripts = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        for category in [SpeakDocumentCategory.bible, .memorization] {
+            let cursor = SpeakStreamCursor(
+                category: category,
+                bookInitials: "WrongSpeechCategory",
+                key: "Gen.1.1",
+                ordinalStart: 1,
+                ordinalEnd: 1,
+                versification: "KJV"
+            )
+            let checkpoint = SpeakProviderCheckpoint(
+                current: cursor,
+                lowerBound: cursor,
+                upperBound: cursor,
+                isBounded: true,
+                isMemorizationLoop: category == .memorization
+            )
+
+            XCTAssertNil(controller.reconstructSpeechSession(from: checkpoint, service: service))
+            XCTAssertEqual(wrongModule.currentKey(), baselineCursor)
+            XCTAssertEqual(service.currentSessionGeneration, baselineGeneration)
+            XCTAssertEqual(service.activeProviderCategory, baselineServiceCategory)
+            XCTAssertEqual(service.currentPosition, baselineServicePosition)
+            XCTAssertEqual(service.currentTitle, baselineTitle)
+            XCTAssertEqual(service.currentSubtitle, baselineSubtitle)
+            XCTAssertEqual(controller.currentCategory, baselineReaderCategory)
+            XCTAssertEqual(controller.activeModuleName, baselineBible)
+            XCTAssertEqual(controller.currentBook, baselineBook)
+            XCTAssertEqual(controller.currentChapter, baselineChapter)
+            XCTAssertEqual(controller.currentVerse, baselineVerse)
+            XCTAssertEqual(persistCount, 0)
+            XCTAssertEqual(recordedScripts().count, baselineScripts)
+        }
+    }
+
     /** Verifies typed native selection routing, atomic metadata, and stale-session rejection. */
     @MainActor
     func testNativeSelectionRoutesMyDocumentAndRejectsPartialOrStaleIdentity() throws {
@@ -673,6 +748,49 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(service.currentSessionGeneration, baselineGeneration)
         XCTAssertEqual(service.activeProviderCategory, .dictionary)
         XCTAssertEqual(service.currentPosition?.bookInitials, "SpeechBaseline")
+        XCTAssertEqual(service.currentPosition?.key, "ENTRY")
+    }
+
+    /**
+     Resolves a My Documents speech request through JSword's full-name case tier.
+
+     - Setup: Persists one globally unowned local page, then requests generic speech with a
+       case-varied full display name instead of its initials.
+     - Expected: The provider uses the canonical My Documents initials/key and reads that page.
+     - Failure meaning: Speech uses an exact-initials-only local path and drifts from the reader,
+       Agent, and Android `Books.getBook` owner contract.
+     - Side effects: Writes an in-memory SwiftData graph and records synthesis in a test double.
+     */
+    @MainActor
+    func testGenericSpeechResolvesMyDocumentCaseInsensitiveFullNameAlias() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let document = MyDocument(name: "Local Speech Full Name", initials: "MySpeechNotes")
+        let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
+        let content = MyDocumentPageContent(pageId: page.id, content: "Authorized local speech")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        try context.save()
+
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        let service = makeSpeechService()
+        controller.speakService = service
+
+        controller.bridge(
+            controller.bridge,
+            speakGeneric: "local speech full name",
+            osisRef: "ENTRY",
+            startOrdinal: 0,
+            endOrdinal: 0
+        )
+
+        XCTAssertEqual(service.activeProviderCategory, .myDocument)
+        XCTAssertEqual(service.currentPosition?.bookInitials, "MySpeechNotes")
         XCTAssertEqual(service.currentPosition?.key, "ENTRY")
     }
 

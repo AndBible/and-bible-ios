@@ -27,7 +27,15 @@ public final class BibleUIAgentSettingsDocumentAccessPolicy: BibleUIAgentDocumen
         self.settingsStore = settingsStore
     }
 
-    /** Reads only the excluded-initials set and fails closed on persistence errors. */
+    /**
+     Reads only the excluded-initials set using Java-exact UTF-16 membership.
+
+     - Parameter documentInitials: Canonical installed-book initials presented to Agent tools.
+     - Returns: `false` for an exact persisted exclusion or any settings read failure; canonically
+       equivalent but Java-distinct spellings retain separate Android identities.
+     - Side effects: Reads the singleton AI settings row on the main actor.
+     - Failure modes: Persistence errors fail closed without normalizing the requested identity.
+     */
     public func allows(documentInitials: String) -> Bool {
         guard let settings = try? settingsStore.globalSettings() else { return false }
         return !settings.aiExcludedDocuments.contains(documentInitials)
@@ -118,6 +126,8 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
     let windowManager: WindowManager
     let documentAccessPolicy: any BibleUIAgentDocumentAccessPolicy
     let windowDocumentRouter: any BibleUIAgentWindowDocumentRouting
+    /// Throwing live-registry admission check used before Agent-created My Documents publish.
+    let strictMyDocumentInitialsUnavailable: ((String) throws -> Bool)?
 
     /**
      Creates production routing over existing app stores and runtime services.
@@ -133,6 +143,8 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
        - windowManager: Active workspace/window state owner.
        - documentAccessPolicy: Global AI document exclusion policy.
        - windowDocumentRouter: App-owned live pane navigation operation.
+       - strictMyDocumentInitialsUnavailable: Optional production-only fresh throwing registry
+         lookup. Isolated adapters may omit it and retain their injected legacy inventory fixtures.
      - Side effects: None; dependencies retain their existing ownership.
      - Failure modes: None.
      */
@@ -146,7 +158,8 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         myDocumentStore: MyDocumentStore,
         windowManager: WindowManager,
         documentAccessPolicy: any BibleUIAgentDocumentAccessPolicy,
-        windowDocumentRouter: any BibleUIAgentWindowDocumentRouting
+        windowDocumentRouter: any BibleUIAgentWindowDocumentRouting,
+        strictMyDocumentInitialsUnavailable: ((String) throws -> Bool)? = nil
     ) {
         self.swordManager = swordManager
         self.sqliteLibrary = sqliteLibrary
@@ -158,6 +171,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         self.windowManager = windowManager
         self.documentAccessPolicy = documentAccessPolicy
         self.windowDocumentRouter = windowDocumentRouter
+        self.strictMyDocumentInitialsUnavailable = strictMyDocumentInitialsUnavailable
     }
 
     /** Routes every typed request to its owning production domain operation. */
@@ -334,21 +348,35 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         }
     }
 
-    /** Resolves AI Documents ownership from a fresh transactional library snapshot. */
+    /**
+     Resolves whether one explicit management identity owns Android's AI Documents collection.
+
+     - Parameters:
+       - documentID: Optional stable database identifier.
+       - initials: Optional exact Android/Java UTF-16 initials.
+     - Returns: True only when the supplied identities resolve to the same AI Documents row.
+     - Side effects: Loads one fresh transactional My Documents snapshot without mutating it.
+     - Failure modes: Snapshot failures, absent identities, conflicting ID/initials pairs, and
+       canonically equivalent but Java-distinct initials all return false.
+     */
     public func isAIDocument(documentID: UUID?, initials: String?) async -> Bool {
         guard let session = try? myDocumentLibraryStore.loadSession() else { return false }
         let byID = documentID.flatMap { id in session.documents.first { $0.id == id } }
         let byInitials = initials.flatMap { value in
-            session.documents.first { $0.initials == value }
+            session.documents.first {
+                SwordJavaStringIdentity.equals($0.initials, value)
+            }
         }
         if documentID != nil, initials != nil, byID?.id != byInitials?.id { return false }
         let document = byID ?? byInitials
-        return document?.initials == MyDocumentManagementSession.aiDocumentsInitials
+        return document.map {
+            SwordJavaStringIdentity.equals(
+                $0.initials,
+                MyDocumentManagementSession.aiDocumentsInitials
+            )
+        } ?? false
     }
 
-    var reservedDocumentInitials: Set<String> {
-        Set(swordManager.installedModules().map(\.name) + sqliteLibrary.modules.map { $0.info.name })
-    }
 }
 
 /** Discoverable production name for app composition. */

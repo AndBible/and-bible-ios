@@ -1370,7 +1370,10 @@ public struct AIPromptManagementView: View {
                 noticeMessage = editableImportMessage(summary)
                 refresh()
             case .addOn:
-                let importResult = ExternalDocumentImportService().importDocument(
+                let importResult = ExternalDocumentImportService.androidRegistryAware(
+                    modelContext: modelContext,
+                    swordManager: swordManager
+                ).importDocument(
                     ExternalDocumentImportRequest(
                         url: url,
                         contentTypeIdentifier: UTType.commaSeparatedText.identifier,

@@ -2,6 +2,7 @@
 
 import BibleCore
 import Foundation
+import SwordKit
 import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
@@ -29,6 +30,10 @@ public struct MyDocumentsListView: View {
     @Environment(\.modelContext) private var modelContext
 
     private let reservedInitials: Set<String>
+    /// Live combined-registry admission check run before publishing a new or renamed identity.
+    private let isInitialsUnavailable: (String) throws -> Bool
+    /// Canonical SWORD root that scopes the process-wide identity-publication coordinator.
+    private let moduleStoreRootURL: URL
     private let surfacePalette: ReaderThemeSurfacePalette
     private let onDismiss: (() -> Void)?
     private let onLibrarySaved: (() -> Void)?
@@ -55,33 +60,58 @@ public struct MyDocumentsListView: View {
      Creates a standalone My Documents route using the application palette.
 
      - Parameters:
-       - reservedInitials: Installed module initials unavailable to generated My Documents.
+       - reservedInitials: Legacy installed identities compared with Java-exact UTF-16 semantics.
+       - isInitialsUnavailable: Live Android registry lookup for full-name/case-tier collisions.
+       - moduleStoreRootURL: Canonical SWORD root used by the live lookup and global mutation gate.
        - onDismiss: Optional owner callback used when the manager is a reader destination.
        - onLibrarySaved: Optional callback that refreshes readers after persistence succeeds.
        - onOpenPage: Opens a persisted page in the owning reader pane.
      */
     public init(
         reservedInitials: Set<String> = [],
+        isInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false },
+        moduleStoreRootURL: URL = URL(
+            fileURLWithPath: SwordManager.defaultModulePath(),
+            isDirectory: true
+        ),
         onDismiss: (() -> Void)? = nil,
         onLibrarySaved: (() -> Void)? = nil,
         onOpenPage: @escaping (String, String) -> Void
     ) {
         self.reservedInitials = reservedInitials
+        self.isInitialsUnavailable = isInitialsUnavailable
+        self.moduleStoreRootURL = moduleStoreRootURL
         surfacePalette = .standard
         self.onDismiss = onDismiss
         self.onLibrarySaved = onLibrarySaved
         self.onOpenPage = onOpenPage
     }
 
-    /** Creates a reader-owned route using its resolved workspace/window palette. */
+    /**
+     Creates a reader-owned route using its resolved workspace/window palette.
+
+     - Parameters:
+       - reservedInitials: Initials already claimed by reader-visible sources.
+       - isInitialsUnavailable: Throwing live-admission fallback retained for callers that
+         supplement the combined registry snapshot.
+       - moduleStoreRootURL: Exact reader module root used by strict publication admission.
+       - surfacePalette: Workspace/window colors applied to the routed view.
+       - onDismiss: Optional callback invoked when the route closes.
+       - onLibrarySaved: Optional callback that refreshes readers after persistence succeeds.
+       - onOpenPage: Opens a persisted page in the owning reader pane.
+     */
     init(
         reservedInitials: Set<String>,
+        isInitialsUnavailable: @escaping (String) throws -> Bool,
+        moduleStoreRootURL: URL,
         surfacePalette: ReaderThemeSurfacePalette,
         onDismiss: (() -> Void)?,
         onLibrarySaved: (() -> Void)?,
         onOpenPage: @escaping (String, String) -> Void
     ) {
         self.reservedInitials = reservedInitials
+        self.isInitialsUnavailable = isInitialsUnavailable
+        self.moduleStoreRootURL = moduleStoreRootURL
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
         self.onLibrarySaved = onLibrarySaved
@@ -264,7 +294,10 @@ public struct MyDocumentsListView: View {
         guard !didLoad else { return }
         didLoad = true
         do {
-            session = try MyDocumentLibraryStore(modelContext: modelContext).loadSession()
+            session = try MyDocumentLibraryStore(
+                modelContext: modelContext,
+                moduleStoreRootURL: moduleStoreRootURL
+            ).loadSession()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -311,7 +344,11 @@ public struct MyDocumentsListView: View {
         do {
             switch request.purpose {
             case .create:
-                _ = try session.createDocument(name: value, reservedInitials: reservedInitials)
+                _ = try session.createDocument(
+                    name: value,
+                    reservedInitials: reservedInitials,
+                    isInitialsUnavailable: draftInitialsAreUnavailable
+                )
             case .rename(let documentID):
                 try session.renameDocument(id: documentID, name: value)
             case .editDescription(let documentID):
@@ -320,7 +357,8 @@ public struct MyDocumentsListView: View {
                 _ = try session.importDocument(
                     name: value,
                     files: pendingImportFiles,
-                    reservedInitials: reservedInitials
+                    reservedInitials: reservedInitials,
+                    isInitialsUnavailable: draftInitialsAreUnavailable
                 )
                 pendingImportFiles = []
             }
@@ -403,9 +441,13 @@ public struct MyDocumentsListView: View {
     private func saveSession() -> Bool {
         var candidate = session
         do {
-            try MyDocumentLibraryStore(modelContext: modelContext).save(
+            try MyDocumentLibraryStore(
+                modelContext: modelContext,
+                moduleStoreRootURL: moduleStoreRootURL
+            ).save(
                 &candidate,
-                reservedInitials: reservedInitials
+                reservedInitials: reservedInitials,
+                checkingInitialsWith: isInitialsUnavailable
             )
             session = candidate
             onLibrarySaved?()
@@ -413,6 +455,23 @@ public struct MyDocumentsListView: View {
         } catch {
             errorMessage = error.localizedDescription
             return false
+        }
+    }
+
+    /**
+     Converts throwing registry preflight into the session's conservative draft-time predicate.
+
+     - Parameter initials: Candidate generated before the user commits the management session.
+     - Returns: The live registry result, or `true` when any metadata source cannot be read.
+     - Side effects: Invokes the injected read-only registry snapshot outside the save boundary.
+     - Failure modes: Errors are deliberately mapped to unavailable for draft feedback; Save repeats
+       the throwing check under the global lease and surfaces the original failure if still present.
+     */
+    private func draftInitialsAreUnavailable(_ initials: String) -> Bool {
+        do {
+            return try isInitialsUnavailable(initials)
+        } catch {
+            return true
         }
     }
 

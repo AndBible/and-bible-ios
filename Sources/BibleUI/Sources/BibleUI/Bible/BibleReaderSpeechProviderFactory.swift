@@ -245,7 +245,7 @@ enum BibleReaderSpeechProviderFactory {
     ) -> BibleReaderSpeechProviderBuild? {
         if checkpoint.version == 0 {
             let cursor = checkpoint.current
-            guard cursor.bookInitials == context.moduleName,
+            guard SwordJavaStringIdentity.equals(cursor.bookInitials, context.moduleName),
                   let ordinal = cursor.ordinalStart,
                   cursor.ordinalEnd == ordinal else {
                 return nil
@@ -319,7 +319,7 @@ enum BibleReaderSpeechProviderFactory {
     ) -> BibleReaderSpeechProviderBuild? {
         if checkpoint.version == 0 {
             let cursor = checkpoint.current
-            guard cursor.bookInitials == bookInitials,
+            guard SwordJavaStringIdentity.equals(cursor.bookInitials, bookInitials),
                   let ordinal = cursor.ordinalStart,
                   cursor.ordinalEnd == ordinal else {
                 return nil

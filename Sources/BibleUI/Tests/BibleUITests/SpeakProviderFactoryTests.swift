@@ -474,4 +474,94 @@ final class SpeakProviderFactoryTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(provider.currentPosition?.ordinalStart, 5)
         XCTAssertFalse(try XCTUnwrap(provider.checkpoint()).isBounded)
     }
+
+    /**
+     Verifies speech checkpoint identities preserve Java-distinct Unicode spellings.
+
+     - Setup: Creates canonically equivalent composed/decomposed module initials with identical
+       generic page keys and ordinals.
+     - Expected result: A cursor matches and reconstructs only the exact UTF-16 spelling; the
+       canonically equivalent spelling fails closed before page-source construction.
+     - Failure meaning: Swift canonical equality can resume a checkpoint against a different
+       Android document owner and read speech content under the stale identity.
+     - Side effects: None; the test uses immutable in-memory page fixtures.
+     */
+    func testSpeechCheckpointRejectsCanonicallyEquivalentJavaDistinctInitials() throws {
+        let composed = "Caf\u{00E9}Speech"
+        let decomposed = "Cafe\u{0301}Speech"
+        let page = BibleReaderSpeechPage(
+            key: "entry.xhtml",
+            title: "Entry",
+            plainText: "",
+            rawMarkup: #"<html><body><bva ordinal="4">Four</bva></body></html>"#,
+            ordinalRange: 4...4,
+            language: "en"
+        )
+        let composedCursor = SpeakStreamCursor(
+            category: .myDocument,
+            bookInitials: composed,
+            key: page.key,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            versification: nil
+        )
+        let decomposedCursor = SpeakStreamCursor(
+            category: .myDocument,
+            bookInitials: decomposed,
+            key: page.key,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            versification: nil
+        )
+        let decomposedPosition = SpeakStreamPosition(
+            id: "\(decomposed):\(page.key):4",
+            category: .myDocument,
+            bookInitials: decomposed,
+            key: page.key,
+            osisRef: nil,
+            keyName: page.title,
+            bookName: "Document",
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            chapter: nil,
+            verse: nil,
+            groupIdentifier: page.key,
+            language: page.language,
+            versification: nil
+        )
+        XCTAssertFalse(composedCursor.matches(decomposedPosition))
+        XCTAssertTrue(decomposedCursor.matches(decomposedPosition))
+
+        let staleCheckpoint = SpeakProviderCheckpoint(
+            version: 0,
+            current: decomposedCursor,
+            lowerBound: decomposedCursor,
+            upperBound: decomposedCursor,
+            isBounded: false,
+            isMemorizationLoop: false
+        )
+        XCTAssertNil(BibleReaderSpeechProviderFactory.pages(
+            category: .myDocument,
+            bookInitials: composed,
+            bookName: "Document",
+            pages: [page],
+            checkpoint: staleCheckpoint
+        ))
+
+        let exactCheckpoint = SpeakProviderCheckpoint(
+            version: 0,
+            current: composedCursor,
+            lowerBound: composedCursor,
+            upperBound: composedCursor,
+            isBounded: false,
+            isMemorizationLoop: false
+        )
+        XCTAssertNotNil(BibleReaderSpeechProviderFactory.pages(
+            category: .myDocument,
+            bookInitials: composed,
+            bookName: "Document",
+            pages: [page],
+            checkpoint: exactCheckpoint
+        ))
+    }
 }

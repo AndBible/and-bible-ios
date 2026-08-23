@@ -436,7 +436,23 @@ public final class SwordModule: @unchecked Sendable {
     /// Validated contained `.dat` URL used to read only the selected RawLD/RawLD4 record body.
     private var cachedRawDictionaryEntryURL: URL?
 
-    init(handle: UnsafeMutableRawPointer, modulePath: String? = nil) {
+    /**
+     Creates one native module wrapper from an already-resolved exact config when available.
+
+     - Parameters:
+       - handle: Native module handle owned by the creating `SwordManager`.
+       - modulePath: Installed SWORD root used by later config-backed inspections.
+       - parsedConfig: Config captured by the manager's one-pass registry enumeration. Passing it
+         prevents a nested full-directory scan while preserving the exact metadata owner.
+     - Side effects: Reads immutable native metadata and may read one config when no parsed value is
+       supplied; no module cursor or content is changed.
+     - Failure modes: Missing optional metadata falls back to the native handle's config entries.
+     */
+    init(
+        handle: UnsafeMutableRawPointer,
+        modulePath: String? = nil,
+        parsedConfig: SwordModuleConfig? = nil
+    ) {
         self.handle = handle
         self.moduleRootPath = modulePath
 
@@ -448,7 +464,8 @@ public final class SwordModule: @unchecked Sendable {
             let language = String(cString: SWModule_getLanguage(handle))
             let modDrvPtr = SWModule_getConfigEntry(handle, "ModDrv")
             let modDrv = modDrvPtr != nil ? String(cString: modDrvPtr!) : ""
-            let config = modulePath.flatMap { SwordModuleConfig.read(name: name, modulePath: $0) }
+            let config = parsedConfig
+                ?? modulePath.flatMap { SwordModuleConfig.read(name: name, modulePath: $0) }
 
             // Detect features by parsing the .conf file directly from disk.
             // SWORD's flat API getConfigEntry() only returns the FIRST value for
@@ -644,6 +661,59 @@ public final class SwordModule: @unchecked Sendable {
             let rawEntry = String(cString: SWModule_getRawEntry(handle))
             SWModule_setKeyText(handle, previousKey)
             return (actualKey, verseKey, rawEntry)
+        }
+    }
+
+    /**
+     Atomically captures one exact verse through SWORD's source-to-OSIS filter and restores the
+     caller's complete cursor.
+
+     JSword converts each backend's configured source type to OSIS before its structural repair and
+     `SwordBook.addOSIS` projection. Reader callers must use this boundary instead of treating
+     `getRawEntry` as OSIS, because ThML, GBF, TEI, and plain-text modules have distinct source
+     semantics.
+
+     - Parameter keyText: Exact SWORD verse key such as `=Gen.1.1` or an introduction key ending in
+       verse zero.
+     - Returns: Resolved key text, structured VerseKey metadata, and source-neutral OSIS. Missing or
+       empty native content is returned as an empty fragment for the caller to reject or omit.
+     - Side effects: Temporarily moves the native module cursor and runs SWORD option, source, and
+       encoding filters while holding the process-wide runtime gate.
+     - Throws: `SwordVerseSourceInspectionError.cursorRestorationFailed` when SWORD cannot restore
+       both the prior key text and VerseKey ordinal; no captured content is published in that case.
+     - Important: The returned strings and metadata are copied before the runtime lease ends and do
+       not retain native pointers.
+     */
+    public func inspectVerseKeyOSISSourceRestoringPrevious(
+        _ keyText: String
+    ) throws -> (actualKey: String, verseKey: VerseKeyChildren?, osisFragment: String) {
+        try SwordRuntime.sync {
+            let previousIndexValue = SWModule_getVerseKeyIndex(handle)
+            let cursorSnapshot = SwordModuleCursorSnapshot(
+                keyText: String(cString: SWModule_getKeyText(handle)),
+                verseIndex: previousIndexValue >= 0 ? Int(previousIndexValue) : nil
+            )
+
+            SWModule_setKeyText(handle, keyText)
+            let result = (
+                actualKey: String(cString: SWModule_getKeyText(handle)),
+                verseKey: Self.currentVerseKeyChildren(handle: handle),
+                osisFragment: SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+            )
+
+            SWModule_setKeyText(handle, cursorSnapshot.keyText)
+            if let verseIndex = cursorSnapshot.verseIndex {
+                _ = SWModule_setVerseKeyIndex(handle, CLong(verseIndex))
+            }
+            let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
+            let restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+            guard cursorSnapshot.matches(
+                restoredKeyText: String(cString: SWModule_getKeyText(handle)),
+                restoredVerseIndex: restoredIndex
+            ) else {
+                throw SwordVerseSourceInspectionError.cursorRestorationFailed
+            }
+            return result
         }
     }
 
@@ -1551,7 +1621,7 @@ public final class SwordModule: @unchecked Sendable {
         config: SwordModuleConfig,
         moduleName: String
     ) throws -> RawDictionaryKeyEncoding {
-        let configured = config.values["encoding"]?.first ?? "Latin-1"
+        let configured = config.values["Encoding"]?.first ?? "Latin-1"
         switch configured {
         case "UTF-8":
             return .utf8
@@ -1914,7 +1984,8 @@ public final class SwordModule: @unchecked Sendable {
         // Try reading .conf file directly (reliable for multi-value keys)
         if let modulePath,
            let config = SwordModuleConfig.read(name: name, modulePath: modulePath) {
-            featureValues = (config.values["feature"] ?? []) + (config.values["globaloptionfilter"] ?? [])
+            featureValues = (config.values["Feature"] ?? [])
+                + (config.values["GlobalOptionFilter"] ?? [])
         } else {
             // Fallback: use C API (only gets first value for multi-value keys)
             var features: ModuleFeatures = []

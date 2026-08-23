@@ -46,12 +46,143 @@ public enum SwordModuleAccessState: Equatable, Sendable {
  ```
  */
 public final class SwordManager: @unchecked Sendable {
+    /**
+     One supported native SWORD book registered with the fields used by JSword's `BookSet`.
+
+     The module handle is created from the exact config initials and retained beside the fresh
+     session-adjusted metadata. Values are immutable after construction; creating a registration may
+     populate the manager cache but does not read document content.
+     */
+    private struct NativeModuleRegistration {
+        /// Exact native module handle whose metadata initials match `info.name` by Java equality.
+        let module: SwordModule
+
+        /// Inclusive installed metadata, including current locked/unlocked ownership state.
+        let info: ModuleInfo
+
+        /// Parsed JSword abbreviation, falling back to exact initials when absent or Java-empty.
+        let abbreviation: String
+
+        /// Exact config `Description` used by JSword's full-name map and final TreeSet tie-break.
+        let fullName: String
+
+        /// Exact installed config owner used for verified cipher-key persistence.
+        let configURL: URL
+    }
+
+    /**
+     Captures native inventory separately from registrations whose backend ownership is proven.
+
+     `installedRegistrations` may retain comparator-distinct metadata rows that share exact
+     initials, matching JSword's public TreeSet inventory. `resolvableRegistrations` excludes every
+     raw duplicate-exact-initial collision before a `SwordModule` wrapper can enter the manager
+     cache. Values are immutable after the single config/native capture and read no content.
+     */
+    private struct NativeModuleRegistrySnapshot {
+        /// Supported native metadata rows eligible for installed-TreeSet projection.
+        let installedRegistrations: [InstalledModuleRegistration]
+
+        /// Ownership-proven registrations keyed by unique exact initials.
+        let exactInitials: [SwordJavaExactStringIdentity: NativeModuleRegistration]
+
+        /// Ownership-proven registrations keyed only by unique exact full names.
+        let exactFullNames: [SwordJavaExactStringIdentity: NativeModuleRegistration]
+
+        /// Exact full-name keys intentionally withheld because multiple books claim them.
+        let ambiguousExactFullNames: Set<SwordJavaExactStringIdentity>
+
+        /// Ownership-proven registrations in installed JSword TreeSet order for alias lookup.
+        let treeSetRegistrations: [NativeModuleRegistration]
+    }
+
+    /**
+     Metadata and the JSword abbreviation required to merge every installed book family.
+
+     Native registrations retain their parsed abbreviation, while sidecar formats without that
+     field use initials just as their Android-compatible metadata constructors do. Values are
+     immutable and perform no work after construction.
+     */
+    private struct InstalledModuleRegistration {
+        /// Inclusive installed metadata returned through the public inventory API.
+        let info: ModuleInfo
+
+        /// Exact JSword abbreviation used after category in installed-TreeSet ordering.
+        let abbreviation: String
+
+        /// Exact user-visible name used by JSword's final raw UTF-16 tie-break.
+        let fullName: String
+    }
+
+    /**
+     Concrete JSword `AbstractBook` subclass participating in native driver-set equality.
+
+     `AbstractBook.equals` rejects a different concrete class before delegating to metadata equality.
+     The discriminator therefore preserves same-metadata books produced by different supported
+     `BookType`s while remaining independent of Swift runtime type names.
+     */
+    private enum NativeSwordBookClassIdentity: Hashable {
+        /// Verse-keyed `SwordBook` produced by text/commentary/raw-files book types.
+        case swordBook
+
+        /// List-keyed `SwordDictionary` produced by native lexical-data book types.
+        case swordDictionary
+
+        /// Calendar-keyed `SwordDailyDevotion` produced by daily-devotional lexical data.
+        case swordDailyDevotion
+
+        /// Tree-keyed `SwordGenBook` produced by native generic-book data.
+        case swordGenBook
+    }
+
+    /**
+     Hash identity used by `SwordBookDriver` before it returns its arbitrary-order book array.
+
+     Pinned `AbstractBook.equals` first requires the same concrete class, then
+     `AbstractBookMetaData.equals` compares exact category, full name, and initials. Its `HashSet`
+     therefore drops only same-class books with all three exact metadata fields equal. Exact UTF-16
+     keys avoid Swift canonical-equivalence collapse.
+     */
+    private struct NativeSwordBookHashIdentity: Hashable {
+        /// Concrete `AbstractBook` subclass created by the config's supported JSword `BookType`.
+        let bookClass: NativeSwordBookClassIdentity
+
+        /// Pinned JSword category ordinal participating in metadata equality.
+        let categoryOrdinal: Int
+
+        /// Exact Java initials participating in metadata equality.
+        let initials: SwordJavaExactStringIdentity
+
+        /// Exact Java full name participating in metadata equality.
+        let fullName: SwordJavaExactStringIdentity
+    }
+
+    /** Hash identity for one comparator slot in JSword's installed `TreeSet`. */
+    private struct InstalledBookSetIdentity: Hashable {
+        /// Pinned JSword category ordinal, the comparator's first field.
+        let categoryOrdinal: Int
+
+        /// Java case-insensitive abbreviation identity, the comparator's second field.
+        let abbreviation: SwordJavaStringIdentity
+
+        /// Exact Java initials, the comparator's third field.
+        let initials: SwordJavaExactStringIdentity
+
+        /// Exact Java full name, the comparator's final field.
+        let fullName: SwordJavaExactStringIdentity
+    }
+
     private let handle: UnsafeMutableRawPointer
 
     /// Internal access to the C handle for InstallManager operations.
     var rawHandle: UnsafeMutableRawPointer { handle }
-    private var moduleCache: [String: SwordModule] = [:]
-    private var sessionUnlockedModuleNames: Set<String> = []
+    /// Native handle cache keyed by Java-exact UTF-16 initials rather than Swift canonical equality.
+    private var moduleCache: [SwordJavaExactStringIdentity: SwordModule] = [:]
+
+    /// One manager-lifetime config/registry capture, invalidated by unlock and explicit refresh.
+    private var nativeRegistrySnapshotCache: NativeModuleRegistrySnapshot?
+
+    /// Current-session unlock overrides keyed by the exact canonical initials that were verified.
+    private var sessionUnlockedModuleNames: Set<SwordJavaExactStringIdentity> = []
 
     /// The filesystem path where SWORD modules are installed.
     public let modulePath: String
@@ -71,6 +202,7 @@ public final class SwordManager: @unchecked Sendable {
 
     deinit {
         SwordRuntime.sync {
+            nativeRegistrySnapshotCache = nil
             moduleCache.removeAll()
             SWMgr_delete(handle)
         }
@@ -106,7 +238,9 @@ public final class SwordManager: @unchecked Sendable {
      sidecar package directory. Android exposes both families through `Books.installed().books`;
      iOS mirrors that inventory here by projecting readable custom modules into `ModuleInfo` rows.
 
-     - Returns: SWORD modules and readable Android custom modules, de-duplicated by initials.
+     - Returns: SWORD modules and readable Android custom modules projected through JSword's
+       category/abbreviation/initials/name TreeSet comparator. Canonically equivalent Java-distinct
+       UTF-16 spellings and comparator-distinct duplicate-initial metadata remain separate books.
      - Side effects: Reads `mods.d` configs, sidecar metadata, and checks custom payload files.
      - Failure modes: Malformed configs, modules libsword cannot resolve, and custom rows without
        readable payloads are skipped.
@@ -114,26 +248,16 @@ public final class SwordManager: @unchecked Sendable {
        this manager session overrides only that module's stale native metadata snapshot.
      */
     public func installedModules() -> [ModuleInfo] {
-        let swordModules = SwordRuntime.sync {
-            var modules: [ModuleInfo] = []
-            for config in SwordModuleConfig.readAll(modulePath: modulePath) {
-                guard !config.isAndroidCustomDriver else { continue }
-                let name = config.name
-                guard let modHandle = SWMgr_getModuleByName(handle, name) else { continue }
-
-                let mod = getOrCreateModule(name: name, handle: modHandle)
-                let persistedCipherKey = config.values["cipherkey"]?.first
-                let isUnlocked = sessionUnlockedModuleNames.contains(name)
-                    || (persistedCipherKey.map { !$0.isEmpty } ?? mod.info.isUnlocked)
-                modules.append(Self.moduleInfo(mod.info, overridingUnlocked: isUnlocked))
-            }
-            return modules
-        }
+        let swordModules = nativeModuleRegistrySnapshot().installedRegistrations
+        let restoredCustomModules = Self.androidCustomInstalledRegistrations(modulePath: modulePath)
+        let packageModules = Self.admittedMyBiblePackageRegistrations(
+            Self.myBiblePackageRegistrations(modulePath: modulePath),
+            after: swordModules + restoredCustomModules
+        )
 
         let merged = Self.mergedInstalledModules(
             swordModules: swordModules,
-            customModules: Self.androidCustomInstalledModules(modulePath: modulePath) +
-                Self.myBiblePackageInstalledModules(modulePath: modulePath)
+            customModules: restoredCustomModules + packageModules
         )
         // Exclude modules SWORD cannot fully use (e.g. a Bible with an unrecognized versification),
         // mirroring Android's `Books.installed()`, which never contains an unsupported book. Such a
@@ -155,31 +279,30 @@ public final class SwordManager: @unchecked Sendable {
     /**
      Classifies whether an installed native SWORD module can be activated for content reads.
 
-     This query intentionally derives from a fresh `installedModules()` snapshot so a successful
-     live unlock is observed through `sessionUnlockedModuleNames` even though a cached
-     `SwordModule.info` value is immutable. Inventory and `module(named:)` remain inclusive for
+     This query derives from the manager's immutable native-registration snapshot. A successful live
+     unlock invalidates that snapshot before subsequent access, while external filesystem mutation
+     becomes visible only after `refresh()`. Inventory and `module(named:)` remain inclusive for
      Downloads, About, uninstall, and unlock workflows.
 
-     - Parameter name: Case-insensitive installed module initials to classify.
+     - Parameter name: Installed initials/full name resolved through JSword's exact maps followed by
+       its case-insensitive installed-TreeSet tier.
      - Returns: `.readable` for a supported native module with current access, `.locked` for an
        encrypted module awaiting a verified key, or `.unavailable` for missing, unsupported, and
        Android custom-driver projections that do not have a native SWORD handle.
-     - Side effects: Reads installed configuration and may populate the manager's native module
-       cache while resolving the canonical module identity; it does not mutate cipher or reader
-       state.
-     - Failure modes: Malformed configuration, unsupported modules, and native lookup failures are
-       classified as `.unavailable` rather than exposing a partially readable handle.
+     - Side effects: The first lookup reads installed configuration and may populate the manager's
+       registry/module caches; later lookups reuse them and do not mutate cipher or reader state.
+     - Failure modes: Malformed configuration, unsupported modules, native lookup failures, and
+       ambiguous duplicate exact initials are classified as `.unavailable` rather than exposing a
+       partially readable or unowned handle.
      - Important: Libsword work is serialized by the existing `SwordRuntime` boundaries used by
        `installedModules()` and `module(named:)`.
      */
     public func moduleAccessState(named name: String) -> SwordModuleAccessState {
         guard !name.isEmpty,
-              let info = installedModules().first(where: {
-                  SwordJavaStringIdentity.equalsIgnoreCase($0.name, name)
-              }),
-              module(named: info.name) != nil else {
+              let registration = nativeModuleRegistration(named: name) else {
             return .unavailable
         }
+        let info = registration.info
         if info.isEncrypted && !info.isUnlocked {
             return .locked
         }
@@ -187,92 +310,98 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
-     Resolves one native module only when a fresh manager snapshot authorizes content access.
+     Resolves one native module only when the manager's current snapshot authorizes content access.
 
      Inclusive `module(named:)` remains the inventory, unlock, uninstall, and metadata boundary.
      Content callers use this method so a cached native handle cannot bypass a later relock.
 
-     - Parameter name: Installed module initials matched with Java `String.equalsIgnoreCase` rules.
-     - Returns: The canonical native handle when the fresh row is readable, otherwise nil.
-     - Side effects: Enumerates installed configuration once, then creates or reuses at most one
-       native handle for the selected readable row.
-     - Failure modes: Empty, missing, unsupported, custom-driver, and locked identities fail closed.
+     - Parameter name: Installed initials/full name resolved through JSword exact-map precedence and
+       the pinned case-insensitive TreeSet scan.
+     - Returns: The canonical native handle when the current row is readable, otherwise nil.
+     - Side effects: On first access, enumerates installed configuration and creates native wrappers;
+       later calls reuse the immutable registry until unlock or explicit refresh invalidates it.
+     - Failure modes: Empty, missing, unsupported, custom-driver, locked, and ambiguous duplicate
+       exact-initial identities fail closed.
      */
     public func readableModule(named name: String) -> SwordModule? {
         guard !name.isEmpty,
-              let info = installedModules().first(where: {
-                  SwordJavaStringIdentity.equalsIgnoreCase($0.name, name)
-              }),
-              !info.isEncrypted || info.isUnlocked else {
+              let registration = nativeModuleRegistration(named: name),
+              !registration.info.isEncrypted || registration.info.isUnlocked else {
             return nil
         }
-        return module(named: info.name)
+        return registration.module
     }
 
     /**
-     Get a module by name.
-     - Parameter name: The module abbreviation (e.g., "KJV").
-     - Returns: The module, or nil if not installed.
+     Resolves an inclusive native module through Android's installed-book identity tiers.
+
+     Exact initials win before exact full name. When neither exact map matches, the first
+     case-insensitive initials/full-name match in pinned JSword TreeSet order wins. This prevents
+     config enumeration order and Swift Unicode normalization from redirecting one identity to a
+     different native backend.
+
+     - Parameter name: Exact initials/full name or Java case-insensitive alias.
+     - Returns: The supported native module selected by JSword rules, or nil when not installed.
+     - Side effects: Reads installed configs and creates or reuses native handles in the exact-keyed
+       manager cache; no document cursor or cipher state is mutated.
+     - Failure modes: Empty, custom-driver, unsupported, unmatched, and ambiguous duplicate
+       exact-initial identities return nil.
      */
     public func module(named name: String) -> SwordModule? {
-        SwordRuntime.sync {
-            let resolved: SwordModule?
-            if let cached = moduleCache[name] {
-                resolved = cached
-            } else if let modHandle = SWMgr_getModuleByName(handle, name) {
-                resolved = getOrCreateModule(name: name, handle: modHandle)
-            } else {
-                resolved = nil
-            }
-            // Do not surface an unsupported module (e.g. a Bible with an unrecognized versification),
-            // mirroring Android's `Books.installed().getBook()`, which returns null for such a book.
-            // The cache entry is left intact so enumeration internals are unaffected. See ADR-0010.
-            guard let resolved, resolved.info.isSupported else { return nil }
-            return resolved
-        }
+        guard !name.isEmpty else { return nil }
+        return nativeModuleRegistration(named: name)?.module
     }
 
     /**
      Applies and verifies a cipher key for an installed encrypted module.
 
      - Parameters:
-       - name: Installed module initials.
+       - name: Installed initials/full name or Java case-insensitive alias resolved through the same
+         native BookSet contract as reader access.
        - cipherKey: Non-empty decryption key supplied by the user.
      - Returns: `true` only when the candidate key produces readable module content and is saved to
        the module configuration for subsequent launches.
      - Side Effects: Creates a temporary SWORD manager, applies the candidate only there for
        validation, persists a verified `CipherKey`, then applies it to the live manager and marks
        only the named module unlocked in current inventory snapshots.
-     - Failure Modes: Empty keys, missing/plain modules, unreadable decrypted content, and config
-       persistence failures leave the live manager key unchanged, restore the original config bytes
-       after a failed write, and return `false`.
+     - Failure Modes: Empty keys, missing/plain modules, ambiguous duplicate exact initials,
+       unreadable decrypted content, and config persistence failures leave the live manager key
+       unchanged, restore the original config bytes after a failed write, and return `false`.
      */
     public func unlockModule(named name: String, withCipherKey cipherKey: String) -> Bool {
         guard !cipherKey.isEmpty else { return false }
         return SwordRuntime.sync {
-            guard let moduleHandle = SWMgr_getModuleByName(handle, name) else { return false }
-            let module = getOrCreateModule(name: name, handle: moduleHandle)
+            guard let registration = nativeModuleRegistration(named: name) else { return false }
+            let canonicalName = registration.info.name
+            let module = registration.module
             guard module.info.isEncrypted else { return false }
 
             // SWORD can add a cipher filter at runtime but cannot remove it. Probe through an isolated
             // manager so a failed first unlock leaves the live reader exactly as it was.
             guard let validationManager = SWMgr_new(modulePath) else { return false }
             defer { SWMgr_delete(validationManager) }
-            guard let validationModule = SWMgr_getModuleByName(validationManager, name) else {
+            guard let validationModule = SWMgr_getModuleByName(validationManager, canonicalName) else {
                 return false
             }
-            SWMgr_setCipherKey(validationManager, name, cipherKey)
+            let validationName = String(cString: SWModule_getName(validationModule))
+            guard SwordJavaExactStringIdentity(validationName)
+                    == SwordJavaExactStringIdentity(canonicalName) else {
+                return false
+            }
+            SWMgr_setCipherKey(validationManager, canonicalName, cipherKey)
             guard Self.moduleHasReadableCipherContent(validationModule, info: module.info),
                   Self.persistVerifiedCipherKey(
                     cipherKey,
-                    moduleName: name,
-                    modulePath: modulePath
+                    moduleName: canonicalName,
+                    modulePath: modulePath,
+                    owningConfigURL: registration.configURL
                   ) else {
                 return false
             }
 
-            SWMgr_setCipherKey(handle, name, cipherKey)
-            sessionUnlockedModuleNames.insert(name)
+            SWMgr_setCipherKey(handle, canonicalName, cipherKey)
+            sessionUnlockedModuleNames.insert(SwordJavaExactStringIdentity(canonicalName))
+            nativeRegistrySnapshotCache = nil
             return true
         }
     }
@@ -444,6 +573,8 @@ public final class SwordManager: @unchecked Sendable {
        - cipherKey: Verified module key.
        - moduleName: Installed module section/initials.
        - modulePath: SWORD root containing `mods.d`.
+       - owningConfigURL: Exact config owned by a previously resolved native registration. When nil,
+         direct callers require one unambiguous section owner.
        - publishVerifiedConfig: Atomic publisher for already-verified staged bytes. The default
          writes atomically; tests inject a failing publisher to exercise post-invalidation rollback.
      - Returns: `true` only when the exact key can be read back and the stale cache is absent.
@@ -460,14 +591,23 @@ public final class SwordManager: @unchecked Sendable {
         _ cipherKey: String,
         moduleName: String,
         modulePath: String,
+        owningConfigURL: URL? = nil,
         publishVerifiedConfig: (Data, URL) throws -> Void = { data, destinationURL in
             try data.write(to: destinationURL, options: .atomic)
         }
     ) -> Bool {
         guard !cipherKey.isEmpty,
-              let configURL = moduleConfigURL(named: moduleName, modulePath: modulePath),
+              let configURL = owningConfigURL
+                ?? moduleConfigURL(named: moduleName, modulePath: modulePath),
+              isOwnedModuleConfigURL(configURL, modulePath: modulePath),
               let originalData = try? Data(contentsOf: configURL),
               let parsedConfig = parseModuleConfig(at: configURL) else {
+            return false
+        }
+        let ownsRequestedIdentity = owningConfigURL != nil
+            ? SwordJavaStringIdentity.equals(parsedConfig.name, moduleName)
+            : SwordJavaStringIdentity.equalsIgnoreCase(parsedConfig.name, moduleName)
+        guard ownsRequestedIdentity else {
             return false
         }
 
@@ -490,7 +630,7 @@ public final class SwordManager: @unchecked Sendable {
         }
         stagedConfig.setValue(section: parsedConfig.name, key: "CipherKey", value: cipherKey)
         stagedConfig.save()
-        guard parseModuleConfig(at: stagingURL)?.values["cipherkey"]?.first == cipherKey,
+        guard parseModuleConfig(at: stagingURL)?.values["CipherKey"]?.first == cipherKey,
               let verifiedConfigData = try? Data(contentsOf: stagingURL) else {
             return false
         }
@@ -538,151 +678,615 @@ public final class SwordManager: @unchecked Sendable {
             return false
         }
         didVerifyPersistence = parseModuleConfig(at: configURL)?
-            .values["cipherkey"]?.first == cipherKey
+            .values["CipherKey"]?.first == cipherKey
             && !fileManager.fileExists(atPath: cacheURL.path)
         return didVerifyPersistence
     }
 
-    /** Locates an installed module config without assuming case-sensitive filename spelling. */
+    /**
+     Locates the config whose section initials match one Java module identity.
+
+     Filenames are not authoritative and may differ in case from their section. Parsing each
+     candidate prevents a `FOO` unlock from rewriting `foo.conf`, while exact UTF-16 comparison keeps
+     canonically equivalent Java-distinct section names separate. A unique case-insensitive alias is
+     retained for compatibility with direct persistence callers; an ambiguous alias fails closed.
+
+     - Parameters:
+       - name: Canonical native module initials selected by the manager's BookSet resolver.
+       - modulePath: SWORD root containing `mods.d`.
+     - Returns: One unambiguous exact config URL, otherwise one unambiguous Java case-insensitive
+       match. Duplicate exact sections fail closed because no native registration owner was supplied.
+     - Side effects: Enumerates and reads local config files without mutating them.
+     - Failure modes: Missing directories and unreadable/malformed configs are ignored.
+     */
     private static func moduleConfigURL(named name: String, modulePath: String) -> URL? {
-        let directory = URL(fileURLWithPath: modulePath, isDirectory: true)
-            .appendingPathComponent("mods.d", isDirectory: true)
-        let expectedName = "\(name).conf"
-        return try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ).first { url in
-            url.lastPathComponent.caseInsensitiveCompare(expectedName) == .orderedSame
+        let candidates = SwordModuleConfig.readAll(modulePath: modulePath)
+        let identity = SwordJavaExactStringIdentity(name)
+        let exact = candidates.filter {
+            SwordJavaExactStringIdentity($0.name) == identity
         }
-    }
-
-    /** Reads one module config using the parser shared with installed-module inventory. */
-    private static func parseModuleConfig(at url: URL) -> SwordModuleConfig? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        let content = String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .isoLatin1)
-        return content.flatMap(SwordModuleConfig.parse)
-    }
-
-    /** Copies module metadata while overriding only the current unlock state. */
-    private static func moduleInfo(
-        _ info: ModuleInfo,
-        overridingUnlocked isUnlocked: Bool
-    ) -> ModuleInfo {
-        ModuleInfo(
-            name: info.name,
-            description: info.description,
-            category: info.category,
-            language: info.language,
-            moduleDriver: info.moduleDriver,
-            version: info.version,
-            isEncrypted: info.isEncrypted,
-            isUnlocked: isUnlocked,
-            features: info.features,
-            isRightToLeft: info.isRightToLeft,
-            aboutMetadata: info.aboutMetadata
-        )
-    }
-
-    private func getOrCreateModule(name: String, handle: UnsafeMutableRawPointer) -> SwordModule {
-        if let cached = moduleCache[name] { return cached }
-        let mod = SwordModule(handle: handle, modulePath: modulePath)
-        moduleCache[name] = mod
-        return mod
+        if exact.count == 1 {
+            return exact[0].sourceURL
+        }
+        guard exact.isEmpty else { return nil }
+        let aliases = candidates.filter {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.name, name)
+        }
+        return aliases.count == 1 ? aliases[0].sourceURL : nil
     }
 
     /**
-     Merges libsword modules and Android custom-driver modules using Android's initials identity.
+     Validates that a resolved owner is one direct JSword config under this manager's `mods.d`.
+
+     - Parameters:
+       - url: Candidate exact config owner.
+       - modulePath: SWORD root whose config directory defines the authorization boundary.
+     - Returns: True only for a direct, lowercase-`.conf`, non-globals file under `mods.d`.
+     - Side effects: Standardizes lexical file URLs; no filesystem mutation occurs.
+     - Failure modes: Escaped, reserved, and differently suffixed paths return false.
+     */
+    private static func isOwnedModuleConfigURL(_ url: URL, modulePath: String) -> Bool {
+        let directory = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .standardizedFileURL
+        let candidate = url.standardizedFileURL
+        return candidate.deletingLastPathComponent() == directory
+            && candidate.lastPathComponent.hasSuffix(".conf")
+            && !candidate.lastPathComponent.hasPrefix("globals.")
+    }
+
+    /** Reads one module config using the parser and encoding policy shared with inventory. */
+    private static func parseModuleConfig(at url: URL) -> SwordModuleConfig? {
+        SwordModuleConfig.read(url: url)
+    }
+
+    /**
+     Builds one config-owned metadata row with its exact persisted encryption state.
+
+     - Parameters:
+       - config: Parsed config owner whose JSword metadata identifies this registration.
+       - isUnlocked: Fresh persisted/session unlock projection for this exact initials identity.
+     - Returns: Installed metadata with config-owned identity/order fields and native lock state.
+     - Side effects: None.
+     - Failure modes: Missing optional config values retain the parser's JSword defaults.
+     */
+    private static func moduleInfo(
+        config: SwordModuleConfig,
+        overridingUnlocked isUnlocked: Bool
+    ) -> ModuleInfo {
+        ModuleInfo(
+            name: config.name,
+            description: config.description,
+            category: config.category,
+            language: config.language,
+            moduleDriver: config.modDrv,
+            version: config.version,
+            isEncrypted: config.values["CipherKey"] != nil,
+            isUnlocked: isUnlocked,
+            features: config.features,
+            isRightToLeft: config.direction.caseInsensitiveCompare("RtoL") == .orderedSame,
+            aboutMetadata: config.aboutMetadata
+        )
+    }
+
+    /**
+     Builds and caches supported native inventory plus ownership-proven lookup indexes.
+
+     Pinned `SwordBookDriver` first filters supported configs through a `HashSet`, whose equality
+     requires the same concrete `AbstractBook` class plus exact category/full-name/initials, then
+     returns an arbitrary-order array to `Books.addBook`. iOS chooses the exact config-path minimum
+     as a deterministic metadata representative for each equality group, but it never assigns
+     content ownership to raw duplicate initials or exact full-name collisions because Android
+     exposes no stable winner for those map keys.
+
+     - Returns: One cached installed inventory, exact-initial/full-name indexes, and TreeSet alias
+       order. Subsequent lookups reuse the same immutable snapshot until unlock or `refresh()`.
+     - Side effects: On first access, reads installed configs, asks libsword for exact handles, and
+       populates the exact-keyed module cache only for raw-unique identities. No content is read.
+     - Failure modes: Custom, missing, cross-resolved, and unsupported configs are omitted from
+       native inventory. Duplicate identity detection occurs before those filters, preventing one
+       filtered config from making a surviving backend appear safely owned. Exact full-name
+       collisions remain individually readable by initials but fail closed through the name map.
+     - Important: All native work executes through the re-entrant `SwordRuntime` serialization gate.
+     - Complexity: O(N log N) once per cache lifetime; cached exact lookup is O(1).
+     */
+    private func nativeModuleRegistrySnapshot() -> NativeModuleRegistrySnapshot {
+        SwordRuntime.sync {
+            if let nativeRegistrySnapshotCache { return nativeRegistrySnapshotCache }
+            let configs = SwordModuleConfig.readAll(modulePath: modulePath)
+            var exactInitialCounts: [SwordJavaExactStringIdentity: Int] = [:]
+            for config in configs {
+                exactInitialCounts[SwordJavaExactStringIdentity(config.name), default: 0] += 1
+            }
+            let ambiguousExactInitials = Set(
+                exactInitialCounts.compactMap { identity, count in
+                    count > 1 ? identity : nil
+                }
+            )
+
+            let deterministicConfigs = configs.sorted {
+                Self.javaStringCompare($0.sourceURL?.path ?? "", $1.sourceURL?.path ?? "") < 0
+            }
+            var nativeHashIdentities: Set<NativeSwordBookHashIdentity> = []
+            var installedRegistrations: [InstalledModuleRegistration] = []
+            var resolvableRegistrations: [NativeModuleRegistration] = []
+            for config in deterministicConfigs {
+                guard !config.isAndroidCustomDriver,
+                      let configURL = config.sourceURL,
+                      let moduleHandle = SWMgr_getModuleByName(handle, config.name) else {
+                    continue
+                }
+                let nativeName = String(cString: SWModule_getName(moduleHandle))
+                guard SwordJavaStringIdentity.equals(nativeName, config.name) else {
+                    continue
+                }
+
+                let persistedCipherKey = config.values["CipherKey"]?.first
+                let isEncrypted = persistedCipherKey != nil
+                let isUnlocked = !isEncrypted || sessionUnlockedModuleNames.contains(
+                    SwordJavaExactStringIdentity(config.name)
+                ) || (persistedCipherKey?.isEmpty == false)
+                let info = Self.moduleInfo(
+                    config: config,
+                    overridingUnlocked: isUnlocked
+                )
+                guard info.isSupported else { continue }
+
+                let nativeHashIdentity = NativeSwordBookHashIdentity(
+                    bookClass: Self.nativeSwordBookClassIdentity(for: config),
+                    categoryOrdinal: Self.jswordCategoryOrdinal(info.category),
+                    initials: SwordJavaExactStringIdentity(info.name),
+                    fullName: SwordJavaExactStringIdentity(config.description)
+                )
+                guard nativeHashIdentities.insert(nativeHashIdentity).inserted else { continue }
+
+                let configuredAbbreviation = config.values["Abbreviation"]?.first
+                    .map(SwordJavaStringIdentity.trim)
+                let abbreviation = configuredAbbreviation.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? info.name
+                installedRegistrations.append(
+                    InstalledModuleRegistration(
+                        info: info,
+                        abbreviation: abbreviation,
+                        fullName: config.description
+                    )
+                )
+
+                let exactInitials = SwordJavaExactStringIdentity(config.name)
+                guard !ambiguousExactInitials.contains(exactInitials),
+                      let module = exactModule(
+                        name: config.name,
+                        handle: moduleHandle,
+                        config: config
+                      ) else {
+                    continue
+                }
+                resolvableRegistrations.append(
+                    NativeModuleRegistration(
+                        module: module,
+                        info: info,
+                        abbreviation: abbreviation,
+                        fullName: config.description,
+                        configURL: configURL
+                    )
+                )
+            }
+            let treeSetRegistrations = resolvableRegistrations.sorted {
+                Self.nativeBookSetComparison($0, $1) < 0
+            }
+            var exactInitials: [SwordJavaExactStringIdentity: NativeModuleRegistration] = [:]
+            var exactFullNameCounts: [SwordJavaExactStringIdentity: Int] = [:]
+            for registration in treeSetRegistrations {
+                exactInitials[SwordJavaExactStringIdentity(registration.info.name)] = registration
+                exactFullNameCounts[
+                    SwordJavaExactStringIdentity(registration.fullName),
+                    default: 0
+                ] += 1
+            }
+            var exactFullNames: [SwordJavaExactStringIdentity: NativeModuleRegistration] = [:]
+            for registration in treeSetRegistrations {
+                let identity = SwordJavaExactStringIdentity(registration.fullName)
+                if exactFullNameCounts[identity] == 1 {
+                    exactFullNames[identity] = registration
+                }
+            }
+            let snapshot = NativeModuleRegistrySnapshot(
+                installedRegistrations: installedRegistrations,
+                exactInitials: exactInitials,
+                exactFullNames: exactFullNames,
+                ambiguousExactFullNames: Set(
+                    exactFullNameCounts.compactMap { identity, count in
+                        count > 1 ? identity : nil
+                    }
+                ),
+                treeSetRegistrations: treeSetRegistrations
+            )
+            nativeRegistrySnapshotCache = snapshot
+            return snapshot
+        }
+    }
+
+    /**
+     Resolves one native registration with JSword `BookSet.getBook` precedence.
+
+     - Parameter name: Exact initials/full name or Java case-insensitive lookup token.
+     - Returns: Unique exact-initials match, unique exact-name match, then the first initials/name
+       alias in category/abbreviation/initials/name TreeSet order.
+     - Side effects: Builds the manager's registry cache on first access; later lookups read it only.
+     - Failure modes: Empty, unmatched, duplicate exact-initial, and duplicate exact-full-name map
+       identities return nil at their ambiguous tier. Locked books remain present because ownership
+       resolution is separate from content authorization.
+     - Important: Duplicate exact map keys are an intentional safety divergence for an
+       Android-runtime-undefined collision. `File.list` to `HashSet.toArray` to `Books.addBook`
+       provides no stable cross-platform winner, so iOS withholds only the ambiguous lookup tier
+       instead of risking a backend cross-read or mutating a non-owner config.
+     - Complexity: O(1) for exact tiers and O(N) only for the case-insensitive TreeSet scan.
+     */
+    private func nativeModuleRegistration(named name: String) -> NativeModuleRegistration? {
+        guard !name.isEmpty else { return nil }
+        let snapshot = nativeModuleRegistrySnapshot()
+        let exactName = SwordJavaExactStringIdentity(name)
+        if let exactInitials = snapshot.exactInitials[exactName] { return exactInitials }
+        if snapshot.ambiguousExactFullNames.contains(exactName) { return nil }
+        if let exactFullName = snapshot.exactFullNames[exactName] { return exactFullName }
+        return snapshot.treeSetRegistrations.first {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.info.name, name)
+                || SwordJavaStringIdentity.equalsIgnoreCase($0.fullName, name)
+        }
+    }
+
+    /**
+     Compares native registrations with JSword `AbstractBookMetaData.compareTo` fields.
+
+     - Parameters describe two supported native registrations.
+     - Returns: Negative, zero, or positive for category, abbreviation, initials, then full name.
+     - Side effects: Loads the pinned Android character table for abbreviation comparison.
+     - Failure modes: None; categories and strings have total deterministic orderings.
+     */
+    private static func nativeBookSetComparison(
+        _ lhs: NativeModuleRegistration,
+        _ rhs: NativeModuleRegistration
+    ) -> Int {
+        let categoryOrder = jswordCategoryOrdinal(lhs.info.category)
+            - jswordCategoryOrdinal(rhs.info.category)
+        if categoryOrder != 0 { return categoryOrder }
+
+        let abbreviationOrder = SwordJavaStringIdentity.compareIgnoreCase(
+            lhs.abbreviation,
+            rhs.abbreviation
+        )
+        if abbreviationOrder != 0 { return abbreviationOrder }
+
+        let initialsOrder = javaStringCompare(lhs.info.name, rhs.info.name)
+        if initialsOrder != 0 { return initialsOrder }
+        return javaStringCompare(lhs.fullName, rhs.fullName)
+    }
+
+    /**
+     Creates or returns one native module cache row keyed by exact Java initials.
+
+     - Parameters:
+       - name: Exact config initials used to request `handle` from libsword.
+       - handle: Native module handle owned by this manager.
+       - config: Already-parsed exact config owner from the one-pass registry scan.
+     - Returns: Stable wrapper only when its reported initials exactly match the requested identity.
+     - Side effects: Inserts one validated wrapper into the manager cache on first access.
+     - Failure modes: A cross-resolved native handle returns nil and is never cached under `name`.
+     */
+    private func exactModule(
+        name: String,
+        handle: UnsafeMutableRawPointer,
+        config: SwordModuleConfig
+    ) -> SwordModule? {
+        let identity = SwordJavaExactStringIdentity(name)
+        if let cached = moduleCache[identity] { return cached }
+        let module = SwordModule(
+            handle: handle,
+            modulePath: modulePath,
+            parsedConfig: config
+        )
+        guard SwordJavaExactStringIdentity(module.info.name) == identity else { return nil }
+        moduleCache[identity] = module
+        return module
+    }
+
+    /**
+     Merges libsword and Android custom-driver registrations through JSword TreeSet semantics.
 
      - Parameters:
        - swordModules: Modules enumerated by libsword.
        - customModules: Config-projected custom modules.
-     - Returns: De-duplicated modules sorted by localized initials.
-     - Side effects: none.
+     - Returns: Comparator-distinct modules sorted by pinned category, abbreviation, exact initials,
+       and exact full name. Same-initials books with different comparator fields remain installed.
+     - Side effects: Loads the pinned Android character table used by the sort comparator.
      - Failure modes: none.
      */
     private static func mergedInstalledModules(
-        swordModules: [ModuleInfo],
-        customModules: [ModuleInfo]
+        swordModules: [InstalledModuleRegistration],
+        customModules: [InstalledModuleRegistration]
     ) -> [ModuleInfo] {
-        var seen = Set<String>()
-        return (swordModules + customModules)
-            .filter { seen.insert($0.name).inserted }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        installedRegistrationOrderProjection(swordModules + customModules)
+            .map(\.info)
+    }
+
+    /**
+     Replays comparator-equal replacement for the combined installed registration sequence.
+
+     - Parameter registrations: Native and custom books in their captured add sequence.
+     - Returns: Surviving registrations in pinned TreeSet order, with a later comparator-equal owner
+       replacing the earlier.
+     - Side effects: Loads the pinned Android character table for abbreviation comparison.
+     - Failure modes: None; an empty sequence returns an empty projection.
+     - Complexity: O(N log N), using the exact comparator identity instead of repeated array scans.
+     */
+    private static func installedRegistrationOrderProjection(
+        _ registrations: [InstalledModuleRegistration]
+    ) -> [InstalledModuleRegistration] {
+        var surviving: [InstalledBookSetIdentity: InstalledModuleRegistration] = [:]
+        for registration in registrations {
+            surviving[installedBookSetIdentity(registration)] = registration
+        }
+        return surviving.values.sorted { installedModuleComparison($0, $1) < 0 }
+    }
+
+    /**
+     Builds the exact hash identity for a zero-valued JSword installed-book comparison.
+
+     - Parameter registration: Installed metadata and abbreviation to identify.
+     - Returns: Category, case-folded abbreviation, exact initials, and exact full-name fields.
+     - Side effects: Loads the pinned Android case-fold table for the abbreviation.
+     - Failure modes: None; every registration has a complete deterministic identity.
+     */
+    private static func installedBookSetIdentity(
+        _ registration: InstalledModuleRegistration
+    ) -> InstalledBookSetIdentity {
+        InstalledBookSetIdentity(
+            categoryOrdinal: jswordCategoryOrdinal(registration.info.category),
+            abbreviation: SwordJavaStringIdentity(registration.abbreviation),
+            initials: SwordJavaExactStringIdentity(registration.info.name),
+            fullName: SwordJavaExactStringIdentity(registration.fullName)
+        )
+    }
+
+    /**
+     Orders installed registrations through pinned JSword comparator fields.
+
+     - Parameters:
+       - lhs: First installed registration.
+       - rhs: Second installed registration.
+     - Returns: Negative, zero, or positive for category, abbreviation, initials, then full name.
+     - Side effects: Loads the pinned Android character table for abbreviation comparison.
+     - Failure modes: None; categories and strings have total deterministic orderings.
+     */
+    private static func installedModuleComparison(
+        _ lhs: InstalledModuleRegistration,
+        _ rhs: InstalledModuleRegistration
+    ) -> Int {
+        let categoryOrder = jswordCategoryOrdinal(lhs.info.category)
+            - jswordCategoryOrdinal(rhs.info.category)
+        if categoryOrder != 0 { return categoryOrder }
+
+        let abbreviationOrder = SwordJavaStringIdentity.compareIgnoreCase(
+            lhs.abbreviation,
+            rhs.abbreviation
+        )
+        if abbreviationOrder != 0 { return abbreviationOrder }
+
+        let initialsOrder = javaStringCompare(lhs.info.name, rhs.info.name)
+        if initialsOrder != 0 { return initialsOrder }
+        return javaStringCompare(lhs.fullName, rhs.fullName)
+    }
+
+    /**
+     Returns the pinned JSword `BookCategory.ordinal()` for one installed metadata row.
+
+     - Parameter category: iOS projection of one pinned JSword book category.
+     - Returns: Exact Android enum ordinal used as the first installed TreeSet comparator field.
+     - Side effects: None.
+     - Failure modes: None; the switch exhaustively maps every `ModuleCategory` case.
+     */
+    private static func jswordCategoryOrdinal(_ category: ModuleCategory) -> Int {
+        switch category {
+        case .bible: return 0
+        case .dictionary: return 1
+        case .commentary: return 2
+        case .dailyDevotion: return 3
+        case .glossary: return 4
+        case .questionable: return 5
+        case .essays: return 6
+        case .images: return 7
+        case .map: return 8
+        case .generalBook: return 9
+        case .unknown: return 10
+        case .addon: return 11
+        }
+    }
+
+    /**
+     Compares strings by Java `String.compareTo` unsigned UTF-16 semantics.
+
+     - Parameters describe the left and right exact Java strings.
+     - Returns: First code-unit difference, or the UTF-16 length difference when one is a prefix.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private static func javaStringCompare(_ lhs: String, _ rhs: String) -> Int {
+        let left = lhs.utf16
+        let right = rhs.utf16
+        for (leftUnit, rightUnit) in zip(left, right) where leftUnit != rightUnit {
+            return Int(leftUnit) - Int(rightUnit)
+        }
+        return left.count - right.count
     }
 
     /**
      Reads Android custom-driver configs that should be visible in installed-book inventory.
 
      - Parameter modulePath: SWORD module root containing `mods.d` and module payloads.
-     - Returns: Module metadata rows for readable custom-driver modules.
+     - Returns: Metadata plus parsed JSword abbreviations for readable custom-driver modules.
      - Side effects: Reads local config files and checks payload existence.
      - Failure modes: Unsupported or incomplete custom-driver rows are skipped.
      */
-    private static func androidCustomInstalledModules(modulePath: String) -> [ModuleInfo] {
+    private static func androidCustomInstalledRegistrations(
+        modulePath: String
+    ) -> [InstalledModuleRegistration] {
         SwordModuleConfig.readAll(modulePath: modulePath)
             .filter { $0.isAndroidCustomDriver && customModulePayloadExists($0, modulePath: modulePath) }
-            .map(\.moduleInfo)
+            .map { config in
+                let configuredAbbreviation = config.values["Abbreviation"]?.first
+                    .map(SwordJavaStringIdentity.trim)
+                return InstalledModuleRegistration(
+                    info: config.moduleInfo,
+                    abbreviation: configuredAbbreviation.flatMap { $0.isEmpty ? nil : $0 }
+                        ?? config.name,
+                    fullName: config.description
+                )
+            }
     }
 
     /**
      Reads iOS sidecar-installed MyBible package modules into Android-compatible inventory rows.
 
      - Parameter modulePath: SWORD module root containing the `mybible` sidecar package directory.
-     - Returns: Readable package modules sorted by initials.
-     - Side effects: Reads `module.json` sidecars and checks extracted package payload files.
-     - Failure modes: Missing directories, malformed sidecars, and sidecars without readable payloads
-       are skipped.
+     - Returns: Database-derived package modules admitted in deterministic discovery order and then
+       projected through pinned JSword installed-TreeSet order.
+     - Side effects: Reads `module.json` sidecars and opens each immediate SQLite/MyBible payload
+       read-only before loading the pinned Android comparison table.
+     - Failure modes: Missing directories, malformed sidecars/databases, unsupported schemas, and a
+       later package whose initials resolve to an already admitted package are skipped.
      */
     static func myBiblePackageInstalledModules(modulePath: String) -> [ModuleInfo] {
+        installedRegistrationOrderProjection(
+            admittedMyBiblePackageRegistrations(
+                myBiblePackageRegistrations(modulePath: modulePath),
+                after: []
+            )
+        ).map(\.info)
+    }
+
+    /**
+     Reads payload-owned MyBible registrations from every valid iOS package sidecar directory.
+
+     - Parameter modulePath: SWORD root containing the `mybible` package directory.
+     - Returns: Registrations in deterministic exact UTF-16 directory and payload-path order.
+     - Side effects: Enumerates sidecars and opens/closes candidate SQLite databases read-only.
+     - Failure modes: Missing/unreadable directories, malformed sidecars, and unsupported payloads
+       are skipped independently.
+     */
+    private static func myBiblePackageRegistrations(
+        modulePath: String
+    ) -> [InstalledModuleRegistration] {
         let fm = FileManager.default
         let installDirectory = URL(fileURLWithPath: modulePath, isDirectory: true)
             .appendingPathComponent("mybible", isDirectory: true)
         guard let entries = try? fm.contentsOfDirectory(
             at: installDirectory,
             includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            options: []
         ) else {
             return []
         }
 
-        return entries.compactMap { url in
+        return entries.sorted {
+            javaStringCompare($0.path, $1.path) < 0
+        }.flatMap { url -> [InstalledModuleRegistration] in
             guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
-                return nil
+                return []
             }
             let metadataURL = url.appendingPathComponent("module.json")
             guard let data = try? Data(contentsOf: metadataURL),
-                  let metadata = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
-                  metadata.hasReadablePayload(in: url) else {
-                return nil
+                  let metadata = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data) else {
+                return []
             }
-            return metadata.moduleInfo
+            return InstalledMyBibleBookReader.registrations(in: url, sidecar: metadata).map {
+                InstalledModuleRegistration(
+                    info: $0.info,
+                    abbreviation: $0.abbreviation,
+                    fullName: $0.info.description
+                )
+            }
         }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /**
+     Applies Android's pre-add `Books.getBook(metadata.initials)` gate to manual MyBible books.
+
+     Native/restored config books are supplied first because Android registers them before scanning
+     manually installed MyBible databases. Each accepted package immediately participates in exact
+     initials/full-name and case-insensitive TreeSet alias lookup for the next candidate. Android's
+     filesystem discovery winner is runtime-dependent; iOS uses exact path order but preserves the
+     deterministic observable contract that at most the first matching identity is admitted.
+
+     - Parameters:
+       - candidates: Database-derived registrations in deterministic payload discovery order.
+       - existing: Books registered before manual MyBible discovery.
+     - Returns: Candidate registrations whose initials do not resolve through the current BookSet.
+     - Side effects: Loads the pinned Android case table for alias comparison.
+     - Failure modes: Colliding candidates are skipped; an empty sequence returns an empty array.
+     - Complexity: O(N) expected time using exact and pinned case-fold identity indexes, avoiding a
+       repeated full config/database projection or BookSet scan for each module.
+     */
+    private static func admittedMyBiblePackageRegistrations(
+        _ candidates: [InstalledModuleRegistration],
+        after existing: [InstalledModuleRegistration]
+    ) -> [InstalledModuleRegistration] {
+        var exactInitials = Set(existing.map { SwordJavaExactStringIdentity($0.info.name) })
+        var exactFullNames = Set(existing.map { SwordJavaExactStringIdentity($0.fullName) })
+        var foldedInitials = Set(existing.map { SwordJavaStringIdentity($0.info.name) })
+        var foldedFullNames = Set(existing.map { SwordJavaStringIdentity($0.fullName) })
+        var admitted: [InstalledModuleRegistration] = []
+        for candidate in candidates {
+            let lookup = candidate.info.name
+            let exactLookup = SwordJavaExactStringIdentity(lookup)
+            let hasExactMatch = exactInitials.contains(exactLookup)
+                || exactFullNames.contains(exactLookup)
+            let foldedLookup = SwordJavaStringIdentity(lookup)
+            let hasAliasMatch = !hasExactMatch && (
+                foldedInitials.contains(foldedLookup) || foldedFullNames.contains(foldedLookup)
+            )
+            guard !hasExactMatch, !hasAliasMatch else { continue }
+
+            exactInitials.insert(SwordJavaExactStringIdentity(candidate.info.name))
+            exactFullNames.insert(SwordJavaExactStringIdentity(candidate.fullName))
+            foldedInitials.insert(SwordJavaStringIdentity(candidate.info.name))
+            foldedFullNames.insert(SwordJavaStringIdentity(candidate.fullName))
+            admitted.append(candidate)
+        }
+        return admitted
     }
 
     /**
      Reads Android add-on modules that provide reading-plan files.
 
      Android discovers add-on plans from repeated `AndBibleProvidesReadingPlan` config values and
-     resolves each file relative to the module's adjusted `DataPath` location. iOS mirrors that
-     behavior by using the config `DataPath` directory as the provider file base and by skipping
-     missing or unsafe file references.
+     resolves each file relative to the module's adjusted `DataPath` location. Providers are
+     admitted only from `And Bible` books whose minimum version is compatible, then traversed in
+     the installed TreeSet order that defines Android's duplicate-plan ownership.
 
-     - Parameter modulePath: SWORD module root containing `mods.d` and module payloads.
-     - Returns: Readable add-on reading-plan providers in config order, de-duplicated by plan code.
+     - Parameters:
+       - modulePath: SWORD module root containing `mods.d` and module payloads.
+       - applicationVersionNumber: Android version-code compatibility implemented by this iOS build.
+         Nil uses the pinned current-stable compatibility level; tests may inject an exact boundary.
+     - Returns: Readable admitted providers in first-plan TreeSet order, with a later TreeSet book
+       replacing an earlier provider that declares the same plan code.
      - Side effects: Reads local config files and checks provider file metadata.
      - Failure modes: Missing configs, unreadable files, and escaped paths are skipped.
      */
     public static func readingPlanProviders(
-        modulePath: String = SwordManager.defaultModulePath()
+        modulePath: String = SwordManager.defaultModulePath(),
+        applicationVersionNumber: Int? = nil
     ) -> [SwordReadingPlanProvider] {
         var providersByCode: [String: SwordReadingPlanProvider] = [:]
         var orderedCodes: [String] = []
+        let compatibleVersion = applicationVersionNumber
+            ?? androidCompatibilityVersionNumber
 
-        for config in SwordModuleConfig.readAll(modulePath: modulePath) {
-            let planFileNames = config.values["andbibleprovidesreadingplan"] ?? []
+        let configs = addonConfigsInInstalledOrder(
+            SwordModuleConfig.readAll(modulePath: modulePath),
+            applicationVersionNumber: compatibleVersion
+        )
+        for config in configs {
+            let planFileNames = config.values["AndBibleProvidesReadingPlan"] ?? []
             for fileName in planFileNames {
                 guard let fileURL = readingPlanProviderFileURL(
                     fileName: fileName,
@@ -698,11 +1302,11 @@ public final class SwordManager: @unchecked Sendable {
                 let provider = SwordReadingPlanProvider(
                     planCode: planCode,
                     name: displayName(for: config),
-                    description: config.values["shortpromo"]?.first?
+                    description: config.values["ShortPromo"]?.first?
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                     fileURL: fileURL,
-                    versification: nonEmpty(config.values["versification"]?.first),
-                    isDateBased: config.values["andbiblereadingplandatebased"]?.first?
+                    versification: nonEmpty(config.values["Versification"]?.first),
+                    isDateBased: config.values["AndBibleReadingPlanDateBased"]?.first?
                         .caseInsensitiveCompare("True") == .orderedSame
                 )
 
@@ -714,6 +1318,132 @@ public final class SwordManager: @unchecked Sendable {
         }
 
         return orderedCodes.compactMap { providersByCode[$0] }
+    }
+
+    /**
+     Android current-stable version code whose add-on feature contract this iOS build implements.
+
+     Pinned And Bible commit `00b4ea24` declares version code 1115. This deliberately does not read
+     `CFBundleVersion`: iOS local builds use `1`, while release automation uses dotted UTC stamps, so
+     neither value represents Android add-on compatibility. Advancing this constant requires parity
+     review of add-on features introduced after the pinned Android version.
+     */
+    private static let androidCompatibilityVersionNumber = 1115
+
+    /**
+     Filters and orders configs through Android's `AndBibleAddonFilter` plus installed TreeSet.
+
+     - Parameters:
+       - configs: Parsed installed configs in the captured platform enumeration sequence.
+       - applicationVersionNumber: Android version-code compatibility supported by this build.
+     - Returns: Comparator-distinct admitted add-on configs in pinned installed-book order.
+     - Side effects: Loads the pinned Android character table for category and abbreviation matching.
+     - Failure modes: Missing minimum version defaults to zero; malformed/overflowing minimum values
+       fail closed instead of reproducing Android's process-level `NumberFormatException`.
+     */
+    private static func addonConfigsInInstalledOrder(
+        _ configs: [SwordModuleConfig],
+        applicationVersionNumber: Int
+    ) -> [SwordModuleConfig] {
+        let deterministicConfigs = configs.sorted {
+            javaStringCompare($0.sourceURL?.path ?? "", $1.sourceURL?.path ?? "") < 0
+        }
+        var nativeBooks: Set<NativeSwordBookHashIdentity> = []
+        var surviving: [InstalledBookSetIdentity: (SwordModuleConfig, InstalledModuleRegistration)] = [:]
+        for config in deterministicConfigs where addonConfigIsAdmitted(
+            config,
+            applicationVersionNumber: applicationVersionNumber
+        ) {
+            let registration = installedRegistration(for: config)
+            let nativeIdentity = NativeSwordBookHashIdentity(
+                bookClass: nativeSwordBookClassIdentity(for: config),
+                categoryOrdinal: jswordCategoryOrdinal(registration.info.category),
+                initials: SwordJavaExactStringIdentity(registration.info.name),
+                fullName: SwordJavaExactStringIdentity(registration.fullName)
+            )
+            guard nativeBooks.insert(nativeIdentity).inserted else { continue }
+            surviving[installedBookSetIdentity(registration)] = (config, registration)
+        }
+        return surviving.values.sorted {
+            installedModuleComparison($0.1, $1.1) < 0
+        }.map(\.0)
+    }
+
+    /**
+     Projects one supported native config to the concrete class created by pinned JSword `BookType`.
+
+     JSword selects the `AbstractBook` subclass from the registered driver/book-type contract rather
+     than from the configured category alone. Native text, commentary, and raw-file drivers create
+     `SwordBook`; generic-book creates `SwordGenBook`; lexical data creates `SwordDictionary` except
+     for its daily-devotional specialization.
+
+     - Parameter config: Parsed config already proven supported by the calling registry/admission
+       gate.
+     - Returns: Stable discriminator matching the concrete JSword class used by `AbstractBook.equals`.
+     - Side effects: None.
+     - Failure modes: None. Callers admit only pinned native drivers; the remaining supported native
+       branch is lexical data and therefore maps to `SwordDictionary`.
+     */
+    private static func nativeSwordBookClassIdentity(
+        for config: SwordModuleConfig
+    ) -> NativeSwordBookClassIdentity {
+        let info = config.moduleInfo
+        if info.isJSwordSwordBook {
+            return .swordBook
+        }
+
+        let driver = config.modDrv
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if driver == "rawgenbook" {
+            return .swordGenBook
+        }
+        if config.category == .dailyDevotion {
+            return .swordDailyDevotion
+        }
+        return .swordDictionary
+    }
+
+    /**
+     Applies Android's add-on category and minimum-version admission rule to one parsed config.
+
+     - Parameters:
+       - config: Candidate installed config.
+       - applicationVersionNumber: Android compatibility version implemented by this iOS build.
+     - Returns: True for `And Bible` category and a missing/parseable compatible minimum version.
+     - Side effects: Loads the pinned Android character table through category resolution.
+     - Failure modes: Malformed and overflowing version values fail closed.
+     */
+    private static func addonConfigIsAdmitted(
+        _ config: SwordModuleConfig,
+        applicationVersionNumber: Int
+    ) -> Bool {
+        guard config.category == .addon, config.moduleInfo.isSupported else { return false }
+        let rawMinimum = config.values["AndBibleMinimumVersion"]?.first ?? "0"
+        guard let minimumVersion = Int64(rawMinimum) else { return false }
+        return minimumVersion <= Int64(applicationVersionNumber)
+    }
+
+    /**
+     Projects one parsed config into the comparator fields used by JSword's installed TreeSet.
+
+     - Parameter config: Parsed installed book metadata.
+     - Returns: Registration with Java-trimmed abbreviation fallback and exact identity/name fields.
+     - Side effects: None.
+     - Failure modes: Missing or Java-empty abbreviation falls back to exact initials.
+     */
+    private static func installedRegistration(
+        for config: SwordModuleConfig
+    ) -> InstalledModuleRegistration {
+        let abbreviation = config.values["Abbreviation"]?.first
+            .map(SwordJavaStringIdentity.trim)
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? config.name
+        return InstalledModuleRegistration(
+            info: config.moduleInfo,
+            abbreviation: abbreviation,
+            fullName: config.description
+        )
     }
 
     /**
@@ -731,7 +1461,7 @@ public final class SwordManager: @unchecked Sendable {
 
         switch driver {
         case "mybiblebible", "mybiblecommentary", "mybibledictionary":
-            if config.values["andbibledbfile"]?.first != nil {
+            if config.values["AndBibleDbFile"]?.first != nil {
                 return androidDatabaseFileExists(config, modulePath: modulePath)
             }
             guard !config.dataPath.isEmpty else { return false }
@@ -742,7 +1472,7 @@ public final class SwordManager: @unchecked Sendable {
                 isDirectory: false
             )
         case "myswordbible", "myswordcommentary", "mysworddictionary":
-            if config.values["andbibledbfile"]?.first != nil {
+            if config.values["AndBibleDbFile"]?.first != nil {
                 return androidDatabaseFileExists(config, modulePath: modulePath)
             }
             guard !config.dataPath.isEmpty else { return false }
@@ -758,12 +1488,12 @@ public final class SwordManager: @unchecked Sendable {
             guard !config.dataPath.isEmpty else { return false }
             return readablePath(config.dataPath, modulePath: modulePath, isDirectory: true)
         default:
-            if config.values["andbiblemyswordmodule"]?.isEmpty == false ||
-                config.values["andbibleeswordmodule"]?.isEmpty == false {
+            if config.values["AndBibleMySwordModule"]?.isEmpty == false ||
+                config.values["AndBibleESwordModule"]?.isEmpty == false {
                 return androidDatabaseFileExists(config, modulePath: modulePath)
             }
-            if config.values["andbibleepubmodule"]?.isEmpty == false,
-               let epubDir = config.values["andbibleepubdir"]?.first {
+            if config.values["AndBibleEpubModule"]?.isEmpty == false,
+               let epubDir = config.values["AndBibleEpubDir"]?.first {
                 return readablePath(epubDir, modulePath: modulePath, isDirectory: true)
             }
             return false
@@ -781,7 +1511,7 @@ public final class SwordManager: @unchecked Sendable {
      - Failure modes: Missing or unsafe paths return `false`.
      */
     private static func androidDatabaseFileExists(_ config: SwordModuleConfig, modulePath: String) -> Bool {
-        guard let dbFile = config.values["andbibledbfile"]?.first else { return false }
+        guard let dbFile = config.values["AndBibleDbFile"]?.first else { return false }
         return readablePath(dbFile, modulePath: modulePath, isDirectory: false)
     }
 
@@ -1026,6 +1756,7 @@ public final class SwordManager: @unchecked Sendable {
      */
     public func refresh() {
         SwordRuntime.sync {
+            nativeRegistrySnapshotCache = nil
             moduleCache.removeAll()
         }
         // Recreate is the simplest way to refresh libsword's module list.

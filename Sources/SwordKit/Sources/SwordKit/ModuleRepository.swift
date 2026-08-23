@@ -2236,8 +2236,8 @@ public final class ModuleRepository: @unchecked Sendable {
     ) throws -> ModuleStoreInstalledLayout {
         guard let parsedConfig = SwordModuleConfig.parse(configurationContent),
               Self.moduleConfigSectionNames(in: configurationContent) == [parsedConfig.name],
-              parsedConfig.values["moddrv"]?.count == 1,
-              parsedConfig.values["datapath"]?.count == 1 else {
+              parsedConfig.values["ModDrv"]?.count == 1,
+              parsedConfig.values["DataPath"]?.count == 1 else {
             throw ModuleRepositoryError.invalidZip(
                 "Package config for \(moduleName) must contain one module section, ModDrv, and DataPath"
             )

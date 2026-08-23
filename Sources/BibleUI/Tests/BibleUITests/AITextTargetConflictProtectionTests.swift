@@ -3,13 +3,15 @@ import SwiftData
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
+@testable import BibleView
+@testable import SwordKit
 
 /**
  Protects production AI text transformation reads and atomic writeback for Bible and generic
  bookmark notes, StudyPad text entries, and My Documents pages.
  */
 @MainActor
-final class AITextTargetConflictProtectionTests: XCTestCase {
+final class AITextTargetConflictProtectionTests: BibleUISwordFixtureTestCase {
     /**
      Verifies every production target reads exact source content and preserves its durable type.
 
@@ -182,6 +184,81 @@ final class AITextTargetConflictProtectionTests: XCTestCase {
         XCTAssertEqual(
             fixture.bookmarkService.genericBookmark(id: fixture.genericBookmarkID)?.notes?.notes,
             "Generic original"
+        )
+    }
+
+    /**
+     Reauthorizes My Documents AI reads and writes against the current combined registry.
+
+     - Setup: Reads and writes one unowned local page, then publishes a native Bible whose full name
+       case-tier owns the local initials while the same text-target backing remains retained.
+     - Expected result: Unowned access succeeds; after ownership transfer the backing returns nil/
+       `targetNotFound` and leaves the previously persisted body unchanged.
+     - Failure meaning: A retained note-editor/AI target can disclose or overwrite a shadowed local
+       page after installed ownership changes, bypassing reader load authorization.
+     - Side effects: Mutates one in-memory My Documents graph and writes one inherited SWORD fixture.
+     */
+    func testMyDocumentTargetRejectsNativeFullNameCaseOwnerWithoutReadOrWrite() async throws {
+        let fixture = try makeFixture()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        controller.myDocumentStore = fixture.myDocumentStore
+        let backing = BibleUIAITextTargetBacking(
+            bookmarkService: fixture.bookmarkService,
+            myDocumentStore: fixture.myDocumentStore,
+            isMyDocumentPageAuthorized: { [weak controller] id in
+                controller?.isAuthorizedMyDocumentPage(id: id) == true
+            }
+        )
+        let target = AITextTarget.myDocumentPage(fixture.pageID)
+        let originalValue = try await backing.read(target)
+        let original = try XCTUnwrap(originalValue)
+        let unownedReplacement = AITextTargetValue(
+            content: "Unowned write",
+            contentType: original.contentType
+        )
+        let unownedResult = try await backing.compareAndWrite(
+            unownedReplacement,
+            to: target,
+            replacing: original
+        )
+        XCTAssertEqual(unownedResult, .written)
+        XCTAssertEqual(
+            fixture.myDocumentStore.page(pageId: fixture.pageID)?.pageContent?.content,
+            "Unowned write"
+        )
+
+        try seedBibleAliasModule(
+            named: "NativeAIPageOwner",
+            description: "mydoc",
+            in: modulePath
+        )
+        let moduleCacheURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/modules-conf.cache")
+        if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
+            try FileManager.default.removeItem(at: moduleCacheURL)
+        }
+        controller.refreshInstalledModules()
+        XCTAssertEqual(
+            controller.registeredInstalledModuleInfo(named: "MYDOC")?.name,
+            "NativeAIPageOwner"
+        )
+
+        let shadowedRead = try await backing.read(target)
+        XCTAssertNil(shadowedRead)
+        let shadowedWrite = try await backing.compareAndWrite(
+            AITextTargetValue(content: "Shadowed write", contentType: .osis),
+            to: target,
+            replacing: unownedReplacement
+        )
+        XCTAssertEqual(shadowedWrite, .targetNotFound)
+        XCTAssertEqual(
+            fixture.myDocumentStore.page(pageId: fixture.pageID)?.pageContent?.content,
+            "Unowned write"
         )
     }
 

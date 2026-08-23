@@ -114,6 +114,250 @@ final class MyDocumentManagementTests: XCTestCase {
     }
 
     /**
+     Applies the live global-registry predicate to explicit and generated creation identities.
+
+     - Setup: An explicit token is owned, and the first two generated candidates are reported owned.
+     - Expected: Explicit creation fails without mutation; generated creation selects the first
+       globally unowned suffix.
+     - Failure meaning: UI/AI creation can persist a My Documents row that Android's global
+       `Books.getBook(candidate.initials)` would reject.
+     - Side effects: Mutates only the in-memory draft session after the successful generated case.
+     */
+    func testCreationUsesLiveGlobalRegistryAvailabilityForEveryCandidate() throws {
+        var session = MyDocumentManagementSession(documents: [])
+
+        XCTAssertThrowsError(try session.createDocument(
+            name: "Explicit",
+            isInitialsUnavailable: { $0 == "Native Full Name" },
+            initials: "Native Full Name"
+        )) { error in
+            XCTAssertEqual(
+                error as? MyDocumentManagementError,
+                .duplicateInitials("Native Full Name")
+            )
+        }
+        XCTAssertTrue(session.documents.isEmpty)
+
+        let documentID = try session.createDocument(
+            name: "Bible Study",
+            isInitialsUnavailable: {
+                ["MyDoc_BibleStudy", "MyDoc_BibleStudy_1"].contains($0)
+            }
+        )
+
+        XCTAssertEqual(session.document(id: documentID)?.initials, "MyDoc_BibleStudy_2")
+    }
+
+    /**
+     Replays pending My Documents through Android's full `Books.getBook` admission tiers.
+
+     - Setup: Creates a `Foo` draft before `foo`, then creates a prior document whose full name is
+       the unsuffixed initials generated for `Bible Study`.
+     - Expected: Case-insensitive initials ownership and exact full-name ownership each force the
+       next Android suffix instead of leaving an unregistrable pending draft.
+     - Failure meaning: iOS deferred creation diverges from Android's immediate registration and
+       can publish a document that the global Books registry suppresses.
+     - Side effects: Mutates only an in-memory management session.
+     */
+    func testCreationReplaysPendingInitialsAndFullNameRegistryOwnership() throws {
+        var caseSession = MyDocumentManagementSession(documents: [])
+        let uppercaseID = try caseSession.createDocument(name: "Foo")
+        let lowercaseID = try caseSession.createDocument(name: "foo")
+
+        XCTAssertEqual(caseSession.document(id: uppercaseID)?.initials, "MyDoc_Foo")
+        XCTAssertEqual(caseSession.document(id: lowercaseID)?.initials, "MyDoc_foo_1")
+
+        var fullNameSession = MyDocumentManagementSession(documents: [])
+        _ = try fullNameSession.createDocument(
+            name: "MyDoc_BibleStudy",
+            initials: "PriorOwner"
+        )
+        let generatedID = try fullNameSession.createDocument(name: "Bible Study")
+
+        XCTAssertEqual(
+            fullNameSession.document(id: generatedID)?.initials,
+            "MyDoc_BibleStudy_1"
+        )
+    }
+
+    /**
+     Revalidates pending My Documents registry ownership immediately before transactional Save.
+
+     - Setup: Persists one document, creates a second document with explicit initials, then renames
+       the earlier draft so its full name owns the second document's initials.
+     - Expected: Save rejects the later registration and leaves both the rename and insertion out
+       of persistent storage.
+     - Failure meaning: A draft sequence can pass creation-time checks but publish an Android-hidden
+       book after a pending rename changes global identity ownership.
+     - Side effects: Writes the baseline document to an in-memory SwiftData container; the rejected
+       save performs no persistent mutation.
+     */
+    @MainActor
+    func testSaveReplaysPendingFullNameOwnershipWithoutPartialPersistence() throws {
+        let container = try makeContainer()
+        let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
+        var session = try store.loadSession()
+        let priorID = try session.createDocument(name: "Original", initials: "PriorOwner")
+        try store.save(&session)
+
+        _ = try session.createDocument(name: "Candidate", initials: "FutureOwner")
+        try session.renameDocument(id: priorID, name: "FutureOwner")
+
+        XCTAssertThrowsError(try store.save(&session)) { error in
+            XCTAssertEqual(
+                error as? MyDocumentManagementError,
+                .duplicateInitials("FutureOwner")
+            )
+        }
+
+        let persisted = try store.loadSession().documents
+        XCTAssertEqual(persisted.map(\.initials), ["PriorOwner"])
+        XCTAssertEqual(persisted.map(\.name), ["Original"])
+    }
+
+    /**
+     Grandfathers an unchanged MyDocument registration omitted by authoritative restore replay.
+
+     - Setup: Persists a restore-shaped graph where the first row's full name case-folds to the
+       second row's initials, then edits only the suppressed row's description in a new session.
+     - Expected result: Save retains both rows and publishes the unrelated description because the
+       same exact baseline owner still causes the same Android registration omission.
+     - Failure meaning: An authoritative restore can make a hidden-but-valid row permanently
+       uneditable, even when the user does not introduce or change an identity collision.
+     - Side effects: Writes and edits two rows in an in-memory SwiftData container.
+     */
+    @MainActor
+    func testSaveAllowsUnrelatedEditToRestoreRetainedSuppressedDocument() throws {
+        let container = try makeContainer()
+        let restoreContext = ModelContext(container)
+        let owner = MyDocument(
+            name: "Retained Identity",
+            initials: "RestoreOwner",
+            orderNumber: 0
+        )
+        let suppressed = MyDocument(
+            name: "Suppressed row",
+            initials: "retained identity",
+            orderNumber: 1
+        )
+        restoreContext.insert(owner)
+        restoreContext.insert(suppressed)
+        try restoreContext.save()
+
+        let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
+        var session = try store.loadSession()
+        try session.setDocumentDescription(
+            id: suppressed.id,
+            description: "Edited after restore"
+        )
+
+        try store.save(&session)
+
+        let persisted = try store.loadSession().documents
+        XCTAssertEqual(persisted.count, 2)
+        XCTAssertEqual(
+            persisted.first(where: { $0.id == suppressed.id })?.documentDescription,
+            "Edited after restore"
+        )
+    }
+
+    /**
+     Preserves Java-exact identity for canonically equivalent My Documents initials.
+
+     - Setup: Creates and saves two documents whose initials are composed/decomposed UTF-16
+       spellings of the same visible text, and separately supplies the composed spelling through
+       the legacy reservation set while creating the decomposed spelling.
+     - Expected result: Android-distinct spellings coexist and persist, while a byte-for-byte UTF-16
+       duplicate remains rejected.
+     - Failure meaning: Swift `String`/`Set` canonical equivalence is still imposing a stricter
+       creation rule than JSword `Books.getBook` and hiding a registration Android accepts.
+     - Side effects: Writes only to an in-memory SwiftData container.
+     */
+    @MainActor
+    func testCreationAndSaveKeepCanonicalEquivalentJavaIdentitiesDistinct() throws {
+        let composed = "Local-Caf\u{00E9}"
+        let decomposed = "Local-Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+
+        var reservedSession = MyDocumentManagementSession(documents: [])
+        let reservedID = try reservedSession.createDocument(
+            name: "Reserved distinction",
+            reservedInitials: [composed],
+            initials: decomposed
+        )
+        XCTAssertEqual(
+            Array(try XCTUnwrap(reservedSession.document(id: reservedID)).initials.utf16),
+            Array(decomposed.utf16)
+        )
+
+        let container = try makeContainer()
+        let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
+        var session = try store.loadSession()
+        _ = try session.createDocument(name: "Composed", initials: composed)
+        _ = try session.createDocument(name: "Decomposed", initials: decomposed)
+        XCTAssertThrowsError(
+            try session.createDocument(name: "Duplicate", initials: composed)
+        ) { error in
+            XCTAssertEqual(
+                error as? MyDocumentManagementError,
+                .duplicateInitials(composed)
+            )
+        }
+
+        try store.save(&session)
+
+        let persisted = try store.loadSession().documents.map(\.initials)
+        XCTAssertEqual(persisted.count, 2)
+        XCTAssertTrue(persisted.contains { Array($0.utf16) == Array(composed.utf16) })
+        XCTAssertTrue(persisted.contains { Array($0.utf16) == Array(decomposed.utf16) })
+    }
+
+    /**
+     Saves an unrelated edit when one restored document has Java-distinct canonical page keys.
+
+     - Setup: Persists two pages whose composed/decomposed keys are Swift-equal but have different
+       UTF-16 sequences, then changes only the parent document description in a loaded session.
+     - Expected result: Save accepts the Android-BINARY-distinct keys and preserves both spellings.
+     - Failure meaning: Management validation imposed Swift canonical equivalence on a legal
+       imported graph and made every later unrelated edit unsavable.
+     - Side effects: Writes and reloads one in-memory SwiftData document graph.
+     */
+    @MainActor
+    func testSavePreservesRestoredJavaDistinctCanonicalPageKeys() throws {
+        let container = try makeContainer()
+        let context = ModelContext(container)
+        let composed = "Page-Caf\u{00E9}"
+        let decomposed = "Page-Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+
+        let document = MyDocument(name: "Imported", initials: "ImportedPages")
+        let composedPage = MyDocumentPage(id: UUID(), title: "Composed", pageKey: composed)
+        let decomposedPage = MyDocumentPage(id: UUID(), title: "Decomposed", pageKey: decomposed)
+        composedPage.document = document
+        decomposedPage.document = document
+        document.pages = [composedPage, decomposedPage]
+        context.insert(document)
+        context.insert(composedPage)
+        context.insert(decomposedPage)
+        try context.save()
+
+        let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
+        var session = try store.loadSession()
+        try session.setDocumentDescription(id: document.id, description: "Unrelated edit")
+        try store.save(&session)
+
+        let persisted = try store.loadSession().documents
+        let restored = try XCTUnwrap(persisted.first { $0.id == document.id })
+        XCTAssertEqual(restored.documentDescription, "Unrelated edit")
+        XCTAssertEqual(Set(restored.pages.map { Array($0.pageKey.utf16) }), Set([
+            Array(composed.utf16),
+            Array(decomposed.utf16),
+        ]))
+    }
+
+    /**
      Verifies import sorting, title rules, type inference, raw fidelity, and export filenames.
      */
     func testImportAndExportRoundTripMatchesAndroidFilenameContract() throws {

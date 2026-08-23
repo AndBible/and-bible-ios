@@ -478,6 +478,14 @@ enum SwordHTMLVisibleTextProjection {
         var bufferedUTF16Count = initialBufferedUTF16Count
         var completedRuns: [Int] = []
 
+        /**
+         Commits the captured non-PCDATA buffer before the scanner changes states.
+
+         - Returns: Nothing.
+         - Side effects: Appends a positive `bufferedUTF16Count` to `completedRuns`, then resets the
+           captured count to zero; an empty buffer only resets the count.
+         - Failure modes: None; the captured integer state is mutated deterministically.
+         */
         func completedBufferRun() {
             if bufferedUTF16Count > 0 { completedRuns.append(bufferedUTF16Count) }
             bufferedUTF16Count = 0

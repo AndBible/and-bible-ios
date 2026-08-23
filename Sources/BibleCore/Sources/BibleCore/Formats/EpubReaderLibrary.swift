@@ -17,16 +17,47 @@ extension EpubReader {
      - Throws: Same failures as the public install API.
      */
     static func install(epubURL: URL, libraryRootURL: URL) throws -> String {
+        try install(
+            epubURL: epubURL,
+            libraryRootURL: libraryRootURL,
+            admittingCandidateWith: { _ in }
+        )
+    }
+
+    /**
+     Installs an EPUB under one lock hold that includes complete-registry admission.
+
+     - Parameters:
+       - epubURL: Source archive URL.
+       - libraryRootURL: Destination library root.
+       - admission: Live validator for the exact identifier and generated Android initials. It runs
+         before the candidate creates a library root, generation container, or staging directory.
+     - Returns: Stable identifier of the atomically published EPUB.
+     - Side effects: After admission, creates the library/staging paths, extracts and indexes the
+       archive, and atomically publishes its generation pointer.
+     - Throws: Propagates admission, archive, indexing, identity, and filesystem errors. Admission
+       failure leaves no candidate artifacts.
+     - Important: The library mutation lock spans admission through publication, so concurrent
+       imports cannot both validate against the same earlier EPUB registry state.
+     */
+    static func install(
+        epubURL: URL,
+        libraryRootURL: URL,
+        admittingCandidateWith admission: InstallAdmission
+    ) throws -> String {
         libraryMutationLock.lock()
         defer { libraryMutationLock.unlock() }
 
         let fileManager = FileManager.default
-        try fileManager.createDirectory(at: libraryRootURL, withIntermediateDirectories: true)
         // Apple filesystems can expose a decomposed path component for an NFC provider filename.
         // Normalize once so persisted source identity and Android's character-wise regex stay stable.
         let sourceFileName = epubURL.lastPathComponent.precomposedStringWithCanonicalMapping
-        let identifier = stableIdentifier(forSourceFileName: sourceFileName)
-        let bookInitials = initials(forDisplayFileName: sourceFileName)
+        let candidate = installCandidate(forEpubURL: epubURL)
+        let identifier = candidate.identifier
+        let bookInitials = candidate.initials
+        try admission(candidate)
+
+        try fileManager.createDirectory(at: libraryRootURL, withIntermediateDirectories: true)
         if let conflict = installedEpubs(libraryRootURL: libraryRootURL).first(where: {
             $0.identifier != identifier && $0.initials == bookInitials
         }) {
@@ -133,11 +164,26 @@ extension EpubReader {
         return identifier
     }
 
-    /// Lists installed EPUB metadata under an explicit library root.
-    static func installedEpubs(libraryRootURL: URL) -> [EpubInfo] {
+    /**
+     Lists installed EPUB metadata under an explicit library root in native enumeration order.
+
+     Android registers raw EPUB directories in the order returned by `File.listFiles()`. Preserving
+     the host filesystem order here keeps every combined-registry consumer on the same first-owner
+     replay contract; UI surfaces may sort a copied presentation list after ownership is resolved.
+
+     - Parameters:
+       - libraryRootURL: Root containing legacy packages and current-generation pointers.
+       - fileManager: Filesystem implementation used for enumeration, migration, and pruning.
+     - Returns: Readable metadata in the pointer enumeration order supplied by the filesystem.
+     - Side effects: Creates a missing root, migrates legacy installs, and prunes stale generations.
+     - Failure modes: Unreadable or incomplete individual installs are omitted from the result.
+     */
+    static func installedEpubs(
+        libraryRootURL: URL,
+        fileManager: FileManager = .default
+    ) -> [EpubInfo] {
         libraryMutationLock.lock()
         defer { libraryMutationLock.unlock() }
-        let fileManager = FileManager.default
         try? fileManager.createDirectory(at: libraryRootURL, withIntermediateDirectories: true)
         guard let children = try? fileManager.contentsOfDirectory(
             at: libraryRootURL,
@@ -188,10 +234,7 @@ extension EpubReader {
                 )
             }
         }
-        return result.sorted {
-            let titleOrder = $0.title.localizedCaseInsensitiveCompare($1.title)
-            return titleOrder == .orderedSame ? $0.initials < $1.initials : titleOrder == .orderedAscending
-        }
+        return result
     }
 
     /**

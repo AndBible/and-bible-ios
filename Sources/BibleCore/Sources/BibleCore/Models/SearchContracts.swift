@@ -1,6 +1,7 @@
 // SearchContracts.swift - Android/JSword-compatible search domain contracts
 
 import Foundation
+import SwordKit
 
 /**
  Canonical scope applied to indexed Bible searches.
@@ -72,6 +73,36 @@ public struct SearchIndexSourceIdentity: Sendable, Hashable {
         self.version = version
         self.fingerprint = fingerprint
     }
+
+    /**
+     Compares installed Search generations while preserving Java's exact module-name identity.
+
+     - Parameters:
+       - lhs: First installed source generation.
+       - rhs: Second installed source generation.
+     - Returns: `true` only when module initials have the same UTF-16 code units and the version and
+       fingerprint match their retained Swift values.
+     - Side effects: None.
+     - Failure modes: None; every Swift string exposes a deterministic UTF-16 view.
+     */
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        SwordJavaStringIdentity.equals(lhs.moduleName, rhs.moduleName)
+            && lhs.version == rhs.version
+            && lhs.fingerprint == rhs.fingerprint
+    }
+
+    /**
+     Hashes the same fields used by equality without canonically folding module initials.
+
+     - Parameter hasher: Process-local Swift hasher receiving the exact source identity.
+     - Side effects: Mutates only `hasher`; source values are not normalized or retained elsewhere.
+     - Failure modes: None.
+     */
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(SwordJavaExactStringIdentity(moduleName))
+        hasher.combine(version)
+        hasher.combine(fingerprint)
+    }
 }
 
 /** Controls how Search derives a hit's visible book name without changing canonical identity. */
@@ -117,6 +148,67 @@ public struct SearchVerseIdentity: Sendable, Hashable, Comparable {
     }
 }
 
+/**
+ Exact UTF-16 identity used by SwiftUI rows whose visible value contains Android module initials.
+
+ Swift `String` identifiers merge canonically equivalent Unicode spellings, while Java book
+ identity does not. This wrapper preserves a readable raw value for diagnostics/accessibility and
+ uses Java `String.equals` code-unit identity for `Hashable`, allowing both exact owners to render.
+ */
+public struct SearchModuleRowIdentity: Sendable, Hashable, CustomStringConvertible {
+    /// Readable identifier value retained without normalization.
+    public let rawValue: String
+
+    /// Exact Java identity that defines equality and hashing for SwiftUI diffing.
+    private let exactIdentity: SwordJavaExactStringIdentity
+
+    /**
+     Creates one row identity from an already formatted module-aware value.
+
+     - Parameter rawValue: Identifier string whose exact UTF-16 code units must remain distinct.
+     - Side effects: None.
+     - Failure modes: None; the value is retained verbatim.
+     */
+    public init(_ rawValue: String) {
+        self.rawValue = rawValue
+        exactIdentity = SwordJavaExactStringIdentity(rawValue)
+    }
+
+    /**
+     Returns the readable unnormalized identifier for diagnostics and accessibility output.
+
+     - Returns: The exact `rawValue` supplied at initialization.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var description: String { rawValue }
+
+    /**
+     Compares row identifiers with Java `String.equals` UTF-16 semantics.
+
+     - Parameters:
+       - lhs: First exact row identity.
+       - rhs: Second exact row identity.
+     - Returns: `true` only when every UTF-16 code unit matches.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.exactIdentity == rhs.exactIdentity
+    }
+
+    /**
+     Hashes the exact UTF-16 identity used by equality.
+
+     - Parameter hasher: Process-local Swift hasher receiving the Java-exact identity.
+     - Side effects: Mutates only `hasher`.
+     - Failure modes: None.
+     */
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(exactIdentity)
+    }
+}
+
 /** One module's hit for a canonical verse. */
 public struct SearchModuleHit: Sendable, Identifiable, Equatable {
     public let moduleName: String
@@ -141,8 +233,17 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
         displayBook(locale: .current)
     }
 
-    public var id: String {
-        "\(moduleName):\(identity.osisBookId).\(identity.chapter).\(identity.verse)"
+    /**
+     Returns the exact module-and-verse identity used by SwiftUI result rows.
+
+     - Returns: Readable row identity whose hashing preserves Java-distinct module spellings.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: SearchModuleRowIdentity {
+        SearchModuleRowIdentity(
+            "\(moduleName):\(identity.osisBookId).\(identity.chapter).\(identity.verse)"
+        )
     }
 
     /**
@@ -244,8 +345,14 @@ public struct SearchModuleFailure: Sendable, Identifiable, Equatable {
     /// User-visible error describing why this module could not be searched.
     public let message: String
 
-    /// Stable row identity for SwiftUI rendering.
-    public var id: String { moduleName }
+    /**
+     Returns the exact module identity used by SwiftUI failure rows.
+
+     - Returns: Readable row identity whose hashing preserves Java-distinct initials.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: SearchModuleRowIdentity { SearchModuleRowIdentity(moduleName) }
 
     /**
      Creates one immutable failure row for a selected module that did not execute successfully.
@@ -284,8 +391,8 @@ public struct SearchGroupedResults: Sendable, Equatable {
        - moduleOrder: Caller-selected module order used for matches, counts, and failures.
        - moduleFailures: Modules whose individual query execution failed.
      - Side effects: None.
-     - Failure modes: Duplicate module results or failures keep dictionary construction's precondition;
-       service callers de-duplicate selected names before constructing this value.
+     - Failure modes: Duplicate Java-exact module results or failures keep dictionary construction's
+       precondition; service callers de-duplicate selected names before constructing this value.
      */
     public init(
         moduleResults: [SearchModuleResults],
@@ -293,23 +400,38 @@ public struct SearchGroupedResults: Sendable, Equatable {
         moduleFailures: [SearchModuleFailure] = []
     ) {
         let resultsByModule = Dictionary(
-            uniqueKeysWithValues: moduleResults.map { ($0.moduleName, $0) }
+            uniqueKeysWithValues: moduleResults.map {
+                (SwordJavaExactStringIdentity($0.moduleName), $0)
+            }
         )
-        let unexpectedNames = Set(resultsByModule.keys).subtracting(moduleOrder).sorted()
-        let orderedNames = Self.orderedUnique(
-            moduleOrder.filter { resultsByModule[$0] != nil } + unexpectedNames
+        let selectedKeys = Set(moduleOrder.map { SwordJavaExactStringIdentity($0) })
+        let unexpectedNames = resultsByModule.values
+            .map(\.moduleName)
+            .filter { !selectedKeys.contains(SwordJavaExactStringIdentity($0)) }
+            .sorted(by: Self.javaStringPrecedes)
+        let orderedNames = Self.orderedUniqueModuleNames(
+            moduleOrder.filter {
+                resultsByModule[SwordJavaExactStringIdentity($0)] != nil
+            } + unexpectedNames
         )
         let failuresByModule = Dictionary(
-            uniqueKeysWithValues: moduleFailures.map { ($0.moduleName, $0) }
+            uniqueKeysWithValues: moduleFailures.map {
+                (SwordJavaExactStringIdentity($0.moduleName), $0)
+            }
         )
-        let unexpectedFailureNames = Set(failuresByModule.keys).subtracting(moduleOrder).sorted()
-        let orderedFailureNames = Self.orderedUnique(
-            moduleOrder.filter { failuresByModule[$0] != nil } + unexpectedFailureNames
+        let unexpectedFailureNames = failuresByModule.values
+            .map(\.moduleName)
+            .filter { !selectedKeys.contains(SwordJavaExactStringIdentity($0)) }
+            .sorted(by: Self.javaStringPrecedes)
+        let orderedFailureNames = Self.orderedUniqueModuleNames(
+            moduleOrder.filter {
+                failuresByModule[SwordJavaExactStringIdentity($0)] != nil
+            } + unexpectedFailureNames
         )
 
         var grouped: [SearchVerseIdentity: [SearchModuleHit]] = [:]
         for moduleName in orderedNames {
-            for hit in resultsByModule[moduleName]?.hits ?? [] {
+            for hit in resultsByModule[SwordJavaExactStringIdentity(moduleName)]?.hits ?? [] {
                 grouped[hit.identity, default: []].append(hit)
             }
         }
@@ -318,16 +440,45 @@ public struct SearchGroupedResults: Sendable, Equatable {
             .map { SearchGroupedVerseResult(identity: $0.key, matches: $0.value) }
             .sorted { $0.identity < $1.identity }
         moduleCounts = orderedNames.map {
-            SearchModuleCount(moduleName: $0, count: resultsByModule[$0]?.hits.count ?? 0)
+            SearchModuleCount(
+                moduleName: $0,
+                count: resultsByModule[SwordJavaExactStringIdentity($0)]?.hits.count ?? 0
+            )
         }
-        self.moduleFailures = orderedFailureNames.compactMap { failuresByModule[$0] }
+        self.moduleFailures = orderedFailureNames.compactMap {
+            failuresByModule[SwordJavaExactStringIdentity($0)]
+        }
         totalHitCount = moduleCounts.reduce(0) { $0 + $1.count }
         isTruncated = moduleResults.contains(where: \.isTruncated)
     }
 
-    private static func orderedUnique(_ values: [String]) -> [String] {
-        var seen = Set<String>()
-        return values.filter { seen.insert($0).inserted }
+    /**
+     Keeps the first value for each exact Java UTF-16 module identity.
+
+     - Parameter values: Ordered module initials from successful/failing results and caller order.
+     - Returns: First-occurrence order with only code-unit-identical duplicates removed.
+     - Side effects: None.
+     - Failure modes: None; canonically equivalent spellings intentionally remain separate.
+     */
+    private static func orderedUniqueModuleNames(_ values: [String]) -> [String] {
+        var seen = Set<SwordJavaExactStringIdentity>()
+        return values.filter {
+            seen.insert(SwordJavaExactStringIdentity($0)).inserted
+        }
+    }
+
+    /**
+     Orders otherwise-unselected module names with Java `String.compareTo` code-unit semantics.
+
+     - Parameters:
+       - lhs: First exact initials value.
+       - rhs: Second exact initials value.
+     - Returns: Whether `lhs` precedes `rhs` by unsigned UTF-16 code-unit lexicographic order.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    private static func javaStringPrecedes(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.utf16.lexicographicallyPrecedes(rhs.utf16)
     }
 }
 

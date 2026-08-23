@@ -131,6 +131,109 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Keeps implicit Search/Strong's tools aligned with prompt BookSet order.
+
+     - Setup: Registers an initials-first native Bible with abbreviation `Zulu` and an initials-last
+       Bible with abbreviation `Alpha`, indexes both exact source generations, and leaves KJV
+       unindexed.
+     - Expected result: Android's installed BookSet reverses initials order through its abbreviation
+       tier, while the prompt default, empty-book Search, and nil-book Strong's tool all select the
+       Alpha-abbreviation Bible.
+     - Failure meaning: Agent tools can silently query a different Bible than the system prompt
+       advertises when automatic routes consume a non-BookSet inventory.
+     - Side effects: Writes two inherited fixture descriptors and a temporary generated-index
+       database removed by teardown.
+     */
+    @MainActor
+    func testAutomaticAgentSearchAndPromptUseInstalledBookSetOrder() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let initialsFirst = "AAAInitialsFirst"
+        let bookSetFirst = "ZZZBookSetFirst"
+        try seedBibleAliasModule(
+            named: initialsFirst,
+            description: "Initials-first Bible",
+            in: modulePath
+        )
+        try seedBibleAliasModule(
+            named: bookSetFirst,
+            description: "BookSet-first Bible",
+            in: modulePath
+        )
+        try appendConfigLine(
+            "Abbreviation=Zulu",
+            moduleName: initialsFirst,
+            modulePath: modulePath
+        )
+        try appendConfigLine(
+            "Abbreviation=Alpha",
+            moduleName: bookSetFirst,
+            modulePath: modulePath
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let initialsFirstModule = try XCTUnwrap(manager.module(named: initialsFirst))
+        let bookSetModule = try XCTUnwrap(manager.module(named: bookSetFirst))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agent-search-bookset-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let searchIndexService = SearchIndexService(databasePath: databaseURL.path)
+        try await searchIndexService.createIndex(module: initialsFirstModule)
+        try await searchIndexService.createIndex(module: bookSetModule)
+
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        XCTAssertLessThan(initialsFirst, bookSetFirst)
+        XCTAssertEqual(
+            resolver.readableModulesInBookSetOrder(categories: [.bible])
+                .map(\.info.name)
+                .filter { $0 == initialsFirst || $0 == bookSetFirst },
+            [bookSetFirst, initialsFirst]
+        )
+
+        let adapter = try makeAdapter(
+            swordManager: manager,
+            searchIndexService: searchIndexService
+        )
+        let bibleSearch = try adapter.searchBible(
+            query: "beginning",
+            books: [],
+            maximum: 20,
+            offset: 0
+        )
+        let searchedBooks = try XCTUnwrap(
+            bibleSearch.data?.objectValue?["results"]?.arrayValue
+        ).compactMap { $0.objectValue?["book"]?.stringValue }
+        XCTAssertFalse(searchedBooks.isEmpty)
+        XCTAssertTrue(searchedBooks.allSatisfy { $0 == bookSetFirst })
+        let strongsSearch = try adapter.searchByStrongs(
+            reportedNumber: "H0430",
+            canonicalToken: "H0430",
+            book: nil,
+            maximum: 20,
+            offset: 0
+        )
+        XCTAssertEqual(
+            strongsSearch.data?.objectValue?["searchedBook"]?.stringValue,
+            bookSetFirst
+        )
+
+        let promptEnvironment = AIReaderReferenceEnvironmentResolver.resolve(
+            installedModules: resolver.registeredBookMetadata(),
+            excludedInitials: [],
+            indexedModule: { name in
+                guard let source = resolver.searchIndexSource(named: name) else { return false }
+                return searchIndexService.hasIndex(for: source.searchIndexSourceIdentity)
+            },
+            selectedStrongsHebrew: [],
+            selectedStrongsGreek: [],
+            selectedGreekMorphology: []
+        )
+        XCTAssertEqual(promptEnvironment.defaultSearchBible?.initials, bookSetFirst)
+    }
+
+    /**
      Builds the production Agent adapter with operation-unused stores backed by transient models.
 
      - Parameters:
@@ -185,6 +288,19 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
             $0.objectValue?["initials"]?.stringValue == initials
         })
         return try XCTUnwrap(document.objectValue?["isIndexed"])
+    }
+
+    /** Appends one test-only SWORD descriptor field without changing inherited fixture payloads. */
+    private func appendConfigLine(
+        _ line: String,
+        moduleName: String,
+        modulePath: String
+    ) throws {
+        let url = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+        var config = try String(contentsOf: url, encoding: .utf8)
+        config.append("\n\(line)\n")
+        try config.write(to: url, atomically: true, encoding: .utf8)
     }
 }
 

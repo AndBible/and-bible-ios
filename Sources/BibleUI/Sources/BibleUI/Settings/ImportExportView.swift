@@ -1251,7 +1251,9 @@ public struct ImportExportView: View {
             contentTypeIdentifier: try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier,
             suggestedFileName: url.lastPathComponent
         )
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext
+        )
         Task { @MainActor in
             let preflight = await Task.detached(priority: .userInitiated) {
                 service.preflightDocument(request)
@@ -1292,7 +1294,9 @@ public struct ImportExportView: View {
         isInstallingDocument = true
         documentInstallProgress = ModuleInstallProgress(phase: .queued)
         statusMessage = nil
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext
+        )
         Task { @MainActor in
             await Task.yield()
             let result = await Task.detached(priority: .userInitiated) {

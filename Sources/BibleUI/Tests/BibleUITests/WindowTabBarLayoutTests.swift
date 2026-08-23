@@ -262,15 +262,18 @@ final class WindowTabBarLayoutTests: XCTestCase {
      window bounds, while the keyboard-adjusted local extent remains relevant only to pane sizing.
 
      - Setup: Uses the reported iPhone portrait window (402x874) and its keyboard-reduced reader height
-       (297 points), plus a true landscape window and reverse-split preference.
+       (297 points), plus true landscape, square, unavailable startup geometry, and reverse-split
+       preference.
      - Expected Result: Portrait remains vertical across the reduced extent, real landscape resolves
-       horizontal, reverse mode deterministically inverts both, and local extent sizing still works.
+       horizontal, Android's non-portrait square resolves horizontal, unavailable geometry keeps its
+       portrait fallback, reverse mode deterministically inverts each, and local sizing still works.
      - Failure Meaning: Focusing a note can reconstruct the pane hierarchy and detach its WebView.
      - Side Effects: None; this test executes only pure geometry functions.
      */
     func testBibleReaderSplitAxisUsesStableWindowGeometryAcrossKeyboardResize() {
         let portraitWindow = CGSize(width: 402, height: 874)
         let landscapeWindow = CGSize(width: 874, height: 402)
+        let squareWindow = CGSize(width: 600, height: 600)
         let keyboardReducedPaneExtent = BibleReaderSplitLayout.availablePaneExtent(
             totalExtent: 297,
             paneCount: 2
@@ -297,6 +300,30 @@ final class WindowTabBarLayoutTests: XCTestCase {
         XCTAssertFalse(
             BibleReaderSplitLayout.isHorizontal(
                 stableWindowSize: landscapeWindow,
+                reverseSplitMode: true
+            )
+        )
+        XCTAssertTrue(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: squareWindow,
+                reverseSplitMode: false
+            )
+        )
+        XCTAssertFalse(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: squareWindow,
+                reverseSplitMode: true
+            )
+        )
+        XCTAssertFalse(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: .zero,
+                reverseSplitMode: false
+            )
+        )
+        XCTAssertTrue(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: .zero,
                 reverseSplitMode: true
             )
         )

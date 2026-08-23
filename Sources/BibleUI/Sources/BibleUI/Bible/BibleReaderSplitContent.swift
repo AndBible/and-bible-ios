@@ -36,15 +36,18 @@ enum BibleReaderSplitLayout {
 
      - Parameters:
        - stableWindowSize: Bounds of the native window that owns the reader. Zero dimensions resolve
-         to portrait/vertical until the window observer publishes its first usable bounds.
+         to the natural portrait direction until the window observer publishes usable bounds. A
+         valid square resolves as Android's non-portrait `Configuration.orientation` does.
        - reverseSplitMode: Workspace preference that inverts Android's natural split direction.
      - Returns: `true` for a horizontal pane stack and `false` for a vertical pane stack.
      - Side Effects: None.
-     - Failure Modes: Missing or zero window geometry deterministically uses the portrait direction;
-       a later valid window observation recomputes the result.
+     - Failure Modes: Missing or zero window geometry deterministically uses the natural portrait
+       direction before applying reverse mode; a later valid window observation recomputes the result.
      */
     static func isHorizontal(stableWindowSize: CGSize, reverseSplitMode: Bool) -> Bool {
-        let naturalHorizontal = stableWindowSize.width > stableWindowSize.height
+        let hasUsableGeometry = stableWindowSize.width > 0 && stableWindowSize.height > 0
+        let naturalHorizontal = hasUsableGeometry
+            && stableWindowSize.width >= stableWindowSize.height
         return reverseSplitMode ? !naturalHorizontal : naturalHorizontal
     }
 }

@@ -4,11 +4,64 @@ import Foundation
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
+@testable import BibleView
 @testable import SwordKit
 
 /** Protects live-pane AI routing from bypassing reader module activation preflights. */
 @MainActor
 final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
+    /**
+     Routes a local full-name/case alias through the canonical combined-registry owner.
+
+     - Setup: Registers one My Documents page and a live empty pane, then calls the production
+       router directly with a case-varied display name rather than initials.
+     - Expected: The exact page renders and observed/persisted state reports canonical initials.
+     - Failure meaning: The Agent preflight and live router use different JSword lookup tiers, or
+       the router reuses the alias for exact local storage reads.
+     - Side effects: Writes in-memory workspace/My Documents graphs and emits one reader document.
+     */
+    func testMyDocumentFullNameAliasRoutesWithCanonicalInitials() async throws {
+        let myDocumentContainer = try makeMyDocumentModelContainer()
+        let myDocumentContext = myDocumentContainer.mainContext
+        let document = MyDocument(name: "Router Local Full Name", initials: "RouterLocal")
+        let page = MyDocumentPage(title: "Entry", pageKey: "entry", contentType: .markdown)
+        let content = MyDocumentPageContent(pageId: page.id, content: "Canonical route")
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
+        myDocumentContext.insert(document)
+        myDocumentContext.insert(page)
+        myDocumentContext.insert(content)
+        try myDocumentContext.save()
+
+        let workspaceContainer = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: workspaceContainer.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "AI local alias route")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let store = MyDocumentStore(modelContext: myDocumentContext)
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        controller.myDocumentStore = store
+        controller.activeWindow = window
+        windowManager.registerController(controller, for: window.id)
+        let router = AIReaderWindowDocumentRouter(
+            windowManager: windowManager,
+            myDocumentStore: store
+        )
+
+        let observed = try await router.setDocument(
+            windowID: window.id,
+            documentInitials: "router local full name",
+            key: "entry"
+        )
+
+        XCTAssertEqual(observed.documentInitials, "RouterLocal")
+        XCTAssertEqual(observed.currentKey, "entry")
+        XCTAssertEqual(window.pageManager?.generalBookDocument, "RouterLocal")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "entry")
+    }
+
     /**
      Verifies a locked Bible plus reference cannot navigate the currently active readable Bible.
 
@@ -171,5 +224,116 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(window.pageManager?.currentCategoryName, baselineCategoryName)
         XCTAssertEqual(persistCount, 0)
         XCTAssertEqual(recordedScripts().count, baselineScriptCount)
+    }
+
+    /**
+     Preflights invalid optional keys for every Android-routable installed document category.
+
+     - Setup: Registers readable Bible, commentary, dictionary, general-book, and map fixtures in one
+       live KJV pane, then requests an invalid reference/key for each through the production router.
+     - Expected: Every request reports `KEY_NOT_FOUND` before changing any category-owned handle,
+       key/reference, PageManager field, persistence count, or Vue emission.
+     - Failure meaning: `setDocument` switches or persists a requested source before proving its
+       optional key, leaving a partially changed window when the second navigation step fails.
+     - Side effects: Writes inherited temporary SWORD fixtures plus isolated in-memory workspace and
+       My Documents graphs.
+     */
+    func testInvalidInstalledKeysFailAcrossAndroidCategoryMatrixBeforeAnyPaneMutation() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: "RouterCommentary", in: modulePath)
+        try seedEmptyRawDictionaryModule(named: "RouterDictionary", in: modulePath)
+        try seedEmptyRawGeneralBookModule(named: "RouterGeneralBook", in: modulePath)
+        try seedEmptyRawMapModule(named: "RouterMap", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        let workspaceContainer = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: workspaceContainer.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "AI key preflight matrix")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.activeWindow = window
+        window.pageManager?.bibleDocument = "KJV"
+        window.pageManager?.currentCategoryName = DocumentCategory.bible.pageManagerKey
+        windowManager.registerController(controller, for: window.id)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
+
+        let myDocumentContainer = try makeMyDocumentModelContainer()
+        let router = AIReaderWindowDocumentRouter(
+            windowManager: windowManager,
+            myDocumentStore: MyDocumentStore(modelContext: myDocumentContainer.mainContext)
+        )
+        let baselineModule = controller.activeModuleName
+        let baselineCommentary = controller.activeCommentaryModuleName
+        let baselineDictionary = controller.activeDictionaryModuleName
+        let baselineGeneralBook = controller.activeGeneralBookModuleName
+        let baselineMap = controller.activeMapModuleName
+        let baselineDictionaryKey = controller.currentDictionaryKey
+        let baselineGeneralBookKey = controller.currentGeneralBookKey
+        let baselineMapKey = controller.currentMapKey
+        let baselineCategory = controller.currentCategory
+        let baselineBook = controller.currentBook
+        let baselineChapter = controller.currentChapter
+        let baselineVerse = controller.currentVerse
+        let pageManager = try XCTUnwrap(window.pageManager)
+        let baselinePageCategory = pageManager.currentCategoryName
+        let baselinePageBible = pageManager.bibleDocument
+        let baselinePageCommentary = pageManager.commentaryDocument
+        let baselinePageDictionary = pageManager.dictionaryDocument
+        let baselinePageDictionaryKey = pageManager.dictionaryKey
+        let baselinePageGeneralBook = pageManager.generalBookDocument
+        let baselinePageGeneralBookKey = pageManager.generalBookKey
+        let baselinePageMap = pageManager.mapDocument
+        let baselinePageMapKey = pageManager.mapKey
+        let baselineScripts = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        let requests = [
+            ("KJV", "Gen.999.1"),
+            ("RouterCommentary", "Gen.999.1"),
+            ("RouterDictionary", "missing-dictionary-key"),
+            ("RouterGeneralBook", "missing-general-book-key"),
+            ("RouterMap", "missing-map-key"),
+        ]
+
+        for (initials, key) in requests {
+            do {
+                _ = try await router.setDocument(
+                    windowID: window.id,
+                    documentInitials: initials,
+                    key: key
+                )
+                XCTFail("Expected optional key preflight to reject \(initials).")
+            } catch let error as BibleUIAgentDomainError {
+                XCTAssertEqual(error.code, "KEY_NOT_FOUND", initials)
+            }
+
+            XCTAssertEqual(controller.activeModuleName, baselineModule, initials)
+            XCTAssertEqual(controller.activeCommentaryModuleName, baselineCommentary, initials)
+            XCTAssertEqual(controller.activeDictionaryModuleName, baselineDictionary, initials)
+            XCTAssertEqual(controller.activeGeneralBookModuleName, baselineGeneralBook, initials)
+            XCTAssertEqual(controller.activeMapModuleName, baselineMap, initials)
+            XCTAssertEqual(controller.currentDictionaryKey, baselineDictionaryKey, initials)
+            XCTAssertEqual(controller.currentGeneralBookKey, baselineGeneralBookKey, initials)
+            XCTAssertEqual(controller.currentMapKey, baselineMapKey, initials)
+            XCTAssertEqual(controller.currentCategory, baselineCategory, initials)
+            XCTAssertEqual(controller.currentBook, baselineBook, initials)
+            XCTAssertEqual(controller.currentChapter, baselineChapter, initials)
+            XCTAssertEqual(controller.currentVerse, baselineVerse, initials)
+            XCTAssertEqual(pageManager.currentCategoryName, baselinePageCategory, initials)
+            XCTAssertEqual(pageManager.bibleDocument, baselinePageBible, initials)
+            XCTAssertEqual(pageManager.commentaryDocument, baselinePageCommentary, initials)
+            XCTAssertEqual(pageManager.dictionaryDocument, baselinePageDictionary, initials)
+            XCTAssertEqual(pageManager.dictionaryKey, baselinePageDictionaryKey, initials)
+            XCTAssertEqual(pageManager.generalBookDocument, baselinePageGeneralBook, initials)
+            XCTAssertEqual(pageManager.generalBookKey, baselinePageGeneralBookKey, initials)
+            XCTAssertEqual(pageManager.mapDocument, baselinePageMap, initials)
+            XCTAssertEqual(pageManager.mapKey, baselinePageMapKey, initials)
+            XCTAssertEqual(persistCount, 0, initials)
+            XCTAssertEqual(recordedScripts().count, baselineScripts, initials)
+        }
     }
 }

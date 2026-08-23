@@ -175,6 +175,158 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Protects Android's combined installed/EPUB/My Documents registration and lookup boundary.
+
+     - Setup: Registers readable/locked native aliases plus ordered local registrations containing
+       full-name, case, trimmed-config, duplicate-name, and composed/decomposed identities.
+     - Expected result: Exact native initials short-circuit metadata; candidate-initials collisions
+       are rejected; later admitted local duplicate names own the exact-name map; TreeSet case lookup
+       and Java trim/composition behavior match pinned JSword; locked owners expose no content.
+     - Failure meaning: A caller can bypass locked ownership, use Swift normalization, ignore local
+       registration order, or resolve a different book than Android's global registry.
+     - Side effects: Writes isolated SWORD descriptors and records local metadata evaluation count.
+     */
+    func testDocumentOwnerResolvesInstalledTiersBeforeLazyLocalFallback() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "NativeExact",
+            description: "Native Full Name",
+            in: modulePath
+        )
+        try seedBibleAliasModule(
+            named: "LockedOwner",
+            description: "Locked Full Name",
+            in: modulePath
+        )
+        try seedBibleAliasModule(
+            named: "ComposedOwner",
+            description: "Caf\u{00E9}",
+            in: modulePath
+        )
+        let lockedConfigURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/lockedowner.conf")
+        var lockedConfiguration = try String(contentsOf: lockedConfigURL, encoding: .utf8)
+        lockedConfiguration.append("\nCipherKey=\n")
+        try lockedConfiguration.write(to: lockedConfigURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        var localLookupCount = 0
+        let ordinaryRegistrations: () -> [BibleReaderLocalDocumentRegistration<String>] = {
+            localLookupCount += 1
+            return [BibleReaderLocalDocumentRegistration(
+                document: "ordinary",
+                initials: "OrdinaryLocal",
+                fullName: "Ordinary Local Name",
+                abbreviation: "OrdinaryLocal",
+                category: .generalBook
+            )]
+        }
+
+        for token in ["NativeExact", "Native Full Name", "nativeexact"] {
+            guard case .installed(let info, let readableSource) = resolver.resolveDocumentOwner(
+                named: token,
+                localRegistrations: ordinaryRegistrations
+            ) else {
+                return XCTFail("Expected native ownership for \(token)")
+            }
+            XCTAssertEqual(info.name, "NativeExact")
+            XCTAssertEqual(readableSource?.info.name, "NativeExact")
+        }
+        guard case .installed(let lockedInfo, let lockedSource) = resolver.resolveDocumentOwner(
+            named: "locked full name",
+            localRegistrations: ordinaryRegistrations
+        ) else {
+            return XCTFail("Expected locked native full-name ownership")
+        }
+        XCTAssertEqual(lockedInfo.name, "LockedOwner")
+        XCTAssertNil(lockedSource)
+        XCTAssertEqual(localLookupCount, 3)
+
+        guard case .local(let local) = resolver.resolveDocumentOwner(
+            named: "Cafe\u{0301}",
+            localRegistrations: {
+                [BibleReaderLocalDocumentRegistration(
+                    document: "decomposed",
+                    initials: "Cafe\u{0301}",
+                    fullName: "Decomposed Local",
+                    abbreviation: "Cafe\u{0301}",
+                    category: .generalBook
+                )]
+            }
+        ) else {
+            return XCTFail("Java-distinct decomposed identity should admit a local document")
+        }
+        XCTAssertEqual(local, "decomposed")
+
+        let orderedLocals = [
+            BibleReaderLocalDocumentRegistration(
+                document: "first-name-owner",
+                initials: "FirstLocal",
+                fullName: "Shared Local Name",
+                abbreviation: "FirstLocal",
+                category: .generalBook
+            ),
+            BibleReaderLocalDocumentRegistration(
+                document: "second-name-owner",
+                initials: "SecondLocal",
+                fullName: "Shared Local Name",
+                abbreviation: "SecondLocal",
+                category: .generalBook
+            ),
+            BibleReaderLocalDocumentRegistration(
+                document: "trimmed",
+                initials: "TrimmedLocal",
+                fullName: "  Trimmed Local Name  ",
+                abbreviation: "  Trimmed Local  ",
+                category: .generalBook
+            ),
+            BibleReaderLocalDocumentRegistration(
+                document: "blocked-native-case",
+                initials: "nativeexact",
+                fullName: "Blocked Local Name",
+                abbreviation: "nativeexact",
+                category: .generalBook
+            ),
+        ]
+        guard case .local(let duplicateNameOwner) = resolver.resolveDocumentOwner(
+            named: "Shared Local Name",
+            localRegistrations: { orderedLocals }
+        ) else {
+            return XCTFail("Expected the later admitted exact-name owner")
+        }
+        XCTAssertEqual(duplicateNameOwner, "second-name-owner")
+        guard case .local(let caseOwner) = resolver.resolveDocumentOwner(
+            named: "firstlocal",
+            localRegistrations: { orderedLocals }
+        ) else { return XCTFail("Expected local TreeSet case-tier ownership") }
+        XCTAssertEqual(caseOwner, "first-name-owner")
+        guard case .local(let trimmedOwner) = resolver.resolveDocumentOwner(
+            named: "Trimmed Local Name",
+            localRegistrations: { orderedLocals }
+        ) else { return XCTFail("Expected Java-trimmed local full-name ownership") }
+        XCTAssertEqual(trimmedOwner, "trimmed")
+        guard case .missing = resolver.resolveDocumentOwner(
+            named: "Blocked Local Name",
+            localRegistrations: { orderedLocals }
+        ) else { return XCTFail("Native case-tier ownership must reject colliding local initials") }
+        let installedLocalOwners = resolver.registeredDocumentOwners(
+            localRegistrations: orderedLocals
+        ).compactMap { owner -> String? in
+            guard case .local(let value) = owner else { return nil }
+            return value
+        }
+        XCTAssertEqual(
+            installedLocalOwners,
+            ["first-name-owner", "second-name-owner", "trimmed"],
+            "TreeSet inventory must retain both admitted full-name duplicates and omit rejected initials."
+        )
+    }
+
+    /**
      Protects Android custom-driver admission from a custom-only duplicate cascade.
 
      - Setup: A native full name owns SQLite A's initials; SQLite A's full name in turn equals
@@ -250,6 +402,99 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Protects picker inventory and activation from the native-rejection custom cascade.
+
+     - Setup: A native full name rejects SQLite A, whose full name would suppress SQLite B if the
+       runtime consumed the library's custom-only admitted list. The coordinator receives the raw
+       in-memory discovery snapshot and a persisted selection for B.
+     - Expected result: The picker exposes B but not rejected A, runtime selection resolves B's
+       exact retained handle, and that handle reads B's content.
+     - Failure meaning: Startup and direct resolver behavior are correct but the live reader catalog
+       still applies a separate custom-only admission path, leaving an Android-valid book unusable.
+     - Side effects: Writes one isolated native descriptor and reads one in-memory SQLite verse.
+     */
+    func testRuntimeInventoryAndSelectionReplayRawCandidatesAfterNativeCascadeRejection() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "NativeCascadeOwner",
+            description: "AliasA",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let candidateA = makeSQLiteModule(
+            rows: [(.verse(book: 10, chapter: 1, verse: 1), "Candidate A")],
+            metadata: SQLiteDocumentMetadata(
+                sourceURL: URL(fileURLWithPath: "/tmp/runtime-cascade-a.SQLite3"),
+                format: .myBible,
+                initials: "AliasA",
+                abbreviation: "Candidate A",
+                title: "AliasB",
+                description: "AliasB",
+                language: "en",
+                version: "1",
+                category: .bible,
+                direction: .ltr,
+                hasStrongs: false,
+                isStrongsDictionary: false,
+                hasWordsOfChrist: false
+            )
+        )
+        let candidateB = makeSQLiteModule(
+            rows: [(.verse(book: 10, chapter: 1, verse: 1), "Candidate B")],
+            metadata: SQLiteDocumentMetadata(
+                sourceURL: URL(fileURLWithPath: "/tmp/runtime-cascade-b.SQLite3"),
+                format: .myBible,
+                initials: "AliasB",
+                abbreviation: "Candidate B",
+                title: "Surviving SQLite",
+                description: "Surviving SQLite",
+                language: "en",
+                version: "1",
+                category: .bible,
+                direction: .ltr,
+                hasStrongs: false,
+                isStrongsDictionary: false,
+                hasWordsOfChrist: false
+            )
+        )
+        let library = SQLiteDocumentModuleLibrary(
+            discoveredModules: [candidateA, candidateB]
+        )
+        let nativeBibles = manager.installedModules().filter { $0.category == .bible }
+        var coordinator = BibleReaderSQLiteRuntimeCoordinator()
+
+        let inventories = coordinator.reload(
+            manager: manager,
+            sqliteLibrary: library,
+            primaryBibles: nativeBibles,
+            primaryCommentaries: [],
+            primaryDictionaries: []
+        )
+        let selection = coordinator.resolveSelections(
+            BibleReaderSwordSelection(
+                activeModuleName: "AliasB",
+                activeCommentaryModuleName: nil,
+                activeDictionaryModuleName: nil,
+                activeGeneralBookModuleName: nil,
+                activeMapModuleName: nil
+            ),
+            hasActiveSwordBible: false,
+            hasActiveSwordCommentary: false
+        )
+
+        XCTAssertEqual(
+            inventories.bibles.map(\.name),
+            ["AliasB", "KJV", "NativeCascadeOwner"]
+        )
+        XCTAssertNil(coordinator.preferredModule(named: "AliasA", category: .bible))
+        XCTAssertEqual(selection.bible?.info.name, "AliasB")
+        XCTAssertEqual(
+            try selection.bible?.verseContent(osisId: "Gen", chapter: 1, verse: 1)?.text,
+            "Candidate B"
+        )
+    }
+
+    /**
      Anchors automatic discovery to JSword TreeSet order and Java-trimmed config metadata.
 
      - Setup: Supplies a Bible plus two SQLite dictionaries in reverse display order. One
@@ -304,10 +549,47 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
             swordModules: [kjv],
             sqliteModules: [zuluAbbreviation, whitespaceAbbreviation]
         )
+        let sharedProjection = BibleReaderInstalledBookSet.treeSetOrderProjection([
+            BibleReaderInstalledBookSetRegistration(
+                value: kjv.info,
+                initials: kjv.info.name,
+                fullName: kjv.info.description,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    kjv.configEntry("Abbreviation"),
+                    initials: kjv.info.name
+                ),
+                category: kjv.info.category
+            ),
+            BibleReaderInstalledBookSetRegistration(
+                value: zuluAbbreviation.info,
+                initials: zuluAbbreviation.info.name,
+                fullName: zuluAbbreviation.info.description,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    zuluAbbreviation.metadata.abbreviation,
+                    initials: zuluAbbreviation.info.name
+                ),
+                category: zuluAbbreviation.info.category
+            ),
+            BibleReaderInstalledBookSetRegistration(
+                value: whitespaceAbbreviation.info,
+                initials: whitespaceAbbreviation.info.name,
+                fullName: whitespaceAbbreviation.info.description,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    whitespaceAbbreviation.metadata.abbreviation,
+                    initials: whitespaceAbbreviation.info.name
+                ),
+                category: whitespaceAbbreviation.info.category
+            ),
+        ]).map(\.value.name)
 
         XCTAssertEqual(
             resolver.registeredBookMetadata().map(\.name),
             ["KJV", "ZedInitials", "AlphaInitials"]
+        )
+        XCTAssertEqual(
+            resolver.registeredBookMetadata().map(\.name),
+            sharedProjection,
+            "Resolver and standalone BookSet projections must remain the same contract"
         )
         let sources = resolver.dictionaryKeySources()
         XCTAssertEqual(sources.map(\.info.name), ["KJV", "ZedInitials", "AlphaInitials"])
@@ -317,6 +599,77 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(sources[1].info.language, "und")
         XCTAssertEqual(sources[2].info.description, "\u{00A0}Zulu full name\u{00A0}")
         XCTAssertEqual(sources[2].info.language, "\u{00A0}en\u{00A0}")
+    }
+
+    /**
+     Keeps prompt and automatic Agent defaults on one readable JSword TreeSet projection.
+
+     - Setup: Registers two readable SQLite Bibles in Zulu-before-Alpha abbreviation order, the
+       reverse of JSword's installed-book order, and marks both index identities ready.
+     - Expected result: The explicit readable BookSet projection and prompt environment both choose
+       the Alpha-abbreviation source while the registration-order API deliberately remains reversed.
+     - Failure meaning: Empty Search, Strong's, or commentary requests can select a different source
+       than the system prompt advertises because one route consumes driver add order.
+     - Side effects: Retains two in-memory SQLite readers only; no content query or index write runs.
+     */
+    func testAutomaticAgentAndPromptDefaultsShareReadableBookSetOrder() {
+        let registrationFirst = makeSQLiteModuleHandle(
+            rows: [(.verse(book: 10, chapter: 1, verse: 1), "Registration first")],
+            metadata: SQLiteDocumentMetadata(
+                sourceURL: URL(fileURLWithPath: "/tmp/agent-registration-first.SQLite3"),
+                format: .myBible,
+                initials: "RegistrationFirst",
+                abbreviation: "Zulu",
+                title: "Registration first",
+                description: "Registration first",
+                language: "en",
+                version: "1",
+                category: .bible,
+                direction: .ltr,
+                hasStrongs: true,
+                isStrongsDictionary: false,
+                hasWordsOfChrist: false
+            )
+        )
+        let bookSetFirst = makeSQLiteModuleHandle(
+            rows: [(.verse(book: 10, chapter: 1, verse: 1), "BookSet first")],
+            metadata: SQLiteDocumentMetadata(
+                sourceURL: URL(fileURLWithPath: "/tmp/agent-bookset-first.SQLite3"),
+                format: .myBible,
+                initials: "BookSetFirst",
+                abbreviation: "Alpha",
+                title: "BookSet first",
+                description: "BookSet first",
+                language: "en",
+                version: "1",
+                category: .bible,
+                direction: .ltr,
+                hasStrongs: true,
+                isStrongsDictionary: false,
+                hasWordsOfChrist: false
+            )
+        )
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordModules: [],
+            sqliteModules: [registrationFirst, bookSetFirst]
+        )
+
+        XCTAssertEqual(
+            resolver.modules(categories: [.bible]).map(\.info.name),
+            ["RegistrationFirst", "BookSetFirst"]
+        )
+        let automaticSources = resolver.readableModulesInBookSetOrder(categories: [.bible])
+        XCTAssertEqual(automaticSources.map(\.info.name), ["BookSetFirst", "RegistrationFirst"])
+        let environment = AIReaderReferenceEnvironmentResolver.resolve(
+            installedModules: resolver.registeredBookMetadata(),
+            excludedInitials: [],
+            indexedModule: { _ in true },
+            selectedStrongsHebrew: [],
+            selectedStrongsGreek: [],
+            selectedGreekMorphology: []
+        )
+        XCTAssertEqual(environment.defaultSearchBible?.initials, automaticSources.first?.info.name)
+        XCTAssertEqual(environment.defaultSearchBible?.initials, "BookSetFirst")
     }
 
     /**

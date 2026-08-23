@@ -21,6 +21,30 @@ struct BibleReaderSQLiteModuleCatalog {
     private var handlesInRegistrationOrder: [BibleReaderSQLiteModuleHandle] = []
 
     /**
+     Shared BookSet registrations retaining exact SQLite handles and parsed config metadata.
+
+     - Returns: Current handles in Android custom-driver add order.
+     - Side effects: None.
+     - Failure modes: Returns an empty array before reload.
+     */
+    private var bookSetRegistrations: [
+        BibleReaderInstalledBookSetRegistration<BibleReaderSQLiteModuleHandle>
+    ] {
+        handlesInRegistrationOrder.map { module in
+            BibleReaderInstalledBookSetRegistration(
+                value: module,
+                initials: module.info.name,
+                fullName: module.info.description,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    module.metadata.abbreviation,
+                    initials: module.info.name
+                ),
+                category: module.info.category
+            )
+        }
+    }
+
+    /**
      Reloads all Android-compatible SQLite families beneath the installed module root.
 
      A reload creates fresh readers and exactly one immutable runtime handle per discovered module.
@@ -37,7 +61,6 @@ struct BibleReaderSQLiteModuleCatalog {
      */
     mutating func reload(moduleRootURL: URL) {
         let library = SQLiteDocumentModuleLibrary(moduleRootURL: moduleRootURL)
-        self.library = library
         var discoveredHandles: [SQLiteDocumentIdentity: BibleReaderSQLiteModuleHandle] = [:]
         var registeredHandles: [BibleReaderSQLiteModuleHandle] = []
         for module in library.modules {
@@ -47,31 +70,49 @@ struct BibleReaderSQLiteModuleCatalog {
             discoveredHandles[key] = handle
             registeredHandles.append(handle)
         }
-        handlesInRegistrationOrder = registeredHandles
+        reload(
+            retaining: library,
+            admittedModulesInRegistrationOrder: registeredHandles
+        )
     }
 
     /**
-     Resolves one readable SQLite module by Java UTF-16 case-insensitive initials identity.
+     Publishes handles already admitted through Android's complete native-plus-custom registry.
+
+     - Parameters:
+       - library: Validated discovery snapshot retained for the lifetime of its runtime handles.
+       - admittedModulesInRegistrationOrder: Exact handles returned by the shared installed-module
+         resolver after replaying raw custom candidates against native and earlier custom owners.
+     - Side effects: Replaces the retained discovery snapshot and current runtime handles without
+       opening files, recreating handles, or applying a second ownership filter.
+     - Failure modes: None. The caller must supply only validated handles from `library`; an empty
+       admitted list intentionally clears the catalog while retaining the current snapshot.
+     - Important: Do not derive this input from `library.modules` in a combined runtime. That list
+       represents custom-only admission and cannot reproduce native-rejection cascades.
+     */
+    mutating func reload(
+        retaining library: SQLiteDocumentModuleLibrary,
+        admittedModulesInRegistrationOrder: [BibleReaderSQLiteModuleHandle]
+    ) {
+        self.library = library
+        handlesInRegistrationOrder = admittedModulesInRegistrationOrder
+    }
+
+    /**
+     Resolves one readable SQLite module through JSword's exact maps and TreeSet case tier.
 
      - Parameters:
        - name: Requested installed-book initials.
        - category: Optional category constraint preventing cross-category resolution.
      - Returns: Stable immutable handle from the current snapshot, or nil when absent/mismatched.
-     - Side effects: None.
+     - Side effects: Loads the pinned Android case table for case-insensitive fallback.
      - Failure modes: Invalid and Java-equal SWORD-shadowed identities fail closed.
      */
     func module(named name: String, category: ModuleCategory? = nil) -> BibleReaderSQLiteModuleHandle? {
-        let resolved = handlesInRegistrationOrder.first {
-            Self.javaStringEquals($0.info.name, name)
-        } ?? handlesInRegistrationOrder.last {
-            Self.javaStringEquals($0.info.description, name)
-        } ?? {
-            let identity = SQLiteDocumentIdentity(name)
-            return handlesInRegistrationOrder.first {
-                SQLiteDocumentIdentity($0.info.name) == identity
-                    || SQLiteDocumentIdentity($0.info.description) == identity
-            }
-        }()
+        let resolved = BibleReaderInstalledBookSet.registration(
+            named: name,
+            in: bookSetRegistrations
+        )?.value
         guard let resolved,
               category == nil || resolved.info.category == category else {
             return nil
@@ -83,15 +124,15 @@ struct BibleReaderSQLiteModuleCatalog {
      Returns readable SQLite modules in one installed-book category.
 
      - Parameter category: Required reader inventory category.
-     - Returns: UTF-16-sorted stable handles from the current snapshot.
-     - Side effects: None.
+     - Returns: Stable handles in JSword's category/abbreviation/initials/name TreeSet order.
+     - Side effects: Loads the pinned Android case table for abbreviation ordering.
      - Failure modes: Returns an empty array before reload or when no module matches.
-     - Note: Sorting compares exact UTF-16 code units and performs no canonical normalization.
+     - Note: Canonically equivalent composed/decomposed identities remain distinct.
      */
     func modules(category: ModuleCategory) -> [BibleReaderSQLiteModuleHandle] {
-        handlesInRegistrationOrder
+        BibleReaderInstalledBookSet.treeSetOrderProjection(bookSetRegistrations)
+            .map(\.value)
             .filter { $0.info.category == category }
-            .sorted { Self.sortsBefore($0.info.name, $1.info.name) }
     }
 
     /**
@@ -132,52 +173,4 @@ struct BibleReaderSQLiteModuleCatalog {
         }
     }
 
-    /**
-     Merges one SWORD coordinator category with readable SQLite books.
-
-     - Parameters:
-       - primary: Metadata already returned by the SWORD coordinator.
-       - category: Category being projected into a picker.
-       - hasReadableSwordModule: Reports whether an initials token resolves to a real SWORD module.
-     - Returns: Stable initials-sorted metadata with one case-insensitive row per identity.
-     - Side effects: None.
-     - Failure modes: None; malformed SQLite modules were excluded during discovery.
-     */
-    func mergedModules(
-        primary: [ModuleInfo],
-        category: ModuleCategory,
-        hasReadableSwordModule: (String) -> Bool
-    ) -> [ModuleInfo] {
-        var mergedByIdentity: [SQLiteDocumentIdentity: ModuleInfo] = [:]
-        for info in primary where info.category == category {
-            mergedByIdentity[SQLiteDocumentIdentity(info.name)] = info
-        }
-        for module in modules(category: category) {
-            let key = SQLiteDocumentIdentity(module.info.name)
-            if hasReadableSwordModule(module.info.name) {
-                continue
-            }
-            mergedByIdentity[key] = module.info
-        }
-        return mergedByIdentity.values.sorted { Self.sortsBefore($0.name, $1.name) }
-    }
-
-    /**
-     Compares exact initials in Java-compatible UTF-16 lexical order for stable picker output.
-
-     - Parameters:
-       - lhs: First exact initials string.
-       - rhs: Second exact initials string.
-     - Returns: `true` when `lhs` precedes `rhs` by unsigned UTF-16 code unit.
-     - Side effects: None.
-     - Failure modes: None; equal strings do not precede one another.
-     */
-    private static func sortsBefore(_ lhs: String, _ rhs: String) -> Bool {
-        lhs.utf16.lexicographicallyPrecedes(rhs.utf16)
-    }
-
-    /** Compares exact Java `String.equals` identities without Unicode normalization. */
-    private static func javaStringEquals(_ lhs: String, _ rhs: String) -> Bool {
-        lhs.utf16.elementsEqual(rhs.utf16)
-    }
 }

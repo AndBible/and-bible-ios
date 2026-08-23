@@ -445,11 +445,11 @@ struct AIDocumentAccessView: View {
     let onBack: (() -> Void)?
 
     /// Draft excluded module initials.
-    @State private var excludedDocuments: Set<String> = []
+    @State private var excludedDocuments: AIExcludedDocumentIdentities = []
     /// Android-compatible installed-book inventory loaded when the destination opens.
     @State private var installedDocuments: [ModuleInfo] = []
     /// Loaded exclusion set used for dirty-state comparison.
-    @State private var initialExcludedDocuments: Set<String> = []
+    @State private var initialExcludedDocuments: AIExcludedDocumentIdentities = []
     /// Whether Android's discard confirmation is visible.
     @State private var showsDiscardConfirmation = false
     /// Credential-free persistence failure.
@@ -522,8 +522,8 @@ struct AIDocumentAccessView: View {
                                 title: documentCategoryTitle(group.category),
                                 accentColor: surfacePalette.controlAccentColor
                             )
-                        ForEach(group.documents, id: \.name) { document in
-                            documentRow(document)
+                        ForEach(group.documents.indices, id: \.self) { index in
+                            documentRow(group.documents[index])
                         }
                             AndroidPreferenceDivider(palette: surfacePalette)
                         }
@@ -637,8 +637,12 @@ struct AIDocumentAccessView: View {
 
     /** Loads Android's global blacklist into explicit draft and baseline sets. */
     private func load() {
+        let myDocuments = (try? MyDocumentLibraryStore(modelContext: modelContext)
+            .loadSession().documents) ?? []
         installedDocuments = AIDocumentAccessInventory.installedModules(
-            swordManager: swordManager
+            swordManager: swordManager,
+            myDocuments: myDocuments,
+            epubs: EpubReader.installedEpubs()
         )
         do {
             let value = try AISettingsStore(modelContext: modelContext).globalSettings().aiExcludedDocuments
@@ -687,40 +691,101 @@ enum AIDocumentAccessInventory {
     /**
      Discovers and merges every document backend registered by the reader.
 
-     - Parameter swordManager: Installed SWORD registry and module-root owner.
-     - Returns: Android-visible SWORD and SQLite modules with SWORD-first initials precedence.
-     - Side effects: Discovers MyBible, MySword, and e-Sword files below the module root.
-     - Failure modes: Missing managers and malformed SQLite files yield only readable modules.
+     - Parameters:
+       - swordManager: Installed SWORD registry and module-root owner.
+       - myDocuments: My Documents metadata in Android registration order.
+       - epubs: Installed EPUB metadata in Android registration order.
+     - Returns: Android-visible globally admitted books in JSword installed TreeSet order.
+     - Side effects: Discovers MyBible, MySword, and e-Sword files below the module root; supplied
+       local metadata is projected without reading pages or EPUB fragments.
+     - Failure modes: Missing managers and malformed custom files fail closed. Locked native rows
+       remain visible and continue to block colliding custom/local candidate initials.
      */
-    static func installedModules(swordManager: SwordManager?) -> [ModuleInfo] {
+    static func installedModules(
+        swordManager: SwordManager?,
+        myDocuments: [MyDocumentDraft] = [],
+        epubs: [EpubInfo] = []
+    ) -> [ModuleInfo] {
         guard let swordManager else { return [] }
-        let sqliteModules = SQLiteDocumentModuleLibrary(
+        let sqliteLibrary = SQLiteDocumentModuleLibrary(
             moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
-        ).modules.map(\.info)
-        return merge(
-            swordModules: swordManager.installedModules(),
-            sqliteModules: sqliteModules
+        )
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: swordManager,
+            sqliteLibrary: sqliteLibrary
+        )
+        let localRegistrations: [BibleReaderLocalDocumentRegistration<ModuleInfo>] = epubs.map {
+            let registeredName = SwordJavaStringIdentity.trim($0.title)
+            let registeredLanguage = SwordJavaStringIdentity.trim($0.language)
+            return BibleReaderLocalDocumentRegistration(
+                document: localModuleInfo(
+                    initials: $0.initials,
+                    name: registeredName,
+                    language: registeredLanguage.isEmpty ? "und" : registeredLanguage,
+                    driver: "EpubBook"
+                ),
+                initials: $0.initials,
+                fullName: registeredName,
+                abbreviation: $0.title,
+                category: .generalBook
+            )
+        } + myDocuments.map {
+            let registeredName = SwordJavaStringIdentity.trim($0.name)
+            return BibleReaderLocalDocumentRegistration(
+                document: localModuleInfo(
+                    initials: $0.initials,
+                    name: registeredName,
+                    language: Locale.current.language.languageCode?.identifier ?? "und",
+                    driver: "RawGenBook"
+                ),
+                initials: $0.initials,
+                fullName: registeredName,
+                abbreviation: $0.initials,
+                category: .generalBook
+            )
+        }
+        return visibleModules(
+            from: resolver.registeredDocumentOwners(localRegistrations: localRegistrations)
+        )
+    }
+
+    /** Creates presentation-only metadata for one admitted local general-book registration. */
+    private static func localModuleInfo(
+        initials: String,
+        name: String,
+        language: String,
+        driver: String
+    ) -> ModuleInfo {
+        ModuleInfo(
+            name: initials,
+            description: name,
+            category: .generalBook,
+            language: language,
+            moduleDriver: driver
         )
     }
 
     /**
-     Applies Android's installed-book category and duplicate-registration contract.
+     Projects globally admitted owner rows into Android's AI document-filter categories.
 
-     - Parameters:
-       - swordModules: Native SWORD modules registered first.
-       - sqliteModules: Android SQLite modules registered afterward.
-     - Returns: Visible documents in backend registration order with the first initials retained.
-     - Side effects: None.
-     - Failure modes: None; unsupported categories are omitted.
+     - Parameter owners: Combined registry owners already ordered by JSword's installed TreeSet.
+     - Returns: Native, SQLite, EPUB, and My Documents metadata in unchanged global order, excluding
+       only categories absent from Android's AI document-filter screen.
+     - Side effects: None; locked installed metadata remains visible without reading content.
+     - Failure modes: Missing sentinels and unsupported categories are omitted.
      */
-    static func merge(
-        swordModules: [ModuleInfo],
-        sqliteModules: [ModuleInfo]
+    static func visibleModules(
+        from owners: [BibleReaderInstalledOrLocalDocumentOwner<ModuleInfo>]
     ) -> [ModuleInfo] {
-        var seenInitials = Set<String>()
-        return (swordModules + sqliteModules).filter { module in
-            visibleCategories.contains(module.category)
-                && seenInitials.insert(module.name).inserted
+        owners.compactMap { owner in
+            let info: ModuleInfo?
+            switch owner {
+            case .installed(let installed, _): info = installed
+            case .local(let local): info = local
+            case .missing: info = nil
+            }
+            guard let info, visibleCategories.contains(info.category) else { return nil }
+            return info
         }
     }
 }

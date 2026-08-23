@@ -88,16 +88,66 @@ extension ModuleStoreTransactionPublisher {
      Resolves a valid installed MyBible sidecar without mutating the live tree.
 
      - Parameter moduleName: Validated MyBible initials.
-     - Returns: The contained module directory, or `nil` when no sidecar metadata exists.
-     - Side effects: Reads path metadata under the transaction lease.
-     - Throws: Canonical-containment, malformed-sidecar, or filesystem errors.
+     Direct sidecar-directory initials are retained for catalog/uninstall compatibility. When the
+     visible installed initials instead come from the actual database filename, the method scans
+     valid sidecars in deterministic raw UTF-16 path order and returns that payload owner.
+
+     - Returns: The contained module directory, or `nil` when no direct or database-derived identity
+       matches.
+     - Side effects: Reads path/sidecar metadata and opens candidate SQLite payloads read-only under
+       the transaction lease.
+     - Throws: Canonical-containment, malformed direct-sidecar, or filesystem errors.
      */
     func myBibleModuleURLIfPresent(moduleName: String) throws -> URL? {
         let myBibleRoot = canonicalRootURL.appendingPathComponent("mybible", isDirectory: true)
         try resolver.validateCanonicalContainment(of: myBibleRoot, beneath: canonicalRootURL)
         let moduleURL = myBibleRoot.appendingPathComponent(moduleName, isDirectory: true)
         try resolver.validateCanonicalContainment(of: moduleURL, beneath: myBibleRoot)
-        guard fileManager.fileExists(atPath: moduleURL.path) else { return nil }
+        if fileManager.fileExists(atPath: moduleURL.path) {
+            return try validatedMyBibleModuleURL(moduleURL, moduleName: moduleName)
+        }
+
+        guard fileManager.fileExists(atPath: myBibleRoot.path) else { return nil }
+        let directories = try fileManager.contentsOfDirectory(
+            at: myBibleRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: []
+        ).sorted {
+            Array($0.path.utf16).lexicographicallyPrecedes(Array($1.path.utf16))
+        }
+        let requestedIdentity = SwordJavaExactStringIdentity(moduleName)
+        for directory in directories {
+            let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard values.isDirectory == true, values.isSymbolicLink != true else { continue }
+            let metadataURL = directory.appendingPathComponent("module.json")
+            guard let data = try? Data(contentsOf: metadataURL),
+                  let sidecar = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
+                  InstalledMyBibleBookReader.registrations(in: directory, sidecar: sidecar).contains(
+                    where: { SwordJavaExactStringIdentity($0.info.name) == requestedIdentity }
+                  ) else {
+                continue
+            }
+            return try validatedMyBibleModuleURL(directory, moduleName: moduleName)
+        }
+        return nil
+    }
+
+    /**
+     Validates one resolved MyBible sidecar directory before transactional removal.
+
+     - Parameters:
+       - moduleURL: Candidate direct or database-derived module directory.
+       - moduleName: Requested installed initials used in diagnostics.
+     - Returns: The unchanged canonical-contained directory.
+     - Side effects: Reads directory and `module.json` file metadata.
+     - Throws: Invalid/symlink directories and missing/malformed sidecar files fail closed.
+     */
+    private func validatedMyBibleModuleURL(
+        _ moduleURL: URL,
+        moduleName: String
+    ) throws -> URL {
+        let myBibleRoot = canonicalRootURL.appendingPathComponent("mybible", isDirectory: true)
+        try resolver.validateCanonicalContainment(of: moduleURL, beneath: myBibleRoot)
         let moduleValues = try moduleURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard moduleValues.isDirectory == true, moduleValues.isSymbolicLink != true else {
             throw ModuleStoreMutationError.invalidConfiguration("mybible/\(moduleName)")
