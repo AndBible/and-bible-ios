@@ -5,7 +5,26 @@ import SwiftData
 import XCTest
 @testable import BibleCore
 
+@MainActor
 final class MyDocumentManagementTests: XCTestCase {
+    /**
+     Persists one management fixture while explicitly declaring that no external book owns it.
+
+     - Parameters:
+       - store: Production management store whose coordinator and strict save path are exercised.
+       - session: Test-owned draft advanced only after the save succeeds.
+     - Side effects: Commits the draft and its remote-sync journal to the test container.
+     - Failure modes: Propagates validation, coordinator, journal, and SwiftData failures.
+     - Important: This no-owner admission exists only in the test target; production must capture
+       the complete native, SQLite, EPUB, and My Documents registry.
+     */
+    private func saveFixture(
+        _ store: MyDocumentLibraryStore,
+        session: inout MyDocumentManagementSession
+    ) throws {
+        try store.save(&session, checkingInitialsWith: { _ in false })
+    }
+
     /**
      Verifies Cancel restores the complete pre-edit graph rather than leaking eager mutations.
 
@@ -198,12 +217,12 @@ final class MyDocumentManagementTests: XCTestCase {
         let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
         var session = try store.loadSession()
         let priorID = try session.createDocument(name: "Original", initials: "PriorOwner")
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         _ = try session.createDocument(name: "Candidate", initials: "FutureOwner")
         try session.renameDocument(id: priorID, name: "FutureOwner")
 
-        XCTAssertThrowsError(try store.save(&session)) { error in
+        XCTAssertThrowsError(try saveFixture(store, session: &session)) { error in
             XCTAssertEqual(
                 error as? MyDocumentManagementError,
                 .duplicateInitials("FutureOwner")
@@ -251,7 +270,7 @@ final class MyDocumentManagementTests: XCTestCase {
             description: "Edited after restore"
         )
 
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let persisted = try store.loadSession().documents
         XCTAssertEqual(persisted.count, 2)
@@ -266,7 +285,7 @@ final class MyDocumentManagementTests: XCTestCase {
 
      - Setup: Creates and saves two documents whose initials are composed/decomposed UTF-16
        spellings of the same visible text, and separately supplies the composed spelling through
-       the legacy reservation set while creating the decomposed spelling.
+       the additional reservation set while creating the decomposed spelling.
      - Expected result: Android-distinct spellings coexist and persist, while a byte-for-byte UTF-16
        duplicate remains rejected.
      - Failure meaning: Swift `String`/`Set` canonical equivalence is still imposing a stricter
@@ -305,7 +324,7 @@ final class MyDocumentManagementTests: XCTestCase {
             )
         }
 
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let persisted = try store.loadSession().documents.map(\.initials)
         XCTAssertEqual(persisted.count, 2)
@@ -346,7 +365,7 @@ final class MyDocumentManagementTests: XCTestCase {
         let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
         var session = try store.loadSession()
         try session.setDocumentDescription(id: document.id, description: "Unrelated edit")
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let persisted = try store.loadSession().documents
         let restored = try XCTUnwrap(persisted.first { $0.id == document.id })
@@ -422,7 +441,7 @@ final class MyDocumentManagementTests: XCTestCase {
         try session.movePages(documentID: firstID, fromOffsets: [1], toOffset: 0)
         session.moveDocuments(fromOffsets: [1], toOffset: 0)
 
-        try writeStore.save(&session)
+        try saveFixture(writeStore, session: &session)
         XCTAssertFalse(session.isDirty)
 
         let readContext = ModelContext(container)
@@ -446,7 +465,7 @@ final class MyDocumentManagementTests: XCTestCase {
         let initialStore = MyDocumentLibraryStore(modelContext: initialContext)
         var initialSession = try initialStore.loadSession()
         let documentID = try initialSession.createDocument(name: "Persisted")
-        try initialStore.save(&initialSession)
+        try saveFixture(initialStore, session: &initialSession)
 
         var draft = try initialStore.loadSession()
         try draft.renameDocument(id: documentID, name: "Unsaved")
@@ -473,7 +492,7 @@ final class MyDocumentManagementTests: XCTestCase {
         let store = MyDocumentLibraryStore(modelContext: sceneContext)
         var session = try store.loadSession()
         _ = try session.createDocument(name: "Managed")
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         sceneContext.rollback()
         let verificationContext = ModelContext(container)
@@ -507,7 +526,7 @@ final class MyDocumentManagementTests: XCTestCase {
             contentType: .markdown,
             content: "Updated"
         )
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let refreshedReaderStore = MyDocumentStore(modelContext: ModelContext(container))
         let payload = try XCTUnwrap(
@@ -568,7 +587,7 @@ final class MyDocumentManagementTests: XCTestCase {
             contentType: .markdown,
             content: "Updated"
         )
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let verificationContext = ModelContext(container)
         let cacheRows = try verificationContext.fetch(FetchDescriptor<AiPageCacheEntry>())
@@ -637,7 +656,7 @@ final class MyDocumentManagementTests: XCTestCase {
         try concurrentContext.save()
 
         try session.renameDocument(id: document.id, name: "Renamed Study")
-        try store.save(&session)
+        try saveFixture(store, session: &session)
 
         let verificationContext = ModelContext(container)
         let savedDocuments = try verificationContext.fetch(FetchDescriptor<MyDocument>())

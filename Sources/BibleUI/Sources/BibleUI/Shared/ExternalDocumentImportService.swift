@@ -112,7 +112,7 @@ private enum ExternalDocumentRegistryAdmissionError: LocalizedError {
  - installer errors are converted to `.failed` so callers can show the existing localized feedback
  */
 public struct ExternalDocumentImportService: Sendable {
-    /// Legacy closure used to install SWORD ZIP modules; retained for source-compatible tests.
+    /// Isolated SWORD ZIP installer injected by focused routing tests.
     public typealias ModuleInstaller = @Sendable (URL) throws -> String
 
     /// Closure used to inspect SWORD ZIP layout, storage demand, and destination conflicts.
@@ -128,9 +128,6 @@ public struct ExternalDocumentImportService: Sendable {
     /// Closure used to install EPUB archives; injectable for focused tests.
     public typealias EpubInstaller = @Sendable (URL) throws -> String
 
-    /// Legacy initials-only predicate retained for source-compatible focused installer tests.
-    public typealias EpubInitialsUnavailable = @Sendable (String) -> Bool
-
     /**
      Throwing live admission that can distinguish an exact EPUB update from another owner.
 
@@ -143,7 +140,7 @@ public struct ExternalDocumentImportService: Sendable {
     ) throws -> Void
 
     /**
-     Installs one EPUB using the resolved legacy or lock-aware production path.
+     Installs one EPUB using the injected test path or lock-aware production path.
 
      - Parameters:
        - url: Candidate archive URL.
@@ -169,7 +166,7 @@ public struct ExternalDocumentImportService: Sendable {
     ) throws -> String
 
     /**
-     Legacy Android backup installer retained for source-compatible focused tests.
+     Android backup installer injected by focused routing tests.
 
      The closure receives an archive URL and returns a restore report or throws. It has no overwrite
      policy input, so production callers must leave this injection `nil` and use the policy-aware
@@ -225,8 +222,8 @@ public struct ExternalDocumentImportService: Sendable {
      EPUB installer that evaluates complete-registry admission at its mutation boundary.
 
      The production implementation delegates to `EpubReader`'s library-lock-owned admission API.
-     A legacy injected `EpubInstaller` is wrapped with a synchronous precheck immediately before
-     invocation; that compatibility path does not promise cross-call serialization.
+     An injected test `EpubInstaller` is wrapped with a synchronous precheck immediately before
+     invocation; the injected installer owns any cross-call serialization required by its fixture.
      */
     private let epubInstaller: RegistryAdmittingEpubInstaller
 
@@ -255,27 +252,24 @@ public struct ExternalDocumentImportService: Sendable {
       Creates a document import service.
 
       - Parameters:
-          - moduleInstaller: Optional source-compatible installer used by focused tests. Production
+          - moduleInstaller: Optional isolated installer used by focused tests. Production
               callers leave it `nil` so policy-aware installation remains authoritative.
           - moduleInspector: Read-only inspector for ZIP-backed SWORD modules.
           - moduleInstallerWithPolicy: Optional policy-aware installer. The default mutates the
               app's SWORD module storage, reports durable phases, and returns the module identifier.
-          - epubInstaller: Optional legacy installer for isolated routing tests. When supplied, the
-              resolved typed admission runs synchronously immediately before this closure, but the
-              injected closure owns serialization. This compatibility boundary cannot make a
-              caller-provided installer atomic across concurrent invocations.
-          - epubCandidateAdmission: Preferred throwing complete-registry validator. Production
+          - epubInstaller: Optional installer for isolated routing tests. When supplied, typed
+              admission runs synchronously immediately before this closure, while the injected
+              closure owns serialization.
+          - epubCandidateAdmission: Throwing complete-registry validator. Production
               callers use `androidRegistryAware(modelContext:swordManager:)`, which rebuilds live
               ownership on every invocation and permits only an exact same-identifier EPUB update.
-          - epubInitialsUnavailable: Legacy initials-only validator wrapped as a typed rejecting
-              admission when `epubCandidateAdmission` is absent.
           - moduleStoreRootURL: Canonical SWORD root whose global coordinator serializes the
               production EPUB admission, staging, pointer publication, and rollback boundary.
           - fontInstaller: Installer for TTF font files. The default copies the font into the SWORD
               `ttf` directory and writes Android-style addon metadata.
           - androidFamilyFileInstaller: Installer for image, prompt, MyBible, MySword, and e-Sword
               files. The default streams one file through the Android backup transaction.
-          - androidModuleBackupInstaller: Optional source-compatible Android backup installer used
+          - androidModuleBackupInstaller: Optional isolated Android backup installer used
               by focused tests. Production callers leave it `nil` so overwrite policy remains
               authoritative.
           - androidModuleBackupInspector: Read-only Android backup inspector that validates every
@@ -289,15 +283,14 @@ public struct ExternalDocumentImportService: Sendable {
       - Side effects: none during initialization; installer closures perform file I/O when invoked.
       - Failure modes: This initializer cannot fail.
       */
-    public init(
+    init(
         moduleInstaller: ModuleInstaller? = nil,
         moduleInspector: @escaping ModuleInspector = { url in
             try ModuleRepository().inspectLocalSwordZip(at: url)
         },
         moduleInstallerWithPolicy: ModuleInstallerWithPolicy? = nil,
         epubInstaller: EpubInstaller? = nil,
-        epubCandidateAdmission: EpubCandidateAdmission? = nil,
-        epubInitialsUnavailable: @escaping EpubInitialsUnavailable = { _ in false },
+        epubCandidateAdmission: @escaping EpubCandidateAdmission,
         moduleStoreRootURL: URL = URL(
             fileURLWithPath: SwordManager.defaultModulePath(),
             isDirectory: true
@@ -330,11 +323,6 @@ public struct ExternalDocumentImportService: Sendable {
                 )
             }
         }
-        let resolvedEpubAdmission: EpubCandidateAdmission = epubCandidateAdmission ?? { candidate in
-            guard !epubInitialsUnavailable(candidate.initials) else {
-                throw ExternalDocumentRegistryAdmissionError.epubIdentityOwned(candidate.initials)
-            }
-        }
         if let epubInstaller {
             self.epubInstaller = { url, admission in
                 try admission(EpubReader.installCandidate(forEpubURL: url))
@@ -350,7 +338,7 @@ public struct ExternalDocumentImportService: Sendable {
                 return EpubReader(identifier: identifier)?.title ?? identifier
             }
         }
-        self.epubCandidateAdmission = resolvedEpubAdmission
+        self.epubCandidateAdmission = epubCandidateAdmission
         self.fontInstaller = fontInstaller
         self.androidFamilyFileInstaller = androidFamilyFileInstaller ?? { url, fileName, family, policy in
             let report = try AndroidModuleBackupService().restoreExternalFile(
@@ -734,7 +722,7 @@ public struct ExternalDocumentImportService: Sendable {
       - Side effects: Mutates local EPUB extracted storage and index files through `EpubReader`.
       - Failure modes: A complete-registry identity owner rejects the candidate before production
           staging; EPUB validation, ZIP parsing, index creation, and file-I/O errors are captured in
-          the returned failure result. Legacy injected installers receive a pre-invocation check but
+          the returned failure result. Injected test installers receive a pre-invocation check but
           retain responsibility for cross-call serialization.
       */
     private func installEpub(at url: URL) -> ExternalDocumentImportResult {

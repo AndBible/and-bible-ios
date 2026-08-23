@@ -319,10 +319,17 @@ private final class ExternalDocumentModulePolicyProbe: @unchecked Sendable {
 private enum ExternalDocumentImportTestError: LocalizedError {
     /// Simulates an installer rejecting a handled document.
     case rejected
+    /// Simulates complete-registry ownership of one EPUB identity.
+    case epubIdentityOwned(String)
 
     /// User-visible error body returned to the service.
     var errorDescription: String? {
-        "installer rejected file"
+        switch self {
+        case .rejected:
+            "installer rejected file"
+        case .epubIdentityOwned(let initials):
+            "Cannot import this EPUB because an installed document already owns module identity \(initials)."
+        }
     }
 }
 
@@ -449,7 +456,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
        - probe: Probe that records module, EPUB, and TTF installer calls.
        - androidModuleBackupDetector: Optional archive classifier override for renamed backup ZIPs.
        - epubArchiveDetector: Optional ZIP classifier override for EPUB fallback tests.
-       - epubInitialsUnavailable: Complete-registry EPUB admission predicate.
+       - epubCandidateAdmission: Typed EPUB admission predicate evaluated before fixture mutation.
      - Returns: Service instance with deterministic installer outputs.
      - Side effects: none during construction.
      - Failure modes: This helper cannot fail.
@@ -458,14 +465,14 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         probe: ExternalDocumentImportProbe,
         androidModuleBackupDetector: ExternalDocumentImportService.AndroidModuleBackupDetector? = nil,
         epubArchiveDetector: ExternalDocumentImportService.EpubArchiveDetector? = nil,
-        epubInitialsUnavailable: @escaping ExternalDocumentImportService.EpubInitialsUnavailable = {
-            _ in false
+        epubCandidateAdmission: @escaping ExternalDocumentImportService.EpubCandidateAdmission = {
+            _ in
         }
     ) -> ExternalDocumentImportService {
         ExternalDocumentImportService(
             moduleInstaller: { url in try probe.installModule(from: url) },
             epubInstaller: { url in try probe.installEpub(from: url) },
-            epubInitialsUnavailable: epubInitialsUnavailable,
+            epubCandidateAdmission: epubCandidateAdmission,
             fontInstaller: { url, displayName in try probe.installFont(from: url, displayName: displayName) },
             androidModuleBackupInstaller: { url in try probe.installAndroidModuleBackup(from: url) },
             androidModuleBackupDetector: androidModuleBackupDetector,
@@ -491,7 +498,11 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         )
         let service = makeExternalDocumentImportService(
             probe: probe,
-            epubInitialsUnavailable: { $0 == expectedInitials }
+            epubCandidateAdmission: { candidate in
+                guard candidate.initials != expectedInitials else {
+                    throw ExternalDocumentImportTestError.epubIdentityOwned(candidate.initials)
+                }
+            }
         )
 
         let result = service.importDocument(at: url)
@@ -1430,6 +1441,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
             moduleInstallerWithPolicy: { url, policy, progressState in
                 try probe.install(url, policy: policy, progressState: progressState)
             },
+            epubCandidateAdmission: { _ in },
             androidModuleBackupDetector: { _ in false },
             epubArchiveDetector: { _ in false }
         )
@@ -1461,6 +1473,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
             moduleInstallerWithPolicy: { url, policy, progressState in
                 try probe.install(url, policy: policy, progressState: progressState)
             },
+            epubCandidateAdmission: { _ in },
             androidModuleBackupDetector: { _ in false },
             epubArchiveDetector: { _ in false }
         )
@@ -1628,6 +1641,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         let probe = ExternalDocumentImportProbe()
         let service = ExternalDocumentImportService(
             moduleInstaller: { url in try probe.installModule(from: url) },
+            epubCandidateAdmission: { _ in },
             androidModuleBackupInstaller: { url in
                 _ = try probe.installAndroidModuleBackup(from: url)
                 return try AndroidModuleBackupService(
@@ -1738,6 +1752,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         let service = ExternalDocumentImportService(
             moduleInstaller: { _ in "unexpected-module" },
             epubInstaller: { _ in "unexpected-epub" },
+            epubCandidateAdmission: { _ in },
             fontInstaller: { _, _ in "unexpected-font" },
             androidFamilyFileInstaller: { url, displayName, family, policy in
                 try probe.install(
@@ -2047,6 +2062,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         let service = ExternalDocumentImportService(
             moduleInstaller: { _ in throw ExternalDocumentImportTestError.rejected },
             epubInstaller: { url in try probe.installEpub(from: url) },
+            epubCandidateAdmission: { _ in },
             fontInstaller: { url, displayName in try probe.installFont(from: url, displayName: displayName) },
             epubArchiveDetector: { url in probe.detectNonEpubArchive(url) }
         )
@@ -2104,6 +2120,7 @@ final class ExternalDocumentImportTests: BibleUISwordFixtureTestCase {
         let service = ExternalDocumentImportService(
             moduleInstaller: { _ in throw ExternalDocumentImportTestError.rejected },
             epubInstaller: { _ in "unused" },
+            epubCandidateAdmission: { _ in },
             fontInstaller: { _, _ in "unused" }
         )
 

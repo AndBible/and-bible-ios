@@ -27,7 +27,8 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     let store = AIGeneratedPageStore(
       modelContext: context,
       markerEventCenter: center,
-      languageCodeProvider: { "en" }
+      languageCodeProvider: { "en" },
+      isDocumentInitialsUnavailable: { _ in false }
     )
     let promptID = UUID()
     let cacheContext = CacheableContext(
@@ -88,7 +89,10 @@ final class AIGeneratedPageStoreTests: XCTestCase {
    */
   func testCacheLookupMatchesAndroidStrictAndLooseQueries() throws {
     let container = try makeContainer()
-    let store = AIGeneratedPageStore(modelContext: ModelContext(container))
+    let store = AIGeneratedPageStore(
+      modelContext: ModelContext(container),
+      isDocumentInitialsUnavailable: { _ in false }
+    )
     let promptID = UUID()
     let strictPrompt = prompt(id: promptID, strict: true)
     let loosePrompt = prompt(id: promptID, strict: false)
@@ -162,7 +166,10 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     setup.insert(first)
     try setup.save()
 
-    let store = AIGeneratedPageStore(modelContext: setup)
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      isDocumentInitialsUnavailable: { _ in false }
+    )
     _ = try store.save(
       content: "Generated",
       title: "Generated",
@@ -354,7 +361,8 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     let store = AIGeneratedPageStore(
       modelContext: ModelContext(container),
       markerEventCenter: center,
-      languageCodeProvider: { "en" }
+      languageCodeProvider: { "en" },
+      isDocumentInitialsUnavailable: { _ in false }
     )
     let promptID = UUID()
     let context = cacheContext(selectedText: "source")
@@ -415,7 +423,8 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     let store = AIGeneratedPageStore(
       modelContext: ModelContext(container),
       markerEventCenter: center,
-      languageCodeProvider: { "en" }
+      languageCodeProvider: { "en" },
+      isDocumentInitialsUnavailable: { _ in false }
     )
     let promptID = UUID()
     let context = cacheContext(selectedText: "source")
@@ -477,7 +486,10 @@ final class AIGeneratedPageStoreTests: XCTestCase {
    */
   func testRegenerationValidationLeavesPersistedPagesUntouched() throws {
     let container = try makeContainer()
-    let store = AIGeneratedPageStore(modelContext: ModelContext(container))
+    let store = AIGeneratedPageStore(
+      modelContext: ModelContext(container),
+      isDocumentInitialsUnavailable: { _ in false }
+    )
     let promptID = UUID()
     let context = cacheContext(selectedText: "source")
     let source = try store.save(

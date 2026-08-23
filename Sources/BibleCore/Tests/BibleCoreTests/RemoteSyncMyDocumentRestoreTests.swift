@@ -19,28 +19,6 @@ private let myDocumentRestoreSQLiteTransient = unsafeBitCast(-1, to: sqlite3_des
  per test; failures indicate Android backup parity or local My Documents data-safety drift.
  */
 final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
-    /**
-     Verifies local My Documents insertion keeps Android bridge initials unique after
-     removing SwiftData's CloudKit-incompatible unique constraint.
-
-     The bridge resolves documents by initials, so allowing two local documents with the same
-     initials would make reader actions nondeterministic and later Android-compatible exports
-     fail against their unique initials index. The store should reject the duplicate before it
-     reaches SwiftData persistence.
-     */
-    func testMyDocumentStoreRejectsDuplicateInitials() throws {
-        let container = try makeModelContainer()
-        let modelContext = ModelContext(container)
-        let store = MyDocumentStore(modelContext: modelContext)
-
-        XCTAssertTrue(store.insert(MyDocument(name: "First", initials: "MYDOC")))
-        XCTAssertFalse(store.insert(MyDocument(name: "Duplicate", initials: "MYDOC")))
-
-        let documents = try modelContext.fetch(FetchDescriptor<MyDocument>())
-        XCTAssertEqual(documents.map(\.name), ["First"])
-        XCTAssertEqual(store.document(initials: "MYDOC")?.name, "First")
-    }
-
     func testRemoteSyncMyDocumentRestoreReplacesLocalGraphAndPreservesAIContext() throws {
         let container = try makeModelContainer()
         let modelContext = ModelContext(container)

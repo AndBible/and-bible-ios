@@ -32,7 +32,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testBookmarkInventoryAdmitsEpubBeforeCollidingMyDocument() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let epubContent = try XCTUnwrap(reader.content(forKey: "1"))
@@ -88,7 +88,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testGenericSpeechAdmitsEpubBeforeCollidingMyDocument() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
 
@@ -134,7 +134,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testDeferredEpubSpeechSynchronizationRejectsNewOwnerWithoutReadOrMutation() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let modulePath = try makeTemporarySwordFixturePath()
@@ -218,7 +218,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testDeferredEpubSpeechSynchronizationKeepsUnownedLocalSuccess() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
@@ -276,7 +276,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testRestoreUsesGeneralBookIdentityAndRendersPersistedNumericKey() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let expected = try XCTUnwrap(reader.content(forKey: "2"))
@@ -330,7 +330,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testRebuiltEpubGenerationAdoptionPreservesKeyAndRejectsDifferentDocument() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
@@ -355,7 +355,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         defer {
             try? FileManager.default.removeItem(at: foreignArchiveURL.deletingLastPathComponent())
         }
-        let foreignIdentifier = try EpubReader.install(epubURL: foreignArchiveURL)
+        let foreignIdentifier = try installDefaultLibraryEpubFixture(epubURL: foreignArchiveURL)
         defer { try? EpubReader.delete(identifier: foreignIdentifier) }
         let foreignReader = try XCTUnwrap(EpubReader(identifier: foreignIdentifier))
 
@@ -378,7 +378,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testRestoreMigratesLegacyEpubHrefIntoGeneralBookState() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
@@ -414,7 +414,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testInternalLinkRequiresMatchingInitialsAndNavigatesToIndexedAnchor() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let (bridge, recordedScripts) = makeRecordingBridge()
@@ -467,7 +467,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testInternalLinkRejectsStaleEpubAfterNativeOwnerAppearsBeforeReadOrMutation() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let modulePath = try makeTemporarySwordFixturePath()
@@ -534,7 +534,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testCommittedEpubDeletionReturnsActivePaneToBibleState() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
@@ -573,7 +573,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     func testEpubBookmarkCommitRejectsGenerationReplacementAfterPlanWithoutMutation() throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
-        let identifier = try EpubReader.install(epubURL: archiveURL)
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
         let target = BookmarkNavigationTarget.generic(.init(

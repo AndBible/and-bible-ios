@@ -60,7 +60,7 @@ public struct MyDocumentsListView: View {
      Creates a standalone My Documents route using the application palette.
 
      - Parameters:
-       - reservedInitials: Legacy installed identities compared with Java-exact UTF-16 semantics.
+       - reservedInitials: Additional installed identities compared with Java-exact UTF-16 semantics.
        - isInitialsUnavailable: Live Android registry lookup for full-name/case-tier collisions.
        - moduleStoreRootURL: Canonical SWORD root used by the live lookup and global mutation gate.
        - onDismiss: Optional owner callback used when the manager is a reader destination.
@@ -69,7 +69,7 @@ public struct MyDocumentsListView: View {
      */
     public init(
         reservedInitials: Set<String> = [],
-        isInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false },
+        isInitialsUnavailable: @escaping (String) throws -> Bool,
         moduleStoreRootURL: URL = URL(
             fileURLWithPath: SwordManager.defaultModulePath(),
             isDirectory: true

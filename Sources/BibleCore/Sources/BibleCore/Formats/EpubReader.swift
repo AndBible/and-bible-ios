@@ -328,27 +328,6 @@ public final class EpubReader: @unchecked Sendable {
     }
 
     /**
-     Installs an EPUB into the default app library.
-
-     - Parameter epubURL: User-selected local or security-scoped EPUB URL.
-     - Returns: Stable local identifier used to reopen the package.
-     - Side effects: Reads the archive, writes a staged extraction/index, and atomically replaces a
-       prior current-generation pointer only after complete validation succeeds.
-     - Throws: `EpubError`, `ZipArchiveReaderError`, or file-system errors. A failure leaves any
-       previously installed package intact.
-     - Important: This compatibility entry point cannot inspect the app's SwiftData registry. App
-       import flows must use `install(epubURL:moduleStoreRootURL:admittingCandidateWith:)` so native,
-       SQLite, EPUB, and My Documents ownership is revalidated under the global publication lease.
-     */
-    public static func install(epubURL: URL) throws -> String {
-        try install(
-            epubURL: epubURL,
-            moduleStoreRootURL: defaultModuleStoreRootURL,
-            admittingCandidateWith: { _ in }
-        )
-    }
-
-    /**
      Installs an EPUB only after a lock-owned live-registry admission check succeeds.
 
      This overload is the production boundary for Android-compatible global book registration.
@@ -361,8 +340,8 @@ public final class EpubReader: @unchecked Sendable {
        - moduleStoreRootURL: SWORD root whose canonical mutation coordinator owns global ordering.
        - admission: Live complete-registry validator invoked with the typed EPUB identity.
      - Returns: Stable local identifier used to reopen the package.
-     - Side effects: On admission, performs the same staged extraction, indexing, and atomic
-       publication as `install(epubURL:)`; rejection leaves the candidate unpublished and unstaged.
+     - Side effects: On admission, performs staged extraction, indexing, and atomic publication;
+       rejection leaves the candidate unpublished and unstaged.
      - Throws: Propagates admission, EPUB validation, ZIP, indexing, and filesystem errors.
      - Important: Admission and all candidate file mutation execute under one library lock hold.
      */
@@ -410,7 +389,7 @@ public final class EpubReader: @unchecked Sendable {
     /**
      Deletes one installed EPUB's stable pointer from the default app library.
 
-     - Parameter identifier: Stable identifier returned by `install(epubURL:)`.
+     - Parameter identifier: Stable identifier returned by a successful EPUB installation.
      - Side effects: Prevents new opens immediately; immutable generations are removed after all
        readers holding them close.
      - Throws: File-system errors raised before the published EPUB identity can be removed. A failed

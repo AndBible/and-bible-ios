@@ -118,6 +118,37 @@ final class AgentMyDocumentIdentityTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(ordinaryIDWithAIInitials)
     }
 
+    /**
+     Verifies Agent document creation fails closed when the complete registry cannot be read.
+
+     - Setup: Builds the production adapter with an injected throwing registry proof and an empty My
+     Documents store, then requests one page whose default destination would create AI Documents.
+     - Expected: Creation throws and a fresh context contains no document graph.
+     - Failure meaning: The adapter has regained its former omission-tolerant inventory fallback and
+       can publish an identity without the Android BookSet ownership proof.
+     - Side effects: Allocates isolated in-memory stores and one temporary search database.
+     */
+    func testDocumentCreationRequiresSuccessfulStrictRegistryProof() throws {
+        struct RegistryUnavailable: Error {}
+
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let adapter = try makeAdapter(
+            myDocumentContext: context,
+            strictMyDocumentInitialsUnavailable: { _ in throw RegistryUnavailable() }
+        )
+
+        XCTAssertThrowsError(try adapter.addMyDocumentPage(
+            documentID: nil,
+            initials: nil,
+            title: "Rejected",
+            content: "Rejected content",
+            contentType: .markdown,
+            context: AgentExecutionContext(promptId: UUID())
+        ))
+        XCTAssertTrue(try ModelContext(container).fetch(FetchDescriptor<MyDocument>()).isEmpty)
+    }
+
     /** Inserts one exact document/page/content graph without generation-time normalization. */
     @discardableResult
     private func insertDocument(
@@ -139,8 +170,21 @@ final class AgentMyDocumentIdentityTests: BibleUISwordFixtureTestCase {
         return document
     }
 
-    /** Builds the real adapter around the supplied My Documents persistence container. */
-    private func makeAdapter(myDocumentContext: ModelContext) throws -> BibleUIAgentDomainAdapter {
+    /**
+     Builds the real adapter around a supplied My Documents container and explicit registry proof.
+
+     - Parameters:
+       - myDocumentContext: Isolated persistence context used by the adapter stores.
+       - strictMyDocumentInitialsUnavailable: Complete-registry lookup; the default explicitly
+         models a test fixture with no installed owner.
+     - Returns: A production adapter with transient supporting stores.
+     - Side effects: Allocates in-memory stores and registers temporary search-database cleanup.
+     - Throws: SWORD fixture, SwiftData, or search service construction failures.
+     */
+    private func makeAdapter(
+        myDocumentContext: ModelContext,
+        strictMyDocumentInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false }
+    ) throws -> BibleUIAgentDomainAdapter {
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
         let bookmarkContext = ModelContext(try makeBookmarkListModelContainer())
         let workspaceContext = ModelContext(try makeWorkspaceModelContainer())
@@ -163,7 +207,8 @@ final class AgentMyDocumentIdentityTests: BibleUISwordFixtureTestCase {
                 workspaceStore: WorkspaceStore(modelContext: workspaceContext)
             ),
             documentAccessPolicy: AgentMyDocumentAllowAllPolicy(),
-            windowDocumentRouter: AgentMyDocumentUnusedWindowRouter()
+            windowDocumentRouter: AgentMyDocumentUnusedWindowRouter(),
+            strictMyDocumentInitialsUnavailable: strictMyDocumentInitialsUnavailable
         )
     }
 
