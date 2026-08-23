@@ -75,36 +75,6 @@ public final class MyDocumentLibraryStore {
     }
 
     /**
-     Applies the session delta atomically and marks it clean only after SwiftData saves.
-
-     - Parameters:
-       - session: Editable session to persist and advance to a clean baseline.
-       - reservedInitials: Legacy installed identities compared with Java-exact UTF-16 semantics.
-       - isInitialsUnavailable: Optional live JSword registry predicate rechecked for newly inserted
-         documents immediately before persistence.
-     - Side effects: Inserts, updates, and deletes only rows/fields changed from the session baseline,
-       saves once, then refreshes the session to include concurrent rows. The coordinator lease is
-       held from the fresh persisted-state fetch through validation, save, and rollback.
-     - Failure modes: Validation failures leave the context untouched; persistence failures roll the
-       context back and preserve the session's dirty baseline.
-     - Important: The global module-store coordinator is acquired before any registry callback may
-       take the recursive EPUB library lock, preserving the process-wide lock order.
-     */
-    public func save(
-        _ session: inout MyDocumentManagementSession,
-        reservedInitials: Set<String> = [],
-        isInitialsUnavailable: ((String) -> Bool)? = nil
-    ) throws {
-        try saveWithExclusiveRegistryAdmission(
-            &session,
-            reservedInitials: reservedInitials,
-            isInitialsUnavailable: { initials in
-                isInitialsUnavailable?(initials) ?? false
-            }
-        )
-    }
-
-    /**
      Applies a session delta after one throwing live-registry check under the global lease.
 
      Production identity publishers use this overload so corrupt or unreadable native/local
@@ -112,10 +82,10 @@ public final class MyDocumentLibraryStore {
 
      - Parameters:
        - session: Editable session to persist and advance only after successful publication.
-       - reservedInitials: Legacy installed identities compared with Java-exact semantics.
+       - reservedInitials: Caller-supplied installed identities compared with Java-exact semantics.
        - registryInitialsUnavailable: Fresh complete-registry lookup invoked for every new document
          while the canonical module-store lease is held.
-     - Side effects: Performs the same isolated SwiftData delta save as the compatibility overload.
+     - Side effects: Applies the isolated SwiftData delta, journals it, and advances the baseline.
      - Throws: Registry snapshot, validation, journaling, or persistence failures without committing
        any part of the candidate graph.
      */
@@ -155,8 +125,8 @@ public final class MyDocumentLibraryStore {
 
      - Parameters:
        - session: Editable management graph whose baseline-to-draft delta is published.
-       - reservedInitials: Legacy native/local identities compared with Java-exact semantics.
-       - isInitialsUnavailable: Optional complete-registry lookup evaluated for each inserted row.
+       - reservedInitials: Additional native/local identities compared with Java-exact semantics.
+       - isInitialsUnavailable: Required complete-registry lookup evaluated for each inserted row.
      - Side effects: Fetches a fresh isolated context, applies only the session delta, writes the
        remote-sync mutation journal and SwiftData graph once, then advances the saved baseline.
      - Throws: Validation and persistence failures after rolling back the isolated context; the

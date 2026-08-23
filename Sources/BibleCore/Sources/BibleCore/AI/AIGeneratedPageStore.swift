@@ -126,7 +126,7 @@ public final class AIGeneratedPageStore {
       fileURLWithPath: SwordManager.defaultModulePath(),
       isDirectory: true
     ),
-    isDocumentInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false }
+    isDocumentInitialsUnavailable: @escaping (String) throws -> Bool
   ) {
     modelContainer = modelContext.container
     self.markerEventCenter = markerEventCenter

@@ -268,6 +268,7 @@ final class ExternalAndroidModuleBackupImportParityTests: XCTestCase {
         let moduleRoot = fixture.moduleRoot
         let stagingRoot = fixture.stagingRoot
         return ExternalDocumentImportService(
+            epubCandidateAdmission: { _ in },
             androidModuleBackupInspector: { archiveURL in
                 try AndroidModuleBackupService(
                     moduleDirectory: moduleRoot,

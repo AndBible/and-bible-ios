@@ -357,18 +357,18 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies committed AI marker additions, updates, and deletion reach initiating and sibling panes.
+     Verifies committed AI marker updates and deletions reach every open pane.
 
-     - Setup: Connects two controllers and one reader-facing store to an isolated typed event center,
-       then inserts, edits, and deletes one generated page with AI cache metadata.
-     - Expected result: Both bridges receive matching marker upserts for add/update and the same page
-       identifier deletion, including the updated title.
-     - Failure meaning: Vue marker state can remain stale in either the pane that initiated a change
-       or another open pane.
-     - Side effects: Persists an in-memory My Documents graph and records bridge JavaScript emissions.
+     - Setup: Persists an admitted generated-page fixture directly in the test container and gives
+       one controller the production reader/bridge store.
+     - Expected result: Editing through the bridge broadcasts the updated title to the initiating
+       and sibling panes; deleting the page broadcasts its stable marker identity to both.
+     - Failure meaning: Existing AI Documents content can change without synchronizing open reader
+       marker state.
+     - Side effects: Writes only to an in-memory SwiftData container and records bridge scripts.
      */
     @MainActor
-    func testAIDocMarkerChangesPropagateToInitiatingAndSiblingPanes() throws {
+    func testAIDocMarkerUpdatesAndDeletesPropagateToInitiatingAndSiblingPanes() throws {
         let eventCenter = MyDocumentAIDocMarkerEventCenter()
         let (initiatingBridge, initiatingScripts) = makeRecordingBridge()
         let (siblingBridge, siblingScripts) = makeRecordingBridge()
@@ -413,16 +413,8 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
         document.pages = [page]
         cache.page = page
 
-        XCTAssertTrue(store.insert(document))
-        for scripts in [initiatingScripts(), siblingScripts()] {
-            let markers = try XCTUnwrap(
-                bridgeEmissionPayload(
-                    from: scripts,
-                    event: "add_or_update_ai_doc_markers"
-                ) as? [[String: Any]]
-            )
-            XCTAssertEqual(markers.first?["title"] as? String, "Initial title")
-        }
+        context.insert(document)
+        try context.save()
 
         let initiatingUpdateBaseline = initiatingScripts().count
         let siblingUpdateBaseline = siblingScripts().count

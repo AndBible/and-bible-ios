@@ -127,7 +127,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
     let documentAccessPolicy: any BibleUIAgentDocumentAccessPolicy
     let windowDocumentRouter: any BibleUIAgentWindowDocumentRouting
     /// Throwing live-registry admission check used before Agent-created My Documents publish.
-    let strictMyDocumentInitialsUnavailable: ((String) throws -> Bool)?
+    let strictMyDocumentInitialsUnavailable: (String) throws -> Bool
 
     /**
      Creates production routing over existing app stores and runtime services.
@@ -143,8 +143,8 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
        - windowManager: Active workspace/window state owner.
        - documentAccessPolicy: Global AI document exclusion policy.
        - windowDocumentRouter: App-owned live pane navigation operation.
-       - strictMyDocumentInitialsUnavailable: Optional production-only fresh throwing registry
-         lookup. Isolated adapters may omit it and retain their injected legacy inventory fixtures.
+       - strictMyDocumentInitialsUnavailable: Required fresh throwing registry lookup. Tests that
+         intentionally have no installed owners must inject an explicit no-owner closure.
      - Side effects: None; dependencies retain their existing ownership.
      - Failure modes: None.
      */
@@ -159,7 +159,7 @@ public final class BibleUIAgentDomainAdapter: BibleUIAgentToolExecuting {
         windowManager: WindowManager,
         documentAccessPolicy: any BibleUIAgentDocumentAccessPolicy,
         windowDocumentRouter: any BibleUIAgentWindowDocumentRouting,
-        strictMyDocumentInitialsUnavailable: ((String) throws -> Bool)? = nil
+        strictMyDocumentInitialsUnavailable: @escaping (String) throws -> Bool
     ) {
         self.swordManager = swordManager
         self.sqliteLibrary = sqliteLibrary

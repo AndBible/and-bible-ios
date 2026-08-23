@@ -131,8 +131,8 @@ public final class MyDocumentStore {
     /// SwiftData context supplied by the owning UI/app actor.
     private let modelContext: ModelContext
 
-    /// Synchronous save operation used by editable page writes.
-    private let savePageContentChanges: () throws -> Void
+    /// Synchronous journaled-save operation used by operation-isolated page writes.
+    private let savePageContentChanges: (ModelContext) throws -> Void
 
     /// App-owned channel that propagates committed AI marker changes to every open reader pane.
     private let aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter
@@ -152,10 +152,10 @@ public final class MyDocumentStore {
     ) {
         self.modelContext = modelContext
         self.aiDocMarkerEventCenter = aiDocMarkerEventCenter
-        self.savePageContentChanges = {
+        self.savePageContentChanges = { operationContext in
             try RemoteSyncMutationJournalService.savePendingGraphChanges(
                 for: .myDocuments,
-                modelContext: modelContext
+                modelContext: operationContext
             )
         }
     }
@@ -165,17 +165,18 @@ public final class MyDocumentStore {
 
      - Parameters:
        - modelContext: SwiftData context containing the My Documents graph.
-       - savePageContentChanges: Synchronous operation that persists pending page-content changes;
-         production callers use `ModelContext.save()` through the public initializer.
+       - savePageContentChanges: Synchronous operation that persists pending page-content changes
+         in the supplied operation-isolated context; the public initializer supplies the My
+         Documents remote-sync journal boundary.
        - aiDocMarkerEventCenter: Typed app event channel shared by open reader controllers.
      - Side effects: Stores references only; no fetch or save occurs during initialization.
      - Failure modes: Errors thrown by `savePageContentChanges` are handled by
        `savePageContent(bookInitials:pageId:content:title:)`.
-     - Important: The closure must obey the supplied context's actor/thread confinement.
+     - Important: The closure must obey the operation context's actor/thread confinement.
      */
     init(
         modelContext: ModelContext,
-        savePageContentChanges: @escaping () throws -> Void,
+        savePageContentChanges: @escaping (ModelContext) throws -> Void,
         aiDocMarkerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared
     ) {
         self.modelContext = modelContext
@@ -184,9 +185,15 @@ public final class MyDocumentStore {
     }
 
     /**
-     Fetches one document by its stable bridge initials.
+     Fetches one persisted document by its stable bridge initials.
+
+     - Parameter initials: Exact Android My Documents identity.
+     - Returns: The first deterministic persisted match, or `nil` when none can be read.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
+     - Failure modes: Fetch failures fail closed as `nil`.
      */
     public func document(initials: String) -> MyDocument? {
+        let context = makeIsolatedContext()
         var descriptor = FetchDescriptor<MyDocument>(
             predicate: #Predicate { $0.initials == initials },
             sortBy: [
@@ -196,20 +203,21 @@ public final class MyDocumentStore {
             ]
         )
         descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        return try? context.fetch(descriptor).first
     }
 
     /**
      Lists My Documents in Android registration order for global book identity resolution.
 
      - Returns: Persisted documents ordered by `orderNumber` with deterministic metadata tie-breakers.
-     - Side effects: Reads document rows from the supplied SwiftData context without saving.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
      - Throws: Re-throws SwiftData metadata fetch failures so callers fail the combined local
        registry closed instead of substituting an EPUB or another document.
      - Important: This method does not access page content. Registration consumers must resolve an
        owner before calling `page(bookInitials:pageKey:)` or another content API.
      */
     public func documentsInRegistrationOrder() throws -> [MyDocument] {
+        let context = makeIsolatedContext()
         let descriptor = FetchDescriptor<MyDocument>(
             sortBy: [
                 SortDescriptor(\.orderNumber),
@@ -218,7 +226,7 @@ public final class MyDocumentStore {
                 SortDescriptor(\.initials),
             ]
         )
-        return try modelContext.fetch(descriptor)
+        return try context.fetch(descriptor)
     }
 
     /**
@@ -230,12 +238,29 @@ public final class MyDocumentStore {
 
      - Parameter initials: Non-empty document initials; matching is case-sensitive and untrimmed.
      - Returns: The only document with the supplied initials.
-     - Side effects: Reads the supplied SwiftData context without saving or mutating models.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
      - Throws: `MyDocumentExactLookupError` for invalid input, no match, duplicate matches, or a
        SwiftData read failure.
-     - Important: The call inherits the supplied context's actor/thread confinement.
+     - Important: The call inherits the store's actor/thread confinement.
      */
     public func exactDocument(initials: String) throws -> MyDocument {
+        try exactDocument(initials: initials, in: makeIsolatedContext())
+    }
+
+    /**
+     Resolves one exact persisted document inside a caller-owned operation context.
+
+     - Parameters:
+       - initials: Non-empty byte-exact Android document identity.
+       - context: Clean isolated context shared with a subsequent exact page lookup.
+     - Returns: The only matching persisted document.
+     - Side effects: Reads SwiftData without saving or mutating rows.
+     - Throws: `MyDocumentExactLookupError` for invalid, missing, duplicate, or unreadable identity.
+     */
+    private func exactDocument(
+        initials: String,
+        in context: ModelContext
+    ) throws -> MyDocument {
         guard !initials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MyDocumentExactLookupError.invalidDocumentInitials
         }
@@ -246,7 +271,7 @@ public final class MyDocumentStore {
 
         let matches: [MyDocument]
         do {
-            matches = try modelContext.fetch(descriptor)
+            matches = try context.fetch(descriptor)
         } catch {
             throw MyDocumentExactLookupError.documentReadFailed(initials: initials)
         }
@@ -260,9 +285,17 @@ public final class MyDocumentStore {
     }
 
     /**
-     Resolves one page by the Android-compatible document initials and page key.
+     Resolves one persisted page by Android-compatible document initials and page key.
+
+     - Parameters:
+       - bookInitials: Exact persisted parent identity.
+       - pageKey: Parent-scoped Android page key.
+     - Returns: The first display-ordered persisted match, or `nil` when none can be read.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
+     - Failure modes: Fetch failures fail closed as `nil`.
      */
     public func page(bookInitials: String, pageKey: String) -> MyDocumentPage? {
+        let context = makeIsolatedContext()
         var descriptor = FetchDescriptor<MyDocumentPage>(
             predicate: #Predicate {
                 $0.pageKey == pageKey && $0.document?.initials == bookInitials
@@ -275,7 +308,7 @@ public final class MyDocumentStore {
             ]
         )
         descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        return try? context.fetch(descriptor).first
     }
 
     /**
@@ -289,13 +322,14 @@ public final class MyDocumentStore {
        - bookInitials: Non-empty exact parent document initials.
        - pageKey: Exact parent-scoped persisted page key; empty keys are looked up literally.
      - Returns: The only matching page.
-     - Side effects: Reads the supplied SwiftData context without saving or mutating models.
+     - Side effects: Opens one isolated read context; caller-staged graph changes are ignored.
      - Throws: `MyDocumentExactLookupError` for invalid/missing/duplicate document identity,
        missing/duplicate page identity, or a SwiftData read failure.
-     - Important: The call inherits the supplied context's actor/thread confinement.
+     - Important: Document and page uniqueness are evaluated in the same persisted snapshot.
      */
     public func exactPage(bookInitials: String, pageKey: String) throws -> MyDocumentPage {
-        let document = try exactDocument(initials: bookInitials)
+        let context = makeIsolatedContext()
+        let document = try exactDocument(initials: bookInitials, in: context)
         let documentID = document.id
         var descriptor = FetchDescriptor<MyDocumentPage>(
             predicate: #Predicate {
@@ -306,7 +340,7 @@ public final class MyDocumentStore {
 
         let matches: [MyDocumentPage]
         do {
-            matches = try modelContext.fetch(descriptor)
+            matches = try context.fetch(descriptor)
         } catch {
             throw MyDocumentExactLookupError.pageReadFailed(
                 bookInitials: bookInitials,
@@ -329,28 +363,41 @@ public final class MyDocumentStore {
     }
 
     /**
-     Resolves one page by its stable page identifier and parent document initials.
+     Resolves one persisted page by stable page identifier and parent document initials.
+
+     - Parameters:
+       - bookInitials: Exact persisted parent identity.
+       - pageId: Stable page UUID.
+     - Returns: The persisted matching page, or `nil` when none can be read.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
+     - Failure modes: Fetch failures fail closed as `nil`.
      */
     public func page(bookInitials: String, pageId: UUID) -> MyDocumentPage? {
+        let context = makeIsolatedContext()
         var descriptor = FetchDescriptor<MyDocumentPage>(
             predicate: #Predicate {
                 $0.id == pageId && $0.document?.initials == bookInitials
             }
         )
         descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        return try? context.fetch(descriptor).first
     }
 
     /**
-     Resolves one page by its stable page identifier without requiring the
-     parent document initials.
+     Resolves one persisted page by stable identifier without requiring parent initials.
+
+     - Parameter pageId: Stable page UUID.
+     - Returns: The persisted matching page, or `nil` when none can be read.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
+     - Failure modes: Fetch failures fail closed as `nil`.
      */
     public func page(pageId: UUID) -> MyDocumentPage? {
+        let context = makeIsolatedContext()
         var descriptor = FetchDescriptor<MyDocumentPage>(
             predicate: #Predicate { $0.id == pageId }
         )
         descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        return try? context.fetch(descriptor).first
     }
 
     /**
@@ -389,7 +436,8 @@ public final class MyDocumentStore {
          therefore uses Android's localized unknown-prompt fallback.
      - Returns: Deterministically ordered metadata matching `CurrentPageBase` and
        `AiDocMarkerInfo`.
-     - Side effects: Reads SwiftData only.
+     - Side effects: Reads metadata from the supplied page and opens an isolated context only for
+       marker inventory, so caller-staged marker rows are ignored.
      - Failure modes: Marker fetch failures degrade to an empty marker list; page metadata remains.
      */
     public func readerMetadata(
@@ -424,11 +472,12 @@ public final class MyDocumentStore {
        - bookInitials: Source document initials stored by `AiPageCacheEntry`.
        - pageKey: Exact source key stored by `AiPageCacheEntry`.
      - Returns: Deterministically ordered markers whose generated page and document still exist.
-     - Side effects: Reads SwiftData only.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
      - Failure modes: Fetch failures and dangling generated-page relationships return an empty or
        filtered marker list; no nearest-key or module-only fallback is attempted.
      */
     public func aiDocMarkers(bookInitials: String, pageKey: String) -> [MyDocumentAIDocMarker] {
+        let context = makeIsolatedContext()
         let sourceInitials = bookInitials
         let sourceKey = pageKey
         let descriptor = FetchDescriptor<AiPageCacheEntry>(
@@ -436,7 +485,7 @@ public final class MyDocumentStore {
                 $0.sourceBookInitials == sourceInitials && $0.sourceBookKey == sourceKey
             }
         )
-        let entries: [AiPageCacheEntry] = (try? modelContext.fetch(descriptor)) ?? []
+        let entries: [AiPageCacheEntry] = (try? context.fetch(descriptor)) ?? []
         return projectedAIDocMarkers(entries)
     }
 
@@ -445,13 +494,14 @@ public final class MyDocumentStore {
 
      - Parameter range: Inclusive KJVA range for the rendered Bible document.
      - Returns: Deterministically ordered generated-page markers with overlapping stored ranges.
-     - Side effects: Reads SwiftData only.
+     - Side effects: Opens an isolated read context; caller-staged graph changes are ignored.
      - Failure modes: Fetch failures, nil source ranges, and dangling page/document relationships are
        omitted; source initials and keys do not constrain Bible marker visibility.
      */
     public func aiDocMarkers(kjvaRange range: ClosedRange<Int>) -> [MyDocumentAIDocMarker] {
+        let context = makeIsolatedContext()
         let descriptor = FetchDescriptor<AiPageCacheEntry>()
-        let entries: [AiPageCacheEntry] = (try? modelContext.fetch(descriptor)) ?? []
+        let entries: [AiPageCacheEntry] = (try? context.fetch(descriptor)) ?? []
         return projectedAIDocMarkers(entries.filter { entry in
             guard let start = entry.kjvOrdinalStart,
                   let end = entry.kjvOrdinalEnd else {
@@ -541,14 +591,20 @@ public final class MyDocumentStore {
     }
 
     /**
-     Deletes one AI-generated My Documents page and its cascaded content/cache.
+     Deletes one persisted AI-generated My Documents page and its cascaded content/cache.
 
-     User-authored pages are refused so the Android action-menu gate stays
-     sourcePromptId-driven on iOS too.
+     - Parameter pageId: Stable page UUID from the Android-compatible reader action payload.
+     - Returns: The deleted page context or the exact fail-closed refusal reason.
+     - Side effects: Opens an operation-owned context, updates the parent timestamp, deletes the
+       page, commits the My Documents remote-sync journal, and posts one marker deletion event.
+       Pending changes in the caller-owned context are neither read nor saved.
+     - Failure modes: Missing and user-authored pages are refused; fetch or journaled-save failures
+       return `.pageNotFound` or `.saveFailed` without committing the operation context.
      */
     @discardableResult
     public func deleteAIPage(pageId: UUID) -> MyDocumentAIPageDeletionResult {
-        guard let page = page(pageId: pageId) else {
+        let operationContext = makeIsolatedContext()
+        guard let page = page(pageId: pageId, in: operationContext) else {
             return .pageNotFound
         }
 
@@ -561,19 +617,19 @@ public final class MyDocumentStore {
             document.updatedAt = now
         }
 
-        modelContext.delete(page)
+        operationContext.delete(page)
 
         do {
             try RemoteSyncMutationJournalService.savePendingGraphChanges(
                 for: .myDocuments,
-                modelContext: modelContext
+                modelContext: operationContext
             )
             aiDocMarkerEventCenter.post(
                 MyDocumentAIDocMarkersChangedEvent(deletedPageIDs: [context.pageId])
             )
             return .deleted(context)
         } catch {
-            modelContext.rollback()
+            operationContext.rollback()
             return .saveFailed
         }
     }
@@ -587,12 +643,12 @@ public final class MyDocumentStore {
        - content: Replacement raw page body.
        - title: Optional replacement page title; `nil` preserves the current title.
      - Returns: `true` when a matching page was found and saved.
-     - Side effects: Mutates the matching page, its parent document timestamp, and its content row,
-       then saves the supplied `ModelContext` synchronously.
-     - Failure modes: Returns `false` when the page cannot be resolved or persistence fails. A save
-       failure restores only the page graph fields changed by this call and removes any content row
-       this call inserted, leaving unrelated pending context changes intact.
-     - Important: The operation inherits the supplied context's actor/thread confinement.
+     - Side effects: Opens an operation-owned context, mutates the matching page, its parent document
+       timestamp, and its content row, commits the My Documents journal, and posts marker upserts.
+       Pending changes in the caller-owned context are neither read nor saved.
+     - Failure modes: Returns `false` when the persisted page cannot be resolved or the journaled
+       operation save fails; the operation context is rolled back without publishing marker changes.
+     - Important: The synchronous operation inherits the store's actor/thread confinement.
      */
     @discardableResult
     public func savePageContent(
@@ -601,17 +657,15 @@ public final class MyDocumentStore {
         content: String,
         title: String?
     ) -> Bool {
-        guard let page = page(bookInitials: bookInitials, pageId: pageId) else {
+        let operationContext = makeIsolatedContext()
+        guard let page = page(
+            bookInitials: bookInitials,
+            pageId: pageId,
+            in: operationContext
+        ) else {
             return false
         }
-
-        let originalTitle = page.title
-        let originalPageUpdatedAt = page.updatedAt
         let document = page.document
-        let originalDocumentUpdatedAt = document?.updatedAt
-        let originalPageContent = page.pageContent
-        let originalContent = originalPageContent?.content
-        var insertedPageContent: MyDocumentPageContent?
 
         let now = Date()
         if let title {
@@ -626,84 +680,73 @@ public final class MyDocumentStore {
             let pageContent = MyDocumentPageContent(pageId: page.id, content: content)
             pageContent.page = page
             page.pageContent = pageContent
-            modelContext.insert(pageContent)
-            insertedPageContent = pageContent
+            operationContext.insert(pageContent)
         }
 
         do {
-            try savePageContentChanges()
+            try savePageContentChanges(operationContext)
             postAIDocMarkerUpserts(for: [page])
             return true
         } catch {
-            page.title = originalTitle
-            page.updatedAt = originalPageUpdatedAt
-            if let document, let originalDocumentUpdatedAt {
-                document.updatedAt = originalDocumentUpdatedAt
-            }
-
-            if let originalPageContent, let originalContent {
-                originalPageContent.content = originalContent
-            } else if let insertedPageContent {
-                page.pageContent = nil
-                insertedPageContent.page = nil
-                modelContext.delete(insertedPageContent)
-            }
+            operationContext.rollback()
             return false
         }
     }
 
     /**
-     Inserts a My Documents graph and saves immediately.
+     Creates a clean context for one persisted read or mutation boundary.
 
-     - Parameter document: Detached graph whose exact initials must be absent from My Documents.
-     - Returns: `true` after the graph and sync journal save, otherwise `false` after rollback.
-     - Side effects: Inserts the graph, records pending remote-sync mutations, updates AI markers,
-       and saves through the journal service.
-     - Failure modes: Duplicate My Documents initials or any persistence error returns `false`.
-     - Important: This compatibility API has no production caller and does not participate in the
-       complete native/SQLite/EPUB/MyDocument admission lease. New application publishers must use
-       `MyDocumentLibraryStore` or another globally coordinated strict publication boundary.
+     - Returns: A non-autosaving context backed by the same persistent container as the read store.
+     - Side effects: Allocates one SwiftData context without fetching or saving rows.
+     - Failure modes: None; context construction is synchronous and nonthrowing.
      */
-    @discardableResult
-    public func insert(_ document: MyDocument) -> Bool {
-        guard !hasDocument(initials: document.initials, excluding: document.id) else {
-            return false
-        }
-        modelContext.insert(document)
-        do {
-            try RemoteSyncMutationJournalService.savePendingGraphChanges(
-                for: .myDocuments,
-                modelContext: modelContext
-            )
-            postAIDocMarkerUpserts(for: document.pages ?? [])
-            return true
-        } catch {
-            modelContext.rollback()
-            return false
-        }
+    private func makeIsolatedContext() -> ModelContext {
+        let context = ModelContext(modelContext.container)
+        context.autosaveEnabled = false
+        return context
     }
 
     /**
-     Saves pending My Documents changes with their remote-sync mutation journal.
+     Fetches one persisted page by stable identifier in an explicit operation context.
 
-     - Side Effects: Commits the graph and Android-compatible `LogEntry` rows atomically, then
-       publishes the complete current AI marker set so open readers replace changed marker values.
-     - Failure: Journal or persistence errors are swallowed and publish no event, preserving this
-       store's eager-save API without exposing uncommitted marker state.
+     - Parameters:
+       - pageId: Stable page UUID supplied by the reader action.
+       - context: Clean operation context that owns any subsequent delete.
+     - Returns: The first persisted matching page, or `nil` when no row can be read.
+     - Side effects: Reads SwiftData without saving or mutating rows.
+     - Failure modes: Fetch failures fail closed as `nil`.
      */
-    public func save() {
-        do {
-            try RemoteSyncMutationJournalService.savePendingGraphChanges(
-                for: .myDocuments,
-                modelContext: modelContext
-            )
-            let entries = (try? modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())) ?? []
-            aiDocMarkerEventCenter.post(
-                MyDocumentAIDocMarkersChangedEvent(markers: projectedAIDocMarkers(entries))
-            )
-        } catch {
-            return
-        }
+    private func page(pageId: UUID, in context: ModelContext) -> MyDocumentPage? {
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate { $0.id == pageId }
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+
+    /**
+     Fetches one persisted page by exact parent initials and stable identifier.
+
+     - Parameters:
+       - bookInitials: Byte-exact Android My Documents identity.
+       - pageId: Stable page UUID supplied by the editor payload.
+       - context: Clean operation context that owns any subsequent edit.
+     - Returns: The first persisted matching page, or `nil` when no row can be read.
+     - Side effects: Reads SwiftData without saving or mutating rows.
+     - Failure modes: Fetch failures fail closed as `nil`.
+     */
+    private func page(
+        bookInitials: String,
+        pageId: UUID,
+        in context: ModelContext
+    ) -> MyDocumentPage? {
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate {
+                $0.id == pageId && $0.document?.initials == bookInitials
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
     }
 
     /**
@@ -721,21 +764,4 @@ public final class MyDocumentStore {
         )
     }
 
-    /**
-     Checks whether another persisted My Documents row already owns the supplied bridge initials.
-
-     `MyDocument.initials` must stay unique for Android-compatible bridge resolution and remote
-     backup export, but CloudKit-backed SwiftData stores cannot use a store-level unique
-     constraint. This helper preserves the uniqueness contract at the app layer before new local
-     rows are inserted.
-     */
-    private func hasDocument(initials: String, excluding documentID: UUID) -> Bool {
-        var descriptor = FetchDescriptor<MyDocument>(
-            predicate: #Predicate {
-                $0.initials == initials && $0.id != documentID
-            }
-        )
-        descriptor.fetchLimit = 1
-        return ((try? modelContext.fetch(descriptor)) ?? []).isEmpty == false
-    }
 }

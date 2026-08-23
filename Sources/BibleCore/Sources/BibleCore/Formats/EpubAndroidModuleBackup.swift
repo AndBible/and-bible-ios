@@ -41,30 +41,6 @@ extension EpubReader {
     }
 
     /**
-     Installs one extracted Android `MODULE_BACKUP` EPUB directory into the default EPUB library.
-
-     The supplied URL must identify the exact `epub/<displayName>/` directory from Android's module
-     tree. Its final path component, rather than a temporary backup filename, owns the portable
-     `Epub-<sanitized displayName>` identity used by Android bookmarks and workspace state.
-
-     - Parameter epubDirectoryURL: Root containing `META-INF/container.xml`, the OPF/resources, and
-       optional Android optimization artifacts.
-     - Returns: Stable iOS library identifier used to reopen the published book.
-     - Side effects: Reads a security-scoped directory, stages a package and native index, and
-       atomically publishes one immutable generation in the app's Documents EPUB library.
-     - Throws: `EpubError` or file-system errors for unsafe, incomplete, corrupt, or mismatched trees.
-       A failure leaves any previously published generation selected and readable.
-     */
-    public static func installAndroidModuleBackup(epubDirectoryURL: URL) throws -> String {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let libraryRootURL = documents.appendingPathComponent("epub", isDirectory: true)
-        return try installAndroidModuleBackup(
-            epubDirectoryURL: epubDirectoryURL,
-            libraryRootURL: libraryRootURL
-        )
-    }
-
-    /**
      Installs one Android EPUB tree into an explicit isolated library root.
 
      Raw trees use the ordinary OPF/XHTML indexer. Optimized trees whose original spine documents

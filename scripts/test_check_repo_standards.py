@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_repo_standards import (
     find_legacy_root_sidebar_shell,
     find_multiline_slash_docblocks,
+    find_unsafe_direct_document_publishers,
     validate_commit_message,
+    validate_source_guards,
 )
 
 
@@ -191,6 +194,351 @@ class RepoStandardsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(find_legacy_root_sidebar_shell(text), [])
+
+    def test_find_unsafe_direct_document_publishers_flags_bypass_apis(self) -> None:
+        text = "\n".join(
+            [
+                "public static func install(epubURL source: Foundation.URL) throws -> String { fatalError() }",
+                "internal func insert(_ graph: BibleCore.MyDocument) -> Bool { true }",
+                "public static func installAndroidModuleBackup(_ source: URL) throws -> String { fatalError() }",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [1, 2, 3])
+
+    def test_find_unsafe_direct_document_publishers_flags_fail_open_dependencies(self) -> None:
+        text = "\n".join(
+            [
+                "public func save() {}",
+                "isDocumentInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false },",
+                "epubCandidateAdmission: EpubCandidateAdmission? = nil,",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleCore/Sources/BibleCore/Database/MyDocumentStore.swift",
+            ),
+            [1, 2, 3],
+        )
+
+    def test_find_unsafe_direct_document_publishers_flags_optional_library_admission(self) -> None:
+        text = "\n".join(
+            [
+                "public func save(",
+                "  _ session: inout Session,",
+                "  isInitialsUnavailable: ((String) -> Bool)? = nil",
+                ") throws {}",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleCore/Sources/BibleCore/Database/MyDocumentLibraryStore.swift",
+            ),
+            [1],
+        )
+
+    def test_find_unsafe_direct_document_publishers_enforces_audited_call_sites(self) -> None:
+        unsafe_text = "\n".join(
+            [
+                "_ = try EpubReader.installAndroidModuleBackup(epubDirectoryURL: source, libraryRootURL: root)",
+                "_ = try EpubReader.install(epubURL: source, moduleStoreRootURL: root, admittingCandidateWith: check)",
+                "let document = MyDocument(name: name, initials: initials)",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(unsafe_text, "Sources/Unsafe.swift"),
+            [1, 2, 3],
+        )
+        audited_text = "\n".join(
+            [
+                "func validatePublishedState() throws {",
+                "  _ = try EpubReader.installAndroidModuleBackup(",
+                "    epubDirectoryURL: source, libraryRootURL: root",
+                "  )",
+                "}",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                audited_text,
+                "Sources/BibleCore/Sources/BibleCore/Services/AndroidModuleBackupRestoreAvailability.swift",
+            ),
+            [],
+        )
+
+    def test_find_unsafe_direct_document_publishers_rejects_aliases_defaults_and_factories(self) -> None:
+        text = "\n".join(
+            [
+                "typealias Reader = EpubReader",
+                "_ = try Reader.install(epubURL: source, moduleStoreRootURL: root, admittingCandidateWith: check)",
+                "func install(epubURL: URL, libraryRootURL: URL = defaultRoot) throws {}",
+                "func publish(_ graph: MyDocument) { modelContext.insert(graph) }",
+                "let document: MyDocument = .init(name: name, initials: initials)",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(text, "AndBible/UnsafePublisher.swift"),
+            [1, 3, 4, 5],
+        )
+
+    def test_find_unsafe_direct_document_publishers_rejects_extra_call_in_audited_file(self) -> None:
+        text = "\n".join(
+            [
+                "func initForTests() throws {",
+                "  _ = try EpubReader.install(",
+                "    epubURL: source, moduleStoreRootURL: root, admittingCandidateWith: check",
+                "  )",
+                "}",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift",
+            ),
+            [2],
+        )
+
+    def test_validate_source_guards_scans_app_host_publishers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app_root = root / "AndBible"
+            app_root.mkdir(parents=True)
+            (app_root / "ContentView.swift").write_text(
+                "struct ContentView {}\n",
+                encoding="utf-8",
+            )
+            (app_root / "UnsafePublisher.swift").write_text(
+                "typealias Reader = EpubReader\n",
+                encoding="utf-8",
+            )
+
+            issues = validate_source_guards(root)
+
+        self.assertEqual(
+            [(issue.path, issue.line) for issue in issues],
+            [("AndBible/UnsafePublisher.swift", 1)],
+        )
+
+    def test_find_unsafe_direct_document_publishers_allows_strict_and_test_calls(self) -> None:
+        text = "\n".join(
+            [
+                "public static func install(",
+                "    epubURL: URL,",
+                "    moduleStoreRootURL: URL,",
+                "    admittingCandidateWith admission: InstallAdmission",
+                ") throws -> String { fatalError() }",
+                "modelContext.insert(document)",
+                "// public static func install(epubURL: URL) throws -> String",
+                "let example = \"func insert(_ document: MyDocument)\"",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [])
+
+    def test_find_unsafe_direct_document_publishers_requires_public_epub_admission(self) -> None:
+        text = "public static func install(epubURL: URL, libraryRootURL: URL) throws -> String { fatalError() }"
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleCore/Sources/BibleCore/Formats/EpubReaderLibrary.swift",
+            ),
+            [1],
+        )
+
+    def test_find_unsafe_direct_document_publishers_requires_strict_admission_type(self) -> None:
+        text = "\n".join(
+            [
+                "public static func install(epubURL: URL, moduleStoreRootURL: URL, admittingCandidateWith: Bool) throws {}",
+                "public static func install(epubURL: URL, moduleStoreRootURL: URL, admittingCandidateWith: InstallAdmission?) throws {}",
+                "public static func install(epubURL: URL, moduleStoreRootURL: URL, admittingCandidateWith: (() -> Void)?) throws {}",
+                "public static func install(epubURL: URL, moduleStoreRootURL: URL, admittingCandidateWith: BibleCore.EpubReader.InstallAdmission) throws {}",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleCore/Sources/BibleCore/Formats/EpubReader.swift",
+            ),
+            [1, 2, 3],
+        )
+
+    def test_find_unsafe_direct_document_publishers_keeps_backup_root_api_internal(self) -> None:
+        text = (
+            "public static func installAndroidModuleBackup("
+            "epubDirectoryURL: URL, libraryRootURL: URL) throws -> String { fatalError() }"
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleCore/Sources/BibleCore/Formats/EpubAndroidModuleBackup.swift",
+            ),
+            [1],
+        )
+
+    def test_find_unsafe_direct_document_publishers_reads_multiline_public_modifiers(self) -> None:
+        epub_text = "\n".join(
+            [
+                "public",
+                "static func install(epubURL: URL, libraryRootURL: URL) throws -> String { fatalError() }",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                epub_text,
+                "Sources/BibleCore/Sources/BibleCore/Formats/EpubReaderLibrary.swift",
+            ),
+            [1],
+        )
+        backup_text = "\n".join(
+            [
+                "public",
+                "static func installAndroidModuleBackup(",
+                "  epubDirectoryURL: URL, libraryRootURL: URL",
+                ") throws -> String { fatalError() }",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                backup_text,
+                "Sources/BibleCore/Sources/BibleCore/Formats/EpubAndroidModuleBackup.swift",
+            ),
+            [1],
+        )
+
+    def test_find_unsafe_direct_document_publishers_ignores_unrelated_installers(self) -> None:
+        text = "func install(font: Font) throws {}"
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [])
+
+    def test_find_unsafe_direct_document_publishers_rejects_qualified_aliases(self) -> None:
+        text = "\n".join(
+            [
+                "typealias Reader = BibleCore.EpubReader",
+                "typealias Document = BibleCore.MyDocument",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [1, 2])
+
+    def test_find_unsafe_direct_document_publishers_rejects_publisher_references(self) -> None:
+        text = "\n".join(
+            [
+                "let publish = EpubReader.install",
+                "let makeDocument = MyDocument.init",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [1, 2])
+
+    def test_find_unsafe_direct_document_publishers_rejects_factory_insertion(self) -> None:
+        text = "\n".join(
+            [
+                "func publish(factory: () -> MyDocument) { modelContext.insert(factory()) }",
+                "func publishNamed(factory: (String, String) -> MyDocument) {",
+                "  let graph: MyDocument = factory(name, initials)",
+                "  modelContext.insert(graph)",
+                "}",
+                "func publishThrowing(factory: (String, String) throws -> MyDocument) throws {",
+                "  modelContext.insert(try factory(name, initials))",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [1, 2, 6])
+
+    def test_find_unsafe_direct_document_publishers_rejects_document_factories(self) -> None:
+        text = "\n".join(
+            [
+                "func makeDocument() -> MyDocument { .init(name: name, initials: initials) }",
+                "let make: () -> MyDocument = { .init(name: name, initials: initials) }",
+                "let parameterized: (String, String) -> MyDocument = { name, initials in",
+                "  .init(name: name, initials: initials)",
+                "}",
+                "let attributed: @Sendable () -> MyDocument = {",
+                "  .init(name: name, initials: initials)",
+                "}",
+                "extension MyDocument {",
+                "  static func make() -> Self { Self(name: name, initials: initials) }",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [1, 2, 3, 6, 10])
+
+    def test_find_unsafe_direct_document_publishers_rejects_noop_audited_admission(self) -> None:
+        text = "\n".join(
+            [
+                "init(moduleStoreRootURL: URL, admission: InstallAdmission) {",
+                "  _ = try EpubReader.install(",
+                "    epubURL: url, moduleStoreRootURL: moduleStoreRootURL,",
+                "    admittingCandidateWith: { _ in }",
+                "  )",
+                "}",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(
+                text,
+                "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift",
+            ),
+            [2],
+        )
+
+    def test_find_unsafe_direct_document_publishers_rejects_import_service_bypass(self) -> None:
+        text = "\n".join(
+            [
+                "ExternalDocumentImportService(epubCandidateAdmission: { _ in })",
+                "ExternalDocumentImportService.init(epubCandidateAdmission: { _ in })",
+                "let service: ExternalDocumentImportService = .init(epubCandidateAdmission: { _ in })",
+            ]
+        )
+        self.assertEqual(
+            find_unsafe_direct_document_publishers(text, "AndBible/UnsafeImport.swift"),
+            [1, 2, 3],
+        )
+
+    def test_find_unsafe_direct_document_publishers_rejects_import_service_self_factory(self) -> None:
+        text = "\n".join(
+            [
+                "extension ExternalDocumentImportService {",
+                "  static func unsafe() -> Self {",
+                "    Self(epubCandidateAdmission: { _ in })",
+                "  }",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(text), [3])
+
+    def test_find_unsafe_direct_document_publishers_requires_strict_import_factory(self) -> None:
+        unsafe_text = "\n".join(
+            [
+                "func androidRegistryAware() -> ExternalDocumentImportService {",
+                "  ExternalDocumentImportService(epubCandidateAdmission: { _ in })",
+                "}",
+            ]
+        )
+        path = "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift"
+        self.assertEqual(find_unsafe_direct_document_publishers(unsafe_text, path), [2])
+
+        ignored_text = "\n".join(
+            [
+                "func androidRegistryAware() -> ExternalDocumentImportService {",
+                "  ExternalDocumentImportService(epubCandidateAdmission: { candidate in",
+                "    let snapshot = try? BibleReaderInstalledDocumentRegistrySnapshot.capture()",
+                "    _ = snapshot?.admitsEpub(candidate)",
+                "  })",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(ignored_text, path), [2])
+
+        strict_text = "\n".join(
+            [
+                "func androidRegistryAware() -> ExternalDocumentImportService {",
+                "  ExternalDocumentImportService(epubCandidateAdmission: { candidate in",
+                "    let snapshot = try BibleReaderInstalledDocumentRegistrySnapshot.capture()",
+                "    guard snapshot.admitsEpub(candidate) else { throw AdmissionError() }",
+                "  })",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unsafe_direct_document_publishers(strict_text, path), [])
 
 
 if __name__ == "__main__":

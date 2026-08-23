@@ -265,7 +265,8 @@ final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
                 workspaceStore: WorkspaceStore(modelContext: workspaceContext)
             ),
             documentAccessPolicy: AllowEveryAgentDocumentPolicy(),
-            windowDocumentRouter: UnusedAgentWindowDocumentRouter()
+            windowDocumentRouter: UnusedAgentWindowDocumentRouter(),
+            strictMyDocumentInitialsUnavailable: { _ in false }
         )
     }
 
