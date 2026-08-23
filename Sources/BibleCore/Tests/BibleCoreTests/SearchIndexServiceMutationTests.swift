@@ -127,7 +127,7 @@ final class SearchIndexServiceMutationTests: XCTestCase {
 
      - Setup: Writes a version-seven-style FTS/metadata pair without opaque-token, display-mode, or
        durable source-generation columns, then opens the database through production initialization.
-     - Expected result: Version nine tables contain every required column and legacy readiness is gone.
+     - Expected result: Version ten tables contain every required column and legacy readiness is gone.
      - Failure meaning: An upgraded app can continue advertising an incompatible generated index.
      - Side effects: Creates and removes one isolated SQLite database.
      */
@@ -162,7 +162,7 @@ final class SearchIndexServiceMutationTests: XCTestCase {
         sqlite3_close(legacyDatabase)
 
         let service = SearchIndexService(databasePath: databaseURL.path)
-        XCTAssertEqual(SearchIndexService.currentSchemaVersion, 9)
+        XCTAssertEqual(SearchIndexService.currentSchemaVersion, 10)
         XCTAssertFalse(service.hasIndex(for: "KJV"))
 
         let ftsColumns = try tableColumns(named: "verse_fts", databaseURL: databaseURL)
@@ -175,6 +175,101 @@ final class SearchIndexServiceMutationTests: XCTestCase {
             try tableColumns(named: "search_index_state", databaseURL: databaseURL),
             Set(["id", "store_generation"])
         )
+        XCTAssertEqual(
+            try tableColumns(named: "verse_strongs", databaseURL: databaseURL),
+            Set(["module_name", "token", "verse_key", "entry_order", "highlight_ranges"])
+        )
+    }
+
+    /**
+     Verifies the first attributed-preview release rebuilds a complete version-nine index.
+
+     - Setup: Creates the current schema, replaces only `verse_strongs` with the version-nine shape
+       that has no visible-word range column, then reopens production initialization.
+     - Expected result: The generated schema is rebuilt with `highlight_ranges` and no stale module
+       can remain ready against lexical rows that cannot reproduce Android Strong highlighting.
+     - Failure meaning: An upgraded installation can return Strong hits without source-backed word
+       emphasis or attempt to query a column that does not exist.
+     - Side effects: Creates, mutates, and removes one isolated SQLite index database.
+     */
+    func testVersionNineStrongsSchemaRebuildsForHighlightRanges() throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-v9-highlights-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let currentService = SearchIndexService(databasePath: databaseURL.path)
+        try seedSearchIndexFixture(moduleName: "KJV", databaseURL: databaseURL)
+        XCTAssertTrue(currentService.hasIndex(for: "KJV"))
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let db else {
+            throw SearchIndexFixtureError.openFailed
+        }
+        let legacyStrongsSQL = """
+            DROP TABLE verse_strongs;
+            CREATE TABLE verse_strongs (
+                module_name TEXT NOT NULL,
+                token TEXT NOT NULL,
+                verse_key TEXT NOT NULL,
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (module_name, token, verse_key)
+            );
+            """
+        guard sqlite3_exec(db, legacyStrongsSQL, nil, nil, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw SearchIndexFixtureError.writeFailed
+        }
+        sqlite3_close(db)
+
+        let reopenedService = SearchIndexService(databasePath: databaseURL.path)
+        XCTAssertFalse(reopenedService.hasIndex(for: "KJV"))
+        XCTAssertEqual(
+            try tableColumns(named: "verse_strongs", databaseURL: databaseURL),
+            Set(["module_name", "token", "verse_key", "entry_order", "highlight_ranges"])
+        )
+    }
+
+    /**
+     Verifies an interrupted legacy schema containing only Strong's storage is recovered.
+
+     - Setup: Creates only the version-nine `verse_strongs` table, modeling interruption after a
+       partial/generated-schema mutation, then opens the database through production initialization.
+     - Expected result: Production rebuilds every generated table and includes `highlight_ranges`.
+     - Failure meaning: A partial local database can evade migration and fail every later index write.
+     - Side effects: Creates and removes one isolated SQLite index database.
+     */
+    func testPartialLegacyStrongsSchemaRebuildsCompleteGeneratedIndex() throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-partial-strongs-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
+        guard let db else { throw SearchIndexFixtureError.openFailed }
+        let partialSQL = """
+            CREATE TABLE verse_strongs (
+                module_name TEXT NOT NULL,
+                token TEXT NOT NULL,
+                verse_key TEXT NOT NULL,
+                entry_order INTEGER NOT NULL,
+                PRIMARY KEY (module_name, token, verse_key)
+            );
+            """
+        guard sqlite3_exec(db, partialSQL, nil, nil, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw SearchIndexFixtureError.writeFailed
+        }
+        sqlite3_close(db)
+
+        _ = SearchIndexService(databasePath: databaseURL.path)
+        XCTAssertEqual(
+            try tableColumns(named: "verse_strongs", databaseURL: databaseURL),
+            Set(["module_name", "token", "verse_key", "entry_order", "highlight_ranges"])
+        )
+        XCTAssertFalse(try tableColumns(named: "verse_fts", databaseURL: databaseURL).isEmpty)
+        XCTAssertFalse(try tableColumns(named: "indexed_modules", databaseURL: databaseURL).isEmpty)
+        XCTAssertFalse(try tableColumns(named: "search_index_state", databaseURL: databaseURL).isEmpty)
     }
 
     /**

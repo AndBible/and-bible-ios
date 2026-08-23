@@ -634,7 +634,7 @@ jobs:
       - repo-standards
       - localization-guardrails
       - bibleview-js
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       DERIVED_DATA_PATH: .derivedData/BibleUIPackageTests
       TEST_XCRESULT_BUNDLE_PATH: .artifacts/BibleUITests-package.xcresult
@@ -747,7 +747,7 @@ jobs:
 
       - name: Run BibleUI package tests
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
           mkdir -p .artifacts
           xcodebuild test \

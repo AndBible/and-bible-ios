@@ -145,8 +145,8 @@ private final class SearchIndexModuleMutationState: @unchecked Sendable {
  */
 @Observable
 public final class SearchIndexService: @unchecked Sendable {
-    /// Schema/content version for canonical metadata, analyzer identity, and text projection.
-    public static let currentSchemaVersion = 9
+    /// Schema/content version for canonical metadata, analyzer identity, and attributed projection.
+    public static let currentSchemaVersion = 10
 
     /// Android caps one module's Lucene result collection at 5,000 hits.
     public static let maximumResultsPerModule = 5_000
@@ -475,9 +475,13 @@ public final class SearchIndexService: @unchecked Sendable {
      */
     private static func searchSchemaNeedsRebuild(db: OpaquePointer?) -> Bool {
         let ftsColumns = tableColumns(db: db, tableName: "verse_fts")
+        let strongsColumns = tableColumns(db: db, tableName: "verse_strongs")
         let metadataColumns = tableColumns(db: db, tableName: "indexed_modules")
         let stateColumns = tableColumns(db: db, tableName: "search_index_state")
-        guard !ftsColumns.isEmpty || !metadataColumns.isEmpty else { return false }
+        guard !ftsColumns.isEmpty
+                || !strongsColumns.isEmpty
+                || !metadataColumns.isEmpty
+                || !stateColumns.isEmpty else { return false }
 
         let requiredFTS: Set<String> = [
             "search_text", "verse_key", "plain_text", "module_name", "entry_order",
@@ -489,8 +493,12 @@ public final class SearchIndexService: @unchecked Sendable {
             "analyzer_id", "strongs_complete", "source_version", "source_fingerprint",
             "store_generation",
         ]
+        let requiredStrongs: Set<String> = [
+            "module_name", "token", "verse_key", "entry_order", "highlight_ranges",
+        ]
         let requiredState: Set<String> = ["id", "store_generation"]
         return !requiredFTS.isSubset(of: ftsColumns)
+            || !requiredStrongs.isSubset(of: strongsColumns)
             || !requiredMetadata.isSubset(of: metadataColumns)
             || !requiredState.isSubset(of: stateColumns)
     }
@@ -540,6 +548,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 token TEXT NOT NULL,
                 verse_key TEXT NOT NULL,
                 entry_order INTEGER NOT NULL,
+                highlight_ranges TEXT NOT NULL,
                 PRIMARY KEY (module_name, token, verse_key)
             )
         """, operation: "creating the Strong's index")
@@ -1275,8 +1284,9 @@ public final class SearchIndexService: @unchecked Sendable {
         try prepare(
             db: db,
             sql: """
-                INSERT OR IGNORE INTO verse_strongs (module_name, token, verse_key, entry_order)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO verse_strongs (
+                    module_name, token, verse_key, entry_order, highlight_ranges
+                ) VALUES (?, ?, ?, ?, ?)
             """,
             statement: &strongsStatement,
             operation: "preparing Strong's insertion"
@@ -1301,7 +1311,10 @@ public final class SearchIndexService: @unchecked Sendable {
                     isNewTestamentBook: canonSection == .newTestament
                 )
                 let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
-                let strongsTokens = Self.orderedUnique(rawTokens + taggedTokens)
+                let highlightRangesByToken = Self.strongHighlightRangesByToken(entry)
+                let strongsTokens = Self.orderedUnique(
+                    rawTokens + taggedTokens + highlightRangesByToken.keys.sorted()
+                )
                 guard source.searchIndexIncludesEmptyIndexText
                         || !analyzed.isEmpty
                         || !strongsTokens.isEmpty else {
@@ -1338,6 +1351,11 @@ public final class SearchIndexService: @unchecked Sendable {
                     bind(token, to: strongsStatement, at: 2)
                     bind(entry.displayKey, to: strongsStatement, at: 3)
                     sqlite3_bind_int64(strongsStatement, 4, sqlite3_int64(entry.entryOrder))
+                    bind(
+                        Self.encodeStrongHighlightRanges(highlightRangesByToken[token] ?? []),
+                        to: strongsStatement,
+                        at: 5
+                    )
                     try stepDone(db: db, statement: strongsStatement, operation: "inserting Strong's token")
                 }
 
@@ -1637,16 +1655,20 @@ public final class SearchIndexService: @unchecked Sendable {
             guard analyzer.identifier == metadata.analyzerIdentifier else {
                 throw SearchIndexError.indexUnavailable(moduleName: moduleName)
             }
-            let ftsQuery = try SearchQueryCompiler.compile(
+            let compiled = try SearchQueryCompiler.compileWithHighlightPlan(
                 query: query,
                 wordMode: wordMode,
                 analyzer: analyzer
             )
             let results = try executeTextSearch(
                 db: readDatabase,
-                ftsQuery: ftsQuery,
+                ftsQuery: compiled.ftsQuery,
                 moduleName: moduleName,
-                scope: scope
+                scope: scope,
+                highlightProjection: .text(
+                    plan: compiled.highlightPlan,
+                    analyzer: analyzer
+                )
             )
             try validateCurrentStoreGeneration(
                 metadata.storeGeneration,
@@ -1737,7 +1759,8 @@ public final class SearchIndexService: @unchecked Sendable {
             let sql = """
                 SELECT f.verse_key, f.plain_text, f.module_name, f.osis_book, f.display_book,
                        CAST(f.chapter AS INTEGER), CAST(f.verse AS INTEGER), CAST(f.book_order AS INTEGER),
-                       f.display_book_mode, MIN(CAST(s.entry_order AS INTEGER)) AS sort_order
+                       f.display_book_mode, GROUP_CONCAT(s.highlight_ranges, ';') AS highlight_ranges,
+                       MIN(CAST(s.entry_order AS INTEGER)) AS sort_order
                 FROM verse_strongs s
                 JOIN verse_fts f ON f.verse_key = s.verse_key AND f.module_name = s.module_name
                 WHERE s.module_name = ? AND s.token IN (\(placeholders)) \(scopeSQL.clause)
@@ -1775,7 +1798,8 @@ public final class SearchIndexService: @unchecked Sendable {
             let results = try readSearchResults(
                 db: readDatabase,
                 statement: statement,
-                moduleName: moduleName
+                moduleName: moduleName,
+                highlightProjection: .strong
             )
             try validateCurrentStoreGeneration(
                 metadata.storeGeneration,
@@ -1959,13 +1983,14 @@ public final class SearchIndexService: @unchecked Sendable {
         db: OpaquePointer,
         ftsQuery: String,
         moduleName: String,
-        scope: SearchCanonicalScope
+        scope: SearchCanonicalScope,
+        highlightProjection: ResultHighlightProjection
     ) throws -> SearchModuleResults {
         let scopeSQL = Self.scopeSQL(scope, tableAlias: "verse_fts")
         let sql = """
             SELECT verse_key, plain_text, module_name, osis_book, display_book,
                    CAST(chapter AS INTEGER), CAST(verse AS INTEGER), CAST(book_order AS INTEGER),
-                   display_book_mode
+                   display_book_mode, NULL AS highlight_ranges
             FROM verse_fts
             WHERE verse_fts MATCH ? AND module_name = ? \(scopeSQL.clause)
             ORDER BY CAST(book_order AS INTEGER), CAST(chapter AS INTEGER),
@@ -1984,7 +2009,21 @@ public final class SearchIndexService: @unchecked Sendable {
             binding += 1
         }
         sqlite3_bind_int(statement, binding, Int32(Self.maximumResultsPerModule + 1))
-        return try readSearchResults(db: db, statement: statement, moduleName: moduleName)
+        return try readSearchResults(
+            db: db,
+            statement: statement,
+            moduleName: moduleName,
+            highlightProjection: highlightProjection
+        )
+    }
+
+    /** Query-specific authority used to materialize plain preview emphasis. */
+    private enum ResultHighlightProjection {
+        /// Analyzer-bound ordinary Search query plan.
+        case text(plan: SearchTextHighlightPlan, analyzer: SearchAnalyzerProfile)
+
+        /// Structured lemma ranges selected by the active Strong's SQL join.
+        case strong
     }
 
     /**
@@ -1994,6 +2033,7 @@ public final class SearchIndexService: @unchecked Sendable {
        - db: Service-owned generated Search database used for diagnostics.
        - statement: Prepared text or Strong's query positioned before its first row.
        - moduleName: Exact module owner used when reporting a database failure.
+       - highlightProjection: Query-specific source of visible UTF-16 emphasis ranges.
      - Returns: At most the Android-compatible result cap plus an explicit truncation flag; every
        retained hit carries its full persisted preview so single and expanded UI rows can reveal it.
      - Side effects: Advances `statement` through completion without mutating index storage.
@@ -2002,7 +2042,8 @@ public final class SearchIndexService: @unchecked Sendable {
     private func readSearchResults(
         db: OpaquePointer,
         statement: OpaquePointer,
-        moduleName: String
+        moduleName: String,
+        highlightProjection: ResultHighlightProjection
     ) throws -> SearchModuleResults {
         var hits: [SearchModuleHit] = []
         var stepCode = sqlite3_step(statement)
@@ -2016,11 +2057,21 @@ public final class SearchIndexService: @unchecked Sendable {
                   let displayBookMode = SearchBookNamePresentation(rawValue: displayBookModeValue) else {
                 throw Self.sqliteError(db: db, operation: "reading search results")
             }
+            let highlightRanges: [SearchTextHighlightRange]
+            switch highlightProjection {
+            case .text(let plan, let analyzer):
+                highlightRanges = try plan.ranges(in: text, analyzer: analyzer)
+            case .strong:
+                highlightRanges = Self.decodeStrongHighlightRanges(
+                    Self.columnText(statement, index: 9) ?? ""
+                )
+            }
             hits.append(SearchModuleHit(
                 moduleName: storedModule,
                 key: key,
                 displayBook: displayBook,
                 snippet: text,
+                highlightRanges: highlightRanges,
                 identity: SearchVerseIdentity(
                     osisBookId: osisBookId,
                     canonicalBookOrder: Int(sqlite3_column_int64(statement, 7)),
@@ -2336,6 +2387,91 @@ public final class SearchIndexService: @unchecked Sendable {
 
     private static func columnText(_ statement: OpaquePointer?, index: Int32) -> String? {
         sqlite3_column_text(statement, index).map { String(cString: $0) }
+    }
+
+    /**
+     Maps structured Strong's lemma tokens to exact visible-preview ranges for one verse.
+
+     - Parameter entry: Backend-neutral row whose lemma spans came from the same source-filtered
+       projection as `previewText`.
+     - Returns: Canonical base/full Strong's tokens mapped to sorted unique valid ranges.
+     - Side effects: None.
+     - Failure modes: Invalid/out-of-bounds spans and malformed lemma tokens are omitted; raw/tagged
+       Strong's indexing remains available without a highlight rather than guessing visible text.
+     */
+    private static func strongHighlightRangesByToken(
+        _ entry: BibleSearchIndexEntry
+    ) -> [String: [SearchTextHighlightRange]] {
+        let previewLength = entry.previewText.utf16.count
+        var result: [String: [SearchTextHighlightRange]] = [:]
+        for span in entry.lemmaSpans {
+            let (upper, overflow) = span.location.addingReportingOverflow(span.length)
+            guard !overflow,
+                  span.location >= 0,
+                  span.length > 0,
+                  upper <= previewLength else { continue }
+            let range = SearchTextHighlightRange(location: span.location, length: span.length)
+            for token in StrongsTokenNormalizer.canonicalTokens(lemmaAttribute: span.lemma) {
+                if !result[token, default: []].contains(range) {
+                    result[token, default: []].append(range)
+                }
+            }
+        }
+        for token in Array(result.keys) {
+            result[token]?.sort {
+                $0.location == $1.location
+                    ? $0.length < $1.length
+                    : $0.location < $1.location
+            }
+        }
+        return result
+    }
+
+    /**
+     Encodes one Strong's token's visible ranges into deterministic SQLite text.
+
+     - Parameter ranges: Valid sorted UTF-16 ranges for one token/verse row.
+     - Returns: Comma-delimited `location:length` pairs; no ranges produce an empty string.
+     - Side effects: None.
+     - Failure modes: None; values are emitted as base-10 integers without locale formatting.
+     */
+    private static func encodeStrongHighlightRanges(
+        _ ranges: [SearchTextHighlightRange]
+    ) -> String {
+        ranges.map { "\($0.location):\($0.length)" }.joined(separator: ",")
+    }
+
+    /**
+     Decodes all Strong's token ranges selected by one grouped lexical query.
+
+     - Parameter encoded: Semicolon-separated token rows containing comma-separated range pairs.
+     - Returns: Sorted unique nonnegative ranges; final preview validation occurs in
+       `SearchModuleHit.snippetSegments`.
+     - Side effects: None.
+     - Failure modes: Malformed/overflowing pairs are ignored individually; storage corruption
+       cannot produce an out-of-bounds string slice.
+     */
+    private static func decodeStrongHighlightRanges(
+        _ encoded: String
+    ) -> [SearchTextHighlightRange] {
+        var result: [SearchTextHighlightRange] = []
+        for row in encoded.split(separator: ";", omittingEmptySubsequences: true) {
+            for pair in row.split(separator: ",", omittingEmptySubsequences: true) {
+                let fields = pair.split(separator: ":", omittingEmptySubsequences: false)
+                guard fields.count == 2,
+                      let location = Int(fields[0]),
+                      let length = Int(fields[1]),
+                      location >= 0,
+                      length > 0 else { continue }
+                let range = SearchTextHighlightRange(location: location, length: length)
+                if !result.contains(range) { result.append(range) }
+            }
+        }
+        return result.sorted {
+            $0.location == $1.location
+                ? $0.length < $1.length
+                : $0.location < $1.location
+        }
     }
 
     private static func orderedUnique(_ values: [String]) -> [String] {

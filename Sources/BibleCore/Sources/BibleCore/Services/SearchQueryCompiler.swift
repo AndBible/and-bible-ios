@@ -201,6 +201,34 @@ public enum SearchQueryCompiler {
     }
 
     /**
+     Compiles one query's FTS expression and analyzer-bound visible emphasis together.
+
+     - Parameters:
+       - query: Raw user input before Android cleanup and word-mode decoration.
+       - wordMode: Android Search matching mode.
+       - analyzer: Persisted module analyzer that authorizes both index matching and preview terms.
+     - Returns: Validated FTS expression plus an immutable positive-clause highlight plan.
+     - Side effects: Lazily loads pinned analyzer resources.
+     - Failure modes: Throws exactly the same typed errors as `compile`; no presentation plan is
+       emitted for invalid or prohibited-only syntax.
+     */
+    static func compileWithHighlightPlan(
+        query: String,
+        wordMode: SearchWordMode,
+        analyzer: SearchAnalyzerProfile
+    ) throws -> (ftsQuery: String, highlightPlan: SearchTextHighlightPlan) {
+        let compiled = try Lucene29QueryCompiler.compileWithHighlightClauses(
+            query: query,
+            wordMode: wordMode,
+            analyzer: analyzer
+        )
+        return (
+            compiled.ftsQuery,
+            SearchTextHighlightPlan(clauses: compiled.highlightClauses)
+        )
+    }
+
+    /**
      Compiles a query by selecting Android's analyzer directly from document language metadata.
 
      This additive entry point is the shared contract for non-Bible indexed documents such as EPUBs:

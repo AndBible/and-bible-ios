@@ -221,6 +221,10 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
 
     /// Complete stored visible preview; collapsed presentation may apply its own visual line limit.
     public let snippet: String
+
+    /// Sorted query-derived UTF-16 emphasis ranges inside `snippet`.
+    public let highlightRanges: [SearchTextHighlightRange]
+
     public let identity: SearchVerseIdentity
 
     /**
@@ -254,6 +258,8 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
        - key: Backend display key retained for diagnostics and stable source lookup.
        - displayBook: Source display name or canonical OSIS fallback persisted with the row.
        - snippet: Complete stored visible preview returned by Search; callers may visually collapse it.
+       - highlightRanges: Query-derived UTF-16 ranges in `snippet`; invalid ranges are ignored when
+         source-preserving segments are materialized.
        - identity: Locale-independent OSIS verse identity used for grouping and navigation.
        - bookNamePresentation: Presentation strategy; SQLite rows use `localizedCanonical`.
      - Side effects: None.
@@ -264,6 +270,7 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
         key: String,
         displayBook: String,
         snippet: String,
+        highlightRanges: [SearchTextHighlightRange] = [],
         identity: SearchVerseIdentity,
         bookNamePresentation: SearchBookNamePresentation = .source
     ) {
@@ -272,7 +279,74 @@ public struct SearchModuleHit: Sendable, Identifiable, Equatable {
         storedDisplayBook = displayBook
         self.bookNamePresentation = bookNamePresentation
         self.snippet = snippet
+        self.highlightRanges = highlightRanges
         self.identity = identity
+    }
+
+    /**
+     Splits the exact plain preview into source-preserving emphasized and ordinary runs.
+
+     - Returns: Runs whose concatenated text equals `snippet`; overlapping ranges are coalesced and
+       invalid/non-boundary ranges are ignored. An empty preview returns no segments.
+     - Side effects: None.
+     - Failure modes: Malformed persisted/query ranges fail closed to unstyled source text rather
+       than trapping or changing accessibility text.
+     */
+    public var snippetSegments: [SearchSnippetSegment] {
+        guard !snippet.isEmpty else { return [] }
+        let sourceLength = snippet.utf16.count
+        let validRanges = highlightRanges
+            .compactMap { range -> Range<Int>? in
+                let (upper, overflow) = range.location.addingReportingOverflow(range.length)
+                guard !overflow,
+                      range.location >= 0,
+                      range.length > 0,
+                      upper <= sourceLength else { return nil }
+                return range.location..<upper
+            }
+            .sorted {
+                $0.lowerBound == $1.lowerBound
+                    ? $0.upperBound < $1.upperBound
+                    : $0.lowerBound < $1.lowerBound
+            }
+        var merged: [Range<Int>] = []
+        for range in validRanges {
+            if let last = merged.last, range.lowerBound <= last.upperBound {
+                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+            } else {
+                merged.append(range)
+            }
+        }
+        guard !merged.isEmpty else {
+            return [SearchSnippetSegment(text: snippet, isEmphasized: false)]
+        }
+
+        let units = Array(snippet.utf16)
+        var segments: [SearchSnippetSegment] = []
+        var cursor = 0
+        for range in merged {
+            if cursor < range.lowerBound {
+                segments.append(SearchSnippetSegment(
+                    text: String(decoding: units[cursor..<range.lowerBound], as: UTF16.self),
+                    isEmphasized: false
+                ))
+            }
+            segments.append(SearchSnippetSegment(
+                text: String(decoding: units[range], as: UTF16.self),
+                isEmphasized: true
+            ))
+            cursor = range.upperBound
+        }
+        if cursor < units.count {
+            segments.append(SearchSnippetSegment(
+                text: String(decoding: units[cursor..<units.count], as: UTF16.self),
+                isEmphasized: false
+            ))
+        }
+        guard segments.map(\.text).joined() == snippet else {
+            return [SearchSnippetSegment(text: snippet, isEmphasized: false)]
+        }
+        return segments
     }
 
     /**

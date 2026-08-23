@@ -18,9 +18,9 @@ final class SearchIndexServiceQueryTests: XCTestCase {
      Verifies indexed Search word modes match Android-visible search semantics.
 
      The UI-level regression switched `earth void` from all-words to phrase and any-word. That
-     behavior is owned by the FTS query builder, so this package test proves:
-     all-words requires both terms, phrase requires adjacency, and any-word restores rows that
-     contain either term.
+     behavior is owned by the FTS query builder, so this package test proves all-words requires both
+     terms, phrase requires adjacency, and any-word restores rows that contain either term. It also
+     proves all/any results publish exactly the analyzer-owned visible ranges for every matched term.
      */
     func testIndexedSearchWordModesMatchAndroidSearchContracts() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
@@ -39,17 +39,29 @@ final class SearchIndexServiceQueryTests: XCTestCase {
             SearchIndexFixtureRow(key: "Genesis 1:3", text: "void alone", moduleName: "KJV", order: 2),
         ])
 
+        let allWordHits = try service.search(
+            query: "earth void",
+            moduleName: "KJV",
+            wordMode: .allWords
+        ).hits
+        XCTAssertEqual(allWordHits.map(\.key), ["Genesis 1:2"])
         XCTAssertEqual(
-            try service.search(query: "earth void", moduleName: "KJV", wordMode: .allWords).hits.map(\.key),
-            ["Genesis 1:2"]
+            allWordHits.flatMap(\.snippetSegments).filter(\.isEmphasized).map(\.text),
+            ["earth", "void"]
         )
         XCTAssertEqual(
             try service.search(query: "earth void", moduleName: "KJV", wordMode: .phrase).hits.map(\.key),
             []
         )
+        let anyWordHits = try service.search(
+            query: "earth void",
+            moduleName: "KJV",
+            wordMode: .anyWord
+        ).hits
+        XCTAssertEqual(anyWordHits.map(\.key), ["Genesis 1:1", "Genesis 1:2", "Genesis 1:3"])
         XCTAssertEqual(
-            try service.search(query: "earth void", moduleName: "KJV", wordMode: .anyWord).hits.map(\.key),
-            ["Genesis 1:1", "Genesis 1:2", "Genesis 1:3"]
+            anyWordHits.map { $0.snippetSegments.filter(\.isEmphasized).map(\.text) },
+            [["earth"], ["earth", "void"], ["void"]]
         )
     }
 
@@ -200,14 +212,20 @@ final class SearchIndexServiceQueryTests: XCTestCase {
                 text: "In the beginning God created the heaven and the earth.",
                 moduleName: "KJV",
                 order: 0,
-                strongTokens: ["H0430"]
+                strongTokens: ["H0430"],
+                strongHighlightRanges: [
+                    "H0430": [SearchTextHighlightRange(location: 17, length: 3)],
+                ]
             ),
             SearchIndexFixtureRow(
                 key: "Genesis 1:2",
                 text: "And the Spirit of God moved upon the face of the waters.",
                 moduleName: "KJV",
                 order: 1,
-                strongTokens: ["H0430"]
+                strongTokens: ["H0430"],
+                strongHighlightRanges: [
+                    "H0430": [SearchTextHighlightRange(location: 18, length: 3)],
+                ]
             ),
             SearchIndexFixtureRow(
                 key: "John 1:1",
@@ -227,6 +245,10 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         XCTAssertTrue(
             hits.allSatisfy { !$0.snippet.contains("<H") && !$0.snippet.contains("<G") },
             "Expected indexed Strong's previews to use cleaned verse text rather than raw Strong's tags"
+        )
+        XCTAssertEqual(
+            hits.map { $0.snippetSegments.filter(\.isEmphasized).map(\.text) },
+            [["God"], ["God"]]
         )
     }
 
@@ -436,8 +458,9 @@ final class SearchIndexServiceQueryTests: XCTestCase {
      */
     private func insertStrongToken(_ strongToken: String, row: SearchIndexFixtureRow, db: OpaquePointer?) throws {
         let sql = """
-            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO verse_strongs (
+                module_name, token, verse_key, entry_order, highlight_ranges
+            ) VALUES (?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -449,6 +472,10 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         sqlite3_bind_text(stmt, 2, strongToken, -1, searchIndexQueryFixtureSQLiteTransient)
         sqlite3_bind_text(stmt, 3, row.key, -1, searchIndexQueryFixtureSQLiteTransient)
         sqlite3_bind_int(stmt, 4, Int32(row.order))
+        let encodedRanges = row.strongHighlightRanges[strongToken, default: []]
+            .map { "\($0.location):\($0.length)" }
+            .joined(separator: ",")
+        sqlite3_bind_text(stmt, 5, encodedRanges, -1, searchIndexQueryFixtureSQLiteTransient)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw SearchIndexQueryFixtureError.writeFailed
         }
@@ -516,6 +543,7 @@ private struct SearchIndexFixtureRow {
     let moduleName: String
     let order: Int
     let strongTokens: [String]
+    let strongHighlightRanges: [String: [SearchTextHighlightRange]]
     let displayBook: String
     let osisBookId: String
     let chapter: Int
@@ -527,6 +555,7 @@ private struct SearchIndexFixtureRow {
         moduleName: String,
         order: Int,
         strongTokens: [String] = [],
+        strongHighlightRanges: [String: [SearchTextHighlightRange]] = [:],
         displayBook explicitDisplayBook: String? = nil,
         osisBookId explicitOsisBookId: String? = nil,
         chapter explicitChapter: Int? = nil,
@@ -540,6 +569,7 @@ private struct SearchIndexFixtureRow {
         self.moduleName = moduleName
         self.order = order
         self.strongTokens = strongTokens
+        self.strongHighlightRanges = strongHighlightRanges
         self.displayBook = explicitDisplayBook ?? parsedDisplayBook
         self.osisBookId = explicitOsisBookId ?? [
             "Genesis": "Gen",

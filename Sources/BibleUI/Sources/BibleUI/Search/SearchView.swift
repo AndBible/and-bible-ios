@@ -1401,11 +1401,12 @@ public struct SearchView: View {
                             .font(.system(size: 17))
                             .foregroundStyle(surfacePalette.foregroundColor)
 
-                            Text(firstMatch.snippet)
+                            highlightedSnippetText(firstMatch)
                                 .font(.system(size: 14))
                                 .foregroundStyle(surfacePalette.secondaryForegroundColor)
                                 .lineLimit(isSingleMatch ? nil : 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityLabel(firstMatch.snippet)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -1442,14 +1443,12 @@ public struct SearchView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(group.matches) { hit in
                         Button(action: { navigateTo(hit) }) {
-                            (
-                                Text("\(hit.moduleName): ").bold()
-                                    + Text(hit.snippet)
-                            )
+                            highlightedSnippetText(hit, includesModulePrefix: true)
                                 .font(.system(size: 15))
                                 .foregroundStyle(surfacePalette.foregroundColor)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
+                                .accessibilityLabel("\(hit.moduleName): \(hit.snippet)")
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier(
@@ -1462,6 +1461,29 @@ public struct SearchView: View {
             }
         }
         .padding(12)
+    }
+
+    /**
+     Builds a plain-text SwiftUI `Text` whose only styling comes from trusted query ranges.
+
+     - Parameters:
+       - hit: Search hit carrying annotation-free source runs and analyzer/lemma-derived emphasis.
+       - includesModulePrefix: Whether to prepend Android's bold expanded-row abbreviation.
+     - Returns: Source-preserving text with matched runs bolded; authored markup remains literal.
+     - Side effects: None.
+     - Failure modes: Invalid ranges already degrade to one unstyled source run in the hit contract.
+       Call sites explicitly provide the original plain string as the accessibility label.
+     */
+    private func highlightedSnippetText(
+        _ hit: SearchModuleHit,
+        includesModulePrefix: Bool = false
+    ) -> Text {
+        var result = includesModulePrefix ? Text("\(hit.moduleName): ").bold() : Text("")
+        for segment in hit.snippetSegments {
+            let text = Text(segment.text)
+            result = result + (segment.isEmphasized ? text.bold() : text)
+        }
+        return result
     }
 
     /// Palette-owned divider shared by SearchResults rows and partial-failure rows.

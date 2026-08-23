@@ -15,7 +15,7 @@ struct StrongsSearchVerseHit: Equatable {
     /// 1-based verse number of the hit.
     let verse: Int
 
-    /// Preview text returned by SWORD for this hit.
+    /// Annotation-free preview projected from the exact source-filtered SWORD verse.
     let previewText: String
 
     /// Human-readable `Book Chapter:Verse` reference string.
@@ -23,10 +23,10 @@ struct StrongsSearchVerseHit: Equatable {
 }
 
 /**
- Pure helpers for normalizing Strong's queries and mapping SWORD search results into verse hits.
+ Shared helpers for normalizing Strong's queries and mapping SWORD search results into verse hits.
 
- The helper is intentionally side-effect free so it can be reused from both production search flows
- and regression tests.
+ Candidate lookup performs bounded native reads, but every inspection restores the caller's exact
+ key and VerseKey ordinal before publishing a hit or miss.
  */
 enum StrongsSearchSupport {
     /**
@@ -79,6 +79,9 @@ enum StrongsSearchSupport {
        - scope: Optional SWORD search scope string.
      - Returns: Verse hits from the first query variant that produces matches, capped to the first
        5000 verse results.
+
+     - Side effects: Runs bounded SWORD searches and inspections while restoring the caller's exact
+       module key and VerseKey ordinal before every candidate returns.
 
      Failure modes:
      - returns an empty array when no JSword-valid canonical tokens are present
@@ -212,14 +215,26 @@ enum StrongsSearchSupport {
                 caseInsensitive: true,
                 scope: scope
             )
-            let swordResults = module.search(options)
-            let hits: [StrongsSearchVerseHit] = swordResults.results.prefix(5000).compactMap { result in
-                guard let parsed = parseVerseKey(result.key) else { return nil }
+            let candidateKeys = (try? module.searchKeys(options, limit: 5000)) ?? []
+            let hits: [StrongsSearchVerseHit] = candidateKeys.compactMap { key in
+                guard let inspection = try? module.inspectVerseKeyOSISSourceRestoringPrevious(key),
+                      let parsed = inspection.verseKey.map({
+                          (
+                              book: normalizedBookName($0.bookName),
+                              chapter: $0.chapter,
+                              verse: $0.verse
+                          )
+                      }) ?? parseVerseKey(inspection.actualKey),
+                      scopeAllows(book: parsed.book, scope: scope) else { return nil }
+                let preview = SwordBibleSearchTextProjection.project(
+                    sourceXML: inspection.osisFragment,
+                    moduleInitials: module.info.name
+                ).previewText
                 return StrongsSearchVerseHit(
                     book: parsed.book,
                     chapter: parsed.chapter,
                     verse: parsed.verse,
-                    previewText: result.previewText
+                    previewText: preview
                 )
             }
             if !hits.isEmpty {
@@ -244,7 +259,8 @@ enum StrongsSearchSupport {
                 caseInsensitive: true,
                 scope: scope
             )
-            for key in module.searchKeys(options, limit: 5000) where seenKeys.insert(key).inserted {
+            let keys = (try? module.searchKeys(options, limit: 5000)) ?? []
+            for key in keys where seenKeys.insert(key).inserted {
                 candidateKeys.append(key)
             }
         }
@@ -263,11 +279,13 @@ enum StrongsSearchSupport {
         var sawLexicalTokens = false
 
         for key in candidateKeys ?? module.allKeys() {
-            let inspection = module.setKeyAndInspect(
+            guard let inspection = try? module.inspectVerseKeySearchSourceRestoringPrevious(
                 key,
                 includeRenderedText: false,
-                includeStrippedText: false
-            )
+                includeOSISFragment: false
+            ) else {
+                continue
+            }
             guard let parsed = parseVerseReference(
                 actualKey: inspection.actualKey,
                 rawEntry: inspection.rawEntry
@@ -281,11 +299,11 @@ enum StrongsSearchSupport {
             let tokens = canonicalStrongTokens(
                 rawEntry: inspection.rawEntry,
                 renderedTextProvider: {
-                    module.setKeyAndInspect(
+                    (try? module.inspectVerseKeySearchSourceRestoringPrevious(
                         key,
                         includeRenderedText: true,
-                        includeStrippedText: false
-                    ).renderedText
+                        includeOSISFragment: false
+                    ).renderedText) ?? ""
                 },
                 book: normalizedBook
             )
@@ -300,17 +318,21 @@ enum StrongsSearchSupport {
             let referenceKey = "\(normalizedBook)|\(parsed.chapter)|\(parsed.verse)"
             guard seenReferences.insert(referenceKey).inserted else { continue }
 
-            let preview = module.setKeyAndInspect(
+            let previewSource = (try? module.inspectVerseKeySearchSourceRestoringPrevious(
                 key,
                 includeRenderedText: false,
-                includeStrippedText: true
-            ).strippedText
+                includeOSISFragment: true
+            ).osisFragment) ?? ""
+            let preview = SwordBibleSearchTextProjection.project(
+                sourceXML: previewSource,
+                moduleInitials: module.info.name
+            ).previewText
 
             hits.append(StrongsSearchVerseHit(
                 book: normalizedBook,
                 chapter: parsed.chapter,
                 verse: parsed.verse,
-                previewText: String(preview.prefix(200))
+                previewText: preview
             ))
 
             if hits.count >= 5000 {

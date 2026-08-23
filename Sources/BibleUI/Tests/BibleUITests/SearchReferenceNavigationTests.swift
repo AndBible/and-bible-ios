@@ -49,9 +49,9 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
 
      - Setup: Reads the private Search result-row source after structured ingestion has persisted
        annotation-free `htmlToSpan`-compatible snippets.
-     - Expected result: Single and expanded rows render each complete stored snippet directly;
-       only a collapsed multi-translation header receives a two-line visual limit. The former regex
-       cleanup and character-prefix APIs are absent so exact long previews survive expansion.
+     - Expected result: Single and expanded rows route the complete stored preview through the
+       query-range renderer; only a collapsed multi-translation header receives a two-line visual
+       limit, and accessibility labels retain the exact unstyled source.
      - Failure meaning: Search UI can mutate the final preview, reintroducing backend-specific
        stripping or Foundation whitespace drift after the index parity boundary.
      - Side effects: Reads one checked-out Swift source file.
@@ -65,11 +65,54 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
             from: searchSource
         )
 
-        XCTAssertTrue(resultGroup.contains("Text(firstMatch.snippet)"))
-        XCTAssertTrue(resultGroup.contains("Text(hit.snippet)"))
+        XCTAssertTrue(resultGroup.contains("highlightedSnippetText(firstMatch)"))
+        XCTAssertTrue(resultGroup.contains("highlightedSnippetText(hit, includesModulePrefix: true)"))
+        XCTAssertTrue(resultGroup.contains(".accessibilityLabel(firstMatch.snippet)"))
+        XCTAssertTrue(resultGroup.contains(".accessibilityLabel(\"\\(hit.moduleName): \\(hit.snippet)\")"))
         XCTAssertTrue(resultGroup.contains(".lineLimit(isSingleMatch ? nil : 2)"))
         XCTAssertFalse(resultGroup.contains("SearchIndexService.cleanText"))
         XCTAssertFalse(resultGroup.contains(".prefix("))
+    }
+
+    /**
+     Guards production Search against reintroducing dormant strip-text preview APIs.
+
+     - Setup: Reads the SWORD module, Search UI support, and Agent scripture access sources after
+       indexed Search became the sole production preview contract.
+     - Expected result: SWORD exposes only key-only candidate search; no direct preview search,
+       fixed 200-character prefix, or Search UI/Agent fallback to a direct facade remains.
+     - Failure meaning: A future call site can bypass structured projection and revive #387/#393.
+     - Side effects: Reads checked-out Swift source files.
+     */
+    func testProductionSearchHasNoLegacyDirectPreviewPath() throws {
+        let moduleSource = try BibleUITestSourceLocator.source(
+            at: "Sources/SwordKit/Sources/SwordKit/SwordModule.swift"
+        )
+        let strongsSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Search/StrongsSearchSupport.swift"
+        )
+        let searchViewSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
+        )
+        let agentSource = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/AI/AgentScriptureDocumentAccess.swift"
+        )
+
+        XCTAssertFalse(moduleSource.contains("public func search(_ options: SearchOptions)"))
+        XCTAssertTrue(moduleSource.contains("public func searchKeys(_ options: SearchOptions"))
+        XCTAssertFalse(strongsSource.contains(".prefix(200)"))
+        XCTAssertFalse(strongsSource.contains(".strippedText"))
+        XCTAssertFalse(strongsSource.contains("module.setKeyAndInspect"))
+        XCTAssertTrue(strongsSource.contains("inspectVerseKeySearchSourceRestoringPrevious"))
+        XCTAssertTrue(strongsSource.contains("inspectVerseKeyOSISSourceRestoringPrevious"))
+        XCTAssertTrue(strongsSource.contains("SwordBibleSearchTextProjection.project"))
+        XCTAssertFalse(searchViewSource.contains("SearchService"))
+        XCTAssertTrue(searchViewSource.contains("SearchIndexService"))
+        XCTAssertFalse(agentSource.contains("SearchService"))
+        XCTAssertFalse(agentSource.contains("module.search("))
+        XCTAssertFalse(agentSource.contains("module.searchKeys("))
+        XCTAssertTrue(agentSource.contains("searchIndexService.search("))
+        XCTAssertTrue(agentSource.contains("searchIndexService.searchStrongs("))
     }
 
     /**

@@ -258,6 +258,85 @@ def _mask_swift_comments_and_strings(text: str) -> str:
     return "".join(masked)
 
 
+def _swift_parenthesized_end(text: str, start: int) -> int | None:
+    """Return the exclusive end of one balanced Swift parenthesized region.
+
+    The input is masked Swift source and `start` points at `(`. Nested parentheses are counted;
+    comments and strings have already been removed by the caller. The helper returns `None` for an
+    unterminated region and performs no I/O or mutation.
+    """
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _swift_top_level_arguments(text: str) -> list[str]:
+    """Split a masked Swift parameter/call body at top-level commas.
+
+    Parentheses, brackets, braces, and generic angle brackets keep their contained commas together.
+    The returned strings preserve source spelling for label/default checks. Malformed nesting fails
+    closed by returning the unsplit remainder as one argument; the helper has no side effects.
+    """
+    if not text.strip():
+        return []
+    arguments: list[str] = []
+    start = 0
+    depths = {"(": 0, "[": 0, "{": 0, "<": 0}
+    closing = {")": "(", "]": "[", "}": "{", ">": "<"}
+    for index, character in enumerate(text):
+        if character in depths:
+            depths[character] += 1
+        elif character in closing:
+            opener = closing[character]
+            depths[opener] = max(0, depths[opener] - 1)
+        elif character == "," and not any(depths.values()):
+            arguments.append(text[start:index])
+            start = index + 1
+    arguments.append(text[start:])
+    return arguments
+
+
+def _swift_function_ranges(masked_source: str) -> list[tuple[str, int, int]]:
+    """Return named Swift function body ranges from masked source.
+
+    The result contains `(name, declarationStart, bodyEnd)` tuples for declarations with a braced
+    body. Nested functions are retained so the smallest containing range identifies exact publisher
+    ownership. Malformed declarations are skipped; no source is changed.
+    """
+    ranges: list[tuple[str, int, int]] = []
+    pattern = re.compile(
+        r"(?:\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)|\b(init))\s*\("
+    )
+    for match in pattern.finditer(masked_source):
+        parameter_start = masked_source.find("(", match.start())
+        parameter_end = _swift_parenthesized_end(masked_source, parameter_start)
+        if parameter_end is None:
+            continue
+        body_start = masked_source.find("{", parameter_end)
+        if body_start == -1:
+            continue
+        body_end = _matching_brace_end(masked_source, body_start)
+        ranges.append((match.group(1) or match.group(2), match.start(), body_end))
+    return ranges
+
+
+def _enclosing_swift_function_name(
+    function_ranges: list[tuple[str, int, int]],
+    position: int,
+) -> str | None:
+    """Return the innermost named function containing one source position, if any."""
+    containing = [item for item in function_ranges if item[1] <= position < item[2]]
+    if not containing:
+        return None
+    return min(containing, key=lambda item: item[2] - item[1])[0]
+
+
 def _matching_brace_end(text: str, open_brace_index: int) -> int:
     """Return the exclusive end offset of a brace-delimited block.
 
@@ -308,18 +387,428 @@ def find_legacy_root_sidebar_shell(text: str) -> list[int]:
     return issues
 
 
+def find_unsafe_direct_document_publishers(
+    text: str,
+    relative_path: str = "",
+) -> list[int]:
+    """Return declaration lines for document publishers that bypass global admission.
+
+    The input is one production Swift file plus its optional repository-relative path. Comments and
+    strings are masked before matching so documentation cannot trigger or suppress the guard. The
+    result covers EPUB publishers whose later admission/lease parameters can be omitted, direct My
+    Documents graph publishers, omission-tolerant registry dependencies, type aliases that obscure
+    audited publisher ownership, and calls outside exact function boundaries. The helper performs
+    no filesystem access or mutation.
+    """
+    masked_source = _mask_swift_comments_and_strings(text)
+    function_ranges = _swift_function_ranges(masked_source)
+    forbidden_patterns = (
+        re.compile(
+            r"\btypealias\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+            r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*EpubReader\b"
+        ),
+        re.compile(
+            r"\btypealias\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+            r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\b"
+        ),
+        re.compile(
+            r"\btypealias\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+            r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*ExternalDocumentImportService\b"
+        ),
+        re.compile(
+            r"\bEpubReader\s*\.\s*(?:install|installAndroidModuleBackup)\b(?!\s*\()"
+        ),
+        re.compile(r"\bMyDocument\s*\.\s*init\b(?!\s*\()"),
+        re.compile(r"\bExternalDocumentImportService\s*\.\s*init\b(?!\s*\()"),
+        re.compile(r"\bSelf\s*\(\s*epubCandidateAdmission\s*:"),
+        re.compile(
+            r"\bfunc\s+insert\s*\(\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*|_)\s+)?"
+            r"(?:[A-Za-z_][A-Za-z0-9_]*|_)\s*:\s*"
+            r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)?MyDocument\b"
+        ),
+        re.compile(r"\bisDocumentInitialsUnavailable\s*:[^,\n=]+="),
+        re.compile(r"\bstrictMyDocumentInitialsUnavailable\s*:[^,\n=]+[?=]"),
+        re.compile(r"\bepubCandidateAdmission\s*:[^,\n=]+="),
+    )
+    matches = [
+        text.count("\n", 0, match.start()) + 1
+        for pattern in forbidden_patterns
+        for match in pattern.finditer(masked_source)
+    ]
+
+    install_declaration = re.compile(
+        r"(?P<modifiers>(?:(?:"
+        r"@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?"
+        r"|public|internal|private|fileprivate|package|static|class|final|nonisolated"
+        r"|override|required|convenience|mutating|nonmutating|distributed|borrowing|consuming"
+        r")\s+)*)"
+        r"\bfunc\s+(?P<name>install|installAndroidModuleBackup)\s*\("
+    )
+    for declaration in install_declaration.finditer(masked_source):
+        declaration_name = declaration.group("name")
+        parameter_start = masked_source.find("(", declaration.start())
+        parameter_end = _swift_parenthesized_end(masked_source, parameter_start)
+        if parameter_end is None:
+            matches.append(text.count("\n", 0, declaration.start()) + 1)
+            continue
+        parameters = _swift_top_level_arguments(
+            masked_source[parameter_start + 1:parameter_end - 1]
+        )
+        labels: set[str] = set()
+        parameter_types: dict[str, str] = {}
+        for parameter in parameters:
+            declaration_part, separator, type_part = parameter.partition(":")
+            identifiers = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|_", declaration_part)
+            if identifiers:
+                label = identifiers[0]
+                labels.add(label)
+                if separator:
+                    parameter_types[label] = type_part.strip()
+        modifiers = declaration.group("modifiers")
+        is_public = re.search(r"\bpublic\b", modifiers) is not None
+        has_default = any("=" in parameter for parameter in parameters)
+        line = text.count("\n", 0, declaration.start()) + 1
+
+        if declaration_name == "install":
+            is_epub_install = (
+                "epubURL" in labels
+                or relative_path.endswith("/EpubReader.swift")
+                or relative_path.endswith("/EpubReaderLibrary.swift")
+            )
+            if not is_epub_install:
+                continue
+            if is_public:
+                required_labels = {
+                    "epubURL",
+                    "moduleStoreRootURL",
+                    "admittingCandidateWith",
+                }
+                admission_type = parameter_types.get("admittingCandidateWith", "")
+                has_strict_admission_type = re.fullmatch(
+                    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*InstallAdmission",
+                    admission_type,
+                ) is not None
+                if (
+                    has_default
+                    or not required_labels.issubset(labels)
+                    or not has_strict_admission_type
+                ):
+                    matches.append(line)
+                continue
+            is_explicit_root_boundary = (
+                relative_path.endswith("/EpubReaderLibrary.swift")
+                and "epubURL" in labels
+                and "libraryRootURL" in labels
+                and not has_default
+            )
+            if not is_explicit_root_boundary:
+                matches.append(line)
+            continue
+
+        is_android_epub_publisher = (
+            "epubDirectoryURL" in labels
+            or relative_path.endswith("/EpubAndroidModuleBackup.swift")
+            or not relative_path
+        )
+        if not is_android_epub_publisher:
+            continue
+        is_internal_explicit_root_boundary = (
+            not is_public
+            and relative_path.endswith("/EpubAndroidModuleBackup.swift")
+            and {"epubDirectoryURL", "libraryRootURL"}.issubset(labels)
+            and not has_default
+        )
+        if not is_internal_explicit_root_boundary:
+            matches.append(line)
+
+    function_declaration = re.compile(r"\bfunc\s+[A-Za-z_][A-Za-z0-9_]*\s*\(")
+    my_document_extension_ranges: list[tuple[int, int]] = []
+    my_document_extension = re.compile(
+        r"\bextension\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\s*\{"
+    )
+    for extension in my_document_extension.finditer(masked_source):
+        body_start = masked_source.find("{", extension.start())
+        my_document_extension_ranges.append(
+            (extension.start(), _matching_brace_end(masked_source, body_start))
+        )
+
+    for declaration in function_declaration.finditer(masked_source):
+        parameter_start = masked_source.find("(", declaration.start())
+        parameter_end = _swift_parenthesized_end(masked_source, parameter_start)
+        if parameter_end is None:
+            continue
+        parameters = _swift_top_level_arguments(
+            masked_source[parameter_start + 1:parameter_end - 1]
+        )
+        body_start = masked_source.find("{", parameter_end)
+        if body_start == -1:
+            continue
+        body_end = _matching_brace_end(masked_source, body_start)
+        signature = masked_source[parameter_end:body_start]
+        body = masked_source[body_start:body_end]
+        returns_document = re.search(
+            r"->\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\b",
+            signature,
+        ) is not None
+        returns_self_in_document_extension = (
+            re.search(r"->\s*Self\b", signature) is not None
+            and any(start <= declaration.start() < end for start, end in my_document_extension_ranges)
+        )
+        constructs_return_value = (
+            re.search(r"(?:\breturn\s+)?\.\s*init\s*\(", body) is not None
+            or (
+                returns_self_in_document_extension
+                and re.search(r"\bSelf\s*\(", body) is not None
+            )
+        )
+        if (returns_document or returns_self_in_document_extension) and constructs_return_value:
+            matches.append(text.count("\n", 0, declaration.start()) + 1)
+
+        document_parameters: list[tuple[str, bool]] = []
+        for parameter in parameters:
+            if ":" not in parameter:
+                continue
+            declaration_part, type_part = parameter.split(":", 1)
+            names = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", declaration_part)
+            if not names:
+                continue
+            is_factory = re.search(
+                r"\([^)]*\)\s*(?:(?:async|throws|rethrows)\s+)*->\s*"
+                r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\b",
+                type_part,
+            ) is not None
+            is_document = re.search(
+                r"(?<!->\s)(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\b",
+                type_part,
+            ) is not None
+            if is_factory or is_document:
+                document_parameters.append((names[-1], is_factory))
+        if not document_parameters:
+            continue
+        publishes_document_parameter = False
+        for name, is_factory in document_parameters:
+            if not is_factory:
+                publishes_document_parameter = re.search(
+                    rf"\.\s*insert\s*\(\s*{re.escape(name)}\s*\)",
+                    body,
+                ) is not None
+            else:
+                publishes_document_parameter = re.search(
+                    rf"\.\s*insert\s*\(\s*(?:(?:try[!?]?|await)\s+)*"
+                    rf"{re.escape(name)}\s*\(",
+                    body,
+                ) is not None
+                if not publishes_document_parameter:
+                    aliases = re.findall(
+                        rf"\b(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+                        rf"(?:\s*:\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument)?"
+                        rf"\s*=\s*(?:(?:try[!?]?|await)\s+)*"
+                        rf"{re.escape(name)}\s*\(",
+                        body,
+                    )
+                    publishes_document_parameter = any(
+                        re.search(
+                            rf"\.\s*insert\s*\(\s*{re.escape(alias)}\s*\)",
+                            body,
+                        )
+                        for alias in aliases
+                    )
+            if publishes_document_parameter:
+                break
+        if publishes_document_parameter:
+            matches.append(text.count("\n", 0, declaration.start()) + 1)
+
+    typed_document_factory = re.compile(
+        r"\b(?:let|var)\s+[A-Za-z_][A-Za-z0-9_]*\s*:\s*"
+        r"(?:(?:@[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?)\s+)*"
+        r"\([^)]*\)\s*"
+        r"(?:(?:async|throws|rethrows)\s+)*->\s*"
+        r"(?:(?:[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)*MyDocument\s*=\s*\{"
+    )
+    for declaration in typed_document_factory.finditer(masked_source):
+        body_start = masked_source.find("{", declaration.start())
+        body_end = _matching_brace_end(masked_source, body_start)
+        body = masked_source[body_start:body_end]
+        if re.search(
+            r"(?:\breturn\s+)?(?:\.\s*init|\bMyDocument(?:\s*\.\s*init)?)\s*\(",
+            body,
+        ):
+            matches.append(text.count("\n", 0, declaration.start()) + 1)
+
+    if relative_path.endswith("/MyDocumentStore.swift"):
+        matches.extend(
+            text.count("\n", 0, match.start()) + 1
+            for match in re.finditer(r"\bfunc\s+save\s*\(\s*\)", masked_source)
+        )
+
+    if relative_path.endswith("/MyDocumentLibraryStore.swift"):
+        fail_open_save = re.compile(
+            r"\bpublic\s+func\s+save\s*\("
+            r"(?:(?!\n\s*\)\s*(?:async\s+)?throws)[\s\S])*?"
+            r"\bisInitialsUnavailable\s*:"
+        )
+        matches.extend(
+            text.count("\n", 0, match.start()) + 1
+            for match in fail_open_save.finditer(masked_source)
+        )
+
+    if relative_path.endswith("/MyDocumentsListView.swift"):
+        matches.extend(
+            text.count("\n", 0, match.start()) + 1
+            for match in re.finditer(
+                r"\bisInitialsUnavailable\s*:[^,\n=]+=",
+                masked_source,
+            )
+        )
+
+    audited_calls = {
+        "installAndroidModuleBackup": [
+            (
+                "Sources/BibleCore/Sources/BibleCore/Services/AndroidModuleBackupRestoreAvailability.swift",
+                "validatePublishedState",
+                {"epubDirectoryURL", "libraryRootURL"},
+            ),
+            (
+                "Sources/BibleCore/Sources/BibleCore/Services/AndroidModuleBackupService.swift",
+                "restorePlannedArchive",
+                {"epubDirectoryURL", "libraryRootURL"},
+            ),
+        ],
+        "install": [
+            (
+                "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift",
+                "init",
+                {"epubURL", "moduleStoreRootURL", "admittingCandidateWith"},
+            ),
+        ],
+    }
+    epub_call = re.compile(r"\bEpubReader\s*\.\s*(installAndroidModuleBackup|install)\s*\(")
+    for call in epub_call.finditer(masked_source):
+        call_name = call.group(1)
+        argument_start = masked_source.find("(", call.start())
+        argument_end = _swift_parenthesized_end(masked_source, argument_start)
+        arguments = "" if argument_end is None else masked_source[argument_start + 1:argument_end - 1]
+        parsed_arguments = _swift_top_level_arguments(arguments)
+        labeled_arguments: dict[str, str] = {}
+        for argument in parsed_arguments:
+            label_match = re.match(
+                r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]*)",
+                argument,
+            )
+            if label_match:
+                labeled_arguments[label_match.group(1)] = label_match.group(2).strip()
+        labels = set(labeled_arguments)
+        enclosing_function = _enclosing_swift_function_name(function_ranges, call.start())
+        is_audited_call = any(
+            relative_path == expected_path
+            and enclosing_function == expected_function
+            and required_labels.issubset(labels)
+            for expected_path, expected_function, required_labels in audited_calls[call_name]
+        )
+        if (
+            call_name == "install"
+            and relative_path
+            == "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift"
+            and enclosing_function == "init"
+            and labeled_arguments.get("admittingCandidateWith") != "admission"
+        ):
+            is_audited_call = False
+        if not is_audited_call:
+            matches.append(text.count("\n", 0, call.start()) + 1)
+
+    import_service_constructor = re.compile(
+        r"(?:\bExternalDocumentImportService\s*(?:\.\s*init)?|\.\s*init)\s*\("
+    )
+    for constructor in import_service_constructor.finditer(masked_source):
+        argument_start = masked_source.find("(", constructor.start())
+        argument_end = _swift_parenthesized_end(masked_source, argument_start)
+        arguments = "" if argument_end is None else masked_source[argument_start + 1:argument_end - 1]
+        parsed_arguments = _swift_top_level_arguments(arguments)
+        labeled_arguments: dict[str, str] = {}
+        for argument in parsed_arguments:
+            label_match = re.match(
+                r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([\s\S]*)",
+                argument,
+            )
+            if label_match:
+                labeled_arguments[label_match.group(1)] = label_match.group(2).strip()
+        if (
+            "epubCandidateAdmission" not in labeled_arguments
+            and not re.match(r"\bExternalDocumentImportService", constructor.group(0))
+        ):
+            continue
+        admission = labeled_arguments.get("epubCandidateAdmission", "")
+        is_strict_factory = (
+            relative_path
+            == "Sources/BibleUI/Sources/BibleUI/Shared/ExternalDocumentImportService.swift"
+            and _enclosing_swift_function_name(function_ranges, constructor.start())
+            == "androidRegistryAware"
+            and re.search(
+                r"\blet\s+snapshot\s*=\s*try\s+"
+                r"BibleReaderInstalledDocumentRegistrySnapshot\s*\.\s*capture\s*\(",
+                admission,
+            ) is not None
+            and re.search(
+                r"\bguard\s+snapshot\s*\.\s*admitsEpub\s*\(\s*candidate\s*\)"
+                r"\s*else\s*\{[\s\S]*\bthrow\b",
+                admission,
+            ) is not None
+        )
+        if not is_strict_factory:
+            matches.append(text.count("\n", 0, constructor.start()) + 1)
+
+    audited_constructors = {
+        (
+            "Sources/BibleCore/Sources/BibleCore/AI/AIGeneratedPageStore.swift",
+            "resolveOrCreateAIDocument",
+        ),
+        (
+            "Sources/BibleCore/Sources/BibleCore/Database/MyDocumentLibraryStore.swift",
+            "saveUnderExclusiveLease",
+        ),
+        (
+            "Sources/BibleCore/Sources/BibleCore/Services/RemoteSyncMyDocumentRestoreService.swift",
+            "stageLocalMyDocuments",
+        ),
+    }
+    my_document_constructor = re.compile(
+        r"(?:\bMyDocument\s*(?:\.\s*init)?\s*\(|:\s*MyDocument\s*=\s*\.\s*init\s*\()"
+    )
+    for constructor in my_document_constructor.finditer(masked_source):
+        owner = (
+            relative_path,
+            _enclosing_swift_function_name(function_ranges, constructor.start()),
+        )
+        if owner not in audited_constructors:
+            matches.append(text.count("\n", 0, constructor.start()) + 1)
+
+    if relative_path.endswith("/MyDocumentStore.swift"):
+        matches.extend(
+            text.count("\n", 0, match.start()) + 1
+            for match in re.finditer(
+                r"savePendingGraphChanges\s*\([\s\S]*?modelContext\s*:\s*modelContext",
+                masked_source,
+            )
+        )
+
+    return sorted(set(matches))
+
+
 def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
     """Validate static source contracts that should run outside XCTest.
 
-    The current guard keeps the `ContentView` legacy root sidebar regression out of the app-host
-    bundle. It reports a missing file as a failure so project-layout moves must deliberately update
-    the guard instead of silently dropping coverage.
+    The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle and
+    prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
+    bypass Android-compatible global ownership admission. Missing fixed-path files fail closed, and
+    the document publisher scan follows every non-test Swift file under `Sources` and `AndBible`
+    across moves.
     """
     content_view_path = repo_root / "AndBible/ContentView.swift"
     relative_path = "AndBible/ContentView.swift"
+    issues: list[SourceGuardIssue] = []
 
     if not content_view_path.exists():
-        return [
+        issues.append(
             SourceGuardIssue(
                 path=relative_path,
                 line=1,
@@ -328,21 +817,44 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
                     "if the project layout changes."
                 ),
             )
-        ]
-
-    source = content_view_path.read_text(encoding="utf-8")
-    return [
-        SourceGuardIssue(
-            path=relative_path,
-            line=line,
-            message=(
-                "ContentView.swift appears to contain the legacy root sidebar shell pattern: "
-                "NavigationSplitView with contentTabBible/contentSettingsLink in the same root "
-                "layout region."
-            ),
         )
-        for line in find_legacy_root_sidebar_shell(source)
-    ]
+    else:
+        source = content_view_path.read_text(encoding="utf-8")
+        issues.extend(
+            SourceGuardIssue(
+                path=relative_path,
+                line=line,
+                message=(
+                    "ContentView.swift appears to contain the legacy root sidebar shell pattern: "
+                    "NavigationSplitView with contentTabBible/contentSettingsLink in the same root "
+                    "layout region."
+                ),
+            )
+            for line in find_legacy_root_sidebar_shell(source)
+        )
+
+    for source_root_name in ("Sources", "AndBible"):
+        sources_root = repo_root / source_root_name
+        if not sources_root.exists():
+            continue
+        for path in sorted(sources_root.rglob("*.swift")):
+            relative = path.relative_to(repo_root)
+            if "Tests" in relative.parts:
+                continue
+            source = path.read_text(encoding="utf-8")
+            issues.extend(
+                SourceGuardIssue(
+                    path=str(relative),
+                    line=line,
+                    message=(
+                        "Production source declares a direct EPUB/My Documents publisher outside "
+                        "the shared global mutation and Android ownership-admission boundary."
+                    ),
+                )
+                for line in find_unsafe_direct_document_publishers(source, str(relative))
+            )
+
+    return issues
 
 
 def main(argv: list[str] | None = None) -> int:

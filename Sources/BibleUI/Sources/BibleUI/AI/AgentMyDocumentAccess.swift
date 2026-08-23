@@ -374,23 +374,13 @@ extension BibleUIAgentDomainAdapter {
 
      - Parameter initials: Explicit or generated My Documents candidate initials.
      - Returns: True when installed, EPUB, or existing My Documents registration owns the token;
-       metadata failures also return true so creation and persistence fail closed.
+       draft-time callers map metadata failures to true so candidate generation fails closed.
      - Side effects: Reads current installed/local metadata without opening document content.
-     - Failure modes: None exposed; persistence failures conservatively reserve the candidate.
+     - Failure modes: Propagates incomplete-registry reads so commit-time persistence cannot publish
+       an identity without authoritative ownership proof.
      */
     private func isDocumentInitialsUnavailable(_ initials: String) throws -> Bool {
-        if let strictMyDocumentInitialsUnavailable {
-            return try strictMyDocumentInitialsUnavailable(initials)
-        }
-        guard let session = try? myDocumentLibraryStore.loadSession() else { return true }
-        let registrations = localGeneralBookRegistrations(
-            documents: session.documents,
-            epubs: EpubReader.installedEpubs()
-        )
-        return readableInstalledModuleResolver().hasRegisteredDocument(
-            named: initials,
-            localRegistrations: registrations
-        )
+        try strictMyDocumentInitialsUnavailable(initials)
     }
 
     /** Maps throwing production registry preflight to conservative draft-time availability. */

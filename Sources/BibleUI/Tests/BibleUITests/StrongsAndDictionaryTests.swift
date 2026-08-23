@@ -607,8 +607,9 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
 
         try await service.performIndexMutationForTesting { db in
             let sql = """
-            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
-            VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
+            INSERT INTO verse_strongs (
+                module_name, token, verse_key, entry_order, highlight_ranges
+            ) VALUES ('KJV', 'H0430', 'Genesis 1:2', 0, '');
             """
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
                 let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "SQLite write failed"
@@ -684,8 +685,9 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
                 ('\(webRows[1])', 'John 3:16',
                  'For God so loved the world.', 'AATESTWEB', 1,
                  'John', 'John', 'source', 3, 16, 45, 'nt');
-            INSERT INTO verse_strongs (module_name, token, verse_key, entry_order)
-            VALUES ('KJV', 'H0430', 'Genesis 1:2', 0);
+            INSERT INTO verse_strongs (
+                module_name, token, verse_key, entry_order, highlight_ranges
+            ) VALUES ('KJV', 'H0430', 'Genesis 1:2', 0, '');
             INSERT INTO indexed_modules (
                 module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
                 strongs_complete, source_version, source_fingerprint, store_generation
@@ -713,13 +715,19 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies the Strong's search path can use SWORD entry-attribute results as a candidate index
-     without trusting them as the semantic result source.
+     Verifies SWORD entry-attribute candidates remain semantic-only and cursor-neutral.
 
      Android's find-all path reads JSword's canonical `strong` field, so iOS must still validate
      candidate verses against parsed Strong's lemma tokens. A failure means the UI search path may
      either fall back to an expensive full-module scan when SWORD already has candidate verses, or
-     return entry-attribute hits that do not match JSword token semantics.
+     return entry-attribute hits that do not match JSword token semantics. Both matching and rejected
+     candidate exits must restore the caller's exact key and VerseKey ordinal.
+
+     - Setup: Positions a real KJV fixture on Genesis 1:2, then validates H0430 candidates once with
+       the matching canonical token and once with a deliberately different semantic token.
+     - Expected result: Only the matching candidate is returned and both calls restore key and index.
+     - Failure meaning: Candidate search can publish a false hit or mutate shared module navigation.
+     - Side effects: Creates one temporary native SWORD fixture and performs bounded searches.
      */
     func testStrongsSearchEntryAttributeCandidatesAreCanonicallyValidated() throws {
         let modulePath = try makeTemporarySwordFixturePath()
@@ -735,6 +743,9 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             StrongsSearchSupport.normalizedQueryOptions(for: "H00430"),
             "Expected H00430 to normalize into Strong's search queries"
         )
+        module.setKey("Gen.1.2")
+        let originalKey = module.currentKey()
+        let originalVerseIndex = module.currentVerseKeyChildren()?.index
 
         let candidateResult = StrongsSearchSupport.searchVerseHitsByEntryAttributeCandidates(
             in: module,
@@ -750,6 +761,87 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             candidateResult.hits.contains { $0.book == "Genesis" && $0.chapter == 1 && $0.verse == 1 },
             "Expected candidate-index search to validate Genesis 1:1 against canonical H0430 tokens"
         )
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyChildren()?.index, originalVerseIndex)
+
+        let rejectedResult = StrongsSearchSupport.searchVerseHitsByEntryAttributeCandidates(
+            in: module,
+            queryOptions: NormalizedStrongsQueryOptions(
+                canonicalStrongTokens: ["H9999"],
+                entryAttributeQueries: queryOptions.entryAttributeQueries
+            ),
+            scope: "Gen"
+        )
+        XCTAssertTrue(rejectedResult.hits.isEmpty)
+        XCTAssertTrue(rejectedResult.sawLexicalTokens)
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyChildren()?.index, originalVerseIndex)
+    }
+
+    /**
+     Verifies both retained native key-collection boundaries restore a chapter-introduction cursor.
+
+     - Setup: Positions a fresh real KJV fixture at Genesis 1:0 before any key-list cache exists,
+       then executes hit, zero-limit, and miss native searches followed by first-read enumeration.
+     - Expected result: Every exit returns the module to the identical introduction key and
+       VerseKey ordinal; enumeration succeeds and its subsequent cached read is cursor-neutral.
+     - Failure meaning: A retained #393 key-only helper can move shared reader state from verse zero
+       to verse one even though the structured preview inspection itself restores correctly.
+     - Side effects: Creates one isolated SWORD fixture, runs bounded searches, and fills its
+       module-lifetime immutable key cache.
+     */
+    func testRetainedKeySearchAndColdEnumerationRestoreIntroductionCursor() throws {
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let queryOptions = try XCTUnwrap(
+            StrongsSearchSupport.normalizedQueryOptions(for: "H00430")
+        )
+        let candidateQuery = try XCTUnwrap(queryOptions.entryAttributeQueries.first)
+        let missOptions = SearchOptions(
+            query: "Word//Lemma./strong:H9999",
+            searchType: .entryAttribute,
+            caseInsensitive: true,
+            scope: "Gen"
+        )
+        module.setKey("=Gen.1.0")
+        let originalKey = module.currentKey()
+        let originalVerseIndex = module.currentVerseKeyIndex()
+
+        XCTAssertEqual(originalKey, "Genesis 1:0")
+        var hitKeys: [String] = []
+        for query in queryOptions.entryAttributeQueries {
+            hitKeys.append(contentsOf: try module.searchKeys(SearchOptions(
+                query: query,
+                searchType: .entryAttribute,
+                caseInsensitive: true,
+                scope: "Gen"
+            ), limit: 5000))
+            XCTAssertEqual(module.currentKey(), originalKey)
+            XCTAssertEqual(module.currentVerseKeyIndex(), originalVerseIndex)
+        }
+        XCTAssertFalse(hitKeys.isEmpty)
+
+        XCTAssertTrue(try module.searchKeys(SearchOptions(
+            query: candidateQuery,
+            searchType: .entryAttribute,
+            caseInsensitive: true,
+            scope: "Gen"
+        ), limit: 0).isEmpty)
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyIndex(), originalVerseIndex)
+
+        XCTAssertTrue(try module.searchKeys(missOptions, limit: 5000).isEmpty)
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyIndex(), originalVerseIndex)
+
+        let coldKeys = try module.loadAllKeys()
+        XCTAssertFalse(coldKeys.isEmpty)
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyIndex(), originalVerseIndex)
+
+        XCTAssertEqual(try module.loadAllKeys(), coldKeys)
+        XCTAssertEqual(module.currentKey(), originalKey)
+        XCTAssertEqual(module.currentVerseKeyIndex(), originalVerseIndex)
     }
 
     /**

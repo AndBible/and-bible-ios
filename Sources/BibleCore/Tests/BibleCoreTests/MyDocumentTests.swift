@@ -41,7 +41,8 @@ final class MyDocumentStoreTests: XCTestCase {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
         let store = MyDocumentStore(modelContext: context)
-        store.insert(MyDocument(name: "My Document", initials: "MYDOC"))
+        context.insert(MyDocument(name: "My Document", initials: "MYDOC"))
+        try context.save()
 
         XCTAssertNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "missing"))
         XCTAssertNil(store.rawContentPayload(bookInitials: "UNKNOWN", pageKey: "intro"))
@@ -185,10 +186,12 @@ final class MyDocumentStoreTests: XCTestCase {
         ))
 
         let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
+        let committedPage = try XCTUnwrap(store.page(bookInitials: "MYDOC", pageId: pageId))
+        let committedDocument = try XCTUnwrap(store.document(initials: "MYDOC"))
         XCTAssertEqual(payload.content, "Edited **markdown**")
         XCTAssertEqual(payload.title, "Renamed")
-        XCTAssertGreaterThan(page.updatedAt, createdAt)
-        XCTAssertGreaterThan(document.updatedAt, createdAt)
+        XCTAssertGreaterThan(committedPage.updatedAt, createdAt)
+        XCTAssertGreaterThan(committedDocument.updatedAt, createdAt)
 
         XCTAssertTrue(store.savePageContent(
             bookInitials: "MYDOC",
@@ -239,7 +242,7 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertEqual(payload.contentType, "HTML")
         XCTAssertEqual(payload.content, "<p>Edited</p>")
         XCTAssertEqual(payload.title, "Intro")
-        XCTAssertNotNil(page.pageContent)
+        XCTAssertNotNil(store.page(bookInitials: "MYDOC", pageId: pageId)?.pageContent)
     }
 
     /**
@@ -326,7 +329,7 @@ final class MyDocumentStoreTests: XCTestCase {
 
             let store = MyDocumentStore(
                 modelContext: context,
-                savePageContentChanges: { throw ForcedMyDocumentSaveError() }
+                savePageContentChanges: { _ in throw ForcedMyDocumentSaveError() }
             )
 
             XCTAssertFalse(store.savePageContent(
@@ -507,6 +510,155 @@ final class MyDocumentStoreTests: XCTestCase {
         )
         XCTAssertTrue(try context.fetch(deletedContentDescriptor).isEmpty)
         XCTAssertTrue(try context.fetch(deletedCacheDescriptor).isEmpty)
+    }
+
+    /**
+     Verifies page edits and deletions cannot publish an unrelated staged My Documents identity.
+
+     - Setup: Persists two admitted AI pages, stages a third unsaved document in the store's read
+       context, then invokes the production page edit and delete APIs.
+     - Expected result: Both intended page mutations commit through operation-owned contexts while a
+       fresh context cannot observe the staged document identity.
+     - Failure meaning: A reader page action can again hitchhike an unadmitted My Documents graph
+       through the remote-sync journal boundary.
+     - Side effects: Writes only to an in-memory SwiftData container.
+     */
+    func testPageMutationsDoNotPublishUnrelatedPendingDocument() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let editablePageID = try XCTUnwrap(
+            UUID(uuidString: "10101010-1010-1010-1010-101010101010")
+        )
+        let deletedPageID = try XCTUnwrap(
+            UUID(uuidString: "20202020-2020-2020-2020-202020202020")
+        )
+        let promptID = try XCTUnwrap(
+            UUID(uuidString: "30303030-3030-3030-3030-303030303030")
+        )
+        let document = MyDocument(name: "Admitted", initials: "ADMITTED")
+        let editablePage = MyDocumentPage(
+            id: editablePageID,
+            title: "Before",
+            pageKey: "edit",
+            sourcePromptId: promptID
+        )
+        let editableContent = MyDocumentPageContent(
+            pageId: editablePageID,
+            content: "Before content"
+        )
+        let deletedPage = MyDocumentPage(
+            id: deletedPageID,
+            title: "Delete",
+            pageKey: "delete",
+            sourcePromptId: promptID
+        )
+        editablePage.document = document
+        editablePage.pageContent = editableContent
+        editableContent.page = editablePage
+        deletedPage.document = document
+        document.pages = [editablePage, deletedPage]
+        context.insert(document)
+        try context.save()
+
+        let staged = MyDocument(name: "Unadmitted", initials: "COLLISION")
+        context.insert(staged)
+        let store = MyDocumentStore(modelContext: context)
+
+        XCTAssertTrue(store.savePageContent(
+            bookInitials: "ADMITTED",
+            pageId: editablePageID,
+            content: "After content",
+            title: "After"
+        ))
+        guard case .deleted = store.deleteAIPage(pageId: deletedPageID) else {
+            return XCTFail("Expected the persisted AI page deletion to succeed")
+        }
+        XCTAssertTrue(context.hasChanges)
+
+        let verificationContext = ModelContext(container)
+        let verificationStore = MyDocumentStore(modelContext: verificationContext)
+        let updated = try XCTUnwrap(verificationStore.page(
+            bookInitials: "ADMITTED",
+            pageId: editablePageID
+        ))
+        XCTAssertEqual(updated.title, "After")
+        XCTAssertEqual(updated.pageContent?.content, "After content")
+        XCTAssertNil(verificationStore.page(pageId: deletedPageID))
+        XCTAssertNil(verificationStore.document(initials: "COLLISION"))
+    }
+
+    /**
+     Verifies registration, exact lookup, and marker inventories expose only committed rows.
+
+     - Setup: Stages an unsaved document, generated page, and source marker in the store's retained
+       caller context.
+     - Expected result: Registration omits the document, exact document/page lookup reports it
+       missing, and marker inventories remain empty until save; every API then exposes the commit.
+     - Failure meaning: A pane-local draft can enter Android BookSet ownership or reader markers
+       before strict registry admission publishes it.
+     - Side effects: Stages, then commits, rows in an in-memory SwiftData container.
+     */
+    func testPersistedOwnerAndMarkerReadsIgnoreCallerStagedGraph() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let pageID = try XCTUnwrap(
+            UUID(uuidString: "40404040-4040-4040-4040-404040404040")
+        )
+        let promptID = try XCTUnwrap(
+            UUID(uuidString: "50505050-5050-5050-5050-505050505050")
+        )
+        let document = MyDocument(name: "Draft", initials: "DRAFT")
+        let page = MyDocumentPage(
+            id: pageID,
+            title: "Draft Page",
+            pageKey: "draft",
+            sourcePromptId: promptID
+        )
+        let marker = AiPageCacheEntry(
+            pageId: pageID,
+            sourcePromptId: promptID,
+            kjvOrdinalStart: 1,
+            kjvOrdinalEnd: 2,
+            sourceBookInitials: "KJV",
+            sourceBookKey: "Gen.1.1"
+        )
+        page.document = document
+        marker.page = page
+        page.aiPageCacheEntries = [marker]
+        document.pages = [page]
+        context.insert(document)
+        context.insert(page)
+        context.insert(marker)
+
+        XCTAssertTrue(try store.documentsInRegistrationOrder().isEmpty)
+        XCTAssertThrowsError(try store.exactDocument(initials: "DRAFT")) { error in
+            XCTAssertEqual(
+                error as? MyDocumentExactLookupError,
+                .documentNotFound(initials: "DRAFT")
+            )
+        }
+        XCTAssertThrowsError(try store.exactPage(bookInitials: "DRAFT", pageKey: "draft"))
+        XCTAssertTrue(store.aiDocMarkers(
+            bookInitials: "KJV",
+            pageKey: "Gen.1.1"
+        ).isEmpty)
+        XCTAssertTrue(store.aiDocMarkers(kjvaRange: 1...2).isEmpty)
+        XCTAssertTrue(context.hasChanges)
+
+        try context.save()
+
+        XCTAssertEqual(try store.documentsInRegistrationOrder().map(\.initials), ["DRAFT"])
+        XCTAssertEqual(try store.exactDocument(initials: "DRAFT").id, document.id)
+        XCTAssertEqual(
+            try store.exactPage(bookInitials: "DRAFT", pageKey: "draft").id,
+            pageID
+        )
+        XCTAssertEqual(
+            store.aiDocMarkers(bookInitials: "KJV", pageKey: "Gen.1.1").map(\.pageId),
+            [pageID]
+        )
+        XCTAssertEqual(store.aiDocMarkers(kjvaRange: 1...2).map(\.pageId), [pageID])
     }
 
     private func makeMyDocumentModelContainer() throws -> ModelContainer {

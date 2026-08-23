@@ -33,10 +33,23 @@ enum Lucene29ClassicTokenizer {
        malformed.
      */
     static func tokens(_ text: String) throws -> [String] {
+        try tokenSpans(text).map(\.term)
+    }
+
+    /**
+     Returns classic-scanner tokens with their original UTF-16 ranges.
+
+     - Parameter text: Source text passed to the JSword Greek or Hebrew analyzer.
+     - Returns: Scanner terms and half-open source ranges in emission order.
+     - Side effects: Lazily reads the immutable generated scanner table.
+     - Failure modes: Throws when the table is missing/malformed; skipped overlong tokens emit no
+       span, exactly matching `tokens`.
+     */
+    static func tokenSpans(_ text: String) throws -> [LuceneSearchAnalyzer.TokenSpan] {
         let tables = try scannerResult.get()
         let input = Array(text.utf16)
         var cursor = 0
-        var result: [String] = []
+        var result: [LuceneSearchAnalyzer.TokenSpan] = []
 
         while cursor < input.count {
             let start = cursor
@@ -79,10 +92,15 @@ enum Lucene29ClassicTokenizer {
 
             var tokenUnits = Array(input[start..<marked])
             // Lucene 2.9+ reclassifies invalid trailing-dot acronyms as hosts and removes the dot.
+            var visibleEnd = marked
             if action == 8, tokenUnits.last == 0x002E {
                 tokenUnits.removeLast()
+                visibleEnd -= 1
             }
-            result.append(String(decoding: tokenUnits, as: UTF16.self))
+            result.append(LuceneSearchAnalyzer.TokenSpan(
+                term: String(decoding: tokenUnits, as: UTF16.self),
+                range: start..<visibleEnd
+            ))
         }
         return result
     }

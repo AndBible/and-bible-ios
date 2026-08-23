@@ -19,13 +19,26 @@ enum Lucene29MMSegTokenizer {
 
     /** Returns the mmseg4j `ComplexAnalyzer` token stream for arbitrary mixed text. */
     static func tokens(_ text: String) throws -> [String] {
+        try tokenSpans(text).map(\.term)
+    }
+
+    /**
+     Returns mmseg4j tokens with exact original UTF-16 source ranges.
+
+     - Parameter text: Arbitrary mixed CJK/Latin/numeric source.
+     - Returns: Normalized terms and half-open source ranges in mmseg emission order.
+     - Side effects: Lazily loads immutable mmseg dictionaries and character tables.
+     - Failure modes: Propagates missing or malformed resource errors without partial output.
+     */
+    static func tokenSpans(_ text: String) throws -> [LuceneSearchAnalyzer.TokenSpan] {
         let dictionary = try Lucene29MMSegDictionary.loaded()
         let characterTables = try Lucene29CharacterTables.loaded()
         let source = Array(text.utf16)
-        var result: [String] = []
+        var result: [LuceneSearchAnalyzer.TokenSpan] = []
         var index = 0
 
         while index < source.count {
+            let tokenStart = index
             var unit = characterTables.lowercase(source[index])
             index += 1
 
@@ -40,7 +53,10 @@ enum Lucene29MMSegTokenizer {
                         buffer.append(next)
                         index += 1
                     }
-                    result.append(String(decoding: buffer, as: UTF16.self))
+                    result.append(LuceneSearchAnalyzer.TokenSpan(
+                        term: String(decoding: buffer, as: UTF16.self),
+                        range: tokenStart..<index
+                    ))
                 case .russian:
                     var buffer = [unit]
                     while index < source.count {
@@ -49,7 +65,10 @@ enum Lucene29MMSegTokenizer {
                         buffer.append(next)
                         index += 1
                     }
-                    result.append(String(decoding: buffer, as: UTF16.self))
+                    result.append(LuceneSearchAnalyzer.TokenSpan(
+                        term: String(decoding: buffer, as: UTF16.self),
+                        range: tokenStart..<index
+                    ))
                 case .greek:
                     var buffer = [unit]
                     while index < source.count {
@@ -58,7 +77,10 @@ enum Lucene29MMSegTokenizer {
                         buffer.append(next)
                         index += 1
                     }
-                    result.append(String(decoding: buffer, as: UTF16.self))
+                    result.append(LuceneSearchAnalyzer.TokenSpan(
+                        term: String(decoding: buffer, as: UTF16.self),
+                        range: tokenStart..<index
+                    ))
                 case .unknown:
                     continue
                 }
@@ -73,7 +95,15 @@ enum Lucene29MMSegTokenizer {
                     sentence.append(next)
                     index += 1
                 }
-                result.append(contentsOf: dictionary.segment(sentence))
+                var segmentOffset = tokenStart
+                for segment in dictionary.segment(sentence) {
+                    let length = segment.utf16.count
+                    result.append(LuceneSearchAnalyzer.TokenSpan(
+                        term: segment,
+                        range: segmentOffset..<(segmentOffset + length)
+                    ))
+                    segmentOffset += length
+                }
                 continue
             }
 
@@ -89,8 +119,14 @@ enum Lucene29MMSegTokenizer {
                 if index < source.count {
                     let next = characterTables.lowercase(source[index])
                     if dictionary.isUnit(next) {
-                        result.append(String(decoding: buffer, as: UTF16.self))
-                        result.append(String(decoding: [next], as: UTF16.self))
+                        result.append(LuceneSearchAnalyzer.TokenSpan(
+                            term: String(decoding: buffer, as: UTF16.self),
+                            range: tokenStart..<index
+                        ))
+                        result.append(LuceneSearchAnalyzer.TokenSpan(
+                            term: String(decoding: [next], as: UTF16.self),
+                            range: index..<(index + 1)
+                        ))
                         index += 1
                         continue
                     }
@@ -102,12 +138,18 @@ enum Lucene29MMSegTokenizer {
                     buffer.append(next)
                     index += 1
                 }
-                result.append(String(decoding: buffer, as: UTF16.self))
+                result.append(LuceneSearchAnalyzer.TokenSpan(
+                    term: String(decoding: buffer, as: UTF16.self),
+                    range: tokenStart..<index
+                ))
                 continue
             }
 
             if characterTables.isLetterNumber(unit) {
-                result.append(String(decoding: [unit], as: UTF16.self))
+                result.append(LuceneSearchAnalyzer.TokenSpan(
+                    term: String(decoding: [unit], as: UTF16.self),
+                    range: tokenStart..<index
+                ))
                 continue
             }
 
@@ -119,7 +161,10 @@ enum Lucene29MMSegTokenizer {
                     buffer.append(next)
                     index += 1
                 }
-                result.append(String(decoding: buffer, as: UTF16.self))
+                result.append(LuceneSearchAnalyzer.TokenSpan(
+                    term: String(decoding: buffer, as: UTF16.self),
+                    range: tokenStart..<index
+                ))
                 continue
             }
 

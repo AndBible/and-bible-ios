@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
 #include <gbfosis.h>
@@ -211,6 +212,52 @@ extern "C" const char *SWModule_getCurrentKeyName(void *moduleHandle) {
     return currentKeyNameStorage.c_str();
 }
 
+extern "C" void *SWModule_cloneCurrentKey(void *moduleHandle) {
+    if (!moduleHandle) {
+        return nullptr;
+    }
+
+    auto *handle = reinterpret_cast<FlatAPIHandleSWModule *>(moduleHandle);
+    auto *module = handle->mod;
+    if (!module || !module->getKey()) {
+        return nullptr;
+    }
+
+    sword::SWKey *clone = module->getKey()->clone();
+    if (clone) {
+        clone->setPersist(false);
+    }
+    return clone;
+}
+
+extern "C" int SWModule_restoreClonedKey(void *moduleHandle, void *clonedKeyHandle) {
+    std::unique_ptr<sword::SWKey> clonedKey(
+        reinterpret_cast<sword::SWKey *>(clonedKeyHandle)
+    );
+    if (!moduleHandle || !clonedKey) {
+        return 1;
+    }
+
+    auto *handle = reinterpret_cast<FlatAPIHandleSWModule *>(moduleHandle);
+    auto *module = handle->mod;
+    if (!module || !module->getKey()) {
+        return 1;
+    }
+
+    sword::SWKey *restoredKey = module->getKey();
+    restoredKey->positionFrom(*clonedKey);
+    const char *restoredText = restoredKey->getText();
+    const char *clonedText = clonedKey->getText();
+    const bool textMatches = std::strcmp(
+        restoredText ? restoredText : "",
+        clonedText ? clonedText : ""
+    ) == 0;
+    return restoredKey->getIndex() == clonedKey->getIndex()
+        && textMatches
+        ? 0
+        : 1;
+}
+
 #else
 
 extern "C" const char *SWModule_getOSISFragment(void *module) {
@@ -231,6 +278,14 @@ extern "C" const char *SWModule_getRawDictionaryOSISFragmentAtIndex(
 extern "C" const char *SWModule_getCurrentKeyName(void *module) {
     static const char *empty = "";
     return empty;
+}
+
+extern "C" void *SWModule_cloneCurrentKey(void *module) {
+    return nullptr;
+}
+
+extern "C" int SWModule_restoreClonedKey(void *module, void *clonedKey) {
+    return 1;
 }
 
 #endif
