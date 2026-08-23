@@ -84,6 +84,30 @@ enum Lucene29QueryCompiler {
         wordMode: SearchWordMode,
         analyzer: SearchAnalyzerProfile
     ) throws -> String {
+        try compileWithHighlightClauses(
+            query: query,
+            wordMode: wordMode,
+            analyzer: analyzer
+        ).ftsQuery
+    }
+
+    /**
+     Compiles matching and visible-emphasis contracts from one shared Lucene syntax tree.
+
+     - Parameters:
+       - query: User input before Android's cleanup/decorator passes.
+       - wordMode: Search mode applied before Lucene parsing.
+       - analyzer: Module-specific analyzer used for terms and phrases.
+     - Returns: FTS expression plus positive term/prefix/phrase clauses in parsed order.
+     - Side effects: May lazily load analyzer resources.
+     - Failure modes: Propagates the same empty, malformed, unsupported, or resource failures as
+       `compile`; a prohibited-only query never yields a presentation-only plan.
+     */
+    static func compileWithHighlightClauses(
+        query: String,
+        wordMode: SearchWordMode,
+        analyzer: SearchAnalyzerProfile
+    ) throws -> (ftsQuery: String, highlightClauses: [SearchTextHighlightClause]) {
         let cleaned = cleanSearchString(query)
         guard !cleaned.isEmpty else { throw SearchIndexError.emptyQuery }
         let decorated = decorate(cleaned, wordMode: wordMode)
@@ -91,9 +115,35 @@ enum Lucene29QueryCompiler {
         let queryNode = try parser.parseTopLevel()
         switch try lower(queryNode) {
         case .expression(let expression):
-            return expression
+            return (expression, positiveHighlightClauses(in: queryNode))
         case .matchNone:
             throw SearchIndexError.unsupportedQuerySyntax(token: "query with only prohibited clauses")
+        }
+    }
+
+    /**
+     Collects positive visible-emphasis clauses from one parsed Lucene subtree.
+
+     - Parameter node: Parsed term, prefix, phrase, or Boolean subtree after analyzer processing.
+     - Returns: Positive clauses in parser order; prohibited subtrees contribute no presentation.
+     - Side effects: None.
+     - Failure modes: None; empty analyzed nodes return no clauses and matching remains owned by
+       the independently lowered FTS expression.
+     */
+    private static func positiveHighlightClauses(
+        in node: QueryNode
+    ) -> [SearchTextHighlightClause] {
+        switch node {
+        case .term(let terms):
+            return terms.map(SearchTextHighlightClause.term)
+        case .prefix(let prefix):
+            return [.prefix(prefix)]
+        case .phrase(let terms):
+            return terms.isEmpty ? [] : [.phrase(terms)]
+        case .boolean(let clauses):
+            return clauses.flatMap { clause in
+                clause.occur == .mustNot ? [] : positiveHighlightClauses(in: clause.node)
+            }
         }
     }
 

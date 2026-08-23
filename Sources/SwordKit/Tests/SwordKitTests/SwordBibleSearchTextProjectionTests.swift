@@ -5,6 +5,35 @@ import XCTest
 /** Protects Android's distinct canonical-index and structured-preview Bible Search contracts. */
 final class SwordBibleSearchTextProjectionTests: XCTestCase {
     /**
+     Verifies structured Strong's lemmas map to visible words without reviving excluded annotations.
+
+     - Setup: Projects two lexical words, a nested lemma span, and a note-owned lexical token through
+       the exact Android preview path.
+     - Expected result: Visible ranges select `God` and `created`; note text/tokens never appear.
+     - Failure meaning: Strong highlighting can bold a guessed word, leak a cross-reference/note, or
+       use offsets from pre-HTML source rather than the final plain preview.
+     - Side effects: Performs bounded in-memory OSIS and visible-text projections.
+     */
+    func testLemmaSpansMapStructuredWordsIntoFinalVisiblePreview() {
+        let projected = SwordBibleSearchTextProjection.project(
+            sourceXML: """
+            <verse osisID="Gen.1.1"><w lemma="strong:H0430">God</w> <w lemma="strong:H01254"><hi>created</hi></w><note><w lemma="strong:H9999">hidden</w></note> all.</verse>
+            """
+        )
+        let units = Array(projected.previewText.utf16)
+
+        XCTAssertEqual(projected.previewText, "God created all.")
+        XCTAssertEqual(projected.lemmaSpans.map(\.lemma), ["strong:H0430", "strong:H01254"])
+        XCTAssertEqual(
+            projected.lemmaSpans.map {
+                String(decoding: units[$0.location..<($0.location + $0.length)], as: UTF16.self)
+            },
+            ["God", "created"]
+        )
+        XCTAssertFalse(projected.previewText.contains("hidden"))
+    }
+
+    /**
      Reproduces FinRK II Peter 1:19 without allowing its cross-reference note into Search text.
 
      - Setup: Projects a leading heading, nested visible formatting, and the FinRK-shaped

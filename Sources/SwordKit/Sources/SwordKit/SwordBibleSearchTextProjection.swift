@@ -2,6 +2,35 @@
 
 import Foundation
 
+/** One structured lemma attribute mapped to its visible Search preview UTF-16 range. */
+public struct SwordBibleSearchLemmaSpan: Equatable, Sendable {
+    /// Exact source lemma attribute, potentially containing multiple space-delimited values.
+    public let lemma: String
+
+    /// Zero-based UTF-16 offset in `SwordBibleSearchTextProjection.previewText`.
+    public let location: Int
+
+    /// Positive UTF-16 length of the visible source text owned by the lemma element.
+    public let length: Int
+
+    /**
+     Creates one immutable structured lexical range.
+
+     - Parameters:
+       - lemma: Exact structured source attribute owned by the visible word.
+       - location: Zero-based UTF-16 offset in the final preview.
+       - length: Positive UTF-16 length of the owned visible source text.
+     - Side effects: None.
+     - Failure modes: Values are retained verbatim; the index boundary validates them against the
+       final preview and omits malformed ranges.
+     */
+    public init(lemma: String, location: Int, length: Int) {
+        self.lemma = lemma
+        self.location = location
+        self.length = length
+    }
+}
+
 /**
  Separates one Bible verse's searchable canonical text from its user-visible Search preview.
 
@@ -15,6 +44,9 @@ public struct SwordBibleSearchTextProjection: Equatable, Sendable {
 
     /// Android MultiSearch-compatible verse text stored for result presentation.
     public let previewText: String
+
+    /// Structured lemma attributes mapped to exact visible-preview ranges.
+    public let lemmaSpans: [SwordBibleSearchLemmaSpan]
 
     /**
      Projects one source-neutral OSIS verse without passing it through an HTML render filter.
@@ -31,7 +63,8 @@ public struct SwordBibleSearchTextProjection: Equatable, Sendable {
      - Parameters:
        - sourceXML: Source-neutral OSIS fragment for one exact positive verse.
        - moduleInitials: Exact installed initials controlling pinned module-specific source repair.
-     - Returns: Independently projected canonical index text and visible preview text.
+     - Returns: Independently projected canonical index text, visible preview text, and structured
+       lemma ranges for Strong's result emphasis.
      - Side effects: Parses one bounded XML fragment in memory; external entities are disabled.
      - Failure modes: Irreparable source produces an empty projection, matching pinned JSword's
        empty-content fallback; no entry selects stripped or rendered text.
@@ -62,10 +95,160 @@ public struct SwordBibleSearchTextProjection: Equatable, Sendable {
             appendPreviewSourceText(from: previewRoot, to: &previewSource)
         }
         let preview = SwordHTMLVisibleTextProjection.project(previewSource)
+        let lemmaSpans = projectedLemmaSpans(
+            previewRoot: previewRoot,
+            isAlreadyWrapped: verseProjection.isAlreadyWrapped,
+            authoritativePreview: preview
+        )
         return Self(
             indexText: SwordJavaTextCompatibility.trim(canonicalWriter.output),
-            previewText: preview
+            previewText: preview,
+            lemmaSpans: lemmaSpans
         )
+    }
+
+    /** Marker grammar used only to carry structured lemma boundaries through Html.fromHtml parity. */
+    private static let lemmaMarkerRegex = try? NSRegularExpression(
+        pattern: "\u{E000}([se])([0-9]+)\u{E001}"
+    )
+
+    /**
+     Projects structured lemma boundaries through the same tolerant HTML pass as visible text.
+
+     - Parameters:
+       - previewRoot: Repaired structured verse-body root used by ordinary preview traversal.
+       - isAlreadyWrapped: Whether only direct `verse` children contribute to presentation.
+       - authoritativePreview: Unmarked visible projection that must remain byte-for-byte unchanged.
+     - Returns: Ordered lemma spans when nonce-like marker removal reconstructs the authoritative
+       preview exactly; otherwise an empty fail-closed list.
+     - Side effects: Performs one additional bounded in-memory visible projection.
+     - Failure modes: Marker collision, malformed nesting, invalid indices, or any projection drift
+       returns no spans rather than associating a Strong's token with the wrong visible word.
+     */
+    private static func projectedLemmaSpans(
+        previewRoot: SwordXMLNode,
+        isAlreadyWrapped: Bool,
+        authoritativePreview: String
+    ) -> [SwordBibleSearchLemmaSpan] {
+        var markedSource = ""
+        var lemmas: [String] = []
+        if isAlreadyWrapped {
+            for verse in previewRoot.children where verse.isElement(named: "verse") {
+                appendMarkedPreviewSourceText(from: verse, to: &markedSource, lemmas: &lemmas)
+            }
+        } else {
+            appendMarkedPreviewSourceText(from: previewRoot, to: &markedSource, lemmas: &lemmas)
+        }
+        guard !lemmas.isEmpty, let lemmaMarkerRegex else { return [] }
+
+        let markedPreview = SwordHTMLVisibleTextProjection.project(markedSource)
+        let markedUnits = Array(markedPreview.utf16)
+        let fullRange = NSRange(location: 0, length: markedUnits.count)
+        let matches = lemmaMarkerRegex.matches(in: markedPreview, range: fullRange)
+        guard matches.count == lemmas.count * 2 else { return [] }
+
+        var cleanUnits: [UInt16] = []
+        cleanUnits.reserveCapacity(markedUnits.count)
+        var sourceCursor = 0
+        var starts: [Int: Int] = [:]
+        var spans: [SwordBibleSearchLemmaSpan] = []
+        for match in matches {
+            guard match.range.location >= sourceCursor,
+                  let kindRange = Range(match.range(at: 1), in: markedPreview),
+                  let indexRange = Range(match.range(at: 2), in: markedPreview),
+                  let index = Int(markedPreview[indexRange]),
+                  lemmas.indices.contains(index) else { return [] }
+            cleanUnits.append(contentsOf: markedUnits[sourceCursor..<match.range.location])
+            let kind = markedPreview[kindRange]
+            if kind == "s" {
+                guard starts[index] == nil else { return [] }
+                starts[index] = cleanUnits.count
+            } else {
+                guard let start = starts.removeValue(forKey: index), start <= cleanUnits.count else {
+                    return []
+                }
+                let length = cleanUnits.count - start
+                if length > 0 {
+                    spans.append(SwordBibleSearchLemmaSpan(
+                        lemma: lemmas[index],
+                        location: start,
+                        length: length
+                    ))
+                }
+            }
+            sourceCursor = match.range.location + match.range.length
+        }
+        cleanUnits.append(contentsOf: markedUnits[sourceCursor..<markedUnits.count])
+        guard starts.isEmpty,
+              String(decoding: cleanUnits, as: UTF16.self) == authoritativePreview else { return [] }
+        return spans.sorted {
+            $0.location == $1.location ? $0.length < $1.length : $0.location < $1.location
+        }
+    }
+
+    /**
+     Concatenates preview source while surrounding every structured lemma element with markers.
+
+     - Parameters:
+       - node: Current repaired OSIS node.
+       - output: HTML-like source accumulated in Android presentation order.
+       - lemmas: Exact lemma values whose marker indices are embedded into `output`.
+     - Side effects: Appends marker/text content and lemma metadata in deterministic source order.
+     - Failure modes: None; note/reference subtrees are excluded and malformed XML was repaired
+       before traversal.
+     */
+    private static func appendMarkedPreviewSourceText(
+        from node: SwordXMLNode,
+        to output: inout String,
+        lemmas: inout [String]
+    ) {
+        guard node.isElement else {
+            if node.isTextLike {
+                output += node.stringValue
+            } else if let description = node.jdomContentDescription {
+                output += description
+            }
+            return
+        }
+        guard !["note", "reference"].contains(node.localName) else { return }
+
+        let markerIndex: Int?
+        if let lemma = node.attribute(named: "lemma"), !lemma.isEmpty {
+            markerIndex = lemmas.count
+            lemmas.append(lemma)
+            output += "\u{E000}s\(lemmas.count - 1)\u{E001}"
+        } else {
+            markerIndex = nil
+        }
+
+        for child in node.children {
+            if child.isElement {
+                guard !["note", "reference"].contains(child.localName) else { continue }
+                if child.children.contains(where: \.isElement) {
+                    appendMarkedPreviewSourceText(from: child, to: &output, lemmas: &lemmas)
+                } else {
+                    let childMarkerIndex: Int?
+                    if let lemma = child.attribute(named: "lemma"), !lemma.isEmpty {
+                        childMarkerIndex = lemmas.count
+                        lemmas.append(lemma)
+                        output += "\u{E000}s\(lemmas.count - 1)\u{E001}"
+                    } else {
+                        childMarkerIndex = nil
+                    }
+                    for leafContent in child.children where leafContent.isTextLike {
+                        output += leafContent.stringValue
+                    }
+                    if let childMarkerIndex {
+                        output += "\u{E000}e\(childMarkerIndex)\u{E001}"
+                    }
+                }
+            } else {
+                appendMarkedPreviewSourceText(from: child, to: &output, lemmas: &lemmas)
+            }
+        }
+        if let markerIndex {
+            output += "\u{E000}e\(markerIndex)\u{E001}"
+        }
     }
 
     /**

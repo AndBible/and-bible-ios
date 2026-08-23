@@ -163,6 +163,20 @@ public enum StrongsTokenNormalizer {
         })
     }
 
+    /**
+     Extracts canonical index tokens from one structured OSIS lemma attribute.
+
+     - Parameter lemmaAttribute: Exact `lemma` value from a source-filtered lexical element; it may
+       contain multiple space-delimited `strong:G...`/`strong:H...` identities.
+     - Returns: Ordered unique base/full tokens using pinned `StrongsNumberFilter` semantics.
+     - Side effects: None.
+     - Failure modes: Malformed, unprefixed, or out-of-range values are ignored; an attribute with
+       no valid Strong's identity returns an empty list.
+     */
+    public static func canonicalTokens(lemmaAttribute: String) -> [String] {
+        orderedUnique(canonicalTokensFromRawOSIS(lemmaAttribute))
+    }
+
     private struct ParsedStrongNumber: Equatable {
         let language: Character
         let digits: String

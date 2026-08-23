@@ -655,6 +655,27 @@ private final class FixtureContext {
         let languageCode: String
     }
 
+    /** One lexical row plus the visible words its encoded UTF-16 ranges must select. */
+    private struct SeededStrongRow {
+        /// Canonical verse key shared with the corresponding seeded FTS row.
+        let verseKey: String
+
+        /// Canonical Strong's token persisted in the lexical facet.
+        let token: String
+
+        /// Exact installed module identity owning the FTS and lexical rows.
+        let moduleName: String
+
+        /// Stable source order used when multiple lexical rows share one verse.
+        let entryOrder: Int
+
+        /// Production `start:length` range encoding over the FTS row's UTF-16 preview.
+        let highlightRanges: String
+
+        /// Visible words every encoded range must extract in order.
+        let expectedHighlightedText: [String]
+    }
+
     /**
      Seeds a minimal KJV fixture FTS index so Search UI tests start from a ready state.
      *
@@ -859,8 +880,9 @@ private final class FixtureContext {
      */
     private func insertSeededStrongRows(into db: OpaquePointer) throws {
         let sql = """
-            INSERT OR IGNORE INTO verse_strongs (module_name, token, verse_key, entry_order)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO verse_strongs (
+                module_name, token, verse_key, entry_order, highlight_ranges
+            ) VALUES (?, ?, ?, ?, ?)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
@@ -873,18 +895,63 @@ private final class FixtureContext {
         defer { sqlite3_finalize(statement) }
 
         for row in Self.seededStrongRows {
+            try validateSeededStrongRow(row)
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
             sqlite3_bind_text(statement, 1, row.moduleName, -1, sqliteTransient)
             sqlite3_bind_text(statement, 2, row.token, -1, sqliteTransient)
             sqlite3_bind_text(statement, 3, row.verseKey, -1, sqliteTransient)
             sqlite3_bind_int(statement, 4, Int32(row.entryOrder))
+            sqlite3_bind_text(statement, 5, row.highlightRanges, -1, sqliteTransient)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw sqliteError(
                     from: db,
                     fallback: "Unable to insert seeded Strong's row '\(row.verseKey)'."
                 )
             }
+        }
+    }
+
+    /**
+     Validates one lexical fixture row against the exact visible FTS preview it references.
+
+     - Parameter row: Strong's row whose comma-separated `start:length` pairs must be checked.
+     - Returns: Nothing after every range extracts the declared visible word in order.
+     - Side effects: Reads only the immutable seeded fixture arrays.
+     - Throws: `FixtureToolError.sqlite` when the paired FTS row is missing, a range is malformed or
+       out of UTF-16 bounds, or the encoded range selects a different word.
+     */
+    private func validateSeededStrongRow(_ row: SeededStrongRow) throws {
+        let searchRows = Self.seededSearchRows + Self.seededMultiTranslationSearchRows
+        guard let source = searchRows.first(where: {
+            $0.moduleName == row.moduleName && $0.verseKey == row.verseKey
+        }) else {
+            throw FixtureToolError.sqlite(
+                "Seeded Strong's row '\(row.moduleName):\(row.verseKey)' has no visible FTS row."
+            )
+        }
+
+        let sourceUnits = Array(source.plainText.utf16)
+        let extracted = try row.highlightRanges.split(separator: ",").map { encoded -> String in
+            let components = encoded.split(separator: ":", omittingEmptySubsequences: false)
+            guard components.count == 2,
+                  let location = Int(components[0]),
+                  let length = Int(components[1]),
+                  location >= 0,
+                  length > 0,
+                  location <= sourceUnits.count,
+                  length <= sourceUnits.count - location else {
+                throw FixtureToolError.sqlite(
+                    "Invalid seeded Strong's highlight range '\(encoded)' for '\(row.verseKey)'."
+                )
+            }
+            return String(decoding: sourceUnits[location..<(location + length)], as: UTF16.self)
+        }
+        guard extracted == row.expectedHighlightedText else {
+            throw FixtureToolError.sqlite(
+                "Seeded Strong's ranges for '\(row.verseKey)' selected \(extracted), "
+                    + "expected \(row.expectedHighlightedText)."
+            )
         }
     }
 
@@ -972,6 +1039,7 @@ private final class FixtureContext {
                 token TEXT NOT NULL,
                 verse_key TEXT NOT NULL,
                 entry_order INTEGER NOT NULL,
+                highlight_ranges TEXT NOT NULL,
                 PRIMARY KEY (module_name, token, verse_key)
             )
         """, db: db)
@@ -1052,7 +1120,8 @@ private final class FixtureContext {
     private static let seededSearchRows: [SeededSearchRow] = [
         SeededSearchRow(
             verseKey: "Genesis 1:2",
-            plainText: "And the earth was without form, and void; and darkness was upon the face of the deep.",
+            plainText: "And the earth was without form, and void; and darkness was upon the face "
+                + "of the deep. And the Spirit of God moved upon the face of the waters.",
             moduleName: "KJV",
             osisBookId: "Gen",
             displayBook: "Genesis",
@@ -1082,16 +1151,18 @@ private final class FixtureContext {
     /**
      SQLite rows preseeded into the KJV fixture Strong's index facet.
 
-     The token is attached to `Genesis 1:2`, which already exists in `seededSearchRows`; this keeps
-     Strong's fixture coverage without changing the deterministic ordinary-text result totals for
-     broad `earth` searches.
+     The token and its UTF-16 `God` range are attached to the full deterministic `Genesis 1:2`
+     preview in `seededSearchRows`. Fixture insertion validates that the encoded range still selects
+     `God`, preventing schema-ready test data from silently emphasizing an unrelated substring.
      */
-    private static let seededStrongRows: [(verseKey: String, token: String, moduleName: String, entryOrder: Int)] = [
-        (
+    private static let seededStrongRows: [SeededStrongRow] = [
+        SeededStrongRow(
             verseKey: "Genesis 1:2",
             token: "H0430",
             moduleName: "KJV",
-            entryOrder: 0
+            entryOrder: 0,
+            highlightRanges: "104:3",
+            expectedHighlightedText: ["God"]
         ),
     ]
 

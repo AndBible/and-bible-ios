@@ -14,10 +14,12 @@ SwordKit (Swift)
 
 ## Key Types
 - `SwordManager`: Wraps SWMgr. Manages module installation path, lists installed modules, gets modules by name, sets global options (Strong's, morphology, footnotes, etc.)
-- `SwordModule`: Wraps SWModule. Sets verse key, retrieves rendered text (HTML/OSIS), raw entry, navigates (next/prev/begin/end), searches.
+- `SwordModule`: Wraps SWModule. Sets verse key, retrieves rendered text (HTML/OSIS), raw entry,
+  navigates (next/prev/begin/end), and returns key-only native search candidates.
 - `InstallManager`: Wraps InstallMgr. Lists remote sources, refreshes catalogs, downloads/installs/uninstalls modules.
 - `ModuleInfo`: Value type for module metadata (name, description, language, category, features, version, cipher key status).
-- `SearchResult`: Value type for search hits (module name, key, preview text).
+- `SearchOptions`: Key-only native candidate-search configuration. Structured previews and
+  highlighting belong to BibleCore's generated search index.
 - `SwordConfig`: Wraps SWConfig for reading/writing sword.conf.
 
 ## C Bridging Pattern

@@ -11,37 +11,83 @@ import Foundation
  that Lucene runtime and bundled with BibleCore, avoiding host-language linguistic heuristics.
  */
 enum LuceneSearchAnalyzer {
+    /** One analyzed token paired with the exact source UTF-16 range that produced it. */
+    struct TokenSpan: Sendable, Equatable {
+        /// Analyzer-normalized term used by Search indexing and query matching.
+        let term: String
+
+        /// Half-open UTF-16 range in the original, unnormalized source string.
+        let range: Range<Int>
+    }
+
     /** Returns the exact analyzer token stream for one profile. */
     static func tokens(
         _ text: String,
         profile: SearchAnalyzerProfile
     ) throws -> [String] {
+        try tokenSpans(text, profile: profile).map(\.term)
+    }
+
+    /**
+     Returns the exact analyzer token stream with source ranges preserved for Search presentation.
+
+     - Parameters:
+       - text: Original visible verse text before analyzer normalization.
+       - profile: Pinned JSword analyzer selected from module language metadata.
+     - Returns: Analyzer-normalized terms in index order with half-open original UTF-16 ranges.
+     - Side effects: Lazily loads the same immutable analyzer resources as `tokens`.
+     - Failure modes: Propagates missing or malformed pinned-resource errors without returning a
+       partial stream. Token terms are byte-for-byte identical to `tokens` for the same input.
+     */
+    static func tokenSpans(
+        _ text: String,
+        profile: SearchAnalyzerProfile
+    ) throws -> [TokenSpan] {
         switch profile.kind {
         case .simple:
-            return try lowerCaseLetterTokens(text).map(Lucene29CharacterTables.asciiFold)
+            return try lowerCaseLetterTokenSpans(text).map {
+                TokenSpan(term: Lucene29CharacterTables.asciiFold($0.term), range: $0.range)
+            }
         case .czech:
-            return try lowerCaseLetterTokens(text)
+            return try lowerCaseLetterTokenSpans(text)
         case .german:
-            return try lowerCaseLetterTokens(text).map(GermanStemmer.stem)
+            return try lowerCaseLetterTokenSpans(text).map {
+                TokenSpan(term: GermanStemmer.stem($0.term), range: $0.range)
+            }
         case .arabic:
-            return try arabicLetterTokens(text).map { ArabicAnalyzer.stem(ArabicAnalyzer.normalize($0)) }
+            return try arabicLetterTokenSpans(text).map {
+                TokenSpan(
+                    term: ArabicAnalyzer.stem(ArabicAnalyzer.normalize($0.term)),
+                    range: $0.range
+                )
+            }
         case .persian:
-            return try arabicLetterTokens(text).map {
-                PersianNormalizer.normalize(ArabicAnalyzer.normalize($0))
+            return try arabicLetterTokenSpans(text).map {
+                TokenSpan(
+                    term: PersianNormalizer.normalize(ArabicAnalyzer.normalize($0.term)),
+                    range: $0.range
+                )
             }
         case .greek:
-            return try Lucene29ClassicTokenizer.tokens(text).map {
-                try GreekLowerCaseFilter.normalize($0)
+            return try Lucene29ClassicTokenizer.tokenSpans(text).map {
+                TokenSpan(term: try GreekLowerCaseFilter.normalize($0.term), range: $0.range)
             }
         case .hebrew:
-            return try Lucene29ClassicTokenizer.tokens(text).map(HebrewPointingFilter.normalize)
+            return try Lucene29ClassicTokenizer.tokenSpans(text).map {
+                TokenSpan(term: HebrewPointingFilter.normalize($0.term), range: $0.range)
+            }
         case .thai:
-            return try Lucene29ThaiTokenizer.tokens(text)
+            return try Lucene29ThaiTokenizer.tokenSpans(text)
         case .cjk:
-            return try Lucene29MMSegTokenizer.tokens(text)
+            return try Lucene29MMSegTokenizer.tokenSpans(text)
         case .snowball:
-            let source = try lowerCaseLetterTokens(text)
-            return try source.map { try SnowballStemmer.stem($0, languageCode: profile.languageCode) }
+            let source = try lowerCaseLetterTokenSpans(text)
+            return try source.map {
+                TokenSpan(
+                    term: try SnowballStemmer.stem($0.term, languageCode: profile.languageCode),
+                    range: $0.range
+                )
+            }
         }
     }
 
@@ -50,53 +96,89 @@ enum LuceneSearchAnalyzer {
         try Lucene29CharacterTables.lowercase(term)
     }
 
-    /** Lucene 3.6 `LowerCaseTokenizer()` configured through its Lucene 3.0 compatibility path. */
-    private static func lowerCaseLetterTokens(_ text: String) throws -> [String] {
+    /**
+     Tokenizes one visible source string with Lucene 3.6 `LowerCaseTokenizer` compatibility.
+
+     - Parameter text: Original UTF-16 text whose letter runs and offsets must be preserved.
+     - Returns: Lowercased Lucene terms paired with their exact half-open source ranges; runs longer
+       than Lucene's 255-unit limit are emitted as consecutive tokens.
+     - Side effects: Lazily reads the immutable pinned Lucene character tables.
+     - Throws: Propagates a missing or malformed character-table resource without returning a
+       partial token stream.
+     */
+    private static func lowerCaseLetterTokenSpans(_ text: String) throws -> [TokenSpan] {
         let tables = try Lucene29CharacterTables.loaded()
-        var result: [String] = []
+        var result: [TokenSpan] = []
         var current: [UInt16] = []
+        var tokenStart = 0
+        var cursor = 0
 
         func flush() {
             guard !current.isEmpty else { return }
-            result.append(String(decoding: current, as: UTF16.self))
+            result.append(TokenSpan(
+                term: String(decoding: current, as: UTF16.self),
+                range: tokenStart..<cursor
+            ))
             current.removeAll(keepingCapacity: true)
         }
 
         for unit in text.utf16 {
             if tables.isLetter(unit) {
+                if current.isEmpty { tokenStart = cursor }
                 current.append(tables.lowercase(unit))
                 if current.count == 255 {
+                    cursor += 1
                     flush()
+                    continue
                 }
             } else {
                 flush()
             }
+            cursor += 1
         }
         flush()
         return result
     }
 
-    /** Lucene 3.6 `ArabicLetterTokenizer()` using its legacy UTF-16 token boundary contract. */
-    private static func arabicLetterTokens(_ text: String) throws -> [String] {
+    /**
+     Tokenizes one Arabic/Persian source string with Lucene 3.6 legacy UTF-16 boundaries.
+
+     - Parameter text: Original UTF-16 text whose letter/nonspacing-mark runs must be preserved.
+     - Returns: Lowercased terms paired with exact half-open source ranges; Lucene's 255-unit token
+       limit is applied before later Arabic or Persian normalization.
+     - Side effects: Lazily reads the immutable pinned Lucene character tables.
+     - Throws: Propagates a missing or malformed character-table resource without returning a
+       partial token stream.
+     */
+    private static func arabicLetterTokenSpans(_ text: String) throws -> [TokenSpan] {
         let tables = try Lucene29CharacterTables.loaded()
-        var result: [String] = []
+        var result: [TokenSpan] = []
         var current: [UInt16] = []
+        var tokenStart = 0
+        var cursor = 0
 
         func flush() {
             guard !current.isEmpty else { return }
-            result.append(String(decoding: current, as: UTF16.self))
+            result.append(TokenSpan(
+                term: String(decoding: current, as: UTF16.self),
+                range: tokenStart..<cursor
+            ))
             current.removeAll(keepingCapacity: true)
         }
 
         for unit in text.utf16 {
             if tables.isLetter(unit) || tables.isNonspacingMark(unit) {
+                if current.isEmpty { tokenStart = cursor }
                 current.append(tables.lowercase(unit))
                 if current.count == 255 {
+                    cursor += 1
                     flush()
+                    continue
                 }
             } else {
                 flush()
             }
+            cursor += 1
         }
         flush()
         return result

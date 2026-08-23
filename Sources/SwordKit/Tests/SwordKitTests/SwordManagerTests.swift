@@ -2306,11 +2306,6 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertNil(opts.scope)
     }
 
-    func testSearchResultIdentity() {
-        let r = SearchResult(key: "Gen 1:1", moduleName: "KJV")
-        XCTAssertEqual(r.id, "KJV:Gen 1:1")
-    }
-
     /**
      Builds real unencrypted RawLD modules in one isolated native manager root.
 

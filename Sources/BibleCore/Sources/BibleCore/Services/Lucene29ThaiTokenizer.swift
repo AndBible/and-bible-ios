@@ -14,14 +14,28 @@ import Foundation
 enum Lucene29ThaiTokenizer {
     /** Returns the ordered token stream emitted by JSword's pinned Thai analyzer chain. */
     static func tokens(_ text: String) throws -> [String] {
+        try tokenSpans(text).map(\.term)
+    }
+
+    /**
+     Returns the Thai analyzer stream with exact source UTF-16 ranges.
+
+     - Parameter text: Original mixed Thai/non-Thai source.
+     - Returns: Lowercased analyzer terms and half-open source ranges in token order.
+     - Side effects: Lazily loads the pinned OpenJDK break resources.
+     - Failure modes: Propagates resource/state errors without returning partial ranges.
+     */
+    static func tokenSpans(_ text: String) throws -> [LuceneSearchAnalyzer.TokenSpan] {
         let breaker = try OpenJDKThaiWordBreaker.loaded()
         let tables = try Lucene29CharacterTables.loaded()
-        var standardTokens: [[UInt16]] = []
+        var standardTokens: [(units: [UInt16], range: Range<Int>)] = []
         var current: [UInt16] = []
+        var tokenStart = 0
+        var cursor = 0
 
         func flush() {
             guard !current.isEmpty else { return }
-            standardTokens.append(current)
+            standardTokens.append((current, tokenStart..<cursor))
             current.removeAll(keepingCapacity: true)
         }
 
@@ -29,22 +43,30 @@ enum Lucene29ThaiTokenizer {
         for unit in text.utf16 {
             let isThaiBlock = (0x0E00...0x0E7F).contains(unit)
             if isThaiBlock || tables.isLetter(unit) || tables.isDecimalDigit(unit) {
+                if current.isEmpty { tokenStart = cursor }
                 current.append(tables.lowercase(unit))
             } else {
                 flush()
             }
+            cursor += 1
         }
         flush()
 
-        var output: [String] = []
+        var output: [LuceneSearchAnalyzer.TokenSpan] = []
         for token in standardTokens {
-            guard let first = token.first, (0x0E00...0x0E7F).contains(first) else {
-                output.append(String(decoding: token, as: UTF16.self))
+            guard let first = token.units.first, (0x0E00...0x0E7F).contains(first) else {
+                output.append(LuceneSearchAnalyzer.TokenSpan(
+                    term: String(decoding: token.units, as: UTF16.self),
+                    range: token.range
+                ))
                 continue
             }
-            let boundaries = try breaker.boundaries(in: token)
+            let boundaries = try breaker.boundaries(in: token.units)
             for pair in zip(boundaries, boundaries.dropFirst()) where pair.0 < pair.1 {
-                output.append(String(decoding: token[pair.0..<pair.1], as: UTF16.self))
+                output.append(LuceneSearchAnalyzer.TokenSpan(
+                    term: String(decoding: token.units[pair.0..<pair.1], as: UTF16.self),
+                    range: (token.range.lowerBound + pair.0)..<(token.range.lowerBound + pair.1)
+                ))
             }
         }
         return output

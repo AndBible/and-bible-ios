@@ -322,6 +322,9 @@ public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendabl
     /// RawLD's fixed-width source index or referenced data record could not be decoded safely.
     case rawDictionaryIndexReadFailed(moduleName: String)
 
+    /// Key enumeration completed, but SWORD did not return to the caller's exact cursor.
+    case cursorRestorationFailed(moduleName: String)
+
     /**
      Produces actionable diagnostic text for Android-equivalent key chooser error presentation.
 
@@ -338,6 +341,8 @@ public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendabl
             return "Could not verify entry \(key) in \(moduleName) (SWORD error \(errorCode))."
         case .rawDictionaryIndexReadFailed(let moduleName):
             return "Could not read the stored dictionary index for \(moduleName)."
+        case .cursorRestorationFailed(let moduleName):
+            return "Could not restore the previous entry position in \(moduleName)."
         }
     }
 }
@@ -718,6 +723,67 @@ public final class SwordModule: @unchecked Sendable {
     }
 
     /**
+     Atomically captures requested Search fallback sources and restores the caller's cursor.
+
+     - Parameters:
+       - keyText: Exact SWORD verse key selected by candidate search or bounded iteration.
+       - includeRenderedText: Whether to run the rendered-text filter for lexical fallback.
+       - includeOSISFragment: Whether to run the source-neutral OSIS filter for preview projection.
+     - Returns: Resolved key metadata and raw entry plus requested rendered/OSIS source forms copied
+       while the same exact verse owns the native cursor; omitted forms are empty strings.
+     - Side effects: Temporarily moves the module cursor and runs only requested filters while holding
+       the process-wide SWORD runtime gate, then restores key text and VerseKey ordinal.
+     - Throws: `SwordVerseSourceInspectionError.cursorRestorationFailed` when the complete caller
+       cursor cannot be restored; no captured source is published in that case.
+     */
+    public func inspectVerseKeySearchSourceRestoringPrevious(
+        _ keyText: String,
+        includeRenderedText: Bool = true,
+        includeOSISFragment: Bool = true
+    ) throws -> (
+        actualKey: String,
+        verseKey: VerseKeyChildren?,
+        rawEntry: String,
+        renderedText: String,
+        osisFragment: String
+    ) {
+        try SwordRuntime.sync {
+            let previousIndexValue = SWModule_getVerseKeyIndex(handle)
+            let cursorSnapshot = SwordModuleCursorSnapshot(
+                keyText: String(cString: SWModule_getKeyText(handle)),
+                verseIndex: previousIndexValue >= 0 ? Int(previousIndexValue) : nil
+            )
+
+            SWModule_setKeyText(handle, keyText)
+            let result = (
+                actualKey: String(cString: SWModule_getKeyText(handle)),
+                verseKey: Self.currentVerseKeyChildren(handle: handle),
+                rawEntry: String(cString: SWModule_getRawEntry(handle)),
+                renderedText: includeRenderedText
+                    ? String(cString: SWModule_getRenderText(handle))
+                    : "",
+                osisFragment: includeOSISFragment
+                    ? SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                    : ""
+            )
+
+            SWModule_setKeyText(handle, cursorSnapshot.keyText)
+            if let verseIndex = cursorSnapshot.verseIndex {
+                _ = SWModule_setVerseKeyIndex(handle, CLong(verseIndex))
+            }
+            let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
+            let restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+            guard cursorSnapshot.matches(
+                restoredKeyText: String(cString: SWModule_getKeyText(handle)),
+                restoredVerseIndex: restoredIndex
+            ) else {
+                throw SwordVerseSourceInspectionError.cursorRestorationFailed
+            }
+            return result
+        }
+    }
+
+    /**
      Atomically captures canonical source text for one verse and restores the previous cursor.
 
      Android AI context keeps the raw OSIS fragment and `getCanonicalText` projection together.
@@ -868,8 +934,13 @@ public final class SwordModule: @unchecked Sendable {
         if let verseIndex = snapshot.verseIndex {
             _ = SWModule_setVerseKeyIndex(handle, CLong(verseIndex))
         }
-        let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
-        let restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+        let restoredIndex: Int?
+        if snapshot.verseIndex != nil {
+            let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
+            restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+        } else {
+            restoredIndex = nil
+        }
         guard snapshot.matches(
             restoredKeyText: String(cString: SWModule_getKeyText(handle)),
             restoredVerseIndex: restoredIndex
@@ -877,6 +948,62 @@ public final class SwordModule: @unchecked Sendable {
             throw SwordVerseSourceInspectionError.cursorRestorationFailed
         }
         return try result.get()
+    }
+
+    /**
+     Captures the complete cursor identity needed by bounded key enumeration and native search.
+
+     - Parameters:
+       - handle: Live SWORD module handle already protected by `SwordRuntime`.
+       - includesVerseIndex: Whether this module category is backed by a VerseKey cursor.
+     - Returns: Copied key text plus the VerseKey ordinal when the module exposes one.
+     - Side effects: Reads native cursor state without moving it.
+     - Failure modes: Non-VerseKey modules report `nil` ordinal and remain key-text addressed.
+     */
+    private static func currentCursorSnapshot(
+        handle: UnsafeMutableRawPointer,
+        includesVerseIndex: Bool
+    ) -> SwordModuleCursorSnapshot {
+        let indexValue = SWModule_getVerseKeyIndex(handle)
+        return SwordModuleCursorSnapshot(
+            keyText: String(cString: SWModule_getKeyText(handle)),
+            verseIndex: includesVerseIndex && indexValue >= 0 ? Int(indexValue) : nil
+        )
+    }
+
+    /**
+     Restores one previously captured key/ordinal pair after bounded native traversal.
+
+     - Parameters:
+       - snapshot: Key text and optional VerseKey ordinal captured before traversal.
+       - clonedKey: Single-use native key clone preserving unpositioned and subclass-specific state.
+       - handle: Live SWORD module handle already protected by `SwordRuntime`.
+     - Returns: `true` only when the restored key text and optional VerseKey ordinal exactly match
+       the captured cursor.
+     - Side effects: Consumes and destroys `clonedKey`, restores its complete native key state, then
+       validates the visible key text and optional VerseKey ordinal.
+     - Failure modes: Returns `false` when native clone restoration fails or the post-restore
+       key/index identity differs; callers fail closed instead of publishing results.
+     */
+    @discardableResult
+    private static func restoreCursor(
+        _ snapshot: SwordModuleCursorSnapshot,
+        clonedKey: UnsafeMutableRawPointer,
+        handle: UnsafeMutableRawPointer
+    ) -> Bool {
+        guard SWModule_restoreClonedKey(handle, clonedKey) == 0 else {
+            return false
+        }
+        guard snapshot.verseIndex != nil else {
+            return true
+        }
+        let restoredIndex: Int?
+        let restoredIndexValue = SWModule_getVerseKeyIndex(handle)
+        restoredIndex = restoredIndexValue >= 0 ? Int(restoredIndexValue) : nil
+        return snapshot.matches(
+            restoredKeyText: String(cString: SWModule_getKeyText(handle)),
+            restoredVerseIndex: restoredIndex
+        )
     }
 
     private static func currentVerseKeyChildren(handle: UnsafeMutableRawPointer) -> VerseKeyChildren? {
@@ -1402,11 +1529,12 @@ public final class SwordModule: @unchecked Sendable {
 
      - Returns: Exact module keys in source order, sharing the successful module-lifetime snapshot.
      - Side effects: The first successful read temporarily moves the module cursor while holding
-       `SwordRuntime`, restores the caller's previous key, and caches the immutable result. Cached
-       reads do not touch the native cursor.
+       `SwordRuntime`, restores the caller's previous key and VerseKey ordinal, and caches the
+       immutable result. Cached reads do not touch the native cursor.
      - Throws: `SwordModuleKeyAccessError.keyListReadFailed` when SWORD reports a non-terminal
-       backend error. Failures are not cached; callers must keep them distinct from a successful
-       empty array and may retry.
+       backend error, or `cursorRestorationFailed` when the exact original cursor cannot be proven.
+       Failures are not cached; callers must keep them distinct from a successful empty array and
+       may retry.
      */
     public func loadAllKeys() throws -> [String] {
         try SwordRuntime.sync {
@@ -1414,16 +1542,35 @@ public final class SwordModule: @unchecked Sendable {
                 return cachedAllKeys
             }
 
-            let savedKey = String(cString: SWModule_getKeyText(handle))
-            defer { SWModule_setKeyText(handle, savedKey) }
+            let cursorSnapshot = Self.currentCursorSnapshot(
+                handle: handle,
+                includesVerseIndex: info.category == .bible || info.category == .commentary
+            )
+            guard let clonedCursor = SWModule_cloneCurrentKey(handle) else {
+                throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
+            }
 
             SWModule_begin(handle)
             let startError = Int(SWModule_popError(handle))
             if startError == Self.endOfKeyListErrorCode {
+                guard Self.restoreCursor(
+                    cursorSnapshot,
+                    clonedKey: clonedCursor,
+                    handle: handle
+                ) else {
+                    throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
+                }
                 cachedAllKeys = []
                 return []
             }
             guard startError == 0 else {
+                guard Self.restoreCursor(
+                    cursorSnapshot,
+                    clonedKey: clonedCursor,
+                    handle: handle
+                ) else {
+                    throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
+                }
                 throw SwordModuleKeyAccessError.keyListReadFailed(
                     moduleName: info.name,
                     errorCode: startError
@@ -1439,11 +1586,25 @@ public final class SwordModule: @unchecked Sendable {
                     break
                 }
                 guard nextError == 0 else {
+                    guard Self.restoreCursor(
+                        cursorSnapshot,
+                        clonedKey: clonedCursor,
+                        handle: handle
+                    ) else {
+                        throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
+                    }
                     throw SwordModuleKeyAccessError.keyListReadFailed(
                         moduleName: info.name,
                         errorCode: nextError
                     )
                 }
+            }
+            guard Self.restoreCursor(
+                cursorSnapshot,
+                clonedKey: clonedCursor,
+                handle: handle
+            ) else {
+                throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
             }
             cachedAllKeys = keys
             return keys
@@ -1875,53 +2036,11 @@ public final class SwordModule: @unchecked Sendable {
     // MARK: - Search
 
     /**
-     Search the module for the given query.
-     - Parameter options: Search configuration.
-     - Returns: Search results.
-     */
-    public func search(_ options: SearchOptions) -> SearchResults {
-        SwordRuntime.sync {
-            let flags: Int32 = options.caseInsensitive ? 2 : 0 // REG_ICASE = 2
-
-            _ = SWModule_search(
-                handle,
-                options.query,
-                Int32(options.searchType.rawValue),
-                flags,
-                options.scope,
-                nil
-            )
-
-            let count = SWModule_searchResultCount(handle)
-            var results: [SearchResult] = []
-            results.reserveCapacity(Int(count))
-
-            for i in 0..<count {
-                let key = String(cString: SWModule_getSearchResultKeyText(handle, i))
-                // Get preview text by navigating to the result key
-                SWModule_setKeyText(handle, key)
-                let preview = String(cString: SWModule_getStripText(handle))
-                results.append(SearchResult(
-                    key: key,
-                    moduleName: info.name,
-                    previewText: String(preview.prefix(200))
-                ))
-            }
-
-            return SearchResults(
-                options: options,
-                moduleName: info.name,
-                results: results
-            )
-        }
-    }
-
-    /**
      Search the module and return only matching keys.
 
-     Strong's candidate-index searches need SWORD's result keys but validate and render each verse
-     through a separate canonical-token path. Keeping this key-only avoids stripping preview text
-     for thousands of candidates before the caller knows which verses are semantically valid.
+     Strong's candidate-index searches need SWORD's result keys but validate and project each verse
+     through the shared structured Search path. Keeping this key-only prevents a caller from
+     reintroducing the removed strip-text/fixed-prefix preview API.
 
      - Parameters:
        - options: Search configuration.
@@ -1929,14 +2048,21 @@ public final class SwordModule: @unchecked Sendable {
      - Returns: Matching SWORD keys in result order.
      - Side effects:
        - performs a SWORD search while holding the runtime lock
-       - restores the module's current key after reading search results
+       - restores the module's current key and VerseKey ordinal after reading search results
      - Failure modes:
        - returns an empty list when SWORD reports no results or the limit is zero
+       - throws `SwordModuleKeyAccessError.cursorRestorationFailed` instead of publishing keys when
+         the exact caller cursor cannot be proven after the search
      */
-    public func searchKeys(_ options: SearchOptions, limit: Int? = nil) -> [String] {
-        SwordRuntime.sync {
-            let savedKey = String(cString: SWModule_getKeyText(handle))
-            defer { SWModule_setKeyText(handle, savedKey) }
+    public func searchKeys(_ options: SearchOptions, limit: Int? = nil) throws -> [String] {
+        try SwordRuntime.sync {
+            let cursorSnapshot = Self.currentCursorSnapshot(
+                handle: handle,
+                includesVerseIndex: info.category == .bible || info.category == .commentary
+            )
+            guard let clonedCursor = SWModule_cloneCurrentKey(handle) else {
+                throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
+            }
 
             let flags: Int32 = options.caseInsensitive ? 2 : 0 // REG_ICASE = 2
 
@@ -1949,14 +2075,21 @@ public final class SwordModule: @unchecked Sendable {
                 nil
             )
 
+            var keys: [String] = []
             let count = Int(SWModule_searchResultCount(handle))
             let boundedCount = limit.map { min(max($0, 0), count) } ?? count
-            guard boundedCount > 0 else { return [] }
-
-            var keys: [String] = []
-            keys.reserveCapacity(boundedCount)
-            for index in 0..<boundedCount {
-                keys.append(String(cString: SWModule_getSearchResultKeyText(handle, Int32(index))))
+            if boundedCount > 0 {
+                keys.reserveCapacity(boundedCount)
+                for index in 0..<boundedCount {
+                    keys.append(String(cString: SWModule_getSearchResultKeyText(handle, Int32(index))))
+                }
+            }
+            guard Self.restoreCursor(
+                cursorSnapshot,
+                clonedKey: clonedCursor,
+                handle: handle
+            ) else {
+                throw SwordModuleKeyAccessError.cursorRestorationFailed(moduleName: info.name)
             }
             return keys
         }
