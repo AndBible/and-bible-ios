@@ -16,6 +16,15 @@ private let sqliteBibleSearchTransient = unsafeBitCast(-1, to: sqlite3_destructo
  */
 final class SQLiteBibleSearchIndexTests: XCTestCase {
     /**
+     Fail-safe budget for semaphore-backed concurrency checkpoints on loaded CI runners.
+
+     These tests synchronize on explicit production events rather than elapsed time. The deadline
+     only prevents a genuine deadlock from hanging the suite and allows simulator task scheduling to
+     exceed the former two-second bound without changing the event ordering under test.
+     */
+    private static let synchronizationTimeout: DispatchTimeInterval = .seconds(20)
+
+    /**
      Indexes sparse MyBible rows with canonical metadata, visible text, scopes, and Strong's tokens.
 
      - Setup: Creates a real MyBible database containing sparse OT rows, one empty real row, and an
@@ -389,7 +398,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         let rebuild = Task {
             try await service.createIndex(source: composedReplacement)
         }
-        XCTAssertEqual(reachedWriterPause.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
 
         XCTAssertFalse(service.hasIndex(for: composedIdentity))
         XCTAssertTrue(service.hasIndex(for: decomposedIdentity))
@@ -727,12 +739,17 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 sourceIdentity: originalIdentity
             )
         }
-        XCTAssertTrue(readBarrier.waitForReaders(timeout: .now() + 2))
+        XCTAssertTrue(
+            readBarrier.waitForReaders(timeout: .now() + Self.synchronizationTimeout)
+        )
 
         let rebuild = Task {
             try await service.createIndex(source: failingReplacement)
         }
-        XCTAssertEqual(reachedWriterPause.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedWriterPause.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
 
         XCTAssertFalse(service.hasIndex(for: originalIdentity))
         XCTAssertThrowsError(
@@ -868,7 +885,9 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 sourceIdentity: sourceIdentity
             )
         }
-        XCTAssertTrue(readBarrier.waitForReaders(timeout: .now() + 2))
+        XCTAssertTrue(
+            readBarrier.waitForReaders(timeout: .now() + Self.synchronizationTimeout)
+        )
 
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         readBarrier.releaseReaders()
@@ -971,7 +990,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 authorization: firstCapture.authorization
             )
         }
-        XCTAssertEqual(reachedFirstBuildPause.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedFirstBuildPause.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
         DispatchQueue.global(qos: .userInitiated).async {
             releaseFirstBuildPause.signal()
         }
@@ -1173,7 +1195,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         let aggregate = Task.detached {
             service.modulesNeedingIndex(from: identities)
         }
-        XCTAssertEqual(reachedFirstCandidate.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedFirstCandidate.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
@@ -1246,7 +1271,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 wordMode: .allWords
             )
         }
-        XCTAssertEqual(reachedFirstModule.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
@@ -1266,7 +1294,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
                 sourceIdentities: identities
             )
         }
-        XCTAssertEqual(reachedFirstModule.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedFirstModule.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
         SwordModuleStore.notifyModulesDidChange(center: notificationCenter)
         DispatchQueue.global(qos: .userInitiated).async {
             releaseAggregate.signal()
@@ -1501,7 +1532,10 @@ final class SQLiteBibleSearchIndexTests: XCTestCase {
         let task = Task {
             try await service.createIndex(source: source)
         }
-        XCTAssertEqual(reachedPause.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(
+            reachedPause.wait(timeout: .now() + Self.synchronizationTimeout),
+            .success
+        )
 
         task.cancel()
         DispatchQueue.global(qos: .userInitiated).async {
