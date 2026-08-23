@@ -96,7 +96,7 @@ struct BibleReaderModulePicker: View {
     /// Whether the Android-style app-bar overflow menu is visible.
     @State private var showOverflowMenu = false
 
-    /// Installed modules captured for Android's selected-by-default backup sheet.
+    /// Installed modules captured for Android's initially-unchecked backup sheet.
     @State private var moduleBackupCandidates: [ModuleInfo] = []
 
     /// Whether Android's module-backup selection sheet is visible.
@@ -1659,7 +1659,7 @@ struct BibleReaderModulePicker: View {
      Presents Android's installed-document backup selection in language-first order.
 
      - Side Effects: Reads current manager inventory, stores a stable candidate snapshot, and opens
-       the selected-by-default module sheet.
+       the initially-unchecked module sheet.
      - Failure Modes: Missing or empty inventory surfaces a user-visible no-modules error.
      */
     private func presentModuleBackupSelection() {
@@ -1704,13 +1704,14 @@ struct BibleReaderModulePicker: View {
             return
         }
         isExportingModuleBackup = true
-        let selectedModuleNames = Set(moduleNames)
 
         Task { @MainActor in
             await Task.yield()
             do {
                 let export = try await Task.detached(priority: .userInitiated) {
-                    try AndroidModuleBackupService().exportArchiveFile(moduleNames: selectedModuleNames)
+                    try AndroidModuleBackupService().exportArchiveFile(
+                        orderedModuleNames: moduleNames
+                    )
                 }.value
                 isExportingModuleBackup = false
                 showModuleBackupSelection = false
@@ -1895,25 +1896,37 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Sorts backup candidates using Android's language, description, and initials order.
+     Stable-sorts backup candidates by Android's localized language-name comparator.
 
-     - Parameter modules: Installed non-pseudo module inventory.
-     - Returns: Stable module order used by the backup selection sheet.
-     - Side Effects: None.
+     - Parameters:
+       - modules: Installed non-pseudo module inventory.
+       - languageName: Optional deterministic language-name resolver used by tests; production uses
+         the same localized display-name projection as the chooser.
+     - Returns: Java UTF-16 localized-name order while preserving installed-book order for equal
+       language names.
+     - Side Effects: Reads the current locale when no resolver is supplied.
      - Failure Modes: None.
      */
-    static func sortedBackupModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
-        modules.sorted { lhs, rhs in
-            let languageOrder = lhs.language.localizedCaseInsensitiveCompare(rhs.language)
-            if languageOrder != .orderedSame {
-                return languageOrder == .orderedAscending
-            }
-            let descriptionOrder = lhs.description.localizedCaseInsensitiveCompare(rhs.description)
-            if descriptionOrder != .orderedSame {
-                return descriptionOrder == .orderedAscending
-            }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+    static func sortedBackupModules(
+        _ modules: [ModuleInfo],
+        languageName: ((String) -> String)? = nil
+    ) -> [ModuleInfo] {
+        let resolvedLanguageName = languageName ?? { displayName(for: $0) }
+        let indexedModules = modules.enumerated().map { entry in
+            (
+                offset: entry.offset,
+                module: entry.element,
+                languageName: resolvedLanguageName(entry.element.language)
+            )
         }
+        return indexedModules.sorted { lhs, rhs in
+            let leftLanguage = SwordJavaExactStringIdentity(lhs.languageName).utf16CodeUnits
+            let rightLanguage = SwordJavaExactStringIdentity(rhs.languageName).utf16CodeUnits
+            if leftLanguage == rightLanguage {
+                return lhs.offset < rhs.offset
+            }
+            return leftLanguage.lexicographicallyPrecedes(rightLanguage)
+        }.map(\.module)
     }
 
     /**
