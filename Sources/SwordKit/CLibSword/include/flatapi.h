@@ -68,6 +68,14 @@ void SWModule_setKeyText(void *module, const char *keyText);
 /// Get the current key text.
 const char *SWModule_getKeyText(void *module);
 
+/// Clone the complete current native key, including unpositioned and subclass-specific state.
+/// The returned token must be consumed exactly once by SWModule_restoreClonedKey.
+void *SWModule_cloneCurrentKey(void *module);
+
+/// Restore and destroy a token returned by SWModule_cloneCurrentKey.
+/// Returns 0 only when native key text and index match the clone.
+int SWModule_restoreClonedKey(void *module, void *clonedKey);
+
 /// Get parsed entry attributes for the current position.
 /// Returns a NULL-terminated array of strings.
 /// Use "-" to enumerate keys at a level, or NULL/empty to fetch all values.

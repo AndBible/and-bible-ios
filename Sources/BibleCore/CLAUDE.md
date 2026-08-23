@@ -34,7 +34,8 @@ Services contain business logic and coordinate between stores and SwordKit:
 - `BookmarkService`: Bookmark CRUD, label management, StudyPad operations
 - `WindowManager`: Window lifecycle, split-screen layout, sync groups
 - `NavigationService`: Book/chapter/verse navigation, history stack
-- `SearchService`: Full-text search via SwordKit, result formatting
+- `SearchIndexService`: Generated SQLite full-text/Strong's indexes, exact source authorization,
+  and analyzer-owned result highlighting
 - `DownloadService`: Module download/install orchestration
 - `SpeakService`: TTS integration via AVSpeechSynthesizer
 - `AndroidDatabaseBackupService`: Android-compatible manual database backup import/export

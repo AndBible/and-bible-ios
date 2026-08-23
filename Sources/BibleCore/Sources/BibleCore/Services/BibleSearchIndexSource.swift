@@ -28,6 +28,9 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
     /// Rendered/tagged source text inspected for legacy inline Strong's markers.
     public let taggedText: String
 
+    /// Structured lemma attributes mapped to exact UTF-16 ranges in `previewText`.
+    public let lemmaSpans: [SwordBibleSearchLemmaSpan]
+
     /// Canonical source ordinal used as a stable final tie-breaker.
     public let entryOrder: Int
 
@@ -58,6 +61,7 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
        - previewText: Annotation-free verse text persisted for Search presentation.
        - sourceMarkup: Exact lexical markup inspected for Strong's attributes.
        - taggedText: Rendered/tagged fallback inspected for legacy Strong's markers.
+       - lemmaSpans: Structured lexical attributes mapped to visible preview ranges.
        - entryOrder: Stable source ordinal used as the final query-order tie breaker.
        - sourcePosition: Traversal position used only for bounded progress publication.
        - osisBookId: Locale-independent canonical JSword book identifier.
@@ -75,6 +79,7 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
         previewText: String,
         sourceMarkup: String,
         taggedText: String,
+        lemmaSpans: [SwordBibleSearchLemmaSpan] = [],
         entryOrder: Int,
         sourcePosition: Int,
         osisBookId: String,
@@ -88,6 +93,7 @@ public struct BibleSearchIndexEntry: Sendable, Equatable {
         self.previewText = previewText
         self.sourceMarkup = sourceMarkup
         self.taggedText = taggedText
+        self.lemmaSpans = lemmaSpans
         self.entryOrder = entryOrder
         self.sourcePosition = sourcePosition
         self.osisBookId = osisBookId
@@ -293,6 +299,7 @@ extension SwordModule: BibleSearchIndexSource {
                     previewText: projectedText.previewText,
                     sourceMarkup: rawEntry,
                     taggedText: text,
+                    lemmaSpans: projectedText.lemmaSpans,
                     entryOrder: verseKey.index,
                     sourcePosition: sourceIndex,
                     osisBookId: verseKey.osisBookName,
@@ -385,6 +392,7 @@ extension SQLiteDocumentModule: BibleSearchIndexSource {
                         previewText: projectedText.previewText,
                         sourceMarkup: row.text,
                         taggedText: row.text,
+                        lemmaSpans: projectedText.lemmaSpans,
                         entryOrder: ordinal,
                         sourcePosition: ordinal,
                         osisBookId: osisBookId,
@@ -409,7 +417,8 @@ private enum SQLiteSearchTextProjection {
      - Parameters:
        - source: Exact transformed or plain source text returned by the format reader.
        - moduleInitials: Exact installed initials controlling pinned module-specific repair.
-     - Returns: Canonical analyzer text and annotation-free preview text.
+     - Returns: Canonical analyzer text, annotation-free preview text, and structured raw lemma
+       attributes mapped to exact visible UTF-16 word ranges.
      - Side effects: Parses one bounded verse fragment in memory.
      - Failure modes: Irreparable source becomes an empty projection, matching JSword `OSISFilter`.
      - Note: Every format is structural-first because Android registers its Bible backends as OSIS,

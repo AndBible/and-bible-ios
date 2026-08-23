@@ -44,9 +44,10 @@ final class SearchIndexEndToEndParityTests: XCTestCase {
      Preserves the complete projection stored for Search result presentation.
 
      - Setup: Indexes one preview longer than the former 240-character service truncation boundary.
-     - Expected result: An exact-generation text query returns every persisted character unchanged.
-     - Failure meaning: Search storage/query code is pre-truncating content that Android exposes when
-       a single result or expanded translation row is rendered.
+     - Expected result: An exact-generation text query returns every persisted character unchanged
+       and marks only the analyzer-matched query token for emphasis.
+     - Failure meaning: Search storage/query code is truncating Android-visible content or losing
+       the analyzer-owned presentation range used by result rows.
      - Side effects: Creates and removes one isolated generated-index database.
      */
     func testSearchHitReturnsCompletePreviewBeyondFormerCharacterLimit() async throws {
@@ -71,6 +72,48 @@ final class SearchIndexEndToEndParityTests: XCTestCase {
             wordMode: .anyWord
         ).hits.first)
         XCTAssertEqual(hit.snippet, fullPreview)
+        XCTAssertEqual(
+            hit.snippetSegments.filter(\.isEmphasized).map(\.text),
+            ["searchneedle"]
+        )
+    }
+
+    /**
+     Verifies structured Strong's ranges survive the complete index publication and query path.
+
+     - Setup: Builds one real generated index row whose H0430 lemma owns only `God` in a longer
+       annotation-free preview.
+     - Expected result: The Strong query returns the full preview and emphasizes exactly `God`.
+     - Failure meaning: Source-backed lexical ranges were lost during normalization, SQLite
+       publication, grouped query decoding, or final hit segmentation.
+     - Side effects: Creates and removes one isolated generated-index database.
+     */
+    func testStrongsHighlightRangeSurvivesIndexPublication() async throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-strong-highlight-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let service = SearchIndexService(databasePath: databaseURL.path)
+        let preview = "In the beginning God created"
+        let source = InMemorySearchIndexSource(
+            moduleName: "LEXICALRANGE",
+            language: "en",
+            storageRevision: "lexical-range",
+            visibleText: preview,
+            strongToken: "H0430",
+            strongHighlightText: "God"
+        )
+
+        try await service.createIndex(source: source)
+
+        let hit = try XCTUnwrap(service.searchStrongs(
+            canonicalTokens: ["H0430"],
+            sourceIdentity: source.searchIndexSourceIdentity
+        ).hits.first)
+        XCTAssertEqual(hit.snippet, preview)
+        XCTAssertEqual(
+            hit.snippetSegments.filter(\.isEmphasized).map(\.text),
+            ["God"]
+        )
     }
 
     /**
@@ -309,6 +352,9 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
     /// Optional lexical token embedded in source markup for Strong's search.
     private let strongToken: String?
 
+    /// Optional visible substring owned by the lexical token for attributed-result coverage.
+    private let strongHighlightText: String?
+
     /**
      Creates one immutable source generation without opening external storage.
 
@@ -319,6 +365,7 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
        - storageRevision: Backend generation component included in the default fingerprint.
        - visibleText: Complete visible text for the only verse.
        - strongToken: Optional canonical Strong's token embedded in lexical markup.
+       - strongHighlightText: Optional first visible substring owned by `strongToken`.
      - Side effects: None.
      - Failure modes: None; the production index service validates the resulting identity and content.
      */
@@ -328,7 +375,8 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
         version: String = "1.0",
         storageRevision: String,
         visibleText: String,
-        strongToken: String? = nil
+        strongToken: String? = nil,
+        strongHighlightText: String? = nil
     ) {
         searchIndexModuleInfo = ModuleInfo(
             name: moduleName,
@@ -341,6 +389,7 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
         searchIndexStorageRevision = storageRevision
         self.visibleText = visibleText
         self.strongToken = strongToken
+        self.strongHighlightText = strongHighlightText
     }
 
     /**
@@ -354,6 +403,20 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
     func forEachSearchIndexEntry(
         _ consume: (BibleSearchIndexEntry) throws -> Bool
     ) throws {
+        let highlightRange = strongHighlightText.map { (visibleText as NSString).range(of: $0) }
+        let lemmaSpans: [SwordBibleSearchLemmaSpan]
+        if let strongToken,
+           let highlightRange,
+           highlightRange.location != NSNotFound,
+           highlightRange.length > 0 {
+            lemmaSpans = [SwordBibleSearchLemmaSpan(
+                lemma: "strong:\(strongToken)",
+                location: highlightRange.location,
+                length: highlightRange.length
+            )]
+        } else {
+            lemmaSpans = []
+        }
         let markup = strongToken.map { "<w lemma=\"strong:\($0)\">\(visibleText)</w>" }
             ?? visibleText
         _ = try consume(BibleSearchIndexEntry(
@@ -362,6 +425,7 @@ private final class InMemorySearchIndexSource: BibleSearchIndexSource {
             previewText: visibleText,
             sourceMarkup: markup,
             taggedText: markup,
+            lemmaSpans: lemmaSpans,
             entryOrder: 0,
             sourcePosition: 1,
             osisBookId: "Gen",
