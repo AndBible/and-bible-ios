@@ -1548,3 +1548,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Tupla-napauta ruutua sulkeaksesi kokoruututilan";
+
+/* Android shared translations */
+"try_again_passphrase" = "Salasana ei toiminut, yritä uudelleen?";
+
+/* Android shared translations */
+"document_not_installed" = "Ole hyvä ja lataa '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ ei löytynyt teoksesta %2$@.";

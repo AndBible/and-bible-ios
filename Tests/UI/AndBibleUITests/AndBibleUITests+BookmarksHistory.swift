@@ -467,6 +467,159 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies a production reader note survives software-keyboard presentation and relaunch.
+
+     Android keeps its reader pane identity stable when the IME reduces the usable content area;
+     the keyboard does not reclassify the window's device orientation. This regression follows the
+     same visible route on iOS: select `Genesis 1:1`, invoke Note, type through the real WebView
+     editor while the full software keyboard is present, dismiss the bookmark dialog directly, and
+     relaunch the same fixture session. It intentionally inspects live WebKit verse content in
+     addition to the native state export because detached reader content can leave stale native
+     state behind.
+
+     * - Side effects:
+     *   - forces portrait orientation and launches the public-domain baseline KJV fixture
+     *   - creates a Genesis 1:1 bookmark note through the production Vue/native bridge
+     *   - terminates and relaunches the app without reseeding the fixture container
+     * - Failure modes:
+     *   - fails if verse selection or the production Note action cannot open the named editor
+     *   - fails if only the input accessory remains instead of the full software keyboard
+     *   - fails if keyboard presentation reconstructs or detaches the reader WebView
+     *   - fails if dismissing the dialog loses the typed note or the note does not survive relaunch
+     * - Synchronization:
+     *   - uses XCTest element and predicate waits instead of fixed sleeps
+     *   - retries the verse tap once because a first tap may only activate an inactive reader pane
+     */
+    func testReaderNoteEditorKeepsSoftwareKeyboardAndPersistsTypedNote() {
+        let app = makeApp()
+        let verseTextFragment = "In the beginning"
+        let editorLabel = "My Notes note editor for Genesis 1:1"
+        let sentinel = "Issue390NoteSentinel"
+        let persistedNoteToken = "|Genesis_1_1=\(sentinel)|"
+
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Expected the baseline reader shell before creating a verse note."
+        )
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV",
+            in: app,
+            timeout: 20
+        )
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(
+            webView.waitForExistence(timeout: 20),
+            "Expected the production reader WebView for the Genesis note workflow."
+        )
+        let verse = webView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", verseTextFragment)
+        ).firstMatch
+        XCTAssertTrue(
+            verse.waitForExistence(timeout: 20) && elementHasUsableFrame(verse),
+            "Expected visible Genesis 1:1 text before opening the Note action."
+        )
+
+        let noteButton = webView.buttons.matching(
+            NSPredicate(format: "label == %@", "Note")
+        ).firstMatch
+        tapElementReliably(verse, timeout: 10)
+        if !noteButton.waitForExistence(timeout: 2) {
+            tapElementReliably(verse, timeout: 10)
+        }
+        XCTAssertTrue(
+            noteButton.waitForExistence(timeout: 10),
+            "Expected the production verse-selection Note action."
+        )
+        tapElementReliably(noteButton, timeout: 10)
+
+        let editor = webView.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", editorLabel)
+        ).firstMatch
+        XCTAssertTrue(
+            editor.waitForExistence(timeout: 10),
+            "Expected the accessible Genesis 1:1 note editor to enter edit mode."
+        )
+
+        let keyboard = app.keyboards.firstMatch
+        let qKey = app.keys.matching(
+            NSPredicate(format: "label ==[c] %@", "q")
+        ).firstMatch
+        XCTAssertTrue(
+            keyboard.waitForExistence(timeout: 10) && qKey.waitForExistence(timeout: 10),
+            "Expected the full software keyboard, not only its input accessory, for note editing."
+        )
+        XCTAssertTrue(
+            waitForUITestCondition("full software keyboard remains visible", timeout: 10) {
+                keyboard.exists &&
+                    self.elementFrameIsUsable(keyboard.frame) &&
+                    keyboard.frame.height > app.frame.height * 0.2 &&
+                    qKey.exists
+            },
+            "Expected a usable software-keyboard frame with character keys."
+        )
+        waitForMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 10)
+        XCTAssertTrue(
+            verse.exists && elementHasUsableFrame(verse),
+            "Expected the rendered verse to remain attached while the keyboard is visible."
+        )
+
+        app.typeText(sentinel)
+        let modalCloseButton = webView.buttons.matching(
+            NSPredicate(format: "label == %@", "Cancel")
+        ).firstMatch
+        XCTAssertTrue(
+            modalCloseButton.waitForExistence(timeout: 10),
+            "Expected the localized outer bookmark-dialog dismissal control."
+        )
+        XCTAssertTrue(
+            qKey.exists,
+            "Expected the full software keyboard to remain active until direct modal dismissal."
+        )
+        tapElementReliably(modalCloseButton, timeout: 10)
+
+        waitForElementToDisappear(keyboard, timeout: 10)
+        waitForElementToDisappear(modalCloseButton, timeout: 10)
+        waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 10)
+        waitForMyNotesState(containing: persistedNoteToken, in: app, timeout: 20)
+        XCTAssertTrue(
+            waitForUITestCondition("rendered verse remains attached after note dismissal", timeout: 15) {
+                verse.exists && self.elementHasUsableFrame(verse)
+            },
+            "Expected the Genesis verse body to remain rendered after closing the note editor."
+        )
+
+        app.terminate()
+        app.launch()
+
+        XCTAssertTrue(
+            waitForReaderShellReady(in: app, timeout: 30),
+            "Expected relaunch to restore the reader shell without reseeding the fixture."
+        )
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV",
+            in: app,
+            timeout: 20
+        )
+        waitForMyNotesState(containing: persistedNoteToken, in: app, timeout: 20)
+        let relaunchedWebView = app.webViews.firstMatch
+        XCTAssertTrue(
+            relaunchedWebView.waitForExistence(timeout: 20),
+            "Expected the reader WebView after relaunch."
+        )
+        let relaunchedVerse = relaunchedWebView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", verseTextFragment)
+        ).firstMatch
+        XCTAssertTrue(
+            relaunchedVerse.waitForExistence(timeout: 20) && elementHasUsableFrame(relaunchedVerse),
+            "Expected persisted note restoration to leave the Genesis reader body rendered."
+        )
+    }
+
+    /**
      Verifies the Android My Notes pseudo-document opens through Choose Document.
      *
      * Android exposes My Notes as a `FakeBookFactory` pseudo-document in the document chooser,

@@ -35,7 +35,9 @@ The view renders Android-parity application preferences backed by `SettingsStore
  - `onAppear` discovers installed modules, hydrates persisted preferences, sanitizes stale selections,
    and applies keep-screen-on / locale side effects
  - many toggles and pickers persist changes immediately through `SettingsStore`
- - dictionary, modal-action, and experimental-feature selections propagate through `onChange`
+ - unavailable explicit dictionary selections remain durable, while disabled dictionary,
+   modal-action, and experimental-feature selections are sanitized before propagating through
+   `onChange`
  - security and advanced actions may update `AppStorage`, open system settings, or schedule a debug crash
  */
 public struct SettingsView: View {
@@ -2515,7 +2517,8 @@ public struct SettingsView: View {
      - Side Effects:
        - queries SWORD for installed modules
        - reads SwiftData/UserDefaults-backed preferences through `SettingsStore`
-       - sanitizes stale dictionary, bookmark-action, and experimental-feature selections
+       - preserves explicit dictionary module names while sanitizing stale disabled-dictionary,
+         bookmark-action, and experimental-feature selections
        - applies the keep-screen-on idle-timer side effect for the loaded value
      - Failure: Module discovery failures leave dictionary arrays empty; settings fetch failures
        fall back through `SettingsStore` defaults.
@@ -2839,44 +2842,84 @@ public struct SettingsView: View {
     }
 
     /**
-     Removes persisted dictionary selections that no longer exist in the current module lists.
+     Dictionary preference values before and after Settings sanitation.
 
-     The stored selection keeps Android semantics where an empty selected set means "all enabled".
+     Explicit definition and morphology selections are durable Android book names. The disabled
+     word-lookup set is inverse state and may discard entries that are no longer installed.
+     */
+    struct DictionaryPreferenceSanitizationState: Equatable {
+        /// Explicit Greek Strong's dictionary names, including temporarily unavailable modules.
+        let strongsGreek: Set<String>
+
+        /// Explicit Hebrew Strong's dictionary names, including temporarily unavailable modules.
+        let strongsHebrew: Set<String>
+
+        /// Explicit Robinson morphology names, including temporarily unavailable modules.
+        let robinsonMorphology: Set<String>
+
+        /// Installed word-lookup dictionaries the user has disabled.
+        let disabledWordLookup: Set<String>
+    }
+
+    /**
+     Applies Android's dictionary preference sanitation policy to persisted Settings state.
+
+     Android preserves every nonempty explicit definition or morphology selection even when a book
+     is temporarily unavailable. Only the inverse disabled-word-lookup set is intersected with the
+     current inventory, because a missing disabled book carries no future selection authority.
+
+     - Parameters:
+       - state: Persisted explicit selections and disabled word-lookup names.
+       - availableWordLookupNames: Currently installed ordinary word-lookup dictionaries.
+       - store: Settings store whose disabled-word-lookup value is updated when sanitation changes it.
+     - Returns: The explicit selections unchanged and the sanitized disabled-word-lookup set.
+     - Side effects: May persist a reduced `.disabledWordLookupDictionaries` value.
+     - Failure modes: Store persistence follows `SettingsStore`'s nonthrowing update contract; empty
+       explicit selections retain Android's automatic-selection meaning.
+     */
+    static func sanitizeDictionaryPreferences(
+        _ state: DictionaryPreferenceSanitizationState,
+        availableWordLookupNames: Set<String>,
+        store: SettingsStore
+    ) -> DictionaryPreferenceSanitizationState {
+        let sanitizedDisabled = state.disabledWordLookup.intersection(availableWordLookupNames)
+        if sanitizedDisabled != state.disabledWordLookup {
+            store.setStringSet(
+                .disabledWordLookupDictionaries,
+                values: Array(sanitizedDisabled)
+            )
+        }
+        return DictionaryPreferenceSanitizationState(
+            strongsGreek: state.strongsGreek,
+            strongsHebrew: state.strongsHebrew,
+            robinsonMorphology: state.robinsonMorphology,
+            disabledWordLookup: sanitizedDisabled
+        )
+    }
+
+    /**
+     Reconciles local dictionary preference state without erasing authoritative module selections.
+
+     - Parameter store: Settings store loaded for the current Settings presentation.
+     - Side effects: Updates local disabled-word-lookup state and may persist its sanitized value;
+       explicit Greek, Hebrew, and morphology selections remain unchanged.
+     - Failure modes: Empty installed word-lookup inventory clears only the inverse disabled set.
      */
     private func sanitizeDictionaryPreferences(store: SettingsStore) {
-        let validGreek = Set(strongsGreekDictionaries.map(\.name))
-        if !selectedStrongsGreekDictionaryNames.isEmpty {
-            let sanitized = selectedStrongsGreekDictionaryNames.intersection(validGreek)
-            if sanitized != selectedStrongsGreekDictionaryNames {
-                selectedStrongsGreekDictionaryNames = sanitized
-                store.setStringSet(.strongsGreekDictionary, values: Array(sanitized))
-            }
-        }
-
-        let validHebrew = Set(strongsHebrewDictionaries.map(\.name))
-        if !selectedStrongsHebrewDictionaryNames.isEmpty {
-            let sanitized = selectedStrongsHebrewDictionaryNames.intersection(validHebrew)
-            if sanitized != selectedStrongsHebrewDictionaryNames {
-                selectedStrongsHebrewDictionaryNames = sanitized
-                store.setStringSet(.strongsHebrewDictionary, values: Array(sanitized))
-            }
-        }
-
-        let validMorph = Set(robinsonMorphologyDictionaries.map(\.name))
-        if !selectedRobinsonMorphologyDictionaryNames.isEmpty {
-            let sanitized = selectedRobinsonMorphologyDictionaryNames.intersection(validMorph)
-            if sanitized != selectedRobinsonMorphologyDictionaryNames {
-                selectedRobinsonMorphologyDictionaryNames = sanitized
-                store.setStringSet(.robinsonGreekMorphology, values: Array(sanitized))
-            }
-        }
-
-        let validWordLookup = Set(wordLookupDictionaries.map(\.name))
-        let sanitizedDisabled = disabledWordLookupDictionaryNames.intersection(validWordLookup)
-        if sanitizedDisabled != disabledWordLookupDictionaryNames {
-            disabledWordLookupDictionaryNames = sanitizedDisabled
-            store.setStringSet(.disabledWordLookupDictionaries, values: Array(sanitizedDisabled))
-        }
+        let sanitized = Self.sanitizeDictionaryPreferences(
+            DictionaryPreferenceSanitizationState(
+                strongsGreek: selectedStrongsGreekDictionaryNames,
+                strongsHebrew: selectedStrongsHebrewDictionaryNames,
+                robinsonMorphology: selectedRobinsonMorphologyDictionaryNames,
+                disabledWordLookup: disabledWordLookupDictionaryNames
+            ),
+            availableWordLookupNames: Set(wordLookupDictionaries.map(\.name)),
+            store: store
+        )
+        selectedStrongsGreekDictionaryNames = sanitized.strongsGreek
+        selectedStrongsHebrewDictionaryNames = sanitized.strongsHebrew
+        selectedRobinsonMorphologyDictionaryNames = sanitized.robinsonMorphology
+        disabledWordLookupDictionaryNames = sanitized.disabledWordLookup
     }
 
     /// Remove persisted modal-action IDs that no longer exist in Android arrays.xml contracts.

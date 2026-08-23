@@ -65,6 +65,24 @@ final class SwordXMLNode {
         }
     }
 
+    /**
+     Returns JDOM2's `Content.toString()` representation for non-Element/non-Text children.
+
+     Android's Bible Search preview appends this diagnostic representation for comments and
+     processing instructions before its one `Html.fromHtml` pass. Elements and text-like nodes
+     return nil because their dedicated traversal branches own those values.
+     */
+    var jdomContentDescription: String? {
+        switch kind {
+        case .comment:
+            return "[Comment: \(serializedXML())]"
+        case .processingInstruction:
+            return "[ProcessingInstruction: \(serializedXML())]"
+        case .element, .text, .cdata:
+            return nil
+        }
+    }
+
     /** Creates an element node with ordered children added later. */
     static func element(name: String, attributes: [String: String]) -> SwordXMLNode {
         SwordXMLNode(kind: .element(name: name, attributes: attributes))
@@ -109,6 +127,21 @@ final class SwordXMLNode {
     func attribute(named name: String) -> String? {
         guard case .element(_, let attributes) = kind else { return nil }
         return attributes[name]
+    }
+
+    /**
+     Sets one no-namespace attribute on an element node.
+
+     - Parameters:
+       - name: Exact attribute name.
+       - value: Replacement value serialized with normal XML escaping.
+     - Side effects: Mutates the receiver when it is an element; other node kinds are unchanged.
+     - Failure modes: None; assigning an existing name replaces its prior value.
+     */
+    func setAttribute(named name: String, value: String) {
+        guard case .element(let elementName, var attributes) = kind else { return }
+        attributes[name] = value
+        kind = .element(name: elementName, attributes: attributes)
     }
 
     /** Produces an independent recursive copy. */
@@ -157,12 +190,21 @@ final class SwordXMLNode {
         }
     }
 
-    /** Escapes XML text while preserving Unicode scalars. */
+    /**
+     Escapes one XML text node with JDOM2-compatible carriage-return preservation.
+
+     - Parameter value: Unserialized text-node content.
+     - Returns: XML-safe text where markup characters are escaped and U+000D is emitted as
+       `&#xD;`, preventing XML newline normalization and later bridge CR cleanup from deleting it.
+     - Side effects: None.
+     - Failure modes: None; tabs and line feeds remain literal like JDOM's text serializer.
+     */
     private static func escapeText(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\r", with: "&#xD;")
     }
 
     /** Escapes XML attribute text while preserving Unicode scalars. */
@@ -277,6 +319,7 @@ final class SwordXMLTreeParser: NSObject, XMLParserDelegate {
 enum SwordOSISProcessorError: Error, LocalizedError {
     case missingRoot
     case invalidRootCount(Int)
+    case missingCommentaryVerse
 
     /// Human-readable malformed-fragment reason.
     var errorDescription: String? {
@@ -285,6 +328,8 @@ enum SwordOSISProcessorError: Error, LocalizedError {
             return "The OSIS fragment has no XML root element."
         case .invalidRootCount(let count):
             return "The OSIS fragment must contain one root element; found \(count)."
+        case .missingCommentaryVerse:
+            return "The commentary fragment has no direct verse element."
         }
     }
 }

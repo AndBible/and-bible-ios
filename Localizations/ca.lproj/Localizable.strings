@@ -1658,3 +1658,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Fes doble toc a la pantalla per sortir de la pantalla completa";
+
+/* Android shared translations */
+"try_again_passphrase" = "La contrasenya no ha funcionat, vols tornar-ho a intentar?";
+
+/* Android shared translations */
+"document_not_installed" = "Baixeu '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "No s'ha trobat %1$@ al document %2$@.";

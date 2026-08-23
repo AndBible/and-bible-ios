@@ -91,6 +91,14 @@ const char *SWModule_getRawEntry(void *module);
 /// The returned pointer is thread-local and remains valid until the next call on that thread.
 const char *SWModule_getOSISFragment(void *module);
 
+/// Read one physical RawLD-family index record and convert it through the module's native filters.
+/// RawLD/RawLD4 callers provide the fixed-record bytes; zLD reads/decompresses by index itself.
+/// The returned pointer is thread-local.
+const char *SWModule_getRawDictionaryOSISFragmentAtIndex(void *module,
+                                                        long index,
+                                                        const unsigned char *rawRecord,
+                                                        unsigned long rawRecordLength);
+
 /// Get the current key's Android-equivalent display name. TreeKey modules return the local node
 /// name while other modules return the key's short text. The pointer is thread-local.
 const char *SWModule_getCurrentKeyName(void *module);

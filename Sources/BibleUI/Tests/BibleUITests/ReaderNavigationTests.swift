@@ -213,6 +213,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertNil(requestedSearchText)
     }
 
+    /**
+     Protects Android's localized fake Strong dictionary only for true compatible-book absence.
+
+     - Setup: Opens an empty installed-book root and requests one Hebrew Strong number.
+     - Expected result: One fake `StrongsHebrew` fragment keeps the raw requested key, empty
+       features, null v11n/content type, and a module-specific localized download link.
+     - Failure meaning: iOS drops Android's recovery action or fabricates real Strong metadata.
+     - Side effects: Writes an isolated empty SWORD fixture removed by the base test case.
+     */
     func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoStrongsDictionaryIsInstalled() throws {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -236,14 +245,1976 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let features = try XCTUnwrap(fragment["features"] as? [String: Any])
 
         XCTAssertEqual(payload["type"] as? String, "multi")
-        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertTrue(payload["contentType"] is NSNull)
         XCTAssertEqual(fragment["bookCategory"] as? String, "DICTIONARY")
-        XCTAssertEqual(fragment["keyName"] as? String, "00430")
-        XCTAssertEqual(features["type"] as? String, "hebrew")
-        XCTAssertEqual(features["keyName"] as? String, "00430")
-        XCTAssertTrue((fragment["xml"] as? String)?.contains("No dictionary module installed") == true)
-        XCTAssertTrue((fragment["xml"] as? String)?.contains("download://") == true)
-        XCTAssertFalse((fragment["xml"] as? String)?.contains("initials=") == true)
+        XCTAssertEqual(fragment["key"] as? String, "StrongsHebrew--H00430")
+        XCTAssertEqual(fragment["keyName"] as? String, "H00430")
+        XCTAssertEqual(fragment["osisRef"] as? String, "H00430")
+        XCTAssertEqual(fragment["bookInitials"] as? String, "StrongsHebrew")
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertFalse(fragment["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertEqual(
+            fragment["xml"] as? String,
+            "<div>Please download '<AndBibleLink href=\"download://?initials=StrongsHebrew\">StrongsHebrew</AndBibleLink>'</div>"
+        )
+    }
+
+    /**
+     Protects Android's external Strong's URI rule for values without a category prefix.
+
+     - Setup: Requests prefixless Strong's value `243` with no installed dictionaries.
+     - Expected result: The synthetic fragment targets `StrongsHebrew` with the raw requested key;
+       lowercase `g` and leading-space `G` classify Hebrew, while raw UTF-16 `G` is Greek even when
+       a combining mark joins it into one Swift `Character`.
+     - Failure meaning: iOS normalized the raw external value before classification or restored the
+       numeric-range heuristic, diverging from Android's literal first-character URI analyzer.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONTreatsPrefixlessExternalValueAsHebrew() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "StrongsHebrew")
+        XCTAssertEqual(fragment["key"] as? String, "StrongsHebrew--243")
+        XCTAssertEqual(fragment["keyName"] as? String, "243")
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isHebrewStrongsNumber("H243"))
+        XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isHebrewStrongsNumber("g243"))
+        XCTAssertTrue(BibleReaderStrongsDocumentBuilder.isHebrewStrongsNumber(" G243"))
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "g243"),
+            ["g243", "", "\r", "Hnull"]
+        )
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: " G243"),
+            [" G243", "", "\r", "Hnull"]
+        )
+        XCTAssertFalse(BibleReaderStrongsDocumentBuilder.isHebrewStrongsNumber("G243"))
+        XCTAssertFalse(
+            BibleReaderStrongsDocumentBuilder.isHebrewStrongsNumber("G\u{0301}243")
+        )
+    }
+
+    /**
+     Protects Android's automatic Robinson download fallback when no morphology book is installed.
+
+     - Setup: Requests one Robinson code from an empty SWORD root with no explicit selection.
+     - Expected result: One synthetic Robinson fragment links directly to its Downloads entry.
+     - Failure meaning: Morphology links silently do nothing instead of exposing Android's missing-
+       document action.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONReturnsInstallFallbackWhenNoMorphologyDictionaryIsInstalled() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "Robinson")
+        XCTAssertEqual(fragment["bookAbbreviation"] as? String, "Robinson")
+        XCTAssertEqual(fragment["key"] as? String, "Robinson--V_PAI_3S")
+        XCTAssertEqual(fragment["keyName"] as? String, "V-PAI-3S")
+        XCTAssertEqual(fragment["osisRef"] as? String, "V-PAI-3S")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.dictionary.rawValue)
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertFalse(fragment["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertEqual(
+            fragment["xml"] as? String,
+            "<div>Please download '<AndBibleLink href=\"download://?initials=Robinson\">Robinson</AndBibleLink>'</div>"
+        )
+    }
+
+    /**
+     Protects Android's distinction between an unavailable Robinson book and an absent entry.
+
+     - Setup: Installs an empty `GreekParse` RawLD module named `Robinson`, then requests a code.
+     - Expected result: The builder returns Android's empty `Multi`, with no synthetic fragment and
+       null content type.
+     - Failure meaning: An exact-key miss in an installed morphology book is misreported as an
+       installation problem.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONReturnsEmptyMultiWhenInstalledMorphologyDictionaryDoesNotContainEntry() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            installedDictionarySources: { resolver.dictionaryKeySources() },
+            installedBookMetadata: { resolver.registeredBookMetadata() },
+            installedDictionarySourceNamed: {
+                resolver.module(named: $0)?.explicitDictionaryKeySource
+            },
+            selectedPreferenceValues: { _ in [] },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+    }
+
+    /**
+     Protects explicit Strong's and morphology preferences from automatic module substitution.
+
+     Android treats a nonempty selected-book setting as authoritative. The fixture installs usable
+     automatic candidates but selects different, unavailable names for each dictionary family.
+
+     - Setup: Installs populated `StrongsGreek` and `Robinson` modules, then explicitly selects
+       unavailable module names for Greek definitions and Robinson morphology.
+     - Expected result: Strong's returns `nil`; Robinson returns Android's empty `Multi`. Neither
+       installed candidate nor a synthetic missing-module document replaces the explicit selection.
+     - Failure meaning: Stale or unavailable explicit preferences can silently open a different
+       book and overwrite the user's chosen dictionary behavior.
+     - Side effects: Writes isolated RawLD fixtures that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONKeepsUnresolvedExplicitSelectionsAuthoritative() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">G243 Greek definition</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"],
+            entryKey: "V-PAI-3S",
+            entryXML: #"<entryFree n="V-PAI-3S">Morphology definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let greekModule = try XCTUnwrap(manager.module(named: "StrongsGreek"))
+        let morphologyModule = try XCTUnwrap(manager.module(named: "Robinson"))
+        XCTAssertNotNil(
+            BibleReaderStrongsDocumentBuilder.lookupInModule(
+                greekModule,
+                keyOptions: ["G243"]
+            ),
+            "The automatic Greek candidate must contain the requested entry"
+        )
+        XCTAssertNotNil(
+            BibleReaderStrongsDocumentBuilder.lookupInModule(
+                morphologyModule,
+                keyOptions: ["V-PAI-3S"]
+            ),
+            "The automatic morphology candidate must contain the requested entry"
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { key in
+                switch key {
+                case .strongsGreekDictionary:
+                    return ["UnavailableGreek"]
+                case .robinsonGreekMorphology:
+                    return ["UnavailableMorphology"]
+                default:
+                    return []
+                }
+            },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        XCTAssertNil(builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: []))
+        let morphologyJSON = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: [], robinson: ["V-PAI-3S"])
+        )
+        let morphologyPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(morphologyJSON.utf8)) as? [String: Any]
+        )
+        XCTAssertTrue(
+            (morphologyPayload["osisFragments"] as? [[String: Any]])?.isEmpty == true
+        )
+        XCTAssertTrue(morphologyPayload["contentType"] is NSNull)
+    }
+
+    /**
+     Protects JSword RawLD's default case-insensitive search for one raw Robinson candidate.
+
+     - Setup: Installs an uppercase Robinson record and requests its lowercase spelling without
+       adding any iOS-generated key aliases.
+     - Expected result: The single raw request case-normalizes to the stored key, whose exact
+       uppercase identity appears in the fragment and whose GreekParse feature selects Strong mode.
+     - Failure meaning: iOS mistakes “one requested key” for byte-sensitive backend search and
+       returns Android's empty installed-miss Multi.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONUsesDefaultRawLDCaseNormalizationForRobinson() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"],
+            entryKey: "V-PAI-3S",
+            entryXML: #"<entryFree n="V-PAI-3S">Morphology definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            installedDictionarySources: { resolver.dictionaryKeySources() },
+            installedBookMetadata: { resolver.registeredBookMetadata() },
+            installedDictionarySourceNamed: {
+                resolver.module(named: $0)?.explicitDictionaryKeySource
+            },
+            selectedPreferenceValues: { _ in [] },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: [], robinson: ["v-pai-3s"])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        XCTAssertEqual(fragment["key"] as? String, "Robinson--V_PAI_3S")
+        XCTAssertEqual(fragment["keyName"] as? String, "V-PAI-3S")
+        XCTAssertEqual(fragment["osisRef"] as? String, "V-PAI-3S")
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Morphology definition") == true)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+    }
+
+    /**
+     Protects JSword RawLD's exact case-sensitive Robinson fallback.
+
+     - Setup: Installs only an uppercase Robinson record with `CaseSensitiveKeys=true`, then asks
+       for the lowercase raw code.
+     - Expected result: Android's handled route opens an empty Multi with null content type.
+     - Failure meaning: iOS applies default case folding despite the selected book's explicit
+       case-sensitive key contract.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONKeepsCaseSensitiveRobinsonMissEmpty() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"],
+            entryKey: "V-PAI-3S",
+            entryXML: #"<entryFree n="V-PAI-3S">Morphology definition</entryFree>"#,
+            caseSensitiveKeys: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: [], robinson: ["v-pai-3s"])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+    }
+
+    /**
+     Protects JSword's shared identity rules and feature-free explicit selection contract.
+
+     - Setup: Installs a key-readable book with Bible category but no Strong's feature and selects
+       it first by case-insensitive initials, then by its exact full description.
+     - Expected result: Both authoritative selections resolve the same entry through global book
+       identity; the fragment retains the actual Bible category, empty definition features, null
+       Strong's content type, and false Strong's-numbers capability.
+     - Failure meaning: iOS re-filters explicit selections by feature/category or supports only
+       exact module initials while Android resolves the persisted token.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONResolvesExplicitSelectionBySharedBookIdentity() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "SelectedGreek",
+            in: modulePath,
+            features: [],
+            category: ModuleCategory.bible.rawValue,
+            entryKey: "00243",
+            entryXML: #"<entryFree n="00243">Explicit selected definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.module(named: "SelectedGreek")?.info.category, .bible)
+
+        for selectedName in ["selectedgreek", "UI Test Dictionary"] {
+            let builder = BibleReaderStrongsDocumentBuilder(
+                swordManager: manager,
+                selectedPreferenceValues: { key in
+                    key == .strongsGreekDictionary ? [selectedName] : []
+                },
+                moduleDisplayLabel: { $0.info.name },
+                localizedString: { _, defaultValue in defaultValue }
+            )
+            let json = try XCTUnwrap(
+                builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: []),
+                "Explicit selection \(selectedName) must resolve through shared JSword identity"
+            )
+            let payload = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+            )
+            let fragment = try XCTUnwrap(
+                (payload["osisFragments"] as? [[String: Any]])?.first
+            )
+
+            XCTAssertEqual(fragment["bookInitials"] as? String, "SelectedGreek")
+            XCTAssertTrue((fragment["xml"] as? String)?.contains("Explicit selected definition") == true)
+            XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+            XCTAssertEqual(fragment["key"] as? String, "SelectedGreek--00243")
+            XCTAssertEqual(fragment["keyName"] as? String, "00243")
+            XCTAssertEqual(fragment["osisRef"] as? String, "00243")
+            XCTAssertTrue((fragment["features"] as? [String: Any])?.isEmpty == true)
+            XCTAssertFalse(fragment["hasStrongs"] as? Bool ?? true)
+            XCTAssertTrue(fragment["v11n"] is NSNull)
+            XCTAssertTrue(payload["contentType"] is NSNull)
+        }
+    }
+
+    /**
+     Protects Android's feature-only automatic Strong's discovery across the global book registry.
+
+     - Setup: Installs a key-readable native book with Bible category and `GreekDef`, but leaves the
+       explicit Greek selection empty.
+     - Expected result: Automatic discovery finds the book by feature, returns its exact raw key,
+       and preserves its actual Bible category and Greek definition metadata.
+     - Failure meaning: iOS prefilters automatic candidates to dictionary/glossary categories even
+       though Android scans every installed book for the requested feature.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONAutomaticallyDiscoversFeatureBookAcrossCategories() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "GreekFeatureBible",
+            in: modulePath,
+            features: ["GreekDef"],
+            category: ModuleCategory.bible.rawValue,
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Cross-category definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragment["bookInitials"] as? String, "GreekFeatureBible")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+        XCTAssertEqual(fragment["key"] as? String, "GreekFeatureBible--G243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "G243")
+        XCTAssertEqual(features["type"] as? String, "greek")
+        XCTAssertEqual(features["keyName"] as? String, "G243")
+        XCTAssertFalse(fragment["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+        XCTAssertTrue(xml.contains(#"<title type="x-gen">G243</title>"#))
+        XCTAssertTrue(xml.contains("Cross-category definition"))
+        XCTAssertFalse(xml.contains("<BVA"))
+    }
+
+    /**
+     Protects JSword's Essays category metadata and ordinal during feature-only discovery.
+
+     - Setup: Installs two Greek-definition RawLD books in deliberately conflicting name order: a
+       dictionary whose initials sort after an Essays book, and an explicit lowercase `essays`
+       category that exercises JSword's case-insensitive category parser.
+     - Expected result: Android's category ordinal keeps the dictionary first; the Essays fragment
+       remains `ESSAYS` and renders its real definition through the same feature-based lookup.
+     - Failure meaning: iOS infers RawLD as dictionary despite an explicit category, serializes
+       Essays as OTHER/DICTIONARY, or sorts automatic candidates by initials before category.
+     - Side effects: Writes two isolated RawLD fixtures removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONPreservesEssaysCategoryAndJSwordOrder() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "ZuluGreekDictionary",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Dictionary definition</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "AlphaGreekEssay",
+            in: modulePath,
+            features: ["GreekDef"],
+            category: "essays",
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Essay definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            installedDictionarySources: { resolver.dictionaryKeySources() },
+            installedBookMetadata: { resolver.registeredBookMetadata() },
+            installedDictionarySourceNamed: {
+                resolver.module(named: $0)?.explicitDictionaryKeySource
+            },
+            selectedPreferenceValues: { _ in [] },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(
+            fragments.compactMap { $0["bookInitials"] as? String },
+            ["ZuluGreekDictionary", "AlphaGreekEssay"]
+        )
+        XCTAssertEqual(
+            fragments.compactMap { $0["bookCategory"] as? String },
+            [DocumentCategory.dictionary.rawValue, "ESSAYS"]
+        )
+        XCTAssertTrue((fragments[1]["xml"] as? String)?.contains("Essay definition") == true)
+        XCTAssertTrue((fragments[1]["xml"] as? String)?.contains("<BVA") == true)
+    }
+
+    /**
+     Protects Android's contradictory commentary-category `SwordDictionary` error projection.
+
+     - Setup: Installs a populated RawLD Greek-definition book whose explicit category is
+       commentary but whose assembled entry has no direct verse child.
+     - Expected result: The exact book/key remains a Multi fragment with actual commentary and
+       Greek metadata, while XML is the localized unanchored key-not-in-document error.
+     - Failure meaning: iOS either drops an Android error fragment, renders dictionary siblings as
+       commentary, invents a download fallback, or anchors an `OsisError` payload.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONEmitsCommentaryCategoryMissingVerseErrorFragment() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "GreekFeatureCommentary",
+            in: modulePath,
+            features: ["GreekDef"],
+            category: ModuleCategory.commentary.rawValue,
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Not a direct verse</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragment["bookInitials"] as? String, "GreekFeatureCommentary")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.commentary.rawValue)
+        XCTAssertEqual(fragment["key"] as? String, "GreekFeatureCommentary--G243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "G243")
+        XCTAssertEqual(features["type"] as? String, "greek")
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertEqual(
+            fragment["xml"] as? String,
+            "<div>G243 was not found in document GreekFeatureCommentary.</div>"
+        )
+        XCTAssertFalse((fragment["xml"] as? String)?.contains("<BVA") ?? true)
+    }
+
+    /**
+     Protects automatic Strong's lookup through JSword's nested `SwordGenBook` key map.
+
+     - Setup: Installs a real feature-bearing RawGenBook whose only definition lives at the nested
+       TreeKey `Root/G243`, then requests the leaf candidate `G243`.
+     - Expected result: Android's substring tier resolves the entry; keyName remains the leaf while
+       fragment key and osisRef preserve the full TreeKey OSIS path.
+     - Failure meaning: iOS category-filters automatic discovery, requires a flat exact libsword
+       key, or flattens Android's distinct Key name/OSIS identities in the Vue payload.
+     - Side effects: Writes an isolated three-file RawGenBook fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONResolvesNestedFeatureGenBookWithDistinctKeyIdentities() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedNestedGreekDefinitionGeneralBook(
+            named: "NestedGreekBook",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+
+        XCTAssertEqual(fragment["bookInitials"] as? String, "NestedGreekBook")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
+        XCTAssertEqual(fragment["key"] as? String, "NestedGreekBook--Root_G243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Root/G243")
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Nested Greek definition") == true)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+    }
+
+    /**
+     Protects driver-owned TreeKey resolution across contradictory RawGenBook categories.
+
+     - Setup: Installs identical feature-bearing nested RawGenBooks explicitly categorized as Bible
+       and Commentary; neither changes its concrete `SwordGenBook` backend or TreeKey identity.
+     - Expected result: Bible returns the nested definition without BVA, while Commentary retains
+       the same actual key metadata but emits Android's localized unanchored missing-verse error.
+     - Failure meaning: iOS chooses key type from category, rejects a supported RawGenBook book,
+       anchors Bible content, or drops the Commentary error fragment.
+     - Side effects: Writes two isolated RawGenBook fixtures removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONPreservesRawGenBookKeysAcrossActualCategories() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedNestedGreekDefinitionGeneralBook(
+            named: "NestedGreekBible",
+            in: modulePath,
+            category: ModuleCategory.bible.rawValue
+        )
+        try seedNestedGreekDefinitionGeneralBook(
+            named: "NestedGreekCommentary",
+            in: modulePath,
+            category: ModuleCategory.commentary.rawValue
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let bible = try XCTUnwrap(
+            fragments.first { $0["bookInitials"] as? String == "NestedGreekBible" }
+        )
+        let commentary = try XCTUnwrap(
+            fragments.first { $0["bookInitials"] as? String == "NestedGreekCommentary" }
+        )
+
+        XCTAssertEqual(bible["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+        XCTAssertEqual(bible["key"] as? String, "NestedGreekBible--Root_G243")
+        XCTAssertEqual(bible["keyName"] as? String, "G243")
+        XCTAssertEqual(bible["osisRef"] as? String, "Root/G243")
+        XCTAssertTrue((bible["xml"] as? String)?.contains("Nested Greek definition") == true)
+        XCTAssertFalse((bible["xml"] as? String)?.contains("<BVA") ?? true)
+
+        XCTAssertEqual(
+            commentary["bookCategory"] as? String,
+            DocumentCategory.commentary.rawValue
+        )
+        XCTAssertEqual(commentary["key"] as? String, "NestedGreekCommentary--Root_G243")
+        XCTAssertEqual(commentary["keyName"] as? String, "G243")
+        XCTAssertEqual(commentary["osisRef"] as? String, "Root/G243")
+        XCTAssertEqual(
+            commentary["xml"] as? String,
+            "<div>G243 was not found in document NestedGreekCommentary.</div>"
+        )
+        XCTAssertFalse((commentary["xml"] as? String)?.contains("<BVA") ?? true)
+    }
+
+    /**
+     Protects restored Multi's one persisted-key lookup and actual resolved-key metadata.
+
+     - Setup: Installs one Greek dictionary containing only another Strong family (`00243`) and a
+       second case-insensitive RawLD dictionary containing `G243`, then restores separate children.
+     - Expected result: Persisted `G243` does not expand into the padded family; persisted lowercase
+       `g243` resolves through RawLD itself and serializes the actual stored `G243` identity.
+     - Failure meaning: Restore reuses LinkControl's four live-Strong families, or serializes the
+       persisted query instead of the `Key` returned by the selected book.
+     - Side effects: Writes two isolated RawLD fixtures removed by the base test case.
+     */
+    func testRestoredMultiUsesOnePersistedDictionaryKeyAndActualResolvedMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "RestorePaddedOnly",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "00243",
+            entryXML: #"<entryFree n="00243">Padded family only</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "RestoreCasefold",
+            in: modulePath,
+            features: ["GreekDef", "StrongsNumbers"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Casefold restore</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let activeBible = try XCTUnwrap(manager.module(named: "KJV"))
+        let builder = BibleReaderRestoredMultiDocumentBuilder(
+            swordManager: manager,
+            activeModule: activeBible
+        )
+
+        XCTAssertNil(builder.build(pageKey: "RestorePaddedOnly:G243"))
+        let request = try XCTUnwrap(builder.build(pageKey: "RestoreCasefold:g243"))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(request.documentJSON.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(request.renderedKey, AndroidSpecialDocumentIdentity.strongsRenderedKey)
+        XCTAssertEqual(fragment["key"] as? String, "RestoreCasefold--G243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "G243")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.dictionary.rawValue)
+        XCTAssertEqual(features["type"] as? String, "greek")
+        XCTAssertEqual(features["keyName"] as? String, "G243")
+        XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+    }
+
+    /**
+     Protects restored Multi dispatch by concrete JSword book class instead of configured category.
+
+     - Setup: Installs two RawLD Greek-definition books explicitly categorized as Bible and
+       Commentary, persists one exact child from each, and restores them through the shared resolver.
+     - Expected result: The Bible-category RawLD child restores as a key-owned title/body fragment
+       without BVA; the Commentary child restores as the localized actual-book/key error fragment.
+     - Failure meaning: iOS treats RawLD as a verse-backed `SwordBook` because of Category metadata,
+       drops the Commentary read error, or loses the actual categories during restore.
+     - Side effects: Writes two isolated RawLD fixtures removed by the base test case.
+     */
+    func testRestoredMultiDispatchesContradictoryRawLDCategoriesByConcreteBookClass() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "RestoreGreekBible",
+            in: modulePath,
+            features: ["GreekDef"],
+            category: ModuleCategory.bible.rawValue,
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Restored Bible-category definition</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "RestoreGreekCommentary",
+            in: modulePath,
+            features: ["GreekDef"],
+            category: ModuleCategory.commentary.rawValue,
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Not a direct verse</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let activeBible = try XCTUnwrap(manager.module(named: "KJV"))
+        let builder = BibleReaderRestoredMultiDocumentBuilder(
+            swordManager: manager,
+            activeModule: activeBible,
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let request = try XCTUnwrap(builder.build(
+            pageKey: "RestoreGreekBible:G243||RestoreGreekCommentary:G243"
+        ))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(request.documentJSON.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let bible = try XCTUnwrap(
+            fragments.first { $0["bookInitials"] as? String == "RestoreGreekBible" }
+        )
+        let commentary = try XCTUnwrap(
+            fragments.first { $0["bookInitials"] as? String == "RestoreGreekCommentary" }
+        )
+        let bibleFeatures = try XCTUnwrap(bible["features"] as? [String: Any])
+        let commentaryFeatures = try XCTUnwrap(commentary["features"] as? [String: Any])
+
+        XCTAssertEqual(bible["bookCategory"] as? String, DocumentCategory.bible.rawValue)
+        XCTAssertEqual(bible["key"] as? String, "RestoreGreekBible--G243")
+        XCTAssertEqual(bible["keyName"] as? String, "G243")
+        XCTAssertEqual(bible["osisRef"] as? String, "G243")
+        XCTAssertEqual(bibleFeatures["type"] as? String, "greek")
+        XCTAssertEqual(bibleFeatures["keyName"] as? String, "G243")
+        XCTAssertFalse(bible["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(bible["v11n"] is NSNull)
+        XCTAssertTrue((bible["xml"] as? String)?.contains("Restored Bible-category definition") == true)
+        XCTAssertFalse((bible["xml"] as? String)?.contains("<BVA") ?? true)
+
+        XCTAssertEqual(commentary["bookCategory"] as? String, DocumentCategory.commentary.rawValue)
+        XCTAssertEqual(commentary["key"] as? String, "RestoreGreekCommentary--G243")
+        XCTAssertEqual(commentary["keyName"] as? String, "G243")
+        XCTAssertEqual(commentary["osisRef"] as? String, "G243")
+        XCTAssertEqual(commentaryFeatures["type"] as? String, "greek")
+        XCTAssertEqual(commentaryFeatures["keyName"] as? String, "G243")
+        XCTAssertFalse(commentary["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(commentary["v11n"] is NSNull)
+        XCTAssertEqual(
+            commentary["xml"] as? String,
+            "<div>G243 was not found in document RestoreGreekCommentary.</div>"
+        )
+        XCTAssertFalse((commentary["xml"] as? String)?.contains("<BVA") ?? true)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+    }
+
+    /**
+     Preserves actual metadata when restoring a native `SwordBook` configured as Commentary.
+
+     - Setup: Publishes the readable zText KJV fixture under separate initials with Commentary
+       category plus Greek-definition and Strong's-number features, then restores Genesis 1:1.
+     - Expected result: Concrete SwordBook verse restoration succeeds while the fragment retains
+       Commentary category, actual source features, Strong's state, and KJV versification.
+     - Failure meaning: Restore dispatches by configured category, drops native commentary, or
+       reuses the Bible fragment builder's route-derived BIBLE/empty-feature metadata.
+     - Side effects: Writes one isolated descriptor removed by the base test case.
+     */
+    func testRestoredMultiPreservesNativeSwordBookCommentaryMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "RestoreNativeCommentary",
+            description: "Restored native commentary",
+            in: modulePath
+        )
+        let descriptorURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/restorenativecommentary.conf")
+        var descriptor = try String(contentsOf: descriptorURL, encoding: .utf8)
+        descriptor.append(
+            "\nAbbreviation=RNC\nCategory=Commentaries\nFeature=GreekDef\n"
+        )
+        try descriptor.write(to: descriptorURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderRestoredMultiDocumentBuilder(
+            swordManager: manager,
+            activeModule: manager.module(named: "KJV")
+        )
+        let request = try XCTUnwrap(
+            builder.build(pageKey: "RestoreNativeCommentary:Gen.1.1")
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(request.documentJSON.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.commentary.rawValue)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "RestoreNativeCommentary")
+        XCTAssertEqual(fragment["bookAbbreviation"] as? String, "RNC")
+        XCTAssertEqual(fragment["key"] as? String, "RestoreNativeCommentary--Gen.1.1")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(fragment["v11n"] as? String, "KJV")
+        XCTAssertEqual(features["type"] as? String, "greek")
+        XCTAssertEqual(features["keyName"] as? String, fragment["keyName"] as? String)
+        XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+    }
+
+    /**
+     Protects selected-word lookup's single backend key and RawLD-owned case semantics.
+
+     - Setup: Installs two plain dictionaries with the same uppercase key; one uses default RawLD
+       case folding and the other declares `CaseSensitiveKeys=true`, then looks up lowercase text.
+     - Expected result: Only the default dictionary resolves and its actual uppercase key metadata
+       is serialized; the builder never retries lowercase/title-case aliases itself.
+     - Failure meaning: iOS performs host-side key expansion, ignores `CaseSensitiveKeys`, or emits
+       query-derived fragment identity after backend normalization.
+     - Side effects: Writes two isolated RawLD fixtures removed by the base test case.
+     */
+    func testWordLookupUsesOneQueryAndRawLDCaseSensitivityWithActualKeyMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "WordCasefold",
+            in: modulePath,
+            features: [],
+            entryKey: "GRACE",
+            entryXML: #"<entryFree n="GRACE">Casefold definition</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "WordCaseSensitive",
+            in: modulePath,
+            features: [],
+            entryKey: "GRACE",
+            entryXML: #"<entryFree n="GRACE">Must not appear</entryFree>"#,
+            caseSensitiveKeys: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderWordLookupDocumentBuilder(
+            swordManager: manager,
+            disabledDictionaryNames: { [] }
+        )
+
+        let json = try XCTUnwrap(builder.buildWordLookupMultiDocumentJSON(query: "grace"))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "WordCasefold")
+        XCTAssertEqual(fragment["key"] as? String, "WordCasefold--GRACE")
+        XCTAssertEqual(fragment["keyName"] as? String, "GRACE")
+        XCTAssertEqual(fragment["osisRef"] as? String, "GRACE")
+        XCTAssertEqual(fragment["bookCategory"] as? String, DocumentCategory.dictionary.rawValue)
+        XCTAssertTrue((fragment["features"] as? [String: Any])?.isEmpty == true)
+        XCTAssertFalse(fragment["hasStrongs"] as? Bool ?? true)
+        XCTAssertTrue(fragment["v11n"] is NSNull)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Casefold definition") == true)
+        XCTAssertFalse(json.contains("WordCaseSensitive"))
+        XCTAssertFalse(json.contains("Must not appear"))
+    }
+
+    /**
+     Protects Android's JSword TreeSet order for production selected-word results.
+
+     - Setup: Installs two plain RawLD dictionaries in initials order `A`, `Z` but assigns opposing
+       abbreviations `Zulu`, `Alpha`, then supplies the controller's shared resolver projection to
+       the selected-word builder.
+     - Expected result: Resolver candidates and emitted fragments both place abbreviation `Alpha`
+       before `Zulu`, matching `SwordDocumentFacade.wordLookupDictionaries` filtering of
+       `Books.installed().books`.
+     - Failure meaning: The production path has regressed to native initials/registration order,
+       causing Android/iOS word-result tabs to appear in a different order.
+     - Side effects: Writes and rewrites two isolated RawLD descriptors/data files; base teardown
+       removes the temporary SWORD tree. Lookup order is synchronous and deterministic.
+     */
+    func testWordLookupUsesJSwordTreeSetAbbreviationOrder() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let fixtures = [
+            (name: "AWordZulu", abbreviation: "Zulu", definition: "Zulu tab definition"),
+            (name: "ZWordAlpha", abbreviation: "Alpha", definition: "Alpha tab definition"),
+        ]
+        for fixture in fixtures {
+            try seedPopulatedRawDictionaryModule(
+                named: fixture.name,
+                in: modulePath,
+                features: [],
+                entryKey: "GRACE",
+                entryXML: #"<entryFree n="GRACE">\#(fixture.definition)</entryFree>"#
+            )
+            let descriptorURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mods.d/\(fixture.name.lowercased()).conf")
+            var descriptor = try String(contentsOf: descriptorURL, encoding: .utf8)
+            descriptor.append("\nAbbreviation=\(fixture.abbreviation)\n")
+            try descriptor.write(to: descriptorURL, atomically: true, encoding: .utf8)
+        }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteModules: []
+        )
+        let orderedSources = resolver.wordLookupDictionarySources()
+        let builder = BibleReaderWordLookupDocumentBuilder(
+            installedDictionarySources: { orderedSources },
+            disabledDictionaryNames: { [] }
+        )
+
+        XCTAssertEqual(orderedSources.map(\.info.name), ["ZWordAlpha", "AWordZulu"])
+        let json = try XCTUnwrap(builder.buildWordLookupMultiDocumentJSON(query: "grace"))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+
+        XCTAssertEqual(
+            fragments.compactMap { $0["bookInitials"] as? String },
+            ["ZWordAlpha", "AWordZulu"]
+        )
+        XCTAssertEqual(
+            fragments.compactMap { $0["bookAbbreviation"] as? String },
+            ["Alpha", "Zulu"]
+        )
+    }
+
+    /**
+     Protects pinned RawLD Strong's-padding normalization and typed-family caching.
+
+     - Setup: Installs one `StrongsPadding=true` Greek dictionary whose stored pattern is `G0243`,
+       then requests raw `G243` with an isolated preferred-family cache.
+     - Expected result: JSword maps the raw family to the four-digit stored pattern, preserves that
+       stored identity in the payload, and records the raw typed family rather than padded aliases.
+     - Failure meaning: iOS requires byte-exact candidates, infers five-digit padding regardless of
+       stored pattern, or caches the resolved text rather than Android's attempted KeyType.
+     - Side effects: Writes an isolated RawLD fixture and mutates an isolated in-memory cache.
+     */
+    func testBuildStrongsMultiDocJSONUsesJSwordStrongsPaddingAndCachesTypedRawFamily() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "PaddedGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G0243",
+            entryXML: #"<entryFree n="G0243">Four-digit padded definition</entryFree>"#,
+            strongsPadding: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: cache
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let orderedAfterLookup = cache.orderedCandidates(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G244"),
+            moduleInitials: "PaddedGreek"
+        )
+
+        XCTAssertEqual(fragment["key"] as? String, "PaddedGreek--G0243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G0243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "G0243")
+        XCTAssertEqual(orderedAfterLookup.first?.family, .key)
+    }
+
+    /**
+     Protects JSword's default-enabled Strong's padding when a RawLD descriptor omits the property.
+
+     - Setup: Installs one Greek-definition RawLD book whose descriptor has no `StrongsPadding`
+       entry and whose exact stored key uses JSword's four-digit prefixed form `G0243`.
+     - Expected result: A live `G243` request resolves the stored `G0243` key and preserves that
+       actual identity in the fragment, exactly as JSword's default configuration does.
+     - Failure meaning: iOS treats an absent property as false, so ordinary dictionaries relying on
+       JSword defaults silently miss entries that Android resolves.
+     - Side effects: Writes one isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONDefaultsOmittedStrongsPaddingToTrue() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "DefaultPaddedGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G0243",
+            entryXML: #"<entryFree n="G0243">Default padded definition</entryFree>"#,
+            strongsPadding: nil
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "DefaultPaddedGreek"))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: AndroidStrongsKeyPreferenceCache()
+        )
+
+        XCTAssertNil(module.configEntry("StrongsPadding"))
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+
+        XCTAssertEqual(fragment["key"] as? String, "DefaultPaddedGreek--G0243")
+        XCTAssertEqual(fragment["keyName"] as? String, "G0243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "G0243")
+    }
+
+    /**
+     Protects RawLD's one-time first-midpoint padding-pattern selection for mixed-width indices.
+
+     - Setup: Installs an index-zero work-title row followed by sorted five- and four-digit Strong's
+       keys in a `StrongsPadding=true` single-feature dictionary.
+     - Expected result: Source order is preserved; JSword's first midpoint is `G00243`, so raw
+       request `G243` resolves that five-digit record without reconsidering the later four-digit key.
+     - Failure meaning: iOS derives padding from libsword's eventual cursor record or from every
+       binary-search probe, which can select a different logical entry from Android.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONUsesRawLDFirstMidpointPaddingPattern() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "MixedWidthGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entries: [
+                ("About", "Work title"),
+                ("G00243", #"<entryFree n="G00243">Five-digit definition</entryFree>"#),
+                ("G0243", #"<entryFree n="G0243">Four-digit definition</entryFree>"#),
+            ],
+            strongsPadding: true
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "MixedWidthGreek"))
+        XCTAssertEqual(
+            try module.loadRawDictionaryIndexSlots()?.compactMap(\.key),
+            ["About", "G00243", "G0243"]
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: AndroidStrongsKeyPreferenceCache()
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+
+        XCTAssertEqual(fragment["keyName"] as? String, "G00243")
+        XCTAssertTrue(xml.contains(">G00243\n</BVA>"), xml)
+        XCTAssertTrue(xml.contains("Five-") && xml.contains("digit definition"), xml)
+        XCTAssertFalse(xml.contains("Four-") || xml.contains("Four-digit definition"), xml)
+    }
+
+    /**
+     Protects Android's carriage-return Strong family through the physical RawLD index and payload.
+
+     - Setup: Installs five Java-sorted RawLD slots whose midpoint is zero-size and whose only match
+       is the `00243\r` family; the logical CR is encoded as two CR bytes before the LF delimiter.
+     - Expected result: Search moves right to the CR record, caches that typed family, preserves CR
+     in key metadata, sanitizes it only in the fragment ID, and serializes the generated title with
+     JDOM-compatible `&#xD;`; XML newline normalization may fold the source header delimiter text.
+     - Failure meaning: iOS strips the logical CR as a delimiter, retries an iOS-only alias, loses
+       accepted-key identity, or processes a different physical index record from Android.
+     - Side effects: Writes one isolated RawLD fixture and mutates an isolated preference cache.
+     */
+    func testBuildStrongsMultiDocJSONPreservesPhysicalRawLDCarriageReturnFamily() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "CarriageReturnGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entries: [
+                ("About", "Work title"),
+                ("00243\t", "Tab-family neighbor"),
+                ("placeholder", "unused"),
+                ("00243\r", #"<entryFree n="00243">CR definition</entryFree>"#),
+                ("00999", "Later neighbor"),
+            ],
+            zeroSizeSlotIndices: [2]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "CarriageReturnGreek"))
+        let slots = try XCTUnwrap(module.loadRawDictionaryIndexSlots())
+        XCTAssertEqual(slots.map(\.key), ["About", "00243\t", nil, "00243\r", "00999"])
+        XCTAssertEqual(slots.map { $0.size > 0 }, [true, true, false, true, true])
+
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: cache
+        )
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+        let orderedAfterLookup = cache.orderedCandidates(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G244"),
+            moduleInitials: "CarriageReturnGreek"
+        )
+
+        XCTAssertEqual(fragment["key"] as? String, "CarriageReturnGreek--00243_")
+        XCTAssertEqual(fragment["keyName"] as? String, "00243\r")
+        XCTAssertEqual(fragment["osisRef"] as? String, "00243\r")
+        XCTAssertEqual(features["keyName"] as? String, "00243\r")
+        XCTAssertEqual(orderedAfterLookup.first?.family, .zeroPaddedKeyWithCarriageReturn)
+        XCTAssertTrue(xml.contains(">00243&#xD;</BVA></title>"), xml)
+        XCTAssertTrue(xml.contains(">00243\n\n</BVA>"), xml)
+        XCTAssertTrue(xml.contains("CR definition"), xml)
+    }
+
+    /**
+     Protects Android's backend-owned RawLD key from entry-body headword revalidation.
+
+     - Setup: Stores exact index key `G243` with body metadata deliberately naming `G244`.
+     - Expected result: Android's raw key family is accepted, rendered, and recorded in the
+       preferred-family cache despite the divergent body headword.
+     - Failure meaning: iOS applies a second body/numeric/sentinel heuristic after `Book.getKey`
+       has already established ownership, dropping valid modules or selecting another family.
+     - Side effects: Writes an isolated RawLD fixture and mutates an isolated in-memory cache.
+     */
+    func testBuildStrongsMultiDocJSONAcceptsBackendOwnedKeyWithDivergentBodyMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "DivergentGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G244">Divergent body definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: cache
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let orderedAfterLookup = cache.orderedCandidates(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G244"),
+            moduleInitials: "DivergentGreek"
+        )
+
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Divergent body definition") == true)
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(orderedAfterLookup.first?.family, .key)
+    }
+
+    /**
+     Protects JSword's generated SwordDictionary title and retained RawLD key header.
+
+     - Setup: Installs an exact `G243` RawLD record whose body after the stored key is empty.
+     - Expected result: The lookup succeeds and emits the generated key title followed by the
+       physical record's key header, which pinned JSword passes through the source filter even when
+       no definition follows it; no missing document or synthetic paragraph appears.
+     - Failure meaning: iOS uses definition-body presence as ownership, forgets the title JSword
+       inserts, or strips the RawLD header before the source filter sees the complete record.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONKeepsExactEmptyRawLDBodyAsGeneratedTitle() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "EmptyBodyGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: ""
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+
+        XCTAssertEqual(fragment["keyName"] as? String, "G243")
+        XCTAssertEqual(
+            fragment["xml"] as? String,
+            #"<div><title type="x-gen"><BVA ordinal="0" xmlns="http://www.w3.org/1999/xhtml">G243</BVA></title><BVA ordinal="1" xmlns="http://www.w3.org/1999/xhtml">G243</BVA></div>"#
+        )
+    }
+
+    /**
+     Protects Android from a libsword-only unpadded numeric alias.
+
+     - Setup: Installs a Greek dictionary whose sole logical key is `243`, then requests `G243`.
+     - Expected result: The Strong-only route returns `nil` because none of Android's four exact
+       typed candidates names that record.
+     - Failure meaning: Broad numeric equivalence or an extra alias turns an Android miss into iOS
+       content and can bind the request to a distinct logical entry.
+     - Side effects: Writes an isolated RawLD fixture removed by the base test case.
+     */
+    func testBuildStrongsMultiDocJSONRejectsUnpaddedOnlyLibswordAlias() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "243",
+            entryXML: #"<entryFree n="243">iOS-only alias definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        XCTAssertNil(builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: []))
+    }
+
+    /**
+     Protects Android's observable per-book preferred Strong's key-family cache.
+
+     - Setup: A mixed-style module stores `G243` and `00243`; `G243` first resolves raw, while a
+       later `G244` lookup can succeed only through the padded family using one shared cache.
+     - Expected result: Exact accepted keys drive key/name/reference metadata, and the final `G243`
+       lookup tries the remembered padded family first even though raw still names another record.
+     - Failure meaning: Route-local builders lose history, duplicate families collapse, or lookup
+       always restarts in enum order and selects different content from Android.
+     - Side effects: Writes an isolated RawLD fixture and mutates an isolated in-memory cache.
+     */
+    func testBuildStrongsMultiDocJSONUsesRememberedKeyFamilyBeforeRawFamily() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "MixedGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entries: [
+                ("00243", #"<entryFree n="00243">Padded 243 definition</entryFree>"#),
+                ("00244", #"<entryFree n="00244">Padded 244 definition</entryFree>"#),
+                ("G243", #"<entryFree n="G243">Raw 243 definition</entryFree>"#),
+            ]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: cache
+        )
+
+        let rawJSON = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let rawPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(rawJSON.utf8)) as? [String: Any]
+        )
+        let rawFragment = try XCTUnwrap(
+            (rawPayload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let rawFeatures = try XCTUnwrap(rawFragment["features"] as? [String: Any])
+        XCTAssertEqual(rawFragment["key"] as? String, "MixedGreek--G243")
+        XCTAssertEqual(rawFragment["keyName"] as? String, "G243")
+        XCTAssertEqual(rawFragment["osisRef"] as? String, "G243")
+        XCTAssertEqual(rawFeatures["keyName"] as? String, "G243")
+
+        XCTAssertNotNil(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G244"], robinson: []),
+            "The first lookup must establish the padded-family preference"
+        )
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first
+        )
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertTrue(xml.contains("Padded 243 definition"))
+        XCTAssertFalse(xml.contains("Raw 243 definition"))
+        XCTAssertEqual(fragment["key"] as? String, "MixedGreek--00243")
+        XCTAssertEqual(fragment["keyName"] as? String, "00243")
+        XCTAssertEqual(fragment["osisRef"] as? String, "00243")
+        XCTAssertEqual(features["keyName"] as? String, "00243")
+    }
+
+    /**
+     Seeds one populated RawLD dictionary using the shared empty-module fixture metadata.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish and populate.
+       - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - features: SWORD dictionary features required by builder discovery.
+       - entryKey: Exact RawLD lookup key stored before the record separator.
+       - entryXML: Raw dictionary entry body returned for `entryKey`.
+       - caseSensitiveKeys: Optional RawLD case-sensitivity config.
+       - strongsPadding: Optional JSword Strong's-padding config.
+       - zeroSizeSlotIndices: Physical placeholder indices to retain without a data record.
+     - Side effects: Writes one `.conf`, `.dat`, and `.idx` fixture under `modulePath`.
+     - Failure modes: Propagates filesystem failures and rejects RawLD records too large for its
+       16-bit length field.
+     */
+    private func seedPopulatedRawDictionaryModule(
+        named moduleName: String,
+        in modulePath: String,
+        features: [String],
+        category: String = ModuleCategory.dictionary.rawValue,
+        entryKey: String,
+        entryXML: String,
+        caseSensitiveKeys: Bool? = nil,
+        strongsPadding: Bool? = false,
+        zeroSizeSlotIndices: Set<Int> = []
+    ) throws {
+        try seedPopulatedRawDictionaryModule(
+            named: moduleName,
+            in: modulePath,
+            features: features,
+            category: category,
+            entries: [(key: entryKey, xml: entryXML)],
+            caseSensitiveKeys: caseSensitiveKeys,
+            strongsPadding: strongsPadding,
+            zeroSizeSlotIndices: zeroSizeSlotIndices
+        )
+    }
+
+    /**
+     Seeds ordered populated RawLD dictionary records for lookup-order integration tests.
+
+     - Parameters:
+       - moduleName: SWORD module initials to publish and populate.
+       - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - features: SWORD dictionary features required by builder discovery.
+       - category: Installed-book category kept independent from the RawLD key backend.
+       - entries: Source-order exact keys and raw entry bodies; callers keep keys sorted for RawLD.
+       - caseSensitiveKeys: Optional RawLD case-sensitivity config.
+       - strongsPadding: Optional JSword Strong's-padding config.
+       - zeroSizeSlotIndices: Physical index positions written with size zero and no data payload.
+     - Side effects: Writes one `.conf`, `.dat`, and `.idx` fixture under `modulePath`.
+     - Failure modes: Propagates filesystem failures and rejects any record or cumulative offset that
+       cannot be represented by RawLD's fixed-width index.
+     */
+    private func seedPopulatedRawDictionaryModule(
+        named moduleName: String,
+        in modulePath: String,
+        features: [String],
+        category: String = ModuleCategory.dictionary.rawValue,
+        entries: [(key: String, xml: String)],
+        caseSensitiveKeys: Bool? = nil,
+        strongsPadding: Bool? = false,
+        zeroSizeSlotIndices: Set<Int> = []
+    ) throws {
+        try seedEmptyRawDictionaryModule(
+            named: moduleName,
+            in: modulePath,
+            category: category,
+            features: features,
+            caseSensitiveKeys: caseSensitiveKeys,
+            strongsPadding: strongsPadding
+        )
+
+        let moduleKey = moduleName.lowercased()
+        let dataPrefix = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("modules/lexdict/rawld/\(moduleKey)/\(moduleKey)")
+        var data = Data()
+        var index = Data()
+        for (physicalIndex, entry) in entries.enumerated() {
+            if zeroSizeSlotIndices.contains(physicalIndex) {
+                var offset = UInt32(data.count).littleEndian
+                var length = UInt16(0).littleEndian
+                Swift.withUnsafeBytes(of: &offset) { index.append(contentsOf: $0) }
+                Swift.withUnsafeBytes(of: &length) { index.append(contentsOf: $0) }
+                continue
+            }
+            let record = Data("\(entry.key)\r\n\(entry.xml)".utf8)
+            guard record.count <= Int(UInt16.max), data.count <= Int(UInt32.max) else {
+                throw NSError(
+                    domain: "BibleUI.ReaderNavigationTests.RawLDFixture",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "RawLD fixture record is too large"]
+                )
+            }
+
+            var offset = UInt32(data.count).littleEndian
+            var length = UInt16(record.count).littleEndian
+            Swift.withUnsafeBytes(of: &offset) { index.append(contentsOf: $0) }
+            Swift.withUnsafeBytes(of: &length) { index.append(contentsOf: $0) }
+            data.append(record)
+            data.append(0x0A)
+        }
+        try data.write(to: dataPrefix.appendingPathExtension("dat"))
+        try index.write(to: dataPrefix.appendingPathExtension("idx"))
+    }
+
+    /**
+     Seeds a genuine nested RawGenBook generated by SWORD's `imp2gbs` writer.
+
+     - Parameters:
+       - moduleName: Installed initials for the feature-bearing general book.
+       - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - category: Explicit configured category; driver remains RawGenBook in every fixture.
+     - Side effects: Writes the descriptor plus deterministic TreeKey index and entry bytes for
+       `Root/G243` under the isolated fixture root.
+     - Failure modes: Propagates directory/file writes and fails if the embedded writer output is
+       unexpectedly invalid base64.
+     */
+    private func seedNestedGreekDefinitionGeneralBook(
+        named moduleName: String,
+        in modulePath: String,
+        category: String = ModuleCategory.generalBook.rawValue
+    ) throws {
+        try seedEmptyRawGeneralBookModule(
+            named: moduleName,
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let moduleKey = moduleName.lowercased()
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/\(moduleKey).conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration = configuration.replacingOccurrences(
+            of: "Category=Generic Books",
+            with: "Category=\(category)"
+        )
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        let dataPrefix = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("modules/genbook/rawgenbook/\(moduleKey)/\(moduleKey)")
+        let encodedFiles = [
+            "dat": "//////////8EAAAAAAAAAAAAAP////8IAAAAUm9vdAAAAAQAAAD//////////0cyNDMAAAAEAAAA//////////9HMjQzAAgAAAAAADoAAAA=",
+            "idx": "AAAAAA8AAAA1AAAA",
+            "bdt": "PGRpdiB0eXBlPSJlbnRyeSIgbj0iRzI0MyI+TmVzdGVkIEdyZWVrIGRlZmluaXRpb248L2Rpdj4KCg==",
+        ]
+        for (extensionName, encodedData) in encodedFiles {
+            guard let data = Data(base64Encoded: encodedData) else {
+                throw NSError(
+                    domain: "BibleUI.ReaderNavigationTests.RawGenBookFixture",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid embedded RawGenBook fixture"]
+                )
+            }
+            try data.write(to: dataPrefix.appendingPathExtension(extensionName))
+        }
+    }
+
+    /**
+     Protects Android's distinction between a missing Strong's dictionary and a missing entry.
+
+     Android creates its Downloads document only when no compatible dictionary book is installed;
+     `LinkControl.getStrongsKey` returns no document when installed books contain no requested key.
+
+     - Setup: Installs an empty `GreekDef` RawLD module named `StrongsGreek`, then requests the real
+       gap `G243` reported in issue 388.
+     - Expected result: The builder returns `nil`, with no synthetic Downloads fragment.
+     - Failure meaning: iOS again treats an absent entry as an absent installation and shows a false
+       download action to users who already have the dictionary.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONReturnsNilWhenInstalledDictionaryDoesNotContainEntry() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertTrue(
+            manager.installedModules().contains {
+                $0.name == "StrongsGreek" && $0.features.contains(.greekDef)
+            },
+            "The fixture must represent an installed Android-compatible Greek Strong's dictionary"
+        )
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        XCTAssertNil(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: []),
+            "An installed dictionary miss must not produce the no-dictionary Downloads document"
+        )
+    }
+
+    /**
+     Protects installed-but-locked Strong's provenance from a false download fallback.
+
+     - Setup: Installs a populated encrypted GreekDef book with no key, builds from the production
+       inclusive resolver, then persists a verified key and rebuilds the registry.
+     - Expected result: The locked book suppresses the fake Downloads document without exposing
+       content; the fresh unlocked registry resolves the real definition.
+     - Failure meaning: Automatic discovery equates unreadable with absent, leaks locked content, or
+       caches authorization so a successful unlock remains unusable.
+     - Side effects: Rewrites one isolated fixture descriptor and removes it in base teardown.
+     */
+    func testBuildStrongsMultiDocJSONSuppressesFallbackForLockedCompatibleBookThenReadsAfterUnlock() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleName = "LockedGreekDef"
+        try seedPopulatedRawDictionaryModule(
+            named: moduleName,
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">Unlocked definition</entryFree>"#
+        )
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let lockedManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let lockedResolver = BibleReaderInstalledModuleResolver(
+            swordManager: lockedManager,
+            sqliteModules: []
+        )
+        let lockedBuilder = BibleReaderStrongsDocumentBuilder(
+            installedDictionarySources: { lockedResolver.dictionaryKeySources() },
+            installedBookMetadata: { lockedResolver.registeredBookMetadata() },
+            installedDictionarySourceNamed: {
+                lockedResolver.module(named: $0)?.explicitDictionaryKeySource
+            },
+            selectedPreferenceValues: { _ in [] },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        XCTAssertEqual(lockedManager.moduleAccessState(named: moduleName), .locked)
+        XCTAssertFalse(
+            lockedResolver.dictionaryKeySources().contains { $0.info.name == moduleName },
+            "The locked owner must remain metadata-only even when other readable books exist"
+        )
+        XCTAssertTrue(
+            lockedResolver.registeredBookMetadata().contains {
+                $0.name == moduleName && $0.features.contains(.greekDef)
+            }
+        )
+        XCTAssertNil(
+            lockedBuilder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: []),
+            "Installed locked content must suppress the fake download without being read"
+        )
+
+        configuration = configuration.replacingOccurrences(
+            of: "CipherKey=\n",
+            with: "CipherKey=verified-test-key\n"
+        )
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        let unlockedManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let unlockedResolver = BibleReaderInstalledModuleResolver(
+            swordManager: unlockedManager,
+            sqliteModules: []
+        )
+        let unlockedBuilder = BibleReaderStrongsDocumentBuilder(
+            installedDictionarySources: { unlockedResolver.dictionaryKeySources() },
+            installedBookMetadata: { unlockedResolver.registeredBookMetadata() },
+            installedDictionarySourceNamed: {
+                unlockedResolver.module(named: $0)?.explicitDictionaryKeySource
+            },
+            selectedPreferenceValues: { _ in [] },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+        let json = try XCTUnwrap(
+            unlockedBuilder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+
+        XCTAssertEqual(unlockedManager.moduleAccessState(named: moduleName), .readable)
+        XCTAssertTrue(json.contains("Unlocked definition"))
+    }
+
+    /**
+     Verifies missing-dictionary availability is evaluated for each requested Strong's number.
+
+     - Setup: Installs an empty Greek definition dictionary, leaves Hebrew definitions uninstalled,
+       and requests `G243` together with `H00430`.
+     - Expected result: The Greek entry miss is omitted while one Hebrew Downloads fragment remains.
+     - Failure meaning: A document-wide fallback check can label the wrong language as uninstalled or
+       suppress a valid install action when a mixed Strong's request has partial availability.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    func testBuildStrongsMultiDocJSONScopesInstallFallbackToEachRequestedNumber() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue }
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(
+                strongs: ["G243", "H00430"],
+                robinson: []
+            )
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        let fragment = try XCTUnwrap(fragments.first)
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragment["bookInitials"] as? String, "StrongsHebrew")
+        XCTAssertEqual(fragment["keyName"] as? String, "H00430")
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertTrue(
+            (fragment["xml"] as? String)?.contains(
+                "download://?initials=StrongsHebrew"
+            ) == true
+        )
+    }
+
+    /**
+     Verifies the reader route preserves its current page when an installed Strong's dictionary
+     lacks the requested entry, matching Android's null-result behavior.
+
+     - Setup: Routes `ab-w://?strong=G243` through a controller backed by an empty installed
+       `GreekDef` dictionary while recording Vue emissions and links-window routing.
+     - Expected result: No definition document is emitted or routed and native rendered state stays
+       unchanged.
+     - Failure meaning: A builder miss still leaks into UI navigation, clears the current content,
+       or opens a misleading Downloads document.
+     - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
+     */
+    @MainActor
+    func testStrongsLinkDoesNotNavigateWhenInstalledDictionaryDoesNotContainEntry() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var routedDefinitionDocument = false
+        controller.onOpenDefinitionDocumentInLinksWindow = { _, _, _ in
+            routedDefinitionDocument = true
+        }
+        let renderedStateBeforeLookup = controller.renderedContentState
+
+        controller.bridge(bridge, openExternalLink: "ab-w://?strong=G243")
+
+        XCTAssertFalse(routedDefinitionDocument)
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertEqual(controller.renderedContentState, renderedStateBeforeLookup)
+    }
+
+    /**
+     Verifies Android's multi-link dispatcher still opens an empty definition document on misses.
+
+     - Setup: Installs empty Greek and Hebrew definition books, then routes two Strong's query
+       values through one `ab-w` link.
+     - Expected result: The reader emits an empty `MultiDocument` with null content type and adopts
+       Android's general-book `Multi` identity instead of treating the request as one failed link.
+     - Failure meaning: iOS has collapsed Android's `openMulti` branch into the single-link no-op
+       path and leaves users on unrelated content after a handled multi-definition request.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMultiStrongsLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsHebrew",
+            in: modulePath,
+            features: ["HebrewDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&strong=H00430"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "multi")
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertEqual(
+            controller.renderedContentState,
+            "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
+        )
+    }
+
+    /**
+     Verifies mixed Strong's/morphology multi-links retain Android's empty-Multi miss contract.
+
+     - Setup: Installs empty Greek-definition and Robinson books, then routes one Strong's and one
+       morphology value in a single `ab-w` request.
+     - Expected result: One empty null-content-type `MultiDocument` is emitted.
+     - Failure meaning: Definition type, rather than Android route cardinality, still controls
+       whether an all-miss multi request navigates.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMixedDefinitionMultiLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&robinson=V-PAI-3S"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
+    }
+
+    /**
+     Verifies one successful child remains the complete result of an Android multi-definition link.
+
+     - Setup: Installs a Greek definition for `G243` plus an empty Hebrew definition book, then
+       requests both values in one `ab-w` link.
+     - Expected result: The emitted Multi contains only the genuine Greek fragment and Strong's
+       content type; the Hebrew entry miss does not become Downloads or an empty-document override.
+     - Failure meaning: The empty-Multi correction can replace partial results or revive issue #388's
+       misleading missing-installation fallback.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testMultiStrongsLinkKeepsPartialHitWithoutMissFallback() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">another</entryFree>"#
+        )
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsHebrew",
+            in: modulePath,
+            features: ["HebrewDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=G243&strong=H00430"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.count, 1)
+        XCTAssertEqual(fragments.first?["bookInitials"] as? String, "StrongsGreek")
+        XCTAssertEqual(fragments.first?["keyName"] as? String, "G243")
+        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertFalse((fragments.first?["xml"] as? String)?.contains("download://") == true)
+    }
+
+    /**
+     Verifies Android definition children retain their mixed query-type order in the emitted tabs.
+
+     - Setup: Installs matching Robinson and Greek definition entries, then requests morphology
+       before Strong's in one `ab-w` multi-link.
+     - Expected result: The Robinson fragment remains first and the Greek fragment remains second.
+     - Failure meaning: Routing or payload construction has regrouped children by definition type
+       and visibly changed Android's multi-document tab order.
+     - Side effects: Writes isolated SWORD fixtures removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testInterleavedDefinitionLinkPreservesAndroidFragmentOrder() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "Robinson",
+            in: modulePath,
+            features: ["GreekParse"],
+            entryKey: "V-PAI-3S",
+            entryXML: #"<entryFree n="V-PAI-3S">verb</entryFree>"#
+        )
+        try seedPopulatedRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"],
+            entryKey: "G243",
+            entryXML: #"<entryFree n="G243">another</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?robinson=V-PAI-3S&strong=G243"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.map { $0["bookInitials"] as? String }, ["Robinson", "StrongsGreek"])
+        XCTAssertEqual(fragments.map { $0["keyName"] as? String }, ["V-PAI-3S", "G243"])
+    }
+
+    /**
+     Verifies ignored empty query children still select Android's multi-link execution branch.
+
+     - Setup: Installs an empty Greek definition book and routes one empty unknown child before one
+       unresolved Strong's child.
+     - Expected result: Raw child cardinality selects `openMulti`, producing an empty Multi document.
+     - Failure meaning: iOS counts only recognized nonempty definitions and incorrectly treats the
+       request as Android's single-link no-op branch.
+     - Side effects: Writes an isolated SWORD fixture removed by the base test case and records bridge
+       scripts in memory.
+     */
+    @MainActor
+    func testUnknownEmptyDefinitionChildStillSelectsMultiDispatch() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "StrongsGreek",
+            in: modulePath,
+            features: ["GreekDef"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?lemma.TR=&strong=G243"
+        )
+
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue(payload["contentType"] is NSNull)
     }
 
     @MainActor
@@ -263,10 +2234,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let features = try XCTUnwrap(fragment["features"] as? [String: Any])
 
         XCTAssertEqual(payload["type"] as? String, "multi")
-        XCTAssertEqual(payload["contentType"] as? String, "strongs")
+        XCTAssertTrue(payload["contentType"] is NSNull)
         XCTAssertEqual(fragment["bookCategory"] as? String, "DICTIONARY")
-        XCTAssertEqual(features["type"] as? String, "hebrew")
-        XCTAssertEqual(features["keyName"] as? String, "00430")
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertEqual(fragment["keyName"] as? String, "H00430")
         XCTAssertEqual(
             controller.renderedContentState,
             "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
@@ -287,7 +2258,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
 
         let payload = try XCTUnwrap(routedPayload)
-        XCTAssertTrue(payload.json.contains(#""contentType":"strongs""#))
+        XCTAssertTrue(payload.json.contains(#""contentType":null"#))
         XCTAssertEqual(payload.book, "Strongs")
         XCTAssertEqual(payload.key, "strongs")
         XCTAssertEqual(controller.renderedContentState, BibleReaderController.emptyRenderedContentState)
@@ -344,7 +2315,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedKey: "strongs"
         )
 
-        let androidBookAndKeyListRef = "StrongsHebrew:00430"
+        let androidBookAndKeyListRef = "StrongsHebrew:H00430"
         XCTAssertEqual(controller.currentCategory, .generalBook)
         XCTAssertEqual(controller.currentGeneralBookKey, androidBookAndKeyListRef)
         XCTAssertTrue(controller.hasStrongs)
@@ -453,6 +2424,84 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.generalBookDocument, "Multi")
         XCTAssertEqual(pageManager.generalBookKey, "KJV:Gen.1.1||KJV:John.3.16")
         XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Rejects installed wrong-category identities in optional general-book and map restore fields.
+
+     - Setup: Registers one readable dictionary, then restores two fresh panes whose general-book
+       and map fields each point at that dictionary while their visible categories request the
+       corresponding optional document.
+     - Expected: Both restores leave controller module/key/category state, PageManager values,
+       persistence count, and bridge emissions byte-for-byte unchanged.
+     - Failure meaning: Category checks guard only the happy-path handle assignment while a fallback
+       branch still reinterprets a globally owned dictionary as a general book or map.
+     - Side effects: Writes one inherited temporary SWORD fixture and two in-memory pane models.
+     */
+    @MainActor
+    func testRestoreRejectsWrongCategoryGeneralBookAndMapWithoutMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(named: "WrongRestoreCategory", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+
+        for (categoryName, configurePageManager) in [
+            (
+                DocumentCategory.generalBook.pageManagerKey,
+                { (pageManager: PageManager) in
+                    pageManager.generalBookDocument = "WrongRestoreCategory"
+                    pageManager.generalBookKey = "wrong-general-key"
+                }
+            ),
+            (
+                DocumentCategory.map.pageManagerKey,
+                { (pageManager: PageManager) in
+                    pageManager.mapDocument = "WrongRestoreCategory"
+                    pageManager.mapKey = "wrong-map-key"
+                }
+            ),
+        ] {
+            let (bridge, recordedScripts) = makeRecordingBridge()
+            let controller = BibleReaderController(
+                bridge: bridge,
+                swordManagerOverride: manager
+            )
+            let window = Window(isSynchronized: false, isLinksWindow: false)
+            let pageManager = PageManager(id: window.id, currentCategoryName: categoryName)
+            configurePageManager(pageManager)
+            window.pageManager = pageManager
+            controller.activeWindow = window
+            let baselineCategory = controller.currentCategory
+            let baselineGeneralBookName = controller.activeGeneralBookModuleName
+            let baselineGeneralBookKey = controller.currentGeneralBookKey
+            let baselineMapName = controller.activeMapModuleName
+            let baselineMapKey = controller.currentMapKey
+            let baselineScripts = recordedScripts().count
+            var persistCount = 0
+            controller.onPersistState = { persistCount += 1 }
+
+            controller.restoreSavedPosition()
+
+            XCTAssertEqual(controller.currentCategory, baselineCategory)
+            XCTAssertEqual(controller.activeGeneralBookModuleName, baselineGeneralBookName)
+            XCTAssertEqual(controller.currentGeneralBookKey, baselineGeneralBookKey)
+            XCTAssertEqual(controller.activeMapModuleName, baselineMapName)
+            XCTAssertEqual(controller.currentMapKey, baselineMapKey)
+            XCTAssertEqual(pageManager.currentCategoryName, categoryName)
+            XCTAssertEqual(pageManager.generalBookDocument,
+                           categoryName == DocumentCategory.generalBook.pageManagerKey
+                               ? "WrongRestoreCategory" : nil)
+            XCTAssertEqual(pageManager.generalBookKey,
+                           categoryName == DocumentCategory.generalBook.pageManagerKey
+                               ? "wrong-general-key" : nil)
+            XCTAssertEqual(pageManager.mapDocument,
+                           categoryName == DocumentCategory.map.pageManagerKey
+                               ? "WrongRestoreCategory" : nil)
+            XCTAssertEqual(pageManager.mapKey,
+                           categoryName == DocumentCategory.map.pageManagerKey
+                               ? "wrong-map-key" : nil)
+            XCTAssertEqual(persistCount, 0)
+            XCTAssertEqual(recordedScripts().count, baselineScripts)
+        }
     }
 
     /**
@@ -620,6 +2669,76 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             controller.renderedContentState,
             "category=commentary;module=Memorize;book=Genesis 1:1-3;chapter=none;key=memorize:KJV:\(startOrdinal)-\(endOrdinal)"
         )
+    }
+
+    /**
+     Rejects a restored Memorize source that was relocked before process restoration.
+
+     - Setup: Publishes a KJV-backed alias whose descriptor is already locked, restores Android's
+       `commentary/Memorize` identity with that alias in the persisted `BookAndKey`, and retains a
+       recording bridge plus the pre-load controller state.
+     - Expected result: The inclusive manager can still identify the installed module, but the
+       readable resolver rejects it; loading emits no Vue document, does not strip source text, and
+       leaves the Memorize identity and rendered state unchanged.
+     - Failure meaning: Process restoration can bypass a relock through `module(named:)`, or can
+       reinterpret an authorization failure as unrelated commentary content.
+     - Side effects: Writes only an inherited temporary SWORD descriptor and in-memory settings.
+     */
+    @MainActor
+    func testRestoredAndroidMemorizeDocumentRejectsRelockedSourceWithoutMutation() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleName = "LockedMemorize"
+        try seedBibleAliasModule(
+            named: moduleName,
+            description: "Locked Memorize Bible",
+            in: modulePath
+        )
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertNotNil(manager.module(named: moduleName))
+        XCTAssertNil(manager.readableModule(named: moduleName))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let settingsStore = try makeInMemorySettingsStore()
+        controller.settingsStore = settingsStore
+        let ordinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1)
+        )
+        let window = Window(isSynchronized: false, isLinksWindow: true)
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.commentary.pageManagerKey
+        )
+        pageManager.commentaryDocument = "Memorize"
+        pageManager.commentaryAnchorOrdinal = ordinal
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).setPageManagerEntry(
+            .init(
+                windowID: window.id,
+                rawCurrentCategoryName: "COMMENTARY",
+                commentarySourceBookAndKey: "{\"document\":\"\(moduleName)\",\"htmlId\":null,\"key\":\"Gen.1.1\",\"ordinalRange\":null}",
+                dictionaryAnchorOrdinal: nil,
+                generalBookAnchorOrdinal: nil,
+                mapAnchorOrdinal: nil
+            )
+        )
+        controller.restoreSavedPosition()
+        let baselineScripts = recordedScripts().count
+        let baselineRenderedState = controller.renderedContentState
+
+        controller.loadCurrentContent()
+
+        XCTAssertEqual(recordedScripts().count, baselineScripts)
+        XCTAssertEqual(controller.renderedContentState, baselineRenderedState)
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.activeModuleName(for: .commentary), "Memorize")
+        XCTAssertTrue(controller.isShowingAndroidMemorizeDocument)
     }
 
     /**
@@ -807,9 +2926,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let fragment = try XCTUnwrap(fragments.first)
         let features = try XCTUnwrap(fragment["features"] as? [String: Any])
 
-        XCTAssertEqual(payload["contentType"] as? String, "strongs")
-        XCTAssertEqual(features["type"] as? String, "hebrew")
-        XCTAssertEqual(features["keyName"] as? String, "00430")
+        XCTAssertTrue(payload["contentType"] is NSNull)
+        XCTAssertTrue(features.isEmpty)
+        XCTAssertEqual(fragment["keyName"] as? String, "H00430")
         XCTAssertNotEqual(fragment["osisRef"] as? String, "Gen.1")
         XCTAssertEqual(
             controller.renderedContentState,
@@ -1493,15 +3612,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(
             router.route(for: "ab-w://?strong=H0430&robinson=N-NSM"),
-            .definition(strongs: ["H0430"], robinson: ["N-NSM"])
+            .multiDefinition(items: [.strong("H0430"), .robinson("N-NSM")])
         )
         XCTAssertEqual(
             router.route(for: "strongs://G2316"),
-            .definition(strongs: ["G2316"], robinson: [])
+            .definition(items: [.strong("G2316")])
         )
         XCTAssertEqual(
             router.route(for: "morphology://robinson/V-PAI-3S"),
-            .definition(strongs: [], robinson: ["V-PAI-3S"])
+            .definition(items: [.robinson("V-PAI-3S")])
         )
         XCTAssertEqual(
             router.route(for: "ab-find-all://?type=hebrew&name=5775"),
@@ -1554,11 +3673,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             router.route(for: "S:G2424"),
-            .definition(strongs: ["G2424"], robinson: [])
+            .definition(items: [.strong("G2424")])
         )
         XCTAssertEqual(
             router.route(for: "#dH0430"),
-            .definition(strongs: ["H0430"], robinson: [])
+            .definition(items: [.strong("H0430")])
         )
         XCTAssertEqual(
             router.route(for: "https://andbible.org"),
@@ -2822,6 +4941,186 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies local full-name aliases retain Android's canonical My Documents identity and key.
+
+     - Setup: Persists a two-page local document, loads its second page through an exact full-name
+       token, then restores a fresh pane whose saved document uses the case-insensitive full-name
+       tier accepted by `Books.getBook`.
+     - Expected result: Both paths read the requested second page through canonical initials, expose
+       canonical active state, and normalize the restored PageManager document token.
+     - Failure meaning: Global lookup can select the correct local owner while a downstream exact-
+       initials database query drops the requested key, falls back to page one, or fails to render.
+     - Side effects: Uses an in-memory SwiftData graph and bridge recorder; restore records one
+       persistence callback when it canonicalizes the saved alias.
+     */
+    @MainActor
+    func testMyDocumentFullNameAliasesLoadAndRestoreCanonicalRequestedPage() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let document = MyDocument(name: "Canonical Local Name", initials: "LOCALCANON")
+        let firstPage = MyDocumentPage(
+            title: "First",
+            pageKey: "first",
+            contentType: .markdown,
+            orderNumber: 0
+        )
+        let secondPage = MyDocumentPage(
+            title: "Second",
+            pageKey: "second",
+            contentType: .markdown,
+            orderNumber: 1
+        )
+        firstPage.pageContent = MyDocumentPageContent(
+            pageId: firstPage.id,
+            content: "First body"
+        )
+        secondPage.pageContent = MyDocumentPageContent(
+            pageId: secondPage.id,
+            content: "Second body"
+        )
+        firstPage.document = document
+        secondPage.document = document
+        document.pages = [firstPage, secondPage]
+        context.insert(document)
+        context.insert(firstPage)
+        context.insert(secondPage)
+        try context.save()
+
+        let loadedWindow = Window()
+        loadedWindow.pageManager = PageManager(id: loadedWindow.id)
+        let loadedController = BibleReaderController(bridge: bridge)
+        loadedController.myDocumentStore = store
+        loadedController.activeWindow = loadedWindow
+
+        XCTAssertTrue(
+            loadedController.loadMyDocumentPage(
+                bookInitials: document.name,
+                pageKey: secondPage.pageKey
+            )
+        )
+        XCTAssertEqual(loadedController.activeGeneralBookModuleName, document.initials)
+        XCTAssertEqual(loadedController.currentGeneralBookKey, secondPage.pageKey)
+        XCTAssertEqual(loadedWindow.pageManager?.generalBookDocument, document.initials)
+        XCTAssertEqual(loadedWindow.pageManager?.generalBookKey, secondPage.pageKey)
+        XCTAssertTrue(recordedScripts().contains { $0.contains("Second body") })
+
+        let restoredWindow = Window()
+        let restoredPageManager = PageManager(
+            id: restoredWindow.id,
+            currentCategoryName: DocumentCategory.generalBook.pageManagerKey
+        )
+        restoredPageManager.generalBookDocument = document.name.lowercased()
+        restoredPageManager.generalBookKey = secondPage.pageKey
+        restoredWindow.pageManager = restoredPageManager
+        let restoredController = BibleReaderController(bridge: BibleBridge())
+        restoredController.myDocumentStore = store
+        restoredController.activeWindow = restoredWindow
+        var persistCount = 0
+        restoredController.onPersistState = { persistCount += 1 }
+
+        restoredController.restoreSavedPosition()
+
+        XCTAssertEqual(restoredController.activeGeneralBookModuleName, document.initials)
+        XCTAssertEqual(restoredController.currentGeneralBookKey, secondPage.pageKey)
+        XCTAssertEqual(restoredPageManager.generalBookDocument, document.initials)
+        XCTAssertEqual(restoredPageManager.generalBookKey, secondPage.pageKey)
+        XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Rejects direct My Documents copy/share/save calls when Android's installed registry owns the
+     supplied exact-initials, full-name, or Java case-insensitive token.
+
+     - Setup: Registers the KJV fixture and colliding local documents whose initials equal each
+       supported installed lookup tier, then sends the three direct bridge actions for every page.
+     - Expected result: The shared raw-content gate rejects each token, the share callback remains
+       untouched, and every local page retains its original title/body before copy/share/save work.
+     - Failure meaning: A stale or forged My Documents payload can disclose or mutate a local page
+       after an installed book claims the same Android `Books.getBook` identity.
+     - Side effects: Uses temporary SWORD files and an in-memory SwiftData graph; inherited teardown
+       removes the module fixture and no platform pasteboard read is required.
+     */
+    @MainActor
+    func testMyDocumentContentActionsRejectEveryInstalledOwnerIdentityTier() throws {
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let installed = try XCTUnwrap(
+            manager.installedModules().first(where: { $0.name == "KJV" })
+        )
+        let ownerTokens = [installed.name, installed.description, installed.name.lowercased()]
+        XCTAssertEqual(Set(ownerTokens).count, 3)
+
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        var fixtures: [(document: MyDocument, page: MyDocumentPage)] = []
+        for (index, token) in ownerTokens.enumerated() {
+            let pageID = try XCTUnwrap(
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", index + 1))
+            )
+            let document = MyDocument(name: "Local collision \(index)", initials: token)
+            let page = MyDocumentPage(
+                id: pageID,
+                title: "Original \(index)",
+                pageKey: "entry-\(index)",
+                contentType: .markdown
+            )
+            let content = MyDocumentPageContent(
+                pageId: pageID,
+                content: "Private local body \(index)"
+            )
+            page.pageContent = content
+            page.document = document
+            document.pages = [page]
+            context.insert(document)
+            context.insert(page)
+            context.insert(content)
+            fixtures.append((document, page))
+        }
+        try context.save()
+
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        controller.myDocumentStore = MyDocumentStore(modelContext: context)
+        var sharedPayloads: [MyDocumentSharePayload] = []
+        controller.onShareMyDocumentContent = { sharedPayloads.append($0) }
+
+        for (index, fixture) in fixtures.enumerated() {
+            XCTAssertNil(
+                controller.authorizedMyDocumentRawContentPayload(
+                    bookInitials: fixture.document.initials,
+                    pageKey: fixture.page.pageKey
+                )
+            )
+            controller.bridge(
+                bridge,
+                copyMyDocumentContent: fixture.document.initials,
+                pageKey: fixture.page.pageKey
+            )
+            controller.bridge(
+                bridge,
+                shareMyDocumentContent: fixture.document.initials,
+                pageKey: fixture.page.pageKey
+            )
+            controller.bridge(
+                bridge,
+                saveMyDocumentPageContent: fixture.document.initials,
+                pageId: fixture.page.id.uuidString,
+                content: "Leaked replacement \(index)",
+                title: "Leaked title \(index)"
+            )
+
+            XCTAssertEqual(fixture.page.title, "Original \(index)")
+            XCTAssertEqual(fixture.page.pageContent?.content, "Private local body \(index)")
+        }
+
+        XCTAssertTrue(sharedPayloads.isEmpty)
+    }
+
+    /**
      Verifies editing a visible My Documents page persists raw Markdown and reloads Android's
      processed general-book document instead of stale source text.
 
@@ -2910,9 +5209,24 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(reloadedXML.contains("Original *markdown*"))
     }
 
+    /**
+     Verifies AI-page regeneration and deletion retain Android's ownership and fallback contracts.
+
+     - Setup: Builds isolated My Documents records and injects the inherited temporary KJV SWORD
+       fixture, preventing globally installed simulator modules from changing the reader fallback.
+     - Expected result: Only the AI page can regenerate or delete; deletion restores the owned KJV
+       Bible page, persists once, and clears the prior rendered document.
+     - Failure meaning: AI metadata routing, deletion authorization, reader fallback, or test fixture
+       isolation has regressed.
+     - Side effects: Mutates only an in-memory My Documents store and a temporary SWORD tree removed
+       by inherited teardown; bridge and persistence effects are captured by local probes.
+     */
     @MainActor
     func testMyDocumentAIPageBridgeDeletesActivePageAndHandsOffRegeneration() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
         let store = MyDocumentStore(modelContext: context)
@@ -2960,7 +5274,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         context.insert(userContent)
         try context.save()
 
-        let controller = BibleReaderController(bridge: bridge)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.myDocumentStore = store
         var regeneratedContext: MyDocumentAIPageActionContext?
         var persistCount = 0

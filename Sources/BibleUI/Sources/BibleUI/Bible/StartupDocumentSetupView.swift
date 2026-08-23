@@ -166,15 +166,18 @@ struct StartupDocumentSetupView: View {
             .accessibilityIdentifier("startupDocumentSetupWelcomeText")
     }
 
-    /// Localized welcome message matching Android's no-Bible copy when setup is required.
+    /// Localized welcome message matching the resolved blocking setup reason.
     private var welcomeMessage: String {
-        String(
-            format: String(
-                localized: "welcome_message",
-                defaultValue: "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document."
-            ),
-            String(localized: "app_name_long", defaultValue: "AndBible: Bible Study")
-        )
+        switch presentation.reason {
+        case .noBibleModules, .lockedBibleModules:
+            return String(
+                format: String(
+                    localized: "welcome_message",
+                    defaultValue: "Thank you for downloading %@. There are currently no Bibles or documents installed. To continue, please install at least 1 document by downloading from the internet, or by loading from a zip file document."
+                ),
+                String(localized: "app_name_long", defaultValue: "AndBible: Bible Study")
+            )
+        }
     }
 
     /// Supported-file text copied from Android's first-download page.

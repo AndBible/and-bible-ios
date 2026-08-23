@@ -58,6 +58,124 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
     }
 
     /**
+     Protects strict identity admission from treating absent Android family roots as an error.
+
+     - Setup: Creates only the parent module root, with no MyBible, MySword, or e-Sword directories.
+     - Expected result: The strict snapshot succeeds empty and does not create any family directory.
+     - Failure meaning: A read-only registry check either mutates the module store or cannot represent
+       a clean installation that has never installed a SQLite document.
+     - Side effects: Creates and later removes one otherwise-empty temporary parent directory.
+     */
+    func testStrictRegistrationSnapshotLeavesMissingFamilyRootsAbsent() throws {
+        let root = try makeRoot()
+
+        let snapshot = try SQLiteDocumentModuleLibrary.throwingRegistrationSnapshot(
+            moduleRootURL: root
+        )
+
+        XCTAssertTrue(snapshot.registrationCandidates.isEmpty)
+        XCTAssertTrue(snapshot.diagnostics.isEmpty)
+        for family in ["mybible", "mysword", "esword"] {
+            XCTAssertFalse(FileManager.default.fileExists(
+                atPath: root.appendingPathComponent(family, isDirectory: true).path
+            ))
+        }
+    }
+
+    /**
+     Protects strict admission from rejecting Android's deterministic duplicate omission.
+
+     - Setup: Installs the matching legacy and HTML e-Sword fixtures whose exposed initials collide.
+     - Expected result: The strict snapshot retains both raw registration candidates, exposes one
+       typed duplicate diagnostic, and registers only the first owner exactly as Android does.
+     - Failure meaning: A valid installed library can block every later EPUB, MyDocument, and AI
+       identity publication even though Android resolves the duplicate by add-order replay.
+     - Side effects: Copies two checked-in SQLite fixtures into a temporary e-Sword family root.
+     */
+    func testStrictRegistrationSnapshotAllowsDeterministicDuplicateOmission() throws {
+        let root = try makeRoot()
+        try copyFixture("sample.bblx", to: root.appendingPathComponent("esword/sample.bblx"))
+        try copyFixture("sample.bbli", to: root.appendingPathComponent("esword/sample.bbli"))
+
+        let snapshot = try SQLiteDocumentModuleLibrary.throwingRegistrationSnapshot(
+            moduleRootURL: root
+        )
+
+        XCTAssertEqual(snapshot.registrationCandidates.count, 2)
+        XCTAssertEqual(snapshot.modules.count, 1)
+        XCTAssertEqual(snapshot.diagnostics.count, 1)
+        XCTAssertEqual(snapshot.diagnostics.first?.kind, .duplicateRegistration)
+    }
+
+    /**
+     Protects fail-closed admission when permissive discovery cannot enumerate one family root.
+
+     - Setup: Places immutable bytes at the `mybible` directory path while leaving sibling family
+       roots absent; ordinary discovery would silently treat this state as an empty family.
+     - Expected result: Strict discovery reports the existing non-directory root, preserves its
+       bytes, and creates no sibling family roots or staging artifacts.
+     - Failure meaning: A hidden SQLite owner can be omitted from global identity admission, or a
+       supposedly read-only registry snapshot can mutate the module store while rejecting it.
+     - Side effects: Writes one temporary sentinel file and reads its metadata and contents.
+     */
+    func testStrictRegistrationSnapshotRejectsNonDirectoryFamilyRootWithoutArtifacts() throws {
+        let root = try makeRoot()
+        let familyRoot = root.appendingPathComponent("mybible", isDirectory: true)
+        let sentinel = Data("not a directory".utf8)
+        try sentinel.write(to: familyRoot)
+
+        XCTAssertThrowsError(
+            try SQLiteDocumentModuleLibrary.throwingRegistrationSnapshot(moduleRootURL: root)
+        ) { error in
+            let snapshotError = error as? SQLiteDocumentModuleRegistrySnapshotError
+            XCTAssertEqual(snapshotError?.diagnostics.count, 1)
+            XCTAssertEqual(
+                snapshotError?.diagnostics.first?.sourceURL.standardizedFileURL.path,
+                familyRoot.standardizedFileURL.path
+            )
+            XCTAssertTrue(
+                snapshotError?.diagnostics.first?.message.contains("not a readable") == true
+            )
+        }
+
+        XCTAssertEqual(try Data(contentsOf: familyRoot), sentinel)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["mybible"])
+    }
+
+    /**
+     Protects strict admission from silently following a candidate link normal discovery may omit.
+
+     - Setup: Links an accepted MySword filename to a readable database outside its family root.
+     - Expected result: The strict snapshot rejects the symbolic link before opening its target and
+       leaves the family tree and external database unchanged.
+     - Failure meaning: Registration ownership can depend on a mutable or escaped link target, so an
+       identity may change after admission without participating in the global mutation lease.
+     - Side effects: Creates a temporary fixture copy and one symbolic link, then reads metadata.
+     */
+    func testStrictRegistrationSnapshotRejectsSymbolicLinkCandidate() throws {
+        let root = try makeRoot()
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        let target = outside.appendingPathComponent("target.mybible")
+        try copyFixture("sample.bbl.mybible", to: target)
+        let familyRoot = root.appendingPathComponent("mysword", isDirectory: true)
+        try FileManager.default.createDirectory(at: familyRoot, withIntermediateDirectories: true)
+        let link = familyRoot.appendingPathComponent("linked.mybible")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let original = try Data(contentsOf: target)
+
+        XCTAssertThrowsError(
+            try SQLiteDocumentModuleLibrary.throwingRegistrationSnapshot(moduleRootURL: root)
+        ) { error in
+            let snapshotError = error as? SQLiteDocumentModuleRegistrySnapshotError
+            XCTAssertEqual(snapshotError?.diagnostics.first?.sourceURL, link)
+            XCTAssertTrue(snapshotError?.diagnostics.first?.message.contains("symbolic link") == true)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: link.path))
+    }
+
+    /**
      Pins Android `DocumentBibleBooks` visibility and static KJVA chooser chapter counts.
 
      - Setup: Creates Genesis with 1:1 plus an impossible extra chapter, Exodus with only 1:2,
@@ -377,13 +495,14 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
     /**
      Protects Java's non-expanding UTF-16 `String.equalsIgnoreCase` identity edge cases.
 
-     - Setup: Compares every OpenJDK BMP lowercase alias class, one pair from each supplementary
-       cased range, newer Unicode pairs absent from Java 17, sharp s, and equivalent accents.
-     - Expected result: Java 17 BMP and supplementary pairs compare equal; newer Apple-only pairs,
-       multi-character expansion, and composed/decomposed strings remain distinct.
+     - Setup: Compares established BMP aliases, Android 37 ICU 78.3 pairs newer than OpenJDK 17,
+       supplementary case pairs, sharp s, and equivalent accents.
+     - Expected result: Android BMP pairs compare equal, while supplementary pairs remain distinct
+       because Java's `String.equalsIgnoreCase` iterates UTF-16 `char`s rather than code points;
+       multi-character expansion and composed/decomposed strings also remain distinct.
      - Failure meaning: Foundation's full-string case mapping can hide, merge, or misroute module
        identities differently from Android's installed-book registry.
-     - Side effects: Loads the checked-in Java lowercase oracle table once; performs no I/O writes.
+     - Side effects: Loads the checked-in Android character oracle table once; performs no writes.
      */
     func testSQLiteDocumentIdentityMatchesJavaUTF16EqualsIgnoreCaseEdges() {
         XCTAssertEqual(SQLiteDocumentIdentity("İ"), SQLiteDocumentIdentity("i"))
@@ -425,10 +544,10 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
             ("\u{1E900}", "\u{1E922}"), // Adlam
         ]
         for (uppercase, lowercase) in supplementaryPairs {
-            XCTAssertEqual(SQLiteDocumentIdentity(uppercase), SQLiteDocumentIdentity(lowercase))
+            XCTAssertNotEqual(SQLiteDocumentIdentity(uppercase), SQLiteDocumentIdentity(lowercase))
         }
 
-        let newerUnicodePairsAbsentFromJava17: [(String, String)] = [
+        let android37UnicodePairs: [(String, String)] = [
             ("\u{019B}", "\u{A7DC}"),
             ("\u{0264}", "\u{A7CB}"),
             ("\u{1C8A}", "\u{1C89}"),
@@ -443,8 +562,8 @@ final class SQLiteDocumentModuleLibraryTests: XCTestCase {
             ("\u{A7D9}", "\u{A7D8}"),
             ("\u{A7DB}", "\u{A7DA}"),
         ]
-        for (lowercase, uppercase) in newerUnicodePairsAbsentFromJava17 {
-            XCTAssertNotEqual(SQLiteDocumentIdentity(lowercase), SQLiteDocumentIdentity(uppercase))
+        for (lowercase, uppercase) in android37UnicodePairs {
+            XCTAssertEqual(SQLiteDocumentIdentity(lowercase), SQLiteDocumentIdentity(uppercase))
         }
 
         XCTAssertEqual(SQLiteDocumentIdentity("ß"), SQLiteDocumentIdentity("ẞ"))

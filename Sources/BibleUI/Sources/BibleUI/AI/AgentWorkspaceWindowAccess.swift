@@ -2,6 +2,7 @@
 
 import BibleCore
 import Foundation
+import SwordKit
 
 private struct BibleUIAgentWindowStateValue {
     let documentInitials: String?
@@ -46,29 +47,42 @@ extension BibleUIAgentDomainAdapter {
         ))
     }
 
-    /** Creates a cloned window and optionally routes it to a validated document and key. */
+    /**
+     Creates a cloned window and optionally routes it to a validated document and key.
+
+     - Parameters:
+       - documentInitials: Optional installed/local lookup token resolved to canonical initials.
+       - key: Optional category-specific destination key already validated by the live router.
+       - minimized: Whether the successfully created window should begin minimized.
+     - Returns: Android-shaped window metadata after the router reports the exact canonical owner.
+     - Side effects: Creates a workspace window, routes its pane, and may minimize it. Any routing
+       failure removes the newly created window before returning.
+     - Throws: Stable window-domain errors for creation, routing, or Java-distinct postcondition
+       mismatches; cancellation is propagated after removing the provisional window.
+     */
     func createWindow(
         documentInitials: String?,
         key: String?,
         minimized: Bool
     ) async throws -> AgentToolResult {
-        if let documentInitials {
-            try requireWindowDocument(documentInitials)
-        }
+        let resolvedDocumentInitials = try documentInitials.map(requireWindowDocument)
         guard let window = windowManager.addWindow(from: windowManager.activeWindow) else {
             throw windowDomainError("CREATE_ERROR", "The workspace window could not be created.")
         }
 
         var routedState: BibleUIAgentWindowDocumentState?
-        if let documentInitials {
+        if let resolvedDocumentInitials {
             do {
                 let observed = try await windowDocumentRouter.setDocument(
                     windowID: window.id,
-                    documentInitials: documentInitials,
+                    documentInitials: resolvedDocumentInitials,
                     key: key
                 )
                 guard observed.windowID == window.id,
-                      observed.documentInitials == documentInitials else {
+                      SwordJavaStringIdentity.equals(
+                        observed.documentInitials,
+                        resolvedDocumentInitials
+                      ) else {
                     throw windowDomainError(
                         "SET_ERROR",
                         "The new window did not reach the requested document."
@@ -162,13 +176,25 @@ extension BibleUIAgentDomainAdapter {
         ))
     }
 
-    /** Routes a validated document mutation to a specific or active live pane. */
+    /**
+     Routes a validated document mutation to a specific or active live pane.
+
+     - Parameters:
+       - windowID: Optional stable window identity; nil selects the active window.
+       - documentInitials: Installed/local lookup token resolved to canonical initials.
+       - key: Optional category-specific destination key preflighted by the live router.
+     - Returns: Android-shaped state only after the target window reports the Java-exact canonical
+       document owner.
+     - Side effects: May replace content in one live pane through the injected UI router.
+     - Throws: Stable not-found, access, routing, and Java-distinct postcondition errors; cancellation
+       is propagated unchanged.
+     */
     func setWindowDocument(
         windowID: UUID?,
         documentInitials: String,
         key: String?
     ) async throws -> AgentToolResult {
-        try requireWindowDocument(documentInitials)
+        let resolvedDocumentInitials = try requireWindowDocument(documentInitials)
         let target: Window
         if let windowID {
             guard let resolved = windowManager.windowsInPersistedOrder.first(where: {
@@ -190,7 +216,7 @@ extension BibleUIAgentDomainAdapter {
         do {
             observed = try await windowDocumentRouter.setDocument(
                 windowID: target.id,
-                documentInitials: documentInitials,
+                documentInitials: resolvedDocumentInitials,
                 key: key
             )
         } catch is CancellationError {
@@ -201,7 +227,10 @@ extension BibleUIAgentDomainAdapter {
             throw windowDomainError("SET_ERROR", "The window document could not be changed.")
         }
         guard observed.windowID == target.id,
-              observed.documentInitials == documentInitials else {
+              SwordJavaStringIdentity.equals(
+                observed.documentInitials,
+                resolvedDocumentInitials
+              ) else {
             throw windowDomainError("SET_ERROR", "The window did not reach the requested document.")
         }
         return try BibleUIAgentJSON.success(BibleUIAgentJSON.object(
@@ -262,18 +291,34 @@ extension BibleUIAgentDomainAdapter {
         )
     }
 
-    private func requireWindowDocument(_ initials: String) throws {
-        guard documentAccessPolicy.allows(documentInitials: initials) else {
+    /**
+     Resolves one requested window document through Android's complete installed-book registry.
+
+     - Parameter initials: Installed/local initials or full-name token at any JSword exact/case tier.
+     - Returns: Canonical installed or admitted local initials.
+     - Side effects: Captures installed metadata first and reads local metadata only when globally
+       unowned; no page, EPUB fragment, pane state, or persistence is read or mutated.
+     - Throws: Stable access/not-found errors for excluded, locked/missing, or unreadable
+       local metadata. A locked installed owner remains canonical so the UI router can report its
+       ordinary activation failure without falling through to local content.
+     */
+    private func requireWindowDocument(_ initials: String) throws -> String {
+        let owner: BibleReaderInstalledOrLocalDocumentOwner<BibleUIAgentLocalGeneralBookDocument>
+        do {
+            owner = try installedOrLocalGeneralBook(named: initials)
+        } catch let error as BibleUIAgentDomainError where error.code == "DOCUMENT_EXCLUDED" {
             throw windowDomainError("DOCUMENT_NOT_ALLOWED", "Document not allowed: \(initials)")
+        } catch {
+            throw windowDomainError("DOCUMENT_NOT_FOUND", "Document not found: \(initials)")
         }
-        if swordManager.module(named: initials) != nil || sqliteLibrary.module(named: initials) != nil {
-            return
+        switch owner {
+        case .installed(let info, _):
+            return info.name
+        case .local(let document):
+            return document.initials
+        case .missing:
+            throw windowDomainError("DOCUMENT_NOT_FOUND", "Document not found: \(initials)")
         }
-        if let session = try? myDocumentLibraryStore.loadSession(),
-           session.documents.contains(where: { $0.initials == initials }) {
-            return
-        }
-        throw windowDomainError("DOCUMENT_NOT_FOUND", "Document not found: \(initials)")
     }
 
     private func currentWindowState(_ window: Window) -> BibleUIAgentWindowStateValue {
@@ -360,16 +405,23 @@ extension BibleUIAgentDomainAdapter {
         )
     }
 
+    /**
+     Returns the globally owned display name without allowing a colliding local metadata fallback.
+
+     - Parameter initials: Persisted document token from a live window.
+     - Returns: Canonical installed description or the one globally unowned local display name.
+     - Side effects: Captures installed metadata; local metadata is evaluated only when unowned.
+     - Failure modes: Missing, excluded, and unreadable identities return nil.
+     */
     private func windowDocumentName(_ initials: String) -> String? {
-        if let module = swordManager.module(named: initials) {
-            return module.info.description
+        if let info = readableInstalledModuleResolver().registeredModuleInfo(named: initials) {
+            return info.description
         }
-        if let module = sqliteLibrary.module(named: initials) {
-            return module.info.description
+        guard let owner = try? installedOrLocalGeneralBook(named: initials),
+              case .local(let document) = owner else {
+            return nil
         }
-        return (try? myDocumentLibraryStore.loadSession())?.documents.first {
-            $0.initials == initials
-        }?.name
+        return document.displayName
     }
 
     private func androidWindowState(_ window: Window) -> String {

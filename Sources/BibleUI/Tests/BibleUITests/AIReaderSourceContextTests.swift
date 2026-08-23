@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 
 @testable import BibleCore
@@ -12,6 +13,126 @@ import XCTest
  ranges, partial extraction, exact bridge identity, and note-editor routing without UI timing.
  */
 final class AIReaderSourceContextTests: BibleUISwordFixtureTestCase {
+  /**
+   Rejects stale My Documents AI content after an installed book acquires the same lookup token.
+
+   - Setup: Renders one in-memory My Documents page while no installed manager exists, then copies
+   a fresh manager containing a Bible whose initials own the local initials and restores the
+     pane's previously active general-book coordinates.
+   - Expected result: The unowned local page produces source context before the registry change;
+     afterward the fresh installed owner wins and AI capture returns `nil` before reading the local
+     page, even though stale pane state still names that page.
+   - Failure meaning: AI actions can bypass Android's global book registry and disclose local
+     content through a stale general-book identity after install, unlock, or runtime refresh.
+   - Side effects: Mutates only an in-memory SwiftData graph, one temporary SWORD fixture, and
+     controller-local pane state; inherited teardown removes the fixture.
+   */
+  @MainActor
+  func testControllerAISourceContextRejectsStaleLocalPageAfterInstalledOwnerAppears() throws {
+    let container = try makeMyDocumentModelContainer()
+    let modelContext = ModelContext(container)
+    let document = MyDocument(name: "Local source", initials: "MYDOC")
+    let page = MyDocumentPage(title: "Source page", pageKey: "page")
+    let content = MyDocumentPageContent(pageId: page.id, content: "Private local content")
+    page.document = document
+    page.pageContent = content
+    content.page = page
+    document.pages = [page]
+    modelContext.insert(document)
+    modelContext.insert(page)
+    modelContext.insert(content)
+    try modelContext.save()
+
+    let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+    controller.myDocumentStore = MyDocumentStore(modelContext: modelContext)
+    let window = Window()
+    let pageManager = PageManager(id: window.id)
+    window.pageManager = pageManager
+    controller.activeWindow = window
+    XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MYDOC", pageKey: "page"))
+    XCTAssertEqual(
+      controller.aiSourceContext(
+        expectedDocumentInitials: "MYDOC",
+        requestedSourceKey: "page"
+      )?.selectedContent?.contains("Private local content"),
+      true
+    )
+
+    let modulePath = try makeTemporarySwordFixturePath()
+    try seedBibleAliasModule(
+      named: "MYDOC",
+      description: "Installed collision Bible",
+      in: modulePath
+    )
+    let collisionManager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+    let collisionController = BibleReaderController(
+      bridge: BibleBridge(),
+      swordManagerOverride: collisionManager
+    )
+
+    XCTAssertTrue(controller.copyModuleState(from: collisionController))
+    controller.restoreSavedPosition()
+    XCTAssertEqual(controller.currentCategory, .generalBook)
+    XCTAssertEqual(controller.currentGeneralBookKey, "page")
+    XCTAssertNil(controller.aiSourceContext(
+      expectedDocumentInitials: "MYDOC",
+      requestedSourceKey: "page"
+    ))
+  }
+
+  /**
+   Rejects canonically equivalent but Java-distinct My Documents source identities.
+
+   - Setup: Activates an in-memory My Documents page whose initials use a composed accent, then
+     requests AI source context with both that spelling and its decomposed equivalent.
+   - Expected result: The exact UTF-16 spelling returns the page context and the decomposed spelling
+     returns nil without changing active reader identity.
+   - Failure meaning: Swift canonical equality can authorize prompt capture from a different Android
+     registry owner whose initials happen to render identically.
+   - Side effects: Mutates only an in-memory SwiftData graph and controller-local pane state.
+   */
+  @MainActor
+  func testControllerAISourceContextUsesJavaExactDocumentInitials() throws {
+    let composed = "Caf\u{00E9}Source"
+    let decomposed = "Cafe\u{0301}Source"
+    let container = try makeMyDocumentModelContainer()
+    let modelContext = ModelContext(container)
+    let document = MyDocument(name: "Unicode source", initials: composed)
+    let page = MyDocumentPage(title: "Source page", pageKey: "page")
+    let content = MyDocumentPageContent(pageId: page.id, content: "Exact Unicode owner content")
+    page.document = document
+    page.pageContent = content
+    content.page = page
+    document.pages = [page]
+    modelContext.insert(document)
+    modelContext.insert(page)
+    modelContext.insert(content)
+    try modelContext.save()
+
+    let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+    controller.myDocumentStore = MyDocumentStore(modelContext: modelContext)
+    let window = Window()
+    window.pageManager = PageManager(id: window.id)
+    controller.activeWindow = window
+    XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: composed, pageKey: page.pageKey))
+    XCTAssertEqual(
+      controller.aiSourceContext(
+        expectedDocumentInitials: composed,
+        requestedSourceKey: page.pageKey
+      )?.selectedContent?.contains("Exact Unicode owner content"),
+      true
+    )
+
+    XCTAssertNil(controller.aiSourceContext(
+      expectedDocumentInitials: decomposed,
+      requestedSourceKey: page.pageKey
+    ))
+    XCTAssertTrue(SwordJavaStringIdentity.equals(
+      try XCTUnwrap(controller.activeGeneralBookModuleName),
+      composed
+    ))
+  }
+
   /**
    Verifies a selected Bible passage uses converted source OSIS and one canonical projection.
 
@@ -332,6 +453,28 @@ final class AIReaderSourceContextTests: BibleUISwordFixtureTestCase {
         text: ""
       ),
       pane: biblePane,
+      verifiedKJVARange: nil
+    ))
+    let composed = "Caf\u{00E9}Selection"
+    let decomposed = "Cafe\u{0301}Selection"
+    let unicodePane = makePaneSnapshot(
+      initials: composed,
+      category: .bible,
+      sourceBookKey: "Gen.1",
+      sourceOSISRange: "Gen.1.1",
+      selectedContent: "<div/>",
+      selectedText: "composed content",
+      sourceRange: 7...7,
+      kjvaRange: nil
+    )
+    XCTAssertNil(AIReaderBridgeActionResolver.selection(
+      AISelectionActionRequest(
+        bookInitials: decomposed,
+        startOrdinal: 7,
+        endOrdinal: 7,
+        text: ""
+      ),
+      pane: unicodePane,
       verifiedKJVARange: nil
     ))
     XCTAssertNil(AIReaderBridgeActionResolver.selection(

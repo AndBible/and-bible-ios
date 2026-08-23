@@ -7,13 +7,14 @@
 import {flushPromises, mount, type VueWrapper} from "@vue/test-utils";
 import {nextTick, ref} from "vue";
 import {afterEach, describe, expect, it, vi} from "vitest";
-import type {AiDocMarker, GenericBookmark, LabelAndStyle} from "@/types/client-objects";
+import type {AiDocMarker, BaseBookmark, BibleBookmark, GenericBookmark, LabelAndStyle} from "@/types/client-objects";
 import type {OsisDocument} from "@/types/documents";
 import DocumentActionMenu from "@/components/documents/DocumentActionMenu.vue";
 import WholePageBookmarks from "@/components/WholePageBookmarks.vue";
 import OsisDocumentComponent from "@/components/documents/OsisDocument.vue";
 import AmbiguousSelectionBookmarkButton from "@/components/modals/AmbiguousSelectionBookmarkButton.vue";
 import BookmarkModal from "@/components/modals/BookmarkModal.vue";
+import ModalDialog from "@/components/modals/ModalDialog.vue";
 import BookmarkText from "@/components/BookmarkText.vue";
 import {emit} from "@/eventbus";
 import {
@@ -24,6 +25,7 @@ import {
     customCssKey,
     globalBookmarksKey,
     locateTopKey,
+    modalKey,
     stringsKey,
 } from "@/types/constants";
 
@@ -41,6 +43,7 @@ const strings = {
     deleteMyDocumentPageConfirmationTitle: "Delete AI page?",
     documentActionsAccessibilityLabel: "Document actions",
     editTextPlaceholder: "Tap to edit text",
+    myNotesEditorAccessibilityLabel: "My Notes note editor for %s",
     regenerateMyDocumentPageAccessibilityLabel: "Regenerate My Document page",
     saveMyDocumentPageAccessibilityLabel: "Save My Document page",
     shareMyDocumentPageAccessibilityLabel: "Share My Document page",
@@ -144,6 +147,46 @@ function aiMarkerFixture(): AiDocMarker {
 }
 
 /**
+ * Builds one complete Bible bookmark for the reader note-editor accessibility contract.
+ *
+ * @returns A deterministic Genesis 1:1 bookmark with no existing note.
+ * @remarks The fixture has no generated values or side effects, so its reference-specific label is
+ * stable across component and end-to-end tests.
+ */
+function bibleBookmarkFixture(): BibleBookmark {
+    return {
+        id: "bible-bookmark-1",
+        type: "bookmark",
+        hashCode: 3,
+        ordinalRange: [1, 1],
+        offsetRange: null,
+        labels: [],
+        bookInitials: "KJV",
+        bookName: "King James Version",
+        bookAbbreviation: "KJV",
+        createdAt: 1,
+        text: "In the beginning",
+        fullText: "In the beginning God created the heaven and the earth.",
+        bookmarkToLabels: [],
+        primaryLabelId: "",
+        lastUpdatedOn: 1,
+        notes: null,
+        notesContentType: "HTML",
+        hasNote: false,
+        wholeVerse: true,
+        customIcon: null,
+        editAction: {mode: null, content: null},
+        osisRef: "Gen.1.1",
+        originalOrdinalRange: [1, 1],
+        verseRange: "Genesis 1:1",
+        verseRangeOnlyNumber: "1:1",
+        verseRangeAbbreviated: "Gen 1:1",
+        v11n: "KJV",
+        osisFragment: null,
+    };
+}
+
+/**
  * Builds a generic bookmark with structured source OSIS and a deliberately unsafe raw fallback.
  *
  * @returns Complete bookmark payload that distinguishes structured rendering from `v-html`.
@@ -226,7 +269,7 @@ function aiLabelFixture(): LabelAndStyle {
  * @param bookmarks Initial normal bookmarks or AI markers.
  * @returns Minimal provider state matching fields consumed by action and bookmark composables.
  */
-function bookmarkProvider(bookmarks: AiDocMarker[] = []) {
+function bookmarkProvider(bookmarks: BaseBookmark[] = []) {
     return {
         bookmarks: ref([...bookmarks]),
         bookmarkMap: new Map(bookmarks.map(bookmark => [bookmark.id, bookmark])),
@@ -285,6 +328,302 @@ async function openActionMenu(wrapper: VueWrapper) {
 afterEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+});
+
+describe("reader modal accessibility", () => {
+    /** Close sources implemented directly by the shared ModalDialog component. */
+    const modalOwnedClosePaths = ["toolbar", "backdrop", "escape", "registered"] as const;
+
+    /**
+     * Protects the shared modal's icon-only dismissal control for VoiceOver and keyboard users.
+     *
+     * The mounted production component receives the localized string provider used by BibleView.
+     * A passing test proves the visible close glyph exposes one named button and retains the same
+     * close event; failure means assistive technology can no longer identify or activate dismissal.
+     */
+    it("names the standard dismissal button with the localized cancel command", async () => {
+        vi.stubGlobal("ResizeObserver", class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        const register = vi.fn();
+        const wrapper = mount(ModalDialog, {
+            slots: {default: "Reader modal body"},
+            global: {
+                provide: {
+                    ...commonProviders({}),
+                    [modalKey]: {
+                        register,
+                        closeModals: vi.fn(),
+                        modalOpen: ref(false),
+                    },
+                },
+                stubs: {
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    teleport: true,
+                },
+            },
+        });
+        await nextTick();
+
+        const closeButton = wrapper.get("button.modal-action-button");
+        expect(closeButton.attributes("aria-label")).toBe("Cancel");
+        expect(closeButton.attributes("title")).toBe("Cancel");
+        await closeButton.trigger("click");
+        expect(wrapper.emitted("close")).toHaveLength(1);
+        expect(register).toHaveBeenCalledOnce();
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects focus resignation and save ordering for every ModalDialog-owned close path.
+     *
+     * Each case focuses a real input inside the mounted modal, then activates the toolbar,
+     * backdrop, Escape listener, or registered modal-stack callback. Blur must run before the
+     * parent close listener so editor save-on-blur work completes before Vue unmounts the content;
+     * failure means WebKit can leave the software keyboard covering the restored reader.
+     */
+    it.each(modalOwnedClosePaths)("blurs owned focus before the %s path closes", async closePath => {
+        vi.stubGlobal("ResizeObserver", class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        const frameCallbacks: FrameRequestCallback[] = [];
+        const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+            frameCallbacks.push(callback);
+            return frameCallbacks.length;
+        });
+        vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+        const order: string[] = [];
+        const onClose = vi.fn(() => order.push("close"));
+        const register = vi.fn();
+        const wrapper = mount(ModalDialog, {
+            attachTo: document.body,
+            props: {
+                blocking: closePath === "backdrop",
+                onClose,
+            },
+            slots: {default: '<input data-test="modal-editor">'},
+            global: {
+                provide: {
+                    ...commonProviders({}),
+                    [modalKey]: {
+                        register,
+                        closeModals: vi.fn(),
+                        modalOpen: ref(false),
+                    },
+                },
+                stubs: {
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    teleport: true,
+                },
+            },
+        });
+        await flushPromises();
+
+        const editor = wrapper.get('[data-test="modal-editor"]').element as HTMLInputElement;
+        editor.addEventListener("blur", () => order.push("blur"), {once: true});
+        editor.focus();
+        expect(document.activeElement).toBe(editor);
+
+        switch (closePath) {
+            case "toolbar": {
+                const closeButton = wrapper.get("button.modal-action-button");
+                const mouseDown = new MouseEvent("mousedown", {bubbles: true, cancelable: true});
+                closeButton.element.dispatchEvent(mouseDown);
+                expect(mouseDown.defaultPrevented).toBe(true);
+                expect(document.activeElement).toBe(editor);
+                await closeButton.trigger("click");
+                break;
+            }
+            case "backdrop":
+                await wrapper.get(".modal-backdrop").trigger("click");
+                break;
+            case "escape":
+                document.dispatchEvent(new KeyboardEvent("keyup", {key: "Escape"}));
+                await nextTick();
+                break;
+            case "registered": {
+                const registration = register.mock.calls[0]?.[0] as {close: () => void};
+                registration.close();
+                await nextTick();
+                break;
+            }
+        }
+
+        expect(order).toEqual(["blur"]);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(wrapper.emitted("close")).toBeUndefined();
+        expect(requestAnimationFrame).toHaveBeenCalledOnce();
+        frameCallbacks[0]?.(0);
+        await nextTick();
+
+        expect(order).toEqual(["blur", "close"]);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(wrapper.emitted("close")).toHaveLength(1);
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects focus owned by reader content behind a modal during programmatic dismissal.
+     *
+     * The background input is attached to the document while the mounted modal contains no active
+     * editor. Closing through the registered modal-stack callback must still emit once but must not
+     * blur unrelated focus; failure means opening or replacing a nonblocking modal can disrupt a
+     * reader control outside the closing card.
+     */
+    it("does not blur focus outside the closing modal", async () => {
+        vi.stubGlobal("ResizeObserver", class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        const backgroundInput = document.createElement("input");
+        document.body.appendChild(backgroundInput);
+        const backgroundBlur = vi.fn();
+        backgroundInput.addEventListener("blur", backgroundBlur);
+        const onClose = vi.fn();
+        const register = vi.fn();
+        const wrapper = mount(ModalDialog, {
+            attachTo: document.body,
+            attrs: {onClose},
+            slots: {default: "Reader modal body"},
+            global: {
+                provide: {
+                    ...commonProviders({}),
+                    [modalKey]: {
+                        register,
+                        closeModals: vi.fn(),
+                        modalOpen: ref(false),
+                    },
+                },
+                stubs: {
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    teleport: true,
+                },
+            },
+        });
+        await flushPromises();
+
+        backgroundInput.focus();
+        expect(document.activeElement).toBe(backgroundInput);
+        const registration = register.mock.calls[0]?.[0] as {close: () => void};
+        registration.close();
+        await nextTick();
+
+        expect(backgroundBlur).not.toHaveBeenCalled();
+        expect(document.activeElement).toBe(backgroundInput);
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(wrapper.emitted("close")).toHaveLength(1);
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects deferred close ownership when a parent replaces a modal before WebKit's next frame.
+     *
+     * Two registered close requests while an editor is focused must share one frame. Unmounting
+     * cancels that frame, and even a stale callback invocation must not emit into replacement
+     * state; failure can close a newer modal that reused the parent's close listener.
+     */
+    it("cancels one coalesced deferred close when the modal unmounts", async () => {
+        vi.stubGlobal("ResizeObserver", class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        const frameCallbacks = new Map<number, FrameRequestCallback>();
+        const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+            const handle = frameCallbacks.size + 1;
+            frameCallbacks.set(handle, callback);
+            return handle;
+        });
+        const cancelAnimationFrame = vi.fn((handle: number) => frameCallbacks.delete(handle));
+        vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+        vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+        const onClose = vi.fn();
+        const register = vi.fn();
+        const wrapper = mount(ModalDialog, {
+            attachTo: document.body,
+            attrs: {onClose},
+            slots: {default: '<input data-test="modal-editor">'},
+            global: {
+                provide: {
+                    ...commonProviders({}),
+                    [modalKey]: {
+                        register,
+                        closeModals: vi.fn(),
+                        modalOpen: ref(false),
+                    },
+                },
+                stubs: {
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    teleport: true,
+                },
+            },
+        });
+        await flushPromises();
+
+        const editor = wrapper.get('[data-test="modal-editor"]').element as HTMLInputElement;
+        editor.focus();
+        const registration = register.mock.calls[0]?.[0] as {close: () => void};
+        registration.close();
+        registration.close();
+
+        expect(requestAnimationFrame).toHaveBeenCalledOnce();
+        const staleCallback = frameCallbacks.get(1);
+        wrapper.unmount();
+        expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+        expect(frameCallbacks.size).toBe(0);
+
+        staleCallback?.(0);
+        await nextTick();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(wrapper.emitted("close")).toBeUndefined();
+    });
+
+    /**
+     * Protects the production bookmark modal's reference-specific editor naming contract.
+     *
+     * Setup emits the real shared `bookmark_clicked` event with `openNotes=true` for a Genesis 1:1
+     * bookmark. The modal must forward a localized name into `EditableText`; failure means Pell
+     * omits its textbox role/name and the software-keyboard workflow becomes inaccessible and
+     * untestable. Listener cleanup occurs when the wrapper unmounts.
+     */
+    it("passes the selected Bible reference to the bookmark note editor", async () => {
+        const bookmark = bibleBookmarkFixture();
+        const wrapper = mount(BookmarkModal, {
+            global: {
+                provide: commonProviders(
+                    {openAiDocPage: vi.fn(), saveBookmarkNote: vi.fn()},
+                    bookmarkProvider([bookmark]),
+                ),
+                stubs: {
+                    BookmarkButtons: true,
+                    BookmarkText: true,
+                    EditableText: {
+                        name: "EditableText",
+                        props: ["editorAccessibilityLabel"],
+                        template: '<div data-test="bookmark-note-editor"></div>',
+                    },
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    LabelList: true,
+                    ModalDialog: {template: '<div data-test="bookmark-modal"><slot/></div>'},
+                },
+            },
+        });
+
+        emit("bookmark_clicked", bookmark.id, {openNotes: true});
+        await nextTick();
+
+        const editor = wrapper.getComponent({name: "EditableText"});
+        expect(editor.props("editorAccessibilityLabel")).toBe(
+            "My Notes note editor for Genesis 1:1",
+        );
+        wrapper.unmount();
+    });
 });
 
 describe("generic document action parity", () => {

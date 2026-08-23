@@ -1542,3 +1542,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvaput dodirnite zaslon za izlaz iz cijelog zaslona";
+
+/* Android shared translations */
+"try_again_passphrase" = "Lozinka nije urodila plodom, pokušajte ponovno?";
+
+/* Android shared translations */
+"document_not_installed" = "Molimo preuzmite %@";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ nije pronađen u dokumentu %2$@.";

@@ -102,6 +102,62 @@ private enum BibleUIAgentAnchoredDocumentContentError: Error {
     case invalidProcessedXML
 }
 
+/** One local general-book adapter admitted only after global installed ownership is absent. */
+enum BibleUIAgentLocalGeneralBookDocument {
+    /// Transactional My Documents metadata; page content remains unread until a tool selects it.
+    case myDocument(MyDocumentDraft)
+
+    /// Installed EPUB metadata; its immutable reader is opened only for a selected content read.
+    case epub(EpubInfo)
+
+    /// Exact Android-visible initials used by window routing and access policy checks.
+    var initials: String {
+        switch self {
+        case .myDocument(let document): return document.initials
+        case .epub(let info): return info.initials
+        }
+    }
+
+    /// User-visible document name used by installed-document and general-book tool results.
+    var displayName: String {
+        switch self {
+        case .myDocument(let document): return SwordJavaStringIdentity.trim(document.name)
+        case .epub(let info): return SwordJavaStringIdentity.trim(info.title)
+        }
+    }
+
+    /// JSword-generated abbreviation after Java config trimming and initials fallback.
+    var abbreviation: String {
+        switch self {
+        case .myDocument(let document): return document.initials
+        case .epub(let info):
+            return BibleReaderJSwordConfigValue.abbreviation(
+                info.title,
+                initials: info.initials
+            )
+        }
+    }
+
+    /// Android-visible language of the generated local-book registration.
+    var language: String {
+        switch self {
+        case .myDocument:
+            return Locale.current.language.languageCode?.identifier ?? "und"
+        case .epub(let info):
+            let language = SwordJavaStringIdentity.trim(info.language)
+            return language.isEmpty ? "und" : language
+        }
+    }
+
+    /// Whether Android's generated-book index-status projection reports a completed index.
+    var isIndexed: Bool {
+        switch self {
+        case .myDocument: return false
+        case .epub: return true
+        }
+    }
+}
+
 @MainActor
 extension BibleUIAgentDomainAdapter {
     func getVerseContent(
@@ -109,11 +165,16 @@ extension BibleUIAgentDomainAdapter {
         reference: String,
         format: BibleUIAgentContentFormat
     ) throws -> AgentToolResult {
-        try requireDocumentAllowed(book)
-        if let module = swordManager.module(named: book) {
-            guard module.info.category == .bible else {
-                throw domainError("INVALID_BOOK_TYPE", "Book is not a Bible: \(book)")
-            }
+        guard let source = readableInstalledModuleResolver().module(named: book) else {
+            throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
+        }
+        try requireDocumentAllowed(source.info.name)
+        guard source.info.category == .bible else {
+            throw domainError("INVALID_BOOK_TYPE", "Book is not a Bible: \(book)")
+        }
+
+        switch source {
+        case .sword(let module):
             let keys = module.parseKeyList(reference)
             guard !keys.isEmpty else {
                 throw domainError("INVALID_REFERENCE", "The verse reference is invalid.")
@@ -137,52 +198,72 @@ extension BibleUIAgentDomainAdapter {
                 ("text", format == .text ? .string(try BibleUIAgentJSON.boundedText(content)) : nil),
                 ("osisXml", format == .xml ? .string(try BibleUIAgentJSON.boundedText(content)) : nil)
             ))
-        }
 
-        guard let module = sqliteLibrary.module(named: book) else {
-            throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
+        case .sqlite(let module):
+            let verses = try BibleUIAgentKJVAReferenceParser.parse(reference)
+            let values = try verses.compactMap {
+                try module.verseContent(
+                    osisId: $0.osisBookID,
+                    chapter: $0.chapter,
+                    verse: $0.verse
+                )?.text
+            }
+            let content = format == .xml
+                ? "<div>\(values.joined())</div>"
+                : values.map(BibleUIAgentJSON.plainText).joined(separator: "\n")
+            return try BibleUIAgentJSON.success(BibleUIAgentJSON.object(
+                ("book", .string(book)),
+                ("verseRef", .string(reference)),
+                ("text", format == .text ? .string(try BibleUIAgentJSON.boundedText(content)) : nil),
+                ("osisXml", format == .xml ? .string(try BibleUIAgentJSON.boundedText(content)) : nil)
+            ))
         }
-        guard module.info.category == .bible else {
-            throw domainError("INVALID_BOOK_TYPE", "Book is not a Bible: \(book)")
-        }
-        let verses = try BibleUIAgentKJVAReferenceParser.parse(reference)
-        let values = try verses.compactMap {
-            try module.verseContent(osisId: $0.osisBookID, chapter: $0.chapter, verse: $0.verse)?.text
-        }
-        let content = format == .xml
-            ? "<div>\(values.joined())</div>"
-            : values.map(BibleUIAgentJSON.plainText).joined(separator: "\n")
-        return try BibleUIAgentJSON.success(BibleUIAgentJSON.object(
-            ("book", .string(book)),
-            ("verseRef", .string(reference)),
-            ("text", format == .text ? .string(try BibleUIAgentJSON.boundedText(content)) : nil),
-            ("osisXml", format == .xml ? .string(try BibleUIAgentJSON.boundedText(content)) : nil)
-        ))
     }
 
+    /**
+     Searches readable, allowed Bibles through their exact installed source generations.
+
+     - Parameters:
+       - query: Android/Lucene-compatible query text.
+       - books: Optional installed-book tokens; an empty list selects the first ready Bible in
+         Android's installed `BookSet` order.
+       - maximum: Maximum hits returned after cross-module collection.
+       - offset: Number of ordered hits skipped before paging.
+     - Returns: Android-shaped result metadata and canonical verse identities.
+     - Side effects: Captures one fresh readable registry and performs read-only generated-index queries.
+     - Throws: Stable domain errors when no exact current source is indexed, plus query/index failures.
+     */
     func searchBible(
         query: String,
         books: [String],
         maximum: Int,
         offset: Int
     ) throws -> AgentToolResult {
-        let selected: [String]
+        let resolver = readableInstalledModuleResolver()
+        let selected: [SearchIndexSourceIdentity]
         if books.isEmpty {
-            guard let first = installedModuleInfos().first(where: {
-                $0.category == .bible
-                    && documentAccessPolicy.allows(documentInitials: $0.name)
-                    && searchIndexService.hasIndex(for: $0.name)
+            guard let first = resolver.readableModulesInBookSetOrder(categories: [.bible]).compactMap({
+                $0.searchIndexSource
+            }).first(where: {
+                let info = $0.searchIndexModuleInfo
+                return documentAccessPolicy.allows(documentInitials: info.name)
+                    && searchIndexService.hasIndex(for: $0.searchIndexSourceIdentity)
             }) else {
                 throw domainError("NO_INDEX", "No indexed Bible found. Please index a Bible first.")
             }
-            selected = [first.name]
+            selected = [first.searchIndexSourceIdentity]
         } else {
-            selected = books.filter { initials in
-                guard let info = installedModuleInfo(initials: initials), info.category == .bible else {
-                    return false
+            selected = books.compactMap { initials in
+                guard let source = resolver.searchIndexSource(named: initials) else {
+                    return nil
                 }
-                return documentAccessPolicy.allows(documentInitials: initials)
-                    && searchIndexService.hasIndex(for: initials)
+                let canonicalInitials = source.searchIndexModuleInfo.name
+                let sourceIdentity = source.searchIndexSourceIdentity
+                guard documentAccessPolicy.allows(documentInitials: canonicalInitials),
+                      searchIndexService.hasIndex(for: sourceIdentity) else {
+                    return nil
+                }
+                return sourceIdentity
             }
             guard !selected.isEmpty else {
                 throw domainError(
@@ -193,10 +274,10 @@ extension BibleUIAgentDomainAdapter {
         }
 
         var allHits: [SearchModuleHit] = []
-        for initials in selected {
+        for sourceIdentity in selected {
             let result = try searchIndexService.search(
                 query: query,
-                moduleName: initials,
+                sourceIdentity: sourceIdentity,
                 wordMode: .anyWord
             )
             allHits.append(contentsOf: result.hits)
@@ -219,6 +300,20 @@ extension BibleUIAgentDomainAdapter {
         ))
     }
 
+    /**
+     Searches one readable Strong's Bible only through its exact installed index generation.
+
+     - Parameters:
+       - reportedNumber: User-facing Strong's number preserved in the response.
+       - canonicalToken: Normalized token used by the lexical index.
+       - book: Optional installed-book token; nil selects the first exact ready Strong's source in
+         Android's installed `BookSet` order.
+       - maximum: Maximum hits returned after paging.
+       - offset: Number of ordered hits skipped before paging.
+     - Returns: Android-shaped Strong's metadata and canonical verse identities.
+     - Side effects: Captures one fresh readable registry and performs a read-only lexical query.
+     - Throws: Stable category, feature, and readiness errors plus generated-index failures.
+     */
     func searchByStrongs(
         reportedNumber: String,
         canonicalToken: String,
@@ -226,33 +321,38 @@ extension BibleUIAgentDomainAdapter {
         maximum: Int,
         offset: Int
     ) throws -> AgentToolResult {
-        let moduleInfo: ModuleInfo
+        let resolver = readableInstalledModuleResolver()
+        let selectedSource: any BibleSearchIndexSource
         if let book {
-            guard let info = installedModuleInfo(initials: book), info.category == .bible else {
+            guard let source = resolver.searchIndexSource(named: book) else {
                 throw domainError("NO_STRONGS_BIBLE", "No Bible with Strong's numbers was found.")
             }
-            try requireDocumentAllowed(book)
-            moduleInfo = info
+            try requireDocumentAllowed(source.searchIndexModuleInfo.name)
+            selectedSource = source
         } else {
-            let eligible = installedModuleInfos().filter {
-                $0.category == .bible
-                    && $0.features.contains(.strongsNumbers)
-                    && documentAccessPolicy.allows(documentInitials: $0.name)
+            let eligible = resolver.readableModulesInBookSetOrder(categories: [.bible]).compactMap {
+                $0.searchIndexSource
+            }.filter {
+                let info = $0.searchIndexModuleInfo
+                return info.features.contains(.strongsNumbers)
+                    && documentAccessPolicy.allows(documentInitials: info.name)
             }
-            guard let info = eligible.first(where: {
-                searchIndexService.hasStrongsIndex(for: $0.name)
+            guard let source = eligible.first(where: {
+                searchIndexService.hasStrongsIndex(for: $0.searchIndexSourceIdentity)
             }) ?? eligible.first else {
                 throw domainError("NO_STRONGS_BIBLE", "No Bible with Strong's numbers was found.")
             }
-            moduleInfo = info
+            selectedSource = source
         }
+        let moduleInfo = selectedSource.searchIndexModuleInfo
+        let sourceIdentity = selectedSource.searchIndexSourceIdentity
         guard moduleInfo.features.contains(.strongsNumbers) else {
             throw domainError(
                 "NO_STRONGS",
                 "Bible '\(moduleInfo.name)' does not contain Strong's numbers."
             )
         }
-        guard searchIndexService.hasStrongsIndex(for: moduleInfo.name) else {
+        guard searchIndexService.hasStrongsIndex(for: sourceIdentity) else {
             throw domainError(
                 "NOT_INDEXED",
                 "Bible '\(moduleInfo.name)' is not indexed for Strong's search."
@@ -261,7 +361,7 @@ extension BibleUIAgentDomainAdapter {
 
         let allHits = try searchIndexService.searchStrongs(
             canonicalTokens: [canonicalToken],
-            moduleName: moduleInfo.name
+            sourceIdentity: sourceIdentity
         ).hits
         let page = Array(allHits.dropFirst(min(offset, allHits.count)).prefix(maximum))
         let values = page.map { hit in
@@ -301,7 +401,11 @@ extension BibleUIAgentDomainAdapter {
         requestedInitials: [String],
         format: BibleUIAgentContentFormat
     ) throws -> AgentToolResult {
-        let candidates = commentaryInitials(requested: requestedInitials)
+        let resolver = readableInstalledModuleResolver()
+        let candidates = commentaryInitials(
+            requested: requestedInitials,
+            resolver: resolver
+        )
         guard !candidates.isEmpty else {
             throw domainError("NO_COMMENTARIES", "No commentaries available")
         }
@@ -310,7 +414,9 @@ extension BibleUIAgentDomainAdapter {
         for initials in candidates {
             let rendered: [(reference: String, content: String?)]
             let info: ModuleInfo
-            if let module = swordManager.module(named: initials) {
+            guard let source = resolver.module(named: initials) else { continue }
+            switch source {
+            case .sword(let module):
                 info = module.info
                 let keys = module.parseKeyList(reference)
                 guard keys.count <= BibleUIAgentKJVAReferenceParser.maximumVerses else {
@@ -329,7 +435,7 @@ extension BibleUIAgentDomainAdapter {
                     }
                     return (fragment.osisRef, content.value(for: format))
                 }
-            } else if let module = sqliteLibrary.module(named: initials) {
+            case .sqlite(let module):
                 info = module.info
                 let verses = try BibleUIAgentKJVAReferenceParser.parse(reference)
                 rendered = try verses.map { verse in
@@ -352,8 +458,6 @@ extension BibleUIAgentDomainAdapter {
                     }
                     return (verse.osisReference, content.value(for: format))
                 }
-            } else {
-                continue
             }
 
             let blocks = deduplicatedCommentaryBlocks(rendered)
@@ -391,14 +495,18 @@ extension BibleUIAgentDomainAdapter {
         key: String,
         format: BibleUIAgentContentFormat
     ) throws -> AgentToolResult {
-        try requireDocumentAllowed(dictionary)
+        guard let source = readableInstalledModuleResolver().module(named: dictionary) else {
+            throw domainError("DICT_NOT_FOUND", "Dictionary not found: \(dictionary)")
+        }
+        try requireDocumentAllowed(source.info.name)
+        guard source.info.category == .dictionary else {
+            throw domainError("INVALID_BOOK_TYPE", "Book is not a dictionary: \(dictionary)")
+        }
         let info: ModuleInfo
         let resolvedContent: String
         let isStrongs: Bool
-        if let module = swordManager.module(named: dictionary) {
-            guard module.info.category == .dictionary else {
-                throw domainError("INVALID_BOOK_TYPE", "Book is not a dictionary: \(dictionary)")
-            }
+        switch source {
+        case .sword(let module):
             info = module.info
             isStrongs = info.features.contains(.greekDef) || info.features.contains(.hebrewDef)
             guard let resolvedKey = try exactDictionaryKey(key, module: module) else {
@@ -410,18 +518,13 @@ extension BibleUIAgentDomainAdapter {
                 includeStrippedText: format == .text
             )
             resolvedContent = format == .xml ? entry.rawEntry : entry.strippedText
-        } else if let module = sqliteLibrary.module(named: dictionary) {
-            guard module.info.category == .dictionary else {
-                throw domainError("INVALID_BOOK_TYPE", "Book is not a dictionary: \(dictionary)")
-            }
+        case .sqlite(let module):
             info = module.info
             isStrongs = info.features.contains(.greekDef) || info.features.contains(.hebrewDef)
             guard let content = try module.dictionaryContent(for: key)?.text else {
                 throw domainError("KEY_NOT_FOUND", "Key not found in dictionary.")
             }
             resolvedContent = format == .xml ? content : BibleUIAgentJSON.plainText(content)
-        } else {
-            throw domainError("DICT_NOT_FOUND", "Dictionary not found: \(dictionary)")
         }
 
         let linkURL = isStrongs
@@ -437,35 +540,45 @@ extension BibleUIAgentDomainAdapter {
         ))
     }
 
+    /**
+     Lists Android's globally admitted installed-book registry with current Search readiness.
+
+     - Parameter category: Optional Android document-category filter.
+     - Returns: Native, SQLite, EPUB, and My Documents metadata in JSword TreeSet order after
+       Android's EPUB-then-My Documents initials-admission preflight.
+     - Side effects: Captures one fresh readable registry and reads index/local-book metadata only;
+       no local document entry is opened.
+     - Throws: Persistence or result-bound failures.
+     */
     func getInstalledDocuments(
         category: BibleUIAgentDocumentCategory?
     ) throws -> AgentToolResult {
+        let resolver = readableInstalledModuleResolver()
+        let session = try myDocumentLibraryStore.loadSession()
+        let localRegistrations = localGeneralBookRegistrations(
+            documents: session.documents,
+            epubs: EpubReader.installedEpubs()
+        )
         var values: [JSONValue] = []
-        for info in installedModuleInfos() {
-            guard documentAccessPolicy.allows(documentInitials: info.name),
-                  category.map({ moduleCategory(info.category) == $0 }) != false else {
+        for owner in resolver.registeredDocumentOwners(localRegistrations: localRegistrations) {
+            switch owner {
+            case .installed(let info, _):
+                guard documentAccessPolicy.allows(documentInitials: info.name),
+                      category.map({ moduleCategory(info.category) == $0 }) != false else {
+                    continue
+                }
+                values.append(installedDocumentJSON(info, resolver: resolver))
+            case .local(let document):
+                guard category == nil || category == .generalBook,
+                      documentAccessPolicy.allows(documentInitials: document.initials) else {
+                    continue
+                }
+                values.append(installedLocalDocumentJSON(document))
+            case .missing:
                 continue
             }
-            values.append(installedDocumentJSON(info))
             guard values.count <= BibleUIAgentToolRequestParser.maximumArrayItems else {
                 throw domainError("LIMIT_EXCEEDED", "Too many installed documents were returned.")
-            }
-        }
-
-        let session = try myDocumentLibraryStore.loadSession()
-        if category == nil || category == .generalBook {
-            for document in session.documents
-            where documentAccessPolicy.allows(documentInitials: document.initials) {
-                values.append(BibleUIAgentJSON.object(
-                    ("initials", .string(document.initials)),
-                    ("name", .string(document.name)),
-                    ("category", .string(BibleUIAgentDocumentCategory.generalBook.rawValue)),
-                    ("language", .string("unknown")),
-                    ("isLocked", .bool(false)),
-                    ("isIndexed", .bool(false)),
-                    ("abbreviation", .string(document.initials)),
-                    ("hasStrongsNumbers", nil)
-                ))
             }
         }
         return try BibleUIAgentJSON.success(BibleUIAgentJSON.object(
@@ -474,54 +587,84 @@ extension BibleUIAgentDomainAdapter {
         ))
     }
 
+    /**
+     Lists one general book only after Android's global installed-book owner has been selected.
+
+     - Parameters:
+       - book: Installed or local initials/full-name/case alias resolved through global JSword tiers.
+       - offset: Number of ordered navigation keys to skip.
+       - limit: Maximum number of keys returned by the validated tool request.
+     - Returns: Android's general-book key result for the canonical installed or local owner.
+     - Side effects: Captures installed/local metadata, then reads only the selected owner's key list.
+     - Throws: Access, ownership, lock, category, persistence, EPUB-open, and result-bound failures.
+     - Important: A readable or locked installed owner suppresses every colliding local source before
+       local page, EPUB TOC, or content access occurs.
+     */
     func getGenBookKeys(book: String, offset: Int, limit: Int) throws -> AgentToolResult {
-        try requireDocumentAllowed(book)
-        if let document = try myDocumentLibraryStore.loadSession().documents.first(where: {
-            $0.initials == book
-        }) {
+        switch try installedOrLocalGeneralBook(named: book) {
+        case .local(.myDocument(let document)):
             let keys = document.pages.sorted(by: pageOrder)
             let clampedOffset = min(offset, keys.count)
             let page = Array(keys.dropFirst(clampedOffset).prefix(limit))
             return try genBookKeysResult(
-                book: book,
-                name: document.name,
+                book: document.initials,
+                name: SwordJavaStringIdentity.trim(document.name),
                 allCount: keys.count,
                 offset: clampedOffset,
                 keys: page.map { ($0.title, $0.pageKey) }
             )
-        }
 
-        guard let module = swordManager.module(named: book) else {
+        case .local(.epub(let info)):
+            guard let reader = EpubReader(identifier: info.identifier) else {
+                throw domainError("READ_ERROR", "Failed to open EPUB: \(info.initials)")
+            }
+            let keys = reader.tableOfContents()
+            let clampedOffset = min(offset, keys.count)
+            let page = Array(keys.dropFirst(clampedOffset).prefix(limit))
+            return try genBookKeysResult(
+                book: info.initials,
+                name: SwordJavaStringIdentity.trim(info.title),
+                allCount: keys.count,
+                offset: clampedOffset,
+                keys: page.map { ($0.title, $0.key) }
+            )
+
+        case .installed(let info, let readableSource):
+            guard let readableSource, case .sword(let module) = readableSource else {
+                throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
+            }
+            guard info.category == .generalBook else {
+                throw domainError("INVALID_BOOK_TYPE", "Book is not a general book: \(book)")
+            }
+            let keys = try module.loadAllKeys().filter {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            let clampedOffset = min(offset, keys.count)
+            let page = Array(keys.dropFirst(clampedOffset).prefix(limit))
+            return try genBookKeysResult(
+                book: info.name,
+                name: info.description,
+                allCount: keys.count,
+                offset: clampedOffset,
+                keys: page.map { ($0, $0) }
+            )
+
+        case .missing:
             throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
         }
-        guard module.info.category == .generalBook else {
-            throw domainError("INVALID_BOOK_TYPE", "Book is not a general book: \(book)")
-        }
-        let keys = try module.loadAllKeys().filter {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        let clampedOffset = min(offset, keys.count)
-        let page = Array(keys.dropFirst(clampedOffset).prefix(limit))
-        return try genBookKeysResult(
-            book: book,
-            name: module.info.description,
-            allCount: keys.count,
-            offset: clampedOffset,
-            keys: page.map { ($0, $0) }
-        )
     }
 
     /**
      Reads one exact general-book entry with Android-compatible local passage anchors.
 
      - Parameters:
-       - book: Allowed My Documents or installed SWORD general-book initials.
+       - book: Allowed installed SWORD, My Documents, or EPUB general-book identity.
        - key: Exact page or module key returned by `getGenBookKeys`.
        - format: Text with `[§N]` markers or processed OSIS XML with matching `BVA` ordinals.
      - Returns: Android's general-book result shape. Anchor ordinals are entry-local and align with
        the unchanged `linkUrl`, making `#oN` and `#oN-M` follow-up navigation stable.
-     - Side effects: Reads My Documents persistence or an installed SWORD entry. SWORD cursor
-       movement is restored by `rawOSISFragment` before this method returns.
+     - Side effects: Resolves global ownership before reading one selected My Documents, EPUB, or
+       SWORD entry. SWORD cursor movement is restored by `rawOSISFragment` before return.
      - Throws: Stable document/key/category errors, or `READ_ERROR` when source XML cannot be
        processed without returning misleading unanchored content. Empty exact entries remain valid.
      */
@@ -530,10 +673,8 @@ extension BibleUIAgentDomainAdapter {
         key: String,
         format: BibleUIAgentContentFormat
     ) throws -> AgentToolResult {
-        try requireDocumentAllowed(book)
-        if let document = try myDocumentLibraryStore.loadSession().documents.first(where: {
-            $0.initials == book
-        }) {
+        switch try installedOrLocalGeneralBook(named: book) {
+        case .local(.myDocument(let document)):
             guard let page = document.pages.first(where: { $0.pageKey == key }) else {
                 throw domainError("KEY_NOT_FOUND", "Key not found: \(key)")
             }
@@ -543,57 +684,185 @@ extension BibleUIAgentDomainAdapter {
                 content = try BibleUIAgentAnchoredDocumentContent(
                     sourceXML: rendered,
                     category: .generalBook,
-                    moduleInitials: book
+                    moduleInitials: document.initials
                 )
             } catch {
                 throw domainError("READ_ERROR", "Failed to read content: \(error.localizedDescription)")
             }
             return try genBookContentResult(
-                book: book,
-                name: document.name,
+                book: document.initials,
+                name: SwordJavaStringIdentity.trim(document.name),
                 key: key,
                 keyName: page.title,
                 content: content.value(for: format),
                 format: format
             )
-        }
 
-        guard let module = swordManager.module(named: book) else {
+        case .local(.epub(let info)):
+            guard let reader = EpubReader(identifier: info.identifier) else {
+                throw domainError("READ_ERROR", "Failed to open EPUB: \(info.initials)")
+            }
+            guard let entry = reader.content(forKey: key) else {
+                throw domainError("KEY_NOT_FOUND", "Key not found: \(key)")
+            }
+            let projectedContent: String
+            if format == .xml {
+                projectedContent = entry.html
+            } else if let text = AIReaderSelectedContentConverter.plainText(
+                from: entry.html,
+                injectAnchors: true
+            ) {
+                projectedContent = text
+            } else {
+                throw domainError("READ_ERROR", "Failed to read content: \(key)")
+            }
+            return try genBookContentResult(
+                book: info.initials,
+                name: SwordJavaStringIdentity.trim(info.title),
+                key: key,
+                keyName: entry.title,
+                content: projectedContent,
+                format: format
+            )
+
+        case .installed(let info, let readableSource):
+            guard let readableSource, case .sword(let module) = readableSource else {
+                throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
+            }
+            guard info.category == .generalBook else {
+                throw domainError("INVALID_BOOK_TYPE", "Book is not a general book: \(book)")
+            }
+            guard try module.containsExactKey(key) else {
+                throw domainError("KEY_NOT_FOUND", "Key not found: \(key)")
+            }
+            let fragment: SwordRawOSISFragment
+            let content: BibleUIAgentAnchoredDocumentContent
+            do {
+                fragment = try module.rawOSISFragment(forKey: key)
+                content = try BibleUIAgentAnchoredDocumentContent(fragment: fragment)
+            } catch {
+                throw domainError("READ_ERROR", "Failed to read content: \(error.localizedDescription)")
+            }
+            return try genBookContentResult(
+                book: info.name,
+                name: info.description,
+                key: key,
+                keyName: fragment.keyName,
+                content: content.value(for: format),
+                format: format
+            )
+
+        case .missing:
             throw domainError("BOOK_NOT_FOUND", "Book not found: \(book)")
         }
-        guard module.info.category == .generalBook else {
-            throw domainError("INVALID_BOOK_TYPE", "Book is not a general book: \(book)")
-        }
-        guard try module.containsExactKey(key) else {
-            throw domainError("KEY_NOT_FOUND", "Key not found: \(key)")
-        }
-        let fragment: SwordRawOSISFragment
-        let content: BibleUIAgentAnchoredDocumentContent
-        do {
-            fragment = try module.rawOSISFragment(forKey: key)
-            content = try BibleUIAgentAnchoredDocumentContent(fragment: fragment)
-        } catch {
-            throw domainError("READ_ERROR", "Failed to read content: \(error.localizedDescription)")
-        }
-        return try genBookContentResult(
-            book: book,
-            name: module.info.description,
-            key: key,
-            keyName: fragment.keyName,
-            content: content.value(for: format),
-            format: format
+    }
+
+    /**
+     Captures one fresh readable installed-module registry for a single AI tool operation.
+
+     - Returns: SWORD-first global ownership with authorized native and SQLite content handles.
+     - Side effects: Enumerates native access state once and wraps the existing SQLite snapshot.
+     - Failure modes: Locked native owners remain registered but expose no content and never fall
+       through to a colliding SQLite module.
+     */
+    func readableInstalledModuleResolver() -> BibleReaderInstalledModuleResolver {
+        BibleReaderInstalledModuleResolver(
+            swordManager: swordManager,
+            sqliteLibrary: sqliteLibrary
         )
     }
 
-    private func installedModuleInfos() -> [ModuleInfo] {
-        var seen = Set<String>()
-        return (swordManager.installedModules() + sqliteLibrary.modules.map(\.info)).filter {
-            seen.insert($0.name).inserted
+    /**
+     Resolves installed ownership before lazily evaluating My Documents and EPUB metadata.
+
+     - Parameter name: Installed/local initials or full-name token at any JSword exact/case tier.
+     - Returns: Inclusive installed owner, the admitted canonical local owner, or missing.
+     - Side effects: Captures installed metadata first. Only when globally unowned does it load one
+       transactional My Documents snapshot and the installed EPUB metadata list; no page, TOC, or
+       content entry is read.
+     - Throws: My Documents snapshot failures when no other source can satisfy the local lookup, or
+       the document exclusion error for the canonical selected identity.
+     - Important: Locked installed ownership is returned without a content handle and never falls
+       through to a colliding local source.
+     */
+    func installedOrLocalGeneralBook(
+        named name: String
+    ) throws -> BibleReaderInstalledOrLocalDocumentOwner<BibleUIAgentLocalGeneralBookDocument> {
+        let resolver = readableInstalledModuleResolver()
+        var localMetadataError: Error?
+        let owner = resolver.resolveDocumentOwner(named: name, localRegistrations: {
+            var documents: [MyDocumentDraft] = []
+            do {
+                documents = try myDocumentLibraryStore.loadSession().documents
+            } catch {
+                localMetadataError = error
+            }
+            return localGeneralBookRegistrations(
+                documents: documents,
+                epubs: EpubReader.installedEpubs()
+            )
+        })
+
+        switch owner {
+        case .installed(let info, _):
+            try requireDocumentAllowed(info.name)
+        case .local(let local):
+            try requireDocumentAllowed(local.initials)
+        case .missing where localMetadataError != nil:
+            throw domainError("READ_ERROR", "Failed to read local document metadata.")
+        case .missing:
+            break
+        }
+        return owner
+    }
+
+    /**
+     Builds Android's EPUB-then-My Documents custom-book registration sequence.
+
+     - Parameters:
+       - documents: Transactional My Documents metadata in database registration order.
+       - epubs: Valid EPUB metadata in the order returned by the library scanner.
+     - Returns: Metadata-only local registrations with Android full-name, abbreviation, and category.
+     - Side effects: None; supplied values are projected without opening pages or EPUB fragments.
+     - Failure modes: None. The shared resolver applies candidate admission and TreeSet replacement.
+     */
+    func localGeneralBookRegistrations(
+        documents: [MyDocumentDraft],
+        epubs: [EpubInfo]
+    ) -> [BibleReaderLocalDocumentRegistration<BibleUIAgentLocalGeneralBookDocument>] {
+        epubs.map { info in
+            BibleReaderLocalDocumentRegistration(
+                document: .epub(info),
+                initials: info.initials,
+                fullName: info.title,
+                abbreviation: info.title,
+                category: .generalBook
+            )
+        } + documents.map { document in
+            BibleReaderLocalDocumentRegistration(
+                document: .myDocument(document),
+                initials: document.initials,
+                fullName: document.name,
+                abbreviation: document.initials,
+                category: .generalBook
+            )
         }
     }
 
-    private func installedModuleInfo(initials: String) -> ModuleInfo? {
-        installedModuleInfos().first { $0.name == initials }
+    /** Projects one unshadowed My Documents or EPUB row into Android's installed-book shape. */
+    private func installedLocalDocumentJSON(
+        _ document: BibleUIAgentLocalGeneralBookDocument
+    ) -> JSONValue {
+        return BibleUIAgentJSON.object(
+            ("initials", .string(document.initials)),
+            ("name", .string(document.displayName)),
+            ("category", .string(BibleUIAgentDocumentCategory.generalBook.rawValue)),
+            ("language", .string(document.language)),
+            ("isLocked", .bool(false)),
+            ("isIndexed", .bool(document.isIndexed)),
+            ("abbreviation", .string(document.abbreviation)),
+            ("hasStrongsNumbers", nil)
+        )
     }
 
     private func requireDocumentAllowed(_ initials: String) throws {
@@ -605,10 +874,22 @@ extension BibleUIAgentDomainAdapter {
         }
     }
 
-    private func commentaryInitials(requested: [String]) -> [String] {
-        let source = requested.isEmpty
-            ? installedModuleInfos().filter { $0.category == .commentary }.map(\.name)
-            : requested.filter { installedModuleInfo(initials: $0)?.category == .commentary }
+    private func commentaryInitials(
+        requested: [String],
+        resolver: BibleReaderInstalledModuleResolver
+    ) -> [String] {
+        let source: [String]
+        if requested.isEmpty {
+            source = resolver.readableModulesInBookSetOrder(categories: [.commentary]).map(\.info.name)
+        } else {
+            source = requested.compactMap { initials in
+                guard let module = resolver.module(named: initials),
+                      module.info.category == .commentary else {
+                    return nil
+                }
+                return module.info.name
+            }
+        }
         return source.filter(documentAccessPolicy.allows(documentInitials:))
     }
 
@@ -659,12 +940,22 @@ extension BibleUIAgentDomainAdapter {
         return nil
     }
 
+    /**
+     Maps installed JSword categories into the agent document-category vocabulary.
+
+     - Parameter category: Actual installed-book category.
+     - Returns: Agent-facing category, or nil for add-on/unknown sources the document tool cannot
+       read. Questionable, Essays, and Images retain Android's generic-book navigation surface.
+     - Side effects: None.
+     - Failure modes: None; every known module category is handled explicitly.
+     */
     private func moduleCategory(_ category: ModuleCategory) -> BibleUIAgentDocumentCategory? {
         switch category {
         case .bible: return .bible
         case .commentary: return .commentary
         case .dictionary, .glossary: return .dictionary
-        case .generalBook, .dailyDevotion: return .generalBook
+        case .generalBook, .dailyDevotion, .questionable, .essays, .images:
+            return .generalBook
         case .map: return .maps
         case .addon, .unknown: return nil
         }
@@ -674,14 +965,35 @@ extension BibleUIAgentDomainAdapter {
         moduleCategory(category)?.rawValue ?? "OTHER"
     }
 
-    private func installedDocumentJSON(_ info: ModuleInfo) -> JSONValue {
-        BibleUIAgentJSON.object(
+    /**
+     Projects one installed metadata row with generation-specific Search readiness.
+
+     - Parameters:
+       - info: Inclusive installed metadata retained for management and lock presentation.
+       - resolver: Operation-owned readable registry enforcing native collision precedence.
+     - Returns: Android-shaped document metadata; `isIndexed` is true only when this exact readable
+       Bible generation owns current completion metadata.
+     - Side effects: Performs one read-only index-readiness query for a resolved Bible.
+     - Failure modes: Locked, shadowed, wrong-category, stale, and mismatched sources report false.
+     */
+    private func installedDocumentJSON(
+        _ info: ModuleInfo,
+        resolver: BibleReaderInstalledModuleResolver
+    ) -> JSONValue {
+        let sourceIdentity = info.category == .bible
+            ? resolver.searchIndexSource(named: info.name)?.searchIndexSourceIdentity
+            : nil
+        let isIndexed = sourceIdentity.map {
+            $0.moduleName.utf16.elementsEqual(info.name.utf16)
+                && searchIndexService.hasIndex(for: $0)
+        } ?? false
+        return BibleUIAgentJSON.object(
             ("initials", .string(info.name)),
             ("name", .string(info.description)),
             ("category", .string(androidCategoryName(info.category))),
             ("language", .string(info.language.isEmpty ? "unknown" : info.language)),
             ("isLocked", .bool(info.isEncrypted && !info.isUnlocked)),
-            ("isIndexed", .bool(searchIndexService.hasIndex(for: info.name))),
+            ("isIndexed", .bool(isIndexed)),
             ("abbreviation", .string(info.name)),
             ("hasStrongsNumbers", info.category == .bible
                 ? .bool(info.features.contains(.strongsNumbers))

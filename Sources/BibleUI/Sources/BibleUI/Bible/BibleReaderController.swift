@@ -29,6 +29,16 @@ enum BibleReaderBookmarkNavigationCommitFailure: Error, Equatable, LocalizedErro
   }
 }
 
+/** Result of authorizing and validating one installed AI window-document request pre-mutation. */
+enum BibleReaderInstalledWindowDocumentPreflight: Equatable {
+  /// The globally selected readable source owns the request and the optional key is canonical.
+  case authorized(key: String?)
+  /// The installed identity is missing, locked, unreadable, or belongs to another category.
+  case sourceUnavailable
+  /// The readable source does not own the requested exact key/reference.
+  case keyUnavailable
+}
+
 /**
  Typed native WebView selection metadata used to route Speak through Android's source providers.
 
@@ -155,6 +165,42 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   private var activeSQLiteBibleModule: BibleReaderSQLiteModuleHandle?
     /// All installed Bible modules (for module switching)
     private(set) var installedBibleModules: [ModuleInfo] = []
+
+    /**
+     Bible modules eligible for normal reader shortcuts and automatic fallback selection.
+
+     Android's `SwordDocumentFacade.unlockedBibles` keeps locked modules out of toolbar menus while
+     the full document chooser retains inclusive installed inventory for its unlock workflow. Native
+     SWORD rows are classified through the manager's fresh access snapshot; validated Android SQLite
+     projections are readable by construction.
+
+     - Returns: Installed Bible metadata in the existing catalog order, excluding locked or
+       unavailable native SWORD rows.
+     - Side effects: Reads one fresh native inventory snapshot; it does not mutate selection,
+       persistence, rendered content, or the controller's stable catalog order.
+     - Failure modes: Missing managers and unsupported native modules fail closed. SQLite modules
+       remain available because catalog discovery has already validated their readable payload.
+     */
+    var readableBibleModules: [ModuleInfo] {
+        let readableNativeNames: Set<SQLiteDocumentIdentity>
+        if let swordManager {
+            readableNativeNames = Set(
+                swordManager.installedModules().lazy.filter { info in
+                    !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info)
+                        && info.category == .bible
+                        && (!info.isEncrypted || info.isUnlocked)
+                }.map { SQLiteDocumentIdentity($0.name) }
+            )
+        } else {
+            readableNativeNames = []
+        }
+        return installedBibleModules.filter { info in
+            if BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) {
+                return true
+            }
+            return readableNativeNames.contains(SQLiteDocumentIdentity(info.name))
+        }
+    }
 
     /**
      Dynamic book list from the active module's versification.
@@ -1876,9 +1922,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           else {
             return
           }
-          if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
-            != .orderedSame
-          {
+          if !SwordJavaStringIdentity.equalsIgnoreCase(
+            self.activeModuleName,
+            sourceModule.info.name
+          ) {
             self.switchBibleDocument(to: sourceModule.info.name)
           }
           self.navigateToSynchronizedPosition(
@@ -1924,7 +1971,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             },
             synchronizePosition: { [weak self] book, chapter, ordinal in
                 guard let self else { return }
-                if self.activeModuleName != module.info.name {
+                if !SwordJavaStringIdentity.equals(self.activeModuleName, module.info.name) {
                     self.switchBibleDocument(to: module.info.name)
                 }
                 self.navigateToSynchronizedPosition(book: book, chapter: chapter, ordinal: ordinal)
@@ -2040,9 +2087,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                   else {
                     return
                   }
-                  if self.activeModuleName.caseInsensitiveCompare(sourceModule.info.name)
-                    != .orderedSame
-                  {
+                  if !SwordJavaStringIdentity.equalsIgnoreCase(
+                    self.activeModuleName,
+                    sourceModule.info.name
+                  ) {
                     self.switchBibleDocument(to: sourceModule.info.name)
                   }
                   self.navigateToSynchronizedPosition(
@@ -2077,6 +2125,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case myDocument(MyDocument)
     }
 
+    /** One globally unowned local general-book adapter after shared ownership resolution. */
+    enum LocalGeneralBookDocument {
+        /// Exact My Documents graph row and its lazily read pages.
+        case myDocument(MyDocument)
+
+        /// Exact immutable EPUB generation and its lazily read fragments.
+        case epub(EpubReader)
+    }
+
     /** Builds category-correct SWORD generic context with source-owned document-switch navigation. */
     func makeGenericSpeechContext(
         module: SwordModule,
@@ -2084,7 +2141,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         category: SpeakDocumentCategory,
         currentKey: String?
     ) -> BibleReaderGenericSpeechContext? {
-        guard module.info.name == moduleName else { return nil }
+        guard SwordJavaStringIdentity.equals(module.info.name, moduleName) else { return nil }
         return BibleReaderGenericSpeechContext(
             category: category,
             module: module,
@@ -2106,7 +2163,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 guard let self else { return }
                 switch category {
                 case .commentary:
-                    if self.activeCommentaryModuleName != moduleName {
+                    if self.activeCommentaryModuleName.map({
+                        SwordJavaStringIdentity.equals($0, moduleName)
+                    }) != true {
                         self.switchCommentaryDocument(to: moduleName)
                     }
                     if let (book, chapter, verse) = self.parseVerseKey(sourceKey) {
@@ -2116,18 +2175,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                         self.loadCommentaryForCurrentVerse()
                     }
                 case .dictionary:
-                    if self.activeDictionaryModuleName != moduleName {
+                    if self.activeDictionaryModuleName.map({
+                        SwordJavaStringIdentity.equals($0, moduleName)
+                    }) != true {
                         self.switchDictionaryDocument(to: moduleName)
                     }
                     self.loadDictionaryEntry(key: sourceKey)
                 case .generalBook:
                     if module.info.category == .map {
-                        if self.activeMapModuleName != moduleName {
+                        if self.activeMapModuleName.map({
+                            SwordJavaStringIdentity.equals($0, moduleName)
+                        }) != true {
                             self.switchMapDocument(to: moduleName)
                         }
                         self.loadMapEntry(key: sourceKey)
                     } else {
-                        if self.activeGeneralBookModuleName != moduleName {
+                        if self.activeGeneralBookModuleName.map({
+                            SwordJavaStringIdentity.equals($0, moduleName)
+                        }) != true {
                             self.switchGeneralBookDocument(to: moduleName)
                         }
                         self.loadGeneralBookEntry(key: sourceKey)
@@ -2145,38 +2210,48 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         BibleReaderSpeechProviderFactory.category(for: category)
     }
 
-    /** Resolves a generic identity exactly and rejects ambiguous cross-store collisions. */
+    /**
+     Resolves one readable generic source while preserving Android global-registry ownership.
+
+     - Parameters:
+       - bookInitials: Exact persisted source initials.
+       - expectedCategory: Persisted provider category, or `nil` for bridge-owned routing.
+     - Returns: One authorized SWORD, EPUB, or My Documents source when identity is unambiguous.
+     - Side effects: Captures one fresh installed-module resolver snapshot; no content is read.
+     - Failure modes: Locked native owners and registered SQLite identities fail closed. EPUB and
+       My Documents follow Android registration/lookup ownership rather than forming parallel local
+       candidates. Missing and wrong-category owners return nil without constructing a provider.
+     */
     private func genericSpeechSource(
         bookInitials: String,
         expectedCategory: SpeakDocumentCategory?
     ) -> GenericSpeechSource? {
-        var candidates: [GenericSpeechSource] = []
-    if expectedCategory == nil || expectedCategory == .generalBook
-      || expectedCategory == .myDocument,
-      let document = myDocumentStore?.document(initials: bookInitials)
-    {
-            candidates.append(.myDocument(document))
-        }
-        if expectedCategory == nil || expectedCategory == .generalBook,
-           let reader = activeEpubReader?.initials == bookInitials
-               ? activeEpubReader
-        : EpubReader(initials: bookInitials)
-    {
-            candidates.append(.epub(reader))
-        }
-        if let module = swordManager?.module(named: bookInitials),
-           let category = Self.genericSpeechCategory(for: module.info.category),
-      expectedCategory == nil || expectedCategory == category
-    {
-            candidates.append(.sword(module: module, category: category))
-        }
-        guard candidates.count == 1 else {
-            if candidates.count > 1 {
-                logger.error("Ambiguous speech source identity: \(bookInitials, privacy: .public)")
+        guard let owner = installedOrLocalGeneralBookOwner(
+            named: bookInitials,
+            preferredEpub: activeEpubReader
+        ) else { return nil }
+        switch owner {
+        case .installed(let info, let readableSource):
+            guard let readableSource,
+                  case .sword(let module) = readableSource,
+                  let category = Self.genericSpeechCategory(for: info.category),
+                  expectedCategory == nil || expectedCategory == category else {
+                return nil
             }
+            return .sword(module: module, category: category)
+        case .local(.myDocument(let document)):
+            guard expectedCategory == nil
+                    || expectedCategory == .generalBook
+                    || expectedCategory == .myDocument else {
+                return nil
+            }
+            return .myDocument(document)
+        case .local(.epub(let reader)):
+            guard expectedCategory == nil || expectedCategory == .generalBook else { return nil }
+            return .epub(reader)
+        case .missing:
             return nil
         }
-        return candidates[0]
     }
 
     /** Projects My Documents pages into deterministic provider order. */
@@ -2264,10 +2339,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case .epub(let reader):
             let synchronize: @MainActor (String, Int) -> Void = { [weak self] sourceKey, ordinal in
                 guard let self else { return }
-                if self.activeEpubReader?.initials != reader.initials {
-                    self.activateEpub(reader, identifier: reader.identifier, requestedKey: sourceKey)
+                self.withFreshAuthorizedEpubSpeechReader(reader) { admittedReader in
+                    if self.activeEpubIdentifier != admittedReader.identifier
+                        || self.activeEpubReader?.generationIdentifier
+                            != admittedReader.generationIdentifier {
+                        self.activateEpub(
+                            admittedReader,
+                            identifier: admittedReader.identifier,
+                            requestedKey: sourceKey
+                        )
+                    }
+                    self.loadEpubEntry(key: sourceKey, jumpToOrdinal: ordinal)
                 }
-                self.loadEpubEntry(key: sourceKey, jumpToOrdinal: ordinal)
             }
             if let checkpoint {
                 return speechCoordinator.reconstructPageSession(
@@ -2320,7 +2403,56 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-  /** Builds an exact SQLite commentary/dictionary speech session before SWORD resolution. */
+    /**
+     Executes one deferred EPUB speech synchronization only for the current global registry owner.
+
+     - Parameters:
+       - expectedReader: Immutable EPUB generation captured when the speech session was built.
+       - operation: Content/state operation to run with the freshly admitted current generation.
+     - Returns: `true` only when the operation ran for the same current EPUB generation.
+     - Side effects: Opens the stable EPUB pointer and replays the complete installed/SQLite/EPUB/
+       My Documents registry before invoking `operation`; this method reads no EPUB fragment itself.
+     - Failure modes: Rebuilt/deleted EPUB generations, installed or earlier local owners, metadata
+       failures, and Java-distinct identities return `false` without invoking the operation.
+     */
+    @discardableResult
+    func withFreshAuthorizedEpubSpeechReader(
+        _ expectedReader: EpubReader,
+        operation: (EpubReader) -> Void
+    ) -> Bool {
+        guard let currentReader = EpubReader(identifier: expectedReader.identifier),
+              SwordJavaStringIdentity.equals(currentReader.initials, expectedReader.initials),
+              currentReader.generationIdentifier == expectedReader.generationIdentifier,
+              let owner = installedOrLocalGeneralBookOwner(
+                  named: expectedReader.initials,
+                  preferredEpub: currentReader
+              ),
+              case .local(.epub(let admittedReader)) = owner,
+              admittedReader.identifier == currentReader.identifier,
+              admittedReader.generationIdentifier == currentReader.generationIdentifier else {
+            return false
+        }
+        operation(admittedReader)
+        return true
+    }
+
+  /**
+   Builds an exact SQLite commentary/dictionary speech session before SWORD resolution.
+
+   - Parameters:
+     - bookInitials: Android document identity requested by speech or checkpoint restoration.
+     - key: Exact commentary or dictionary source key.
+     - startOrdinal: Optional inclusive source start ordinal.
+     - endOrdinal: Optional inclusive source end ordinal.
+     - expectedCategory: Optional category constraint carried by the request.
+     - checkpoint: Optional persisted provider state to reconstruct.
+     - service: Speech service whose settings and callbacks own the session.
+   - Returns: A source-backed reconstruction, or `nil` when the SQLite source/key cannot be proven.
+   - Side effects: Reads SQLite content lazily and synchronizes accepted positions into the pane;
+     Android-37 Java identity decides whether synchronization switches the active document first.
+   - Failure modes: Missing, shadowed, wrong-category, malformed, and unreadable SQLite sources fail
+     closed without falling through to SWORD or mutating an unrelated active document.
+   */
   private func sqliteGenericSpeechSession(
     bookInitials: String,
     key: String?,
@@ -2349,9 +2481,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           guard let self else { return }
           switch category {
           case .commentary:
-            if self.activeCommentaryModuleName?.caseInsensitiveCompare(module.info.name)
-              != .orderedSame
-            {
+            if self.activeCommentaryModuleName.map({
+              SwordJavaStringIdentity.equalsIgnoreCase($0, module.info.name)
+            }) != true {
               self.switchCommentaryDocument(to: module.info.name)
             }
             guard
@@ -2366,9 +2498,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             self.currentVerse = reference.verse
             self.loadCommentaryForCurrentVerse()
           case .dictionary:
-            if self.activeDictionaryModuleName?.caseInsensitiveCompare(module.info.name)
-              != .orderedSame
-            {
+            if self.activeDictionaryModuleName.map({
+              SwordJavaStringIdentity.equalsIgnoreCase($0, module.info.name)
+            }) != true {
               _ = self.switchDictionaryDocument(to: module.info.name)
             }
             self.loadDictionaryEntry(key: sourceKey)
@@ -2444,7 +2576,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return pages
     }
 
-    /** Reconstructs a persisted pause/last-position checkpoint from its exact source identity. */
+    /**
+     Reconstructs a persisted pause/last-position checkpoint from its exact authorized source.
+
+     - Parameters:
+       - checkpoint: Persisted category, source initials, key/ordinal, and playback state.
+       - service: Speech service that will own a successfully reconstructed session.
+     - Returns: A category-compatible reconstruction, or `nil` when the source is absent, locked,
+       shadowed, stale, or belongs to a different document category.
+     - Side effects: Reads only the freshly authorized source needed to rebuild page text; failure
+       does not mutate reader selection, PageManager state, or the supplied speech service.
+     - Failure modes: Bible/memorization checkpoints require an actual Bible backend. Generic
+       checkpoints replay the combined installed/local ownership contract before any content read.
+     */
     func reconstructSpeechSession(
         from checkpoint: SpeakProviderCheckpoint,
         service: SpeakService
@@ -2465,7 +2609,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           service: service
         )
       }
-            guard let module = swordManager?.module(named: cursor.bookInitials),
+            guard let module = swordManager?.readableModule(named: cursor.bookInitials),
+        module.info.category == .bible,
         let context = makeSpeechContext(module: module)
       else {
                 return nil
@@ -2591,14 +2736,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     /**
      Creates the backend-neutral installed-Bible registry used by one Search presentation.
 
-     Genuine readable SWORD modules are registered first. Android-compatible SQLite modules are
-     discovered through `SQLiteDocumentModuleLibrary`, preserving its exact/full-name/Java-folded
-     ordering while `BibleSearchIndexSourceRegistry` keeps native SWORD ownership of collisions.
+     Freshly verified readable SWORD modules are registered first. Android-compatible SQLite modules
+     reuse the runtime coordinator's validated, registration-ordered handles while
+     `BibleSearchIndexSourceRegistry` keeps native SWORD ownership of collisions.
 
      - Returns: Immutable source snapshot, or nil before a SWORD manager is configured.
-     - Side effects: Enumerates installed SQLite files and validates their metadata read-only.
-     - Failure modes: Malformed SQLite files remain library diagnostics and are absent from Search;
-       unreadable or synthetic SWORD projection rows are excluded.
+     - Side effects: Reads one fresh native inventory snapshot and reuses the coordinator's
+       validated SQLite snapshot; no module is unlocked or rediscovered.
+     - Failure modes: Locked/unreadable native Bibles and SQLite identities shadowed by any native
+       registration are absent, preventing Search from indexing a source reader cannot navigate.
      */
     @MainActor
     func makeSearchIndexSourceRegistry() -> BibleSearchIndexSourceRegistry? {
@@ -2606,24 +2752,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         var registeredSwordIdentities = Set<SQLiteDocumentIdentity>()
         var swordSources: [any BibleSearchIndexSource] = []
-        for info in swordManager.installedModules() where info.category == .bible {
-            guard sqliteRuntimeCoordinator.hasGenuineSwordModule(named: info.name) else { continue }
-            let canonicalName = sqliteRuntimeCoordinator.canonicalSwordModuleName(info.name)
-            let identity = SQLiteDocumentIdentity(canonicalName)
+        for info in swordManager.installedModules()
+        where info.category == .bible
+            && !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info)
+            && (!info.isEncrypted || info.isUnlocked) {
+            let identity = SQLiteDocumentIdentity(info.name)
             guard registeredSwordIdentities.insert(identity).inserted,
-                  let module = swordManager.module(named: canonicalName),
+                  let module = swordManager.module(named: info.name),
                   module.info.category == .bible else {
                 continue
             }
             swordSources.append(module)
         }
 
-        let sqliteLibrary = SQLiteDocumentModuleLibrary(
-            moduleRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
-        )
-        let sqliteSources: [any BibleSearchIndexSource] = sqliteLibrary
-            .modules(category: .bible)
-            .map { $0 }
+        let sqliteSources: [any BibleSearchIndexSource] = sqliteRuntimeCoordinator
+            .unshadowedSQLiteModules(category: .bible)
+            .map(\.searchIndexSource)
         return BibleSearchIndexSourceRegistry(
             primarySources: swordSources,
             additionalSources: sqliteSources
@@ -2649,10 +2793,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return false
         }
         let resolvedName = source.searchIndexModuleInfo.name
-        if activeModuleName != resolvedName || currentCategory != .bible {
+        if !SwordJavaStringIdentity.equals(activeModuleName, resolvedName)
+          || currentCategory != .bible {
             switchBibleDocument(to: resolvedName)
         }
-        guard activeModuleName == resolvedName,
+        guard SwordJavaStringIdentity.equals(activeModuleName, resolvedName),
               currentCategory == .bible,
               let bookName = bookName(forOsisId: target.osisBookId)
                 ?? (!target.displayBook.isEmpty ? target.displayBook : nil) else {
@@ -2769,19 +2914,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    Switches the selected Bible module without changing the visible category.
 
    - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Returns: `.switched` after activation, `.requiresUnlock` for a locked native SWORD module, or
+     `.unavailable` when no compatible backend resolves.
    - Side effects: Updates the active backend, refreshes its real book list, persists
      `PageManager.bibleDocument`, and reloads current content when the client is ready.
-   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+   - Failure modes: Locked, unknown, and unsupported native modules leave controller, persisted, and
+     rendered state unchanged. Serialized SQLite modules are readable and preserve their existing
+     switch path.
   */
-    public func switchModule(to moduleName: String) {
+    @discardableResult
+    public func switchModule(to moduleName: String) -> BibleReaderBibleModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchBible(
       to: moduleName,
       updatesVisibleCategory: false,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchModule(
+    return moduleSwitchCoordinator.switchModule(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2796,29 +2946,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      together, persisted together, and then rendered once when the web client is ready.
 
      - Parameter moduleName: Installed SWORD Bible module abbreviation to make current.
-     Side effects:
-     - mutates the active Bible module and current document category
-     - refreshes the cached Bible book list for the selected module
-     - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
-     - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
-     Failure modes:
-     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
-     - if the resolved module is not a Bible, logs a warning and leaves controller/page state
-       unchanged
+     - Returns: `.switched` after the atomic transition, `.requiresUnlock` before mutation for a
+       locked native SWORD module, or `.unavailable` for missing and incompatible targets.
+     - Side effects:
+       - mutates the active Bible module and current document category
+       - refreshes the cached Bible book list for the selected module
+       - writes `bibleDocument` and `currentCategoryName` to the active pane's `PageManager`
+       - invokes `onPersistState` once when pane state is available
+       - reloads the visible reader document once when the JavaScript client is ready
+     - Failure modes:
+       - locked and unavailable native modules leave controller/page/render state unchanged
+       - if the resolved module is not a Bible, logs a warning and leaves controller/page state
+         unchanged
      - Important: Main-actor isolated because successful switches can mutate SwiftUI-observed reader
        state and synchronously emit WebView bridge updates through `loadCurrentContent()`.
      */
     @MainActor
-    public func switchBibleDocument(to moduleName: String) {
+    @discardableResult
+    public func switchBibleDocument(to moduleName: String) -> BibleReaderBibleModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchBible(
       to: moduleName,
       updatesVisibleCategory: true,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchBibleDocument(
+    return moduleSwitchCoordinator.switchBibleDocument(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2828,19 +2981,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    Switches the selected commentary module without changing the visible category.
 
    - Parameter moduleName: Case-insensitive installed SWORD or Android SQLite initials.
+   - Returns: `.switched` after readable activation, or `.failed` before mutation.
    - Side effects: Updates and persists the commentary backend, reloading only when commentary is
      already visible and the client is ready.
-   - Failure modes: Unknown modules leave controller and persisted state unchanged.
+   - Failure modes: Locked, unknown, unreadable, and unsupported modules leave controller,
+     persisted state, and rendered content unchanged.
   */
-    public func switchCommentaryModule(to moduleName: String) {
+  @discardableResult
+  public func switchCommentaryModule(
+    to moduleName: String
+  ) -> BibleReaderCommentaryModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchCommentary(
       to: moduleName,
       updatesVisibleCategory: false,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchCommentaryModule(
+    return moduleSwitchCoordinator.switchCommentaryModule(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -2855,25 +3013,25 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      selections that should show commentary content immediately.
 
      - Parameter moduleName: Installed SWORD commentary module abbreviation to make current.
-     Side effects:
-     - mutates the active commentary module and current document category
-     - writes `commentaryDocument` and `currentCategoryName` to the active pane's `PageManager`
-     - invokes `onPersistState` once when pane state is available
-     - reloads the visible reader document once when the JavaScript client is ready
-     Failure modes:
-     - if the module cannot be resolved, logs a warning and leaves controller/page state unchanged
-     - if the resolved module is not a commentary, logs a warning and leaves state unchanged
+     - Returns: `.switched` after readable activation, or `.failed` before mutation.
+     - Side effects: On success, mutates the active commentary module/category, writes
+       `commentaryDocument` and `currentCategoryName`, persists once, and reloads once when ready.
+     - Failure modes: Locked, missing, unreadable, and wrong-category modules leave controller,
+       `PageManager`, persistence, navigation, and rendered content unchanged.
      */
     @MainActor
-    public func switchCommentaryDocument(to moduleName: String) {
+    @discardableResult
+    public func switchCommentaryDocument(
+      to moduleName: String
+    ) -> BibleReaderCommentaryModuleSwitchOutcome {
     if sqliteModuleSwitchCoordinator.switchCommentary(
       to: moduleName,
       updatesVisibleCategory: true,
       context: makeSQLiteModuleSwitchContext()
     ) {
-      return
+      return .switched
     }
-    moduleSwitchCoordinator.switchCommentaryDocument(
+    return moduleSwitchCoordinator.switchCommentaryDocument(
       to: sqliteRuntimeCoordinator.canonicalSwordModuleName(moduleName),
       context: makeModuleSwitchContext()
     )
@@ -3094,9 +3252,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 renderMemorizeDocument(activeMemorizeEmission)
                 return
             }
-            if loadRestoredAndroidMemorizeDocument() {
-                return
-            }
+            // A persisted fake document keeps its own identity even when its source was relocked.
+            // Never reinterpret that authorization failure as ordinary commentary content.
+            _ = loadRestoredAndroidMemorizeDocument()
+            return
         }
 
         if showingMyNotes {
@@ -3408,9 +3567,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Builds a Memorize document request for one restored source range.
 
      - Parameter source: Restored Android source document initials and verse references.
-     - Returns: Request configured with source-module canonical text extraction and progress state.
-     - Side effects: None during request construction.
-     - Failure modes: Returns `nil` when the source has no concrete references.
+     - Returns: Request configured with an authorized SWORD handle and progress state.
+     - Side effects: Captures one fresh installed-module resolver snapshot; no content is read.
+     - Failure modes: Returns `nil` when the source has no concrete references, is no longer
+       readable, is not a native SWORD Bible, or is shadowed by a locked native owner.
      */
   private func restoredMemorizeDocumentRequest(source: RestoredMemorizeSource)
     -> MemorizeDocumentRequest?
@@ -3419,9 +3579,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       let lastReference = source.references.last
     else { return nil }
         let bookInitials = source.bookInitials.isEmpty ? activeModuleName : source.bookInitials
-    let sourceModule =
-      swordManager?.module(named: bookInitials)
-            ?? (bookInitials == activeModuleName ? activeModule : nil)
+    guard case .sword(let sourceModule)? = installedModuleResolver().scripture(named: bookInitials)
+    else { return nil }
         let referenceOrdinals = Set(source.references.map(\.ordinal))
         let request = MemorizeDocumentRequest(
             bookInitials: bookInitials,
@@ -4085,35 +4244,107 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     applyNightModeBackground()
   }
 
-    /// Load a general book entry and display it in the WebView.
+    /**
+     Loads the selected installed or local general-book entry into the WebView.
+
+     - Parameter key: Optional exact native key or My Documents page key.
+     - Side effects: For an authorized source, may read one entry, replace Vue content, and persist
+       the resolved key. EPUB dispatch delegates to its separately guarded loader.
+     - Failure modes: Installed global ownership is resolved before local metadata. Locked/wrong-
+       category owners cannot fall through to My Documents, and missing local keys leave the pane
+       unchanged. Native failures retain the auxiliary loader's explicit error-document behavior.
+     */
     public func loadGeneralBookEntry(key: String? = nil) {
         if activeEpubReader != nil {
             loadEpubEntry(key: key)
             return
         }
-        if let initials = activeGeneralBookModuleName,
-      let document = myDocumentStore?.document(initials: initials)
-    {
-            let requestedKey = key ?? currentGeneralBookKey
-      let resolvedKey =
-        requestedKey.flatMap {
-                myDocumentStore?.page(bookInitials: initials, pageKey: $0)?.pageKey
+        guard let initials = activeGeneralBookModuleName else {
+            beginReplacingContentIntent()
+            auxiliaryContentLoader().loadModuleEntry(
+                BibleReaderAuxiliaryModuleEntryRequest(
+                    category: .generalBook,
+                    module: nil,
+                    moduleName: nil,
+                    requestedKey: key,
+                    currentKey: currentGeneralBookKey,
+                    osisBookId: "GenBook",
+                    fallbackBookName: "General Book",
+                    bookCategory: DocumentCategory.generalBook.rawValue,
+                    noModuleMessage:
+                        "No general book module is selected. Download one from the module browser.",
+                    noSelectionMessage: "Select an entry from the key browser to view its content.",
+                    noContentNoun: "content",
+                    persistResolvedKey: { _ in }
+                )
+            )
+            return
         }
-        ?? (document.pages ?? []).sorted {
+        guard let owner = installedOrLocalGeneralBookOwner(named: initials) else { return }
+
+        switch owner {
+        case .local(.myDocument(let document)):
+            let canonicalInitials = document.initials
+            let requestedKey = key ?? currentGeneralBookKey
+            let resolvedKey = requestedKey.flatMap {
+                myDocumentStore?.page(bookInitials: canonicalInitials, pageKey: $0)?.pageKey
+            } ?? (document.pages ?? []).sorted {
                 if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
                 return $0.pageKey < $1.pageKey
             }.first?.pageKey
             if let resolvedKey {
-                _ = loadMyDocumentPage(bookInitials: initials, pageKey: resolvedKey)
+                _ = loadMyDocumentPage(
+                    bookInitials: canonicalInitials,
+                    pageKey: resolvedKey
+                )
             }
             return
+
+        case .local(.epub):
+            return
+
+        case .installed(let info, let readableSource):
+            guard info.category == .generalBook,
+                  let readableSource,
+                  case .sword(let module) = readableSource else {
+                return
+            }
+            if activeGeneralBookModule.map({
+              SwordJavaStringIdentity.equals($0.info.name, info.name)
+            }) != true {
+                if case .failed = switchGeneralBookModule(to: info.name) { return }
+            }
+            loadAuthorizedGeneralBookEntry(module: module, moduleName: info.name, key: key)
+            return
+
+        case .missing:
+            return
         }
+    }
+
+    /**
+     Reads one already authorized native general-book owner through the auxiliary payload contract.
+
+     - Parameters:
+       - module: Fresh readable globally selected SWORD owner.
+       - moduleName: Canonical installed initials persisted/rendered for the owner.
+       - key: Optional exact key; nil retains the selected exact key or requests a chooser.
+     - Side effects: Begins replacement, reads the authorized entry, persists its resolved key, and
+       emits reader payload/error state according to the existing auxiliary loader contract.
+     - Failure modes: Loader validation/read failures emit the existing source-owned error document;
+       this helper is never called for locked, wrong-category, local, or missing owners.
+     */
+    private func loadAuthorizedGeneralBookEntry(
+        module: SwordModule,
+        moduleName: String,
+        key: String?
+    ) {
         beginReplacingContentIntent()
         auxiliaryContentLoader().loadModuleEntry(
             BibleReaderAuxiliaryModuleEntryRequest(
                 category: .generalBook,
-                module: activeGeneralBookModule,
-                moduleName: activeGeneralBookModuleName,
+                module: module,
+                moduleName: moduleName,
                 requestedKey: key,
                 currentKey: currentGeneralBookKey,
                 osisBookId: "GenBook",
@@ -4186,10 +4417,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     guard let firstGlobalKey else { return }
         switch category {
         case .generalBook:
-            guard activeGeneralBookModuleName == module.info.name else { return }
+            guard activeGeneralBookModuleName.map({
+              SwordJavaStringIdentity.equals($0, module.info.name)
+            }) == true else { return }
             loadGeneralBookEntry(key: firstGlobalKey)
         case .map:
-            guard activeMapModuleName == module.info.name else { return }
+            guard activeMapModuleName.map({
+              SwordJavaStringIdentity.equals($0, module.info.name)
+            }) == true else { return }
             loadMapEntry(key: firstGlobalKey)
         default:
             return
@@ -4204,11 +4439,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter identifier: Stable local EPUB library identifier.
      - Side effects: Activates the EPUB adapter, stores its initials/key in general-book PageManager
        fields, clears legacy EPUB fields, and reloads the reader when ready.
-     - Failure modes: An unreadable identifier is logged and leaves the current document unchanged.
+     - Failure modes: An unreadable identifier or different globally registered owner is
+       logged and leaves the current document unchanged without reading EPUB page content.
      */
     public func switchEpub(identifier: String) {
         guard let reader = EpubReader(identifier: identifier) else {
             logger.warning("Failed to open EPUB: \(identifier)")
+            return
+        }
+        guard let localDocument = localGeneralBookDocument(
+            named: reader.initials,
+            preferredEpub: reader
+        ), case .epub = localDocument else {
+            logger.warning("EPUB identity is owned by another installed document: \(reader.initials)")
             return
         }
         activateEpub(reader, identifier: identifier, requestedKey: reader.firstKey())
@@ -4236,7 +4479,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     @discardableResult
     public func adoptRebuiltEpubReader(_ reader: EpubReader) -> Bool {
         guard activeEpubIdentifier == reader.identifier,
-              activeEpubReader?.initials == reader.initials else {
+              activeEpubReader.map({
+                SwordJavaStringIdentity.equals($0.initials, reader.initials)
+              }) == true,
+              let localDocument = localGeneralBookDocument(
+                  named: reader.initials,
+                  preferredEpub: reader
+              ), case .epub = localDocument else {
             return false
         }
         let requestedKey = currentGeneralBookKey ?? reader.firstKey()
@@ -4325,14 +4574,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - jumpToOrdinal: Optional BVA ordinal selected from EPUB search.
      - Side effects: Replaces the Vue document, persists the resolved numeric key in general-book
        PageManager state, emits the optional HTML-id jump, and updates rendered pane identity.
-     - Failure modes: Missing adapters or keys emit a reader error document instead of leaving an
-       indefinite loading state or substituting an unrelated fragment.
+     - Failure modes: A newly installed different global owner returns before any
+       content read or reader/PageManager mutation. Missing adapters or keys emit a reader error
+       document instead of leaving an indefinite loading state or substituting an unrelated fragment.
      */
     public func loadEpubEntry(key: String? = nil, jumpToOrdinal: Int? = nil) {
+        guard let reader = activeEpubReader,
+              let localDocument = localGeneralBookDocument(
+                  named: reader.initials,
+                  preferredEpub: reader
+              ), case .epub = localDocument else {
+            return
+        }
         beginReplacingContentIntent()
         resetAuxiliaryContentState()
-        guard let reader = activeEpubReader,
-              let requestedKey = key ?? currentGeneralBookKey ?? reader.firstKey(),
+        guard let requestedKey = key ?? currentGeneralBookKey ?? reader.firstKey(),
       let content = reader.content(forKey: requestedKey)
     else {
             if let errorDocument = documentPayloadFactory().errorDocumentJSON(
@@ -4658,9 +4914,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        seed this controller.
      - Returns: `true` when shared state was copied; `false` when `other` has no manager yet.
    - Side Effects: Reuses `other`'s `SwordManager`, resolves this controller's own SWORD handles,
-     opens an independent SQLite catalog/connection set, and reapplies SWORD options.
+     opens an independent SQLite catalog/connection set, reapplies SWORD options, and reopens an
+     active EPUB only when the fresh combined registry still admits that exact package.
      - Failure Modes: Returns `false` without mutation when the source controller has no
-       `SwordManager`.
+       `SwordManager`. A newly installed native/SQLite owner suppresses stale copied EPUB state.
      - Important: This avoids constructing multiple C++ `SWMgr` instances during pane creation.
      */
     @discardableResult
@@ -4685,13 +4942,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     configureSwordManager(mgr)
 
         if let epubIdentifier = other.activeEpubIdentifier,
-      let epubReader = EpubReader(identifier: epubIdentifier)
-    {
-            self.activeEpubReader = epubReader
+           let epubReader = EpubReader(identifier: epubIdentifier),
+           let localDocument = localGeneralBookDocument(
+               named: epubReader.initials,
+               preferredEpub: epubReader
+           ),
+           case .epub(let admittedReader) = localDocument,
+           admittedReader.identifier == epubIdentifier {
+            self.activeEpubReader = admittedReader
             self.activeEpubIdentifier = epubIdentifier
-            self.activeEpubTitle = epubReader.title
+            self.activeEpubTitle = admittedReader.title
             self.activeGeneralBookModule = nil
-            self.activeGeneralBookModuleName = epubReader.initials
+            self.activeGeneralBookModuleName = admittedReader.initials
         }
         return true
     }
@@ -4702,28 +4964,34 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    - Side effects: Resolves genuine SWORD or serialized SQLite handles for Bible, commentary, and
      dictionary fields; restores other document categories; canonicalizes persisted module
      spelling; validates exact SQLite dictionary keys; refreshes books; and restores navigation.
-   - Failure modes: Missing, wrong-category, unreadable, and SWORD-shadowed SQLite selections are
-     ignored without replacing the supported setup fallback. Invalid SQLite dictionary keys are
-     cleared rather than normalized. The method is a no-op before `activeWindow` is attached.
+   - Failure modes: Missing, locked, wrong-category, unreadable, and SWORD-shadowed SQLite selections
+     never activate content handles. Commentary keeps its readable setup fallback when available;
+     optional categories preserve their requested identity without inventing a fallback. Invalid
+     SQLite dictionary keys are cleared rather than normalized. The method is a no-op before
+     `activeWindow` is attached.
    - Note: Canonicalized fields invoke `onPersistState` once after all restore decisions.
      */
     public func restoreSavedPosition() {
         guard let pm = activeWindow?.pageManager else { return }
     var normalizedPersistedSelection = false
 
-        // Restore the saved Bible module. `module(named:)` returns nil for an unsupported
-        // (e.g. unknown-versification) module, so a persisted or synced selection naming one is not
-        // restored and the supported module chosen during SWORD configuration remains. ADR-0010.
+        // Restore the saved Bible module only after the manager's fresh access state confirms it is
+        // readable. Locked and unsupported selections retain the readable module chosen during
+        // SWORD configuration instead of entering content rendering. ADR-0010 and issue #389.
     if let saved = pm.bibleDocument {
       let canonicalSaved = sqliteRuntimeCoordinator.canonicalSwordModuleName(saved)
       if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: saved),
-        let mod = swordManager?.module(named: canonicalSaved),
+        let manager = swordManager,
+        manager.moduleAccessState(named: canonicalSaved) == .readable,
+        let mod = manager.module(named: canonicalSaved),
         mod.info.category == .bible
       {
         activeSQLiteBibleModule = nil
             activeModule = mod
         activeModuleName = canonicalSaved
-        if pm.bibleDocument != canonicalSaved {
+        if pm.bibleDocument.map({
+          SwordJavaStringIdentity.equals($0, canonicalSaved)
+        }) != true {
           pm.bibleDocument = canonicalSaved
           normalizedPersistedSelection = true
         }
@@ -4736,7 +5004,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeModule = nil
         activeSQLiteBibleModule = mod
         activeModuleName = mod.info.name
-        if pm.bibleDocument != mod.info.name {
+        if pm.bibleDocument.map({
+          SwordJavaStringIdentity.equals($0, mod.info.name)
+        }) != true {
           pm.bibleDocument = mod.info.name
           normalizedPersistedSelection = true
         }
@@ -4745,139 +5015,170 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       }
         }
 
+        // One fresh global registry snapshot authorizes every auxiliary restore below. Native rows
+        // retain ownership while locked, so a colliding SQLite module cannot become a content
+        // fallback during session restoration.
+        let auxiliaryModuleResolver = installedModuleResolver()
+        let savedGeneralBookOwnerInfo = pm.generalBookDocument.flatMap {
+            auxiliaryModuleResolver.registeredModuleInfo(named: $0)
+        }
+        let rejectsWrongCategoryGeneralBook = savedGeneralBookOwnerInfo.map {
+            $0.category != .generalBook
+        } ?? false
+        let savedMapOwnerInfo = pm.mapDocument.flatMap {
+            auxiliaryModuleResolver.registeredModuleInfo(named: $0)
+        }
+        let rejectsWrongCategoryMap = savedMapOwnerInfo.map { $0.category != .map } ?? false
+
         // Restore saved commentary module or Android synthetic Memorize document
-        if pm.commentaryDocument == AndroidSpecialDocumentIdentity.memorizeDocumentInitials {
+        if pm.commentaryDocument.map({
+          SwordJavaStringIdentity.equals(
+            $0, AndroidSpecialDocumentIdentity.memorizeDocumentInitials)
+        }) == true {
             activeCommentaryModule = nil
       activeSQLiteCommentaryModule = nil
             activeCommentaryModuleName = AndroidSpecialDocumentIdentity.memorizeDocumentInitials
             logger.info("Restored Android synthetic Memorize document")
         } else if let savedComm = pm.commentaryDocument,
-      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedComm),
-      let mod = swordManager?.module(
-        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
-      ),
-      mod.info.category == .commentary
+      let source = auxiliaryModuleResolver.module(named: savedComm),
+      source.info.category == .commentary
     {
-      activeSQLiteCommentaryModule = nil
-            activeCommentaryModule = mod
-      activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
-      if pm.commentaryDocument != activeCommentaryModuleName {
+      switch source {
+      case .sword(let module):
+        activeCommentaryModule = module
+        activeSQLiteCommentaryModule = nil
+      case .sqlite(let module):
+        activeCommentaryModule = nil
+        activeSQLiteCommentaryModule = module
+      }
+      activeCommentaryModuleName = source.info.name
+      if pm.commentaryDocument.map({
+        SwordJavaStringIdentity.equals($0, source.info.name)
+      }) != true {
         pm.commentaryDocument = activeCommentaryModuleName
         normalizedPersistedSelection = true
       }
             logger.info("Restored saved commentary module: \(savedComm)")
-    } else if let savedComm = pm.commentaryDocument,
-      let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: savedComm,
-        category: .commentary
-      )
-    {
-      activeCommentaryModule = nil
-      activeSQLiteCommentaryModule = mod
-      activeCommentaryModuleName = mod.info.name
-      if pm.commentaryDocument != mod.info.name {
-        pm.commentaryDocument = mod.info.name
-        normalizedPersistedSelection = true
-      }
-      logger.info("Restored saved SQLite commentary module: \(savedComm)")
-    } else if let firstComm = installedCommentaryModules.first {
-      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: firstComm.name),
-        let mod = swordManager?.module(
-          named: sqliteRuntimeCoordinator.canonicalSwordModuleName(firstComm.name)
-        ),
-        mod.info.category == .commentary
-      {
+    } else if let firstCommentary = auxiliaryModuleResolver.modules(
+      category: .commentary,
+      orderedBy: installedCommentaryModules
+    ).first {
+      switch firstCommentary {
+      case .sword(let module):
+        activeCommentaryModule = module
         activeSQLiteCommentaryModule = nil
-        activeCommentaryModule = mod
-        activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(
-          firstComm.name
-        )
-      } else if let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: firstComm.name,
-        category: .commentary
-      ) {
+      case .sqlite(let module):
         activeCommentaryModule = nil
-        activeSQLiteCommentaryModule = mod
-        activeCommentaryModuleName = mod.info.name
+        activeSQLiteCommentaryModule = module
       }
+      activeCommentaryModuleName = firstCommentary.info.name
+    } else if let savedComm = pm.commentaryDocument {
+      activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = nil
+      activeCommentaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedComm)
         }
 
         // Restore dictionary module
         if let savedDict = pm.dictionaryDocument,
-      sqliteRuntimeCoordinator.hasGenuineSwordModule(named: savedDict),
-      let mod = swordManager?.module(
-        named: sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
-      ),
-      mod.info.category == .dictionary || mod.info.category == .glossary
+      let source = auxiliaryModuleResolver.module(named: savedDict),
+      source.info.category == .dictionary || source.info.category == .glossary
     {
-      activeSQLiteDictionaryModule = nil
-            activeDictionaryModule = mod
-      activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
-            currentDictionaryKey = pm.dictionaryKey
-      if pm.dictionaryDocument != activeDictionaryModuleName {
+      switch source {
+      case .sword(let module):
+        activeDictionaryModule = module
+        activeSQLiteDictionaryModule = nil
+        currentDictionaryKey = pm.dictionaryKey
+      case .sqlite(let module):
+        let restoredKey: String?
+        do {
+          let keys = try module.dictionaryKeys()
+          restoredKey = BibleReaderSQLiteDictionaryChooser.exactSourceKey(
+            matching: pm.dictionaryKey,
+            in: keys
+          )
+        } catch {
+          restoredKey = nil
+        }
+        activeDictionaryModule = nil
+        activeSQLiteDictionaryModule = module
+        currentDictionaryKey = restoredKey
+        if pm.dictionaryKey != restoredKey {
+          pm.dictionaryKey = restoredKey
+          normalizedPersistedSelection = true
+        }
+      }
+      activeDictionaryModuleName = source.info.name
+      if pm.dictionaryDocument.map({
+        SwordJavaStringIdentity.equals($0, source.info.name)
+      }) != true {
         pm.dictionaryDocument = activeDictionaryModuleName
         normalizedPersistedSelection = true
       }
             logger.info("Restored saved dictionary module: \(savedDict)")
-    } else if let savedDict = pm.dictionaryDocument,
-      let mod = sqliteRuntimeCoordinator.preferredModule(
-        named: savedDict,
-        category: .dictionary
-      )
-    {
-      let restoredKey: String?
-      do {
-        let keys = try mod.dictionaryKeys()
-        restoredKey = BibleReaderSQLiteDictionaryChooser.exactSourceKey(
-          matching: pm.dictionaryKey,
-          in: keys
-        )
-      } catch {
-        restoredKey = nil
-      }
+    } else if let savedDict = pm.dictionaryDocument {
       activeDictionaryModule = nil
-      activeSQLiteDictionaryModule = mod
-      activeDictionaryModuleName = mod.info.name
-      currentDictionaryKey = restoredKey
-      if pm.dictionaryDocument != mod.info.name {
-        pm.dictionaryDocument = mod.info.name
-        normalizedPersistedSelection = true
-      }
-      if pm.dictionaryKey != restoredKey {
-        pm.dictionaryKey = restoredKey
-        normalizedPersistedSelection = true
-      }
-      logger.info("Restored saved SQLite dictionary module: \(savedDict)")
+      activeSQLiteDictionaryModule = nil
+      activeDictionaryModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedDict)
+      currentDictionaryKey = nil
         }
 
         var restoredEpub = false
 
         // Restore general book module, My Document, EPUB adapter, or Android synthetic Multi document.
-        if pm.generalBookDocument == AndroidSpecialDocumentIdentity.multiDocumentInitials {
+        if pm.generalBookDocument.map({
+          SwordJavaStringIdentity.equals(
+            $0, AndroidSpecialDocumentIdentity.multiDocumentInitials)
+        }) == true {
             activeGeneralBookModule = nil
             activeGeneralBookModuleName = AndroidSpecialDocumentIdentity.multiDocumentInitials
             currentGeneralBookKey = pm.generalBookKey
             logger.info("Restored Android synthetic Multi document")
         } else if let savedGB = pm.generalBookDocument,
-      let document = myDocumentStore?.document(initials: savedGB)
-    {
+                  case .sword(let module)? = auxiliaryModuleResolver.module(named: savedGB),
+                  module.info.category == .generalBook {
+            activeEpubReader = nil
+            activeEpubIdentifier = nil
+            activeEpubTitle = nil
+            activeGeneralBookModule = module
+            activeGeneralBookModuleName = module.info.name
+            currentGeneralBookKey = pm.generalBookKey
+            if pm.generalBookDocument.map({
+              SwordJavaStringIdentity.equals($0, module.info.name)
+            }) != true {
+                pm.generalBookDocument = module.info.name
+                normalizedPersistedSelection = true
+            }
+            logger.info("Restored saved general book module: \(savedGB)")
+        } else if let savedGB = pm.generalBookDocument,
+                  let localDocument = localGeneralBookDocument(
+                      named: savedGB,
+                      resolver: auxiliaryModuleResolver
+                  ), case .myDocument(let document) = localDocument {
             activeEpubReader = nil
             activeEpubIdentifier = nil
             activeEpubTitle = nil
             activeGeneralBookModule = nil
-            activeGeneralBookModuleName = savedGB
+            activeGeneralBookModuleName = document.initials
       currentGeneralBookKey =
         pm.generalBookKey.flatMap {
-                myDocumentStore?.page(bookInitials: savedGB, pageKey: $0)?.pageKey
+                myDocumentStore?.page(bookInitials: document.initials, pageKey: $0)?.pageKey
         }
         ?? (document.pages ?? []).sorted {
                 if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
                 return $0.pageKey < $1.pageKey
             }.first?.pageKey
+            if pm.generalBookDocument.map({
+              SwordJavaStringIdentity.equals($0, document.initials)
+            }) != true {
+                pm.generalBookDocument = document.initials
+                normalizedPersistedSelection = true
+            }
             logger.info("Restored My Documents general book: \(savedGB)")
         } else if let savedGB = pm.generalBookDocument,
-      let reader = EpubReader(initials: savedGB)
-    {
+                  let localDocument = localGeneralBookDocument(
+                      named: savedGB,
+                      resolver: auxiliaryModuleResolver
+                  ), case .epub(let reader) = localDocument {
             activeEpubReader = reader
             activeEpubIdentifier = reader.identifier
             activeEpubTitle = reader.title
@@ -4890,34 +5191,49 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             currentEpubTitle = currentGeneralBookKey.flatMap { reader.content(forKey: $0)?.title }
             currentEpubHref = nil
             restoredEpub = true
+            if pm.generalBookDocument.map({
+              SwordJavaStringIdentity.equals($0, reader.initials)
+            }) != true {
+                pm.generalBookDocument = reader.initials
+                normalizedPersistedSelection = true
+            }
             logger.info("Restored EPUB general book: \(savedGB)")
         } else if let savedGB = pm.generalBookDocument,
-                  let mgr = swordManager,
-      let mod = mgr.module(named: savedGB)
-    {
-            activeGeneralBookModule = mod
-            activeGeneralBookModuleName = savedGB
+                  !rejectsWrongCategoryGeneralBook {
+            activeEpubReader = nil
+            activeEpubIdentifier = nil
+            activeEpubTitle = nil
+            activeGeneralBookModule = nil
+            activeGeneralBookModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedGB)
             currentGeneralBookKey = pm.generalBookKey
-            logger.info("Restored saved general book module: \(savedGB)")
         }
 
         // Restore map module
         if let savedMap = pm.mapDocument,
-           let mgr = swordManager,
-      let mod = mgr.module(named: savedMap)
+      case .sword(let module)? = auxiliaryModuleResolver.module(named: savedMap),
+      module.info.category == .map
     {
-            activeMapModule = mod
-            activeMapModuleName = savedMap
+            activeMapModule = module
+            activeMapModuleName = module.info.name
             currentMapKey = pm.mapKey
             logger.info("Restored saved map module: \(savedMap)")
+        } else if let savedMap = pm.mapDocument,
+                  !rejectsWrongCategoryMap {
+            activeMapModule = nil
+            activeMapModuleName = sqliteRuntimeCoordinator.canonicalSwordModuleName(savedMap)
+            currentMapKey = pm.mapKey
         }
 
         // Migrate legacy iOS-only EPUB PageManager fields into Android's general-book fields.
         var migratedLegacyEpub = false
         if !restoredEpub,
            let savedEpub = pm.epubIdentifier,
-      let reader = EpubReader(identifier: savedEpub)
-    {
+           let reader = EpubReader(identifier: savedEpub),
+           let localDocument = localGeneralBookDocument(
+               named: reader.initials,
+               preferredEpub: reader,
+               resolver: auxiliaryModuleResolver
+           ), case .epub = localDocument {
             activeEpubReader = reader
             activeEpubIdentifier = savedEpub
             activeEpubTitle = reader.title
@@ -4943,8 +5259,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         switch categoryName {
         case "commentary": currentCategory = .commentary
         case "dictionary": currentCategory = .dictionary
-        case "general_book": currentCategory = .generalBook
-        case "map": currentCategory = .map
+        case "general_book" where !rejectsWrongCategoryGeneralBook:
+            currentCategory = .generalBook
+        case "map" where !rejectsWrongCategoryMap:
+            currentCategory = .map
+        case "general_book", "map":
+            break
         case "epub" where restoredEpub:
             currentCategory = .generalBook
             pm.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
@@ -6631,38 +6951,98 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Returns the Android-compatible raw My Documents page payload for the supplied document/page key.
+
+     Global native/SQLite ownership is checked before local metadata or page content. A locked or
+     readable installed owner therefore receives `null` rather than exposing a colliding local page.
      */
   public func bridge(
     _ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String,
     pageKey: String
   ) {
-    guard
-      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
-    else {
+    guard let payload = authorizedMyDocumentRawContentPayload(
+      bookInitials: bookInitials,
+      pageKey: pageKey
+    ) else {
             bridge.sendResponse(callId: callId, value: "null")
             return
         }
 
-        bridge.sendResponse(callId: callId, value: payload)
+    bridge.sendResponse(callId: callId, value: payload)
+    }
+
+    /**
+     Resolves one raw My Documents page behind the complete Android registry ownership boundary.
+
+     - Parameters:
+       - bookInitials: Document token supplied by a rendered payload or direct bridge message.
+       - pageKey: Exact page key scoped to the resolved local document.
+     - Returns: The stored raw page payload only when the admitted owner is My Documents.
+     - Side effects: Reads installed/EPUB/My Documents metadata, then reads one local page after
+       ownership is proven; it performs no persistence, pasteboard, sharing, or reader mutation.
+     - Failure modes: Installed owners (including locked rows), EPUB owners, missing
+       metadata, and missing pages return `nil` without local page-content fallback.
+     */
+    func authorizedMyDocumentRawContentPayload(
+      bookInitials: String,
+      pageKey: String
+    ) -> MyDocumentRawContentPayload? {
+      guard let localDocument = localGeneralBookDocument(named: bookInitials),
+        case .myDocument(let document) = localDocument else {
+        return nil
+      }
+      return myDocumentStore?.rawContentPayload(
+        bookInitials: document.initials,
+        pageKey: pageKey
+      )
+    }
+
+    /**
+     Proves one My Documents page still belongs to Android's current combined book owner.
+
+     - Parameter id: Stable page identity captured by a reader AI action.
+     - Returns: `true` only when the page's exact parent document is the freshly admitted local My
+       Documents owner for its canonical initials.
+     - Side effects: Reads page/document and installed/EPUB/My Documents registration metadata only;
+       it never reads page content or mutates reader/persistence state.
+     - Failure modes: Missing relationships, replaced documents, native/SQLite/EPUB ownership
+       (including full-name and case-tier ownership), and local metadata failure return `false`.
+     */
+    func isAuthorizedMyDocumentPage(id: UUID) -> Bool {
+      guard let store = myDocumentStore,
+        let page = store.page(pageId: id),
+        let document = page.document,
+        let localDocument = localGeneralBookDocument(named: document.initials),
+        case .myDocument(let authorizedDocument) = localDocument,
+        authorizedDocument.id == document.id,
+        SwordJavaStringIdentity.equals(authorizedDocument.initials, document.initials)
+      else {
+        return false
+      }
+      return true
     }
 
     /**
      Renders one locally stored My Documents page into the WebView document stream.
 
-     - Returns: `true` when the page exists and a document payload was emitted.
+     - Returns: `true` when the globally unowned page exists and a document payload was emitted.
+     - Side effects: After ownership, page, and serialization checks pass, replaces reader content
+       and persists the local general-book selection.
+     - Failure modes: Locked/readable installed owners, another admitted local owner, missing pages,
+       and serialization failures return false before reader or PageManager mutation.
      */
     @discardableResult
     public func loadMyDocumentPage(bookInitials: String, pageKey: String) -> Bool {
         guard let store = myDocumentStore,
-              let document = store.document(initials: bookInitials),
-      let page = store.page(bookInitials: bookInitials, pageKey: pageKey)
+              let localDocument = localGeneralBookDocument(named: bookInitials),
+              case .myDocument(let document) = localDocument,
+      let page = store.page(bookInitials: document.initials, pageKey: pageKey)
     else {
             return false
         }
 
         let metadata = store.readerMetadata(
             for: page,
-            bookInitials: bookInitials,
+            bookInitials: document.initials,
             pageKey: pageKey,
             unknownPromptName: String(localized: "ai_unknown_prompt", defaultValue: "AI")
         )
@@ -6699,7 +7079,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         activeGeneralBookModuleName = document.initials
         currentGeneralBookKey = page.pageKey
         currentCategory = .generalBook
-        myDocumentCoordinator.setActivePage(bookInitials: bookInitials, pageKey: pageKey)
+        myDocumentCoordinator.setActivePage(
+            bookInitials: document.initials,
+            pageKey: pageKey
+        )
         if let pageManager = activeWindow?.pageManager {
             pageManager.currentCategoryName = DocumentCategory.generalBook.pageManagerKey
             pageManager.generalBookDocument = document.initials
@@ -6725,14 +7108,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Copies the stored raw My Documents page content to the platform pasteboard.
+     Copies one globally authorized My Documents page to the platform pasteboard.
+
+     - Parameters:
+       - bridge: Reader bridge that originated the action; retained for delegate compatibility.
+       - bookInitials: Document token emitted by the rendered My Documents payload.
+       - pageKey: Exact page key emitted by that payload.
+     - Side effects: Resolves the complete installed/EPUB/My Documents registry, reads the exact
+       local page only when My Documents owns the token, then writes its raw body to the pasteboard.
+     - Failure modes: Installed owners (including locked native rows), EPUB owners, missing pages,
+       and local metadata failures return before either page-content or pasteboard access.
      */
   public func bridge(
     _ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String
   ) {
-    guard
-      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
-    else {
+    guard let payload = authorizedMyDocumentRawContentPayload(
+      bookInitials: bookInitials,
+      pageKey: pageKey
+    ) else {
             return
         }
 
@@ -6745,14 +7138,24 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Shares the stored raw My Documents page content through native sharing UI.
+     Shares one globally authorized My Documents page through native sharing UI.
+
+     - Parameters:
+       - bridge: Reader bridge that originated the action; retained for delegate compatibility.
+       - bookInitials: Document token emitted by the rendered My Documents payload.
+       - pageKey: Exact page key emitted by that payload.
+     - Side effects: Resolves the complete installed/EPUB/My Documents registry, reads the exact
+       local page only when My Documents owns the token, and invokes the native share callback.
+     - Failure modes: Installed owners (including locked native rows), EPUB owners, missing pages,
+       and local metadata failures return before page-content access or callback invocation.
      */
   public func bridge(
     _ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String
   ) {
-    guard
-      let payload = myDocumentStore?.rawContentPayload(bookInitials: bookInitials, pageKey: pageKey)
-    else {
+    guard let payload = authorizedMyDocumentRawContentPayload(
+      bookInitials: bookInitials,
+      pageKey: pageKey
+    ) else {
             return
         }
 
@@ -6760,7 +7163,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Persists raw My Documents editor content without rebuilding the document immediately.
+     Persists editor content only when My Documents owns the complete registry identity.
+
+     - Parameters:
+       - bridge: Reader bridge that originated the action; retained for delegate compatibility.
+       - bookInitials: Document token emitted by the rendered editable payload.
+       - pageId: Exact stable page UUID from that payload.
+       - content: Replacement raw Markdown or HTML body.
+       - title: Optional replacement title; `nil` preserves the stored title.
+     - Side effects: Resolves installed/local metadata, then updates and saves the exact local page
+       graph through `MyDocumentStore` only after My Documents ownership is proven.
+     - Failure modes: Malformed UUIDs, installed or EPUB owners, local metadata failures, missing
+       pages, and save failures return without mutating a local page.
      */
   public func bridge(
     _ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String,
@@ -6771,9 +7185,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return
         }
 
-    guard
+    guard let localDocument = localGeneralBookDocument(named: bookInitials),
+      case .myDocument(let document) = localDocument,
       myDocumentStore?.savePageContent(
-            bookInitials: bookInitials,
+            bookInitials: document.initials,
             pageId: pageUUID,
             content: content,
             title: title
@@ -7623,13 +8038,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      */
     private func handleExternalLinkRoute(_ route: BibleReaderExternalLinkRouter.Route) {
         switch route {
-    case .definition(let strongs, let robinson):
-            logger.info("handleExternalLinkRoute.definition: strongs=\(strongs), robinson=\(robinson)")
+    case .definition(let items),
+         .multiDefinition(let items):
+            let emitsEmptyMultiOnMiss: Bool
+            if case .multiDefinition = route {
+                emitsEmptyMultiOnMiss = true
+            } else {
+                emitsEmptyMultiOnMiss = false
+            }
+            logger.info("handleExternalLinkRoute.definition: items=\(String(describing: items))")
       guard
         let multiDocJSON = buildStrongsMultiDocJSON(
-                strongs: strongs,
-                robinson: robinson,
-                stateJSON: currentStrongsDocumentStateJSON()
+                items: items,
+                stateJSON: currentStrongsDocumentStateJSON(),
+                emitsEmptyMultiOnMiss: emitsEmptyMultiOnMiss
         )
       else {
                 return
@@ -7790,14 +8212,49 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
-     Builds the Android-style Strong's `MultiDocument` payload for bridge routing.
+     Builds the Android-style Strong's `MultiDocument` payload for ordered bridge routing.
 
      The controller only supplies pane dependencies; lookup, module selection, linkification, and
-     fallback-document construction are owned by `BibleReaderStrongsDocumentBuilder`.
+     fallback-document construction are owned by `BibleReaderStrongsDocumentBuilder`. Multi-link
+     dispatch remains explicit because Android opens an empty `MultiDocument` when every child
+     misses, while a single missing Strong's entry leaves the current page unchanged.
+
+     - Parameters:
+       - items: Ordered Strong's and morphology children collected from the route.
+       - stateJSON: Optional Vue tab state restored into the destination document.
+       - emitsEmptyMultiOnMiss: Whether the source route used Android's `openMulti` branch.
+     - Returns: Serialized definition document, or `nil` for a single unresolved Strong's link.
+     - Side effects: Reads installed dictionary sources and their current settings-backed selection.
+     - Failure modes: Backend misses and serialization failures follow the delegated builder rules.
      */
-  func buildStrongsMultiDocJSON(strongs: [String], robinson: [String], stateJSON: String? = nil)
-    -> String?
-  {
+    private func buildStrongsMultiDocJSON(
+        items: [BibleReaderDefinitionItem],
+        stateJSON: String? = nil,
+        emitsEmptyMultiOnMiss: Bool
+    ) -> String? {
+        strongsDocumentBuilder().buildStrongsMultiDocumentJSON(
+            items: items,
+            stateJSON: stateJSON,
+            emitsEmptyMultiOnMiss: emitsEmptyMultiOnMiss
+        )
+    }
+
+    /**
+     Builds a Strong's document from the compatibility array API used by direct controller tests.
+
+     - Parameters:
+       - strongs: Ordered Strong's values placed before morphology values in the result.
+       - robinson: Ordered Robinson morphology values placed after Strong's values in the result.
+       - stateJSON: Optional Vue tab state restored into the destination document.
+     - Returns: Serialized definition document, or `nil` for a single unresolved Strong's link.
+     - Side effects: Reads installed dictionary sources and their current settings-backed selection.
+     - Failure modes: Backend misses and serialization failures follow the delegated builder rules.
+     */
+    func buildStrongsMultiDocJSON(
+        strongs: [String],
+        robinson: [String],
+        stateJSON: String? = nil
+    ) -> String? {
         strongsDocumentBuilder().buildStrongsMultiDocumentJSON(
             strongs: strongs,
             robinson: robinson,
@@ -7811,13 +8268,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func strongsDocumentBuilder() -> BibleReaderStrongsDocumentBuilder {
         BibleReaderStrongsDocumentBuilder(
             installedDictionarySources: { [weak self] in
-                self?.installedDictionarySources() ?? []
+                self?.installedDictionaryKeySources() ?? []
+            },
+            installedBookMetadata: { [weak self] in
+                self?.installedModuleResolver().registeredBookMetadata() ?? []
+            },
+            installedDictionarySourceNamed: { [weak self] name in
+                self?.installedModuleResolver().module(named: name)?.explicitDictionaryKeySource
             },
             selectedPreferenceValues: { [weak self] key in
                 self?.settingsStore?.getStringSet(key) ?? []
-            },
-            localizedString: { key, defaultValue in
-                Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
             }
         )
     }
@@ -7900,7 +8360,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         ).buildDocumentJSON(refs: refs)
     }
 
-    /** Captures Android's exact global installed-book registry for one reader operation. */
+    /**
+     Captures Android's global installed-book registry for one reader operation.
+
+     - Returns: A resolver that replays native/custom-driver admission, exact identity maps, locked
+       ownership, and JSword TreeSet ordering over the current runtime snapshot.
+     - Side effects: Enumerates current SWORD metadata and unshadowed SQLite registrations; it does
+       not open content or mutate the registry.
+     - Failure modes: A missing manager produces a SQLite-only resolver. Locked native books retain
+       ownership metadata but expose no readable handle, so callers fail closed on content access.
+     */
     private func installedModuleResolver() -> BibleReaderInstalledModuleResolver {
         BibleReaderInstalledModuleResolver(
             swordManager: swordManager,
@@ -7908,16 +8377,259 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
+    /**
+     Returns the inclusive global owner selected for one installed-document token.
+
+     - Parameter name: Initials or full-name token from persisted state, bridge input, or AI routing.
+     - Returns: Canonical admitted metadata, including a currently locked native owner, or nil when
+       Android's installed registry does not own the token.
+     - Side effects: Captures fresh native access metadata and replays immutable custom admission;
+       no installed or local content is read.
+     - Failure modes: Missing and Java-distinct identities return nil without normalization.
+     */
+    func registeredInstalledModuleInfo(named name: String) -> ModuleInfo? {
+        installedModuleResolver().registeredModuleInfo(named: name)
+    }
+
+    /**
+     Authorizes one installed AI window-document request and validates its optional key atomically.
+
+     - Parameters:
+       - name: Initials or full-name token resolved through the global JSword registry tiers.
+       - category: Exact category reported by the inclusive installed-owner lookup.
+       - key: Optional non-empty Bible/commentary reference or generic source key.
+     - Returns: A readable-source authorization containing the canonical source key/reference, or a
+       typed source/key rejection that the live-window router can report before switching panes.
+     - Side effects: Captures fresh installed ownership and may enumerate exact generic keys or
+       inspect cursor-restoring SWORD reference metadata; it never mutates controller, pane,
+       persistence, navigation, or rendered-content state.
+     - Failure modes: Locked, replaced, missing, and wrong-category owners return
+       `.sourceUnavailable`. Invalid references, absent exact Java keys, SQLite query failures, and
+       unsupported installed backend/category pairs return `.keyUnavailable`.
+     */
+    func preflightInstalledWindowDocument(
+      named name: String,
+      category: ModuleCategory,
+      key: String?
+    ) -> BibleReaderInstalledWindowDocumentPreflight {
+      let resolver = installedModuleResolver()
+      guard let registeredInfo = resolver.registeredModuleInfo(named: name),
+        registeredInfo.category == category,
+        let source = resolver.module(named: name),
+        source.info.category == category,
+        SwordJavaStringIdentity.equals(source.info.name, registeredInfo.name)
+      else {
+        return .sourceUnavailable
+      }
+
+      guard let key, !key.isEmpty else { return .authorized(key: nil) }
+
+      switch category {
+      case .bible:
+        guard let scripture = source.scripture else { return .sourceUnavailable }
+        do {
+          let books = try scripture.bookList()
+          let referenceResolver: BibleReaderReferenceResolver
+          switch scripture {
+          case .sword(let module):
+            referenceResolver = BibleReaderReferenceResolver(
+              activeModule: module,
+              bookList: books,
+              fallbackBooks: [],
+              fallbackVerseCount: { _, _ in 0 }
+            )
+          case .sqlite:
+            referenceResolver = BibleReaderReferenceResolver(
+              activeModule: nil,
+              bookList: books,
+              fallbackBooks: books,
+              fallbackVerseCount: { bookName, chapter in
+                guard let osisID = books.first(where: { $0.name == bookName })?.osisId else {
+                  return 0
+                }
+                return JSwordKJVAVersification.verseCount(
+                  osisId: osisID,
+                  chapter: chapter
+                ) ?? 0
+              }
+            )
+          }
+          guard let reference = referenceResolver.resolveReference(key) else {
+            return .keyUnavailable
+          }
+          return .authorized(key: reference)
+        } catch {
+          return .keyUnavailable
+        }
+
+      case .commentary:
+        guard let reference = referenceResolver().resolveReference(key) else {
+          return .keyUnavailable
+        }
+        return .authorized(key: reference)
+
+      case .dictionary, .glossary:
+        let keys: [String]
+        do {
+          switch source {
+          case .sword(let module): keys = try module.loadAllKeys()
+          case .sqlite(let module): keys = try module.dictionaryKeys()
+          }
+        } catch {
+          return .keyUnavailable
+        }
+        guard let exactKey = keys.first(where: {
+          SwordJavaStringIdentity.equals($0, key)
+        }) else {
+          return .keyUnavailable
+        }
+        return .authorized(key: exactKey)
+
+      case .generalBook, .map:
+        guard case .sword(let module) = source else { return .sourceUnavailable }
+        let keys: [String]
+        do {
+          keys = try module.loadAllKeys()
+        } catch {
+          return .keyUnavailable
+        }
+        guard let exactKey = keys.first(where: {
+          SwordJavaStringIdentity.equals($0, key)
+        }) else {
+          return .keyUnavailable
+        }
+        return .authorized(key: exactKey)
+
+      case .dailyDevotion, .questionable, .essays, .images, .addon, .unknown:
+        return .sourceUnavailable
+      }
+    }
+
+    /**
+     Reports whether Android's complete installed/local registry owns a proposed document token.
+
+     - Parameter name: Candidate My Documents initials generated or explicitly restored by a caller.
+     - Returns: True for exact initials, exact full-name, or Java case-tier ownership. Local metadata
+       failures also return true so creation fails closed rather than publishing a colliding book.
+     - Side effects: Reads installed/local metadata and opens immutable EPUB generations only.
+     - Failure modes: None exposed; metadata errors conservatively reserve the candidate.
+     */
+    func hasRegisteredDocument(named name: String) -> Bool {
+        guard let owner = installedOrLocalGeneralBookOwner(named: name) else { return true }
+        if case .missing = owner { return false }
+        return true
+    }
+
+    /**
+     Resolves a My Documents or EPUB source only after the global registry declines ownership.
+
+     - Parameters:
+       - name: Exact local initials token, also checked against installed initials/full-name/case tiers.
+       - preferredEpub: Already retained EPUB generation to reuse without opening another generation.
+       - resolver: Optional operation-owned installed snapshot; restore supplies one shared snapshot.
+     - Returns: The owner selected after Android's EPUB-then-My Documents registration and global
+       exact-initials, exact-name, then case-insensitive TreeSet lookup tiers.
+     - Side effects: Captures installed metadata, reads ordered local document/EPUB metadata, and
+       opens immutable EPUB generations; it never reads a My Documents page or EPUB fragment.
+     - Failure modes: Candidate initials owned by an earlier installed/local book are rejected.
+       My Documents metadata failures and absent owners fail closed without state mutation.
+     */
+    func localGeneralBookDocument(
+        named name: String,
+        preferredEpub: EpubReader? = nil,
+        resolver: BibleReaderInstalledModuleResolver? = nil
+    ) -> LocalGeneralBookDocument? {
+        guard let owner = installedOrLocalGeneralBookOwner(
+            named: name,
+            preferredEpub: preferredEpub,
+            resolver: resolver
+        ), case .local(let document) = owner else {
+            return nil
+        }
+        return document
+    }
+
+    /**
+     Captures the complete installed/EPUB/My Documents owner for one Android book token.
+
+     - Parameters mirror `localGeneralBookDocument`; local metadata remains entry-content-free.
+     - Returns: Deterministic JSword owner, or nil when My Documents metadata cannot be read.
+     - Side effects: Reads installed/local metadata and opens immutable EPUB generations only.
+     - Failure modes: Local metadata failure returns nil so callers fail before content or state.
+     */
+    private func installedOrLocalGeneralBookOwner(
+        named name: String,
+        preferredEpub: EpubReader? = nil,
+        resolver: BibleReaderInstalledModuleResolver? = nil
+    ) -> BibleReaderInstalledOrLocalDocumentOwner<LocalGeneralBookDocument>? {
+        let resolver = resolver ?? installedModuleResolver()
+        let documents: [MyDocument]
+        if let store = myDocumentStore {
+            guard let ordered = try? store.documentsInRegistrationOrder() else { return nil }
+            documents = ordered
+        } else {
+            documents = []
+        }
+        let epubReaders = EpubReader.installedEpubs().compactMap { info -> EpubReader? in
+            if preferredEpub?.identifier == info.identifier { return preferredEpub }
+            if activeEpubReader?.identifier == info.identifier { return activeEpubReader }
+            return EpubReader(identifier: info.identifier)
+        }
+        let localRegistrations: [BibleReaderLocalDocumentRegistration<LocalGeneralBookDocument>] =
+            epubReaders.map { reader in
+                BibleReaderLocalDocumentRegistration(
+                    document: .epub(reader),
+                    initials: reader.initials,
+                    fullName: reader.title,
+                    abbreviation: reader.title,
+                    category: .generalBook
+                )
+            } + documents.map { document in
+                BibleReaderLocalDocumentRegistration(
+                    document: .myDocument(document),
+                    initials: document.initials,
+                    fullName: document.name,
+                    abbreviation: document.initials,
+                    category: .generalBook
+                )
+            }
+        let owner = resolver.resolveDocumentOwner(
+            named: name,
+            localRegistrations: { localRegistrations }
+        )
+        return owner
+    }
+
     /** Resolves the pane's selected Bible without substituting another installed source. */
     private func activeInstalledScriptureSource() -> BibleReaderInstalledScriptureSource? {
         installedModuleResolver().scripture(named: activeModuleName)
     }
 
-    /** Returns Android's globally registered dictionary/glossary inventory in backend order. */
+    /**
+     Returns Android's selected-word dictionary inventory in installed-book TreeSet order.
+
+     - Returns: Readable plain-dictionary candidates before Strong/morphology and preference
+       filtering by `BibleReaderWordLookupDocumentBuilder`.
+     - Side effects: Captures one fresh global resolver snapshot and projects its immutable
+       category/abbreviation/initials/name order.
+     - Failure modes: Locked, shadowed, wrong-category, and unreadable registrations are omitted.
+     */
     private func installedDictionarySources() -> [BibleReaderInstalledDictionarySource] {
-        installedModuleResolver()
-            .modules(categories: [.dictionary, .glossary])
-            .compactMap(\.dictionary)
+        installedModuleResolver().wordLookupDictionarySources()
+    }
+
+    /**
+     Captures every readable installed book capable of Android's exact dictionary-key API.
+
+     - Returns: Native books and faithful SQLite dictionary backends in JSword TreeSet order for
+       automatic Strong's/morphology feature filtering.
+     - Side effects: Captures one fresh combined native/custom registry snapshot, including custom
+       admission replay and locked ownership metadata; no content entry is read.
+     - Failure modes: Locked, unreadable, shadowed, and non-key-capable registrations are omitted
+       without substituting a colliding backend.
+     */
+    private func installedDictionaryKeySources() -> [BibleReaderInstalledDictionarySource] {
+        installedModuleResolver().dictionaryKeySources()
     }
 
     /**
@@ -8300,33 +9012,42 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      module retained from the link parser.
    - Returns: `true` after exact target mapping and navigation; otherwise `false` with no
      navigation mutation.
-   - Side effects: May switch the visible Bible document/category, persist pane state, record
-     navigation history, and emit a reader document when the web client is ready.
+   - Side effects: For a validated readable destination, may leave My Notes, switch the visible
+     Bible document/category, persist pane state, record navigation history, and emit a reader
+     document when the web client is ready.
    - Failure modes: Missing current/target Bible modules, unsupported strict mappings, invalid
-     target entries, non-monotonic mapped ranges, and unavailable target book metadata fail
-     closed.
+     target entries, locked targets, non-monotonic mapped ranges, and unavailable target book
+     metadata fail closed without leaving My Notes.
    */
   @discardableResult
   func navigateToBibleLink(_ ref: OsisRef) -> Bool {
     guard let target = navigationReference(for: ref) else { return false }
-    // Android routes link results through setCurrentDocumentAndKey, which selects the Bible
-    // page, so link navigation always exits My Notes instead of re-rendering it in place.
-    showingMyNotes = false
 
-    if activeInstalledScriptureSource()?.info.name != target.moduleName
-        || currentCategory != .bible {
-      if !sqliteModuleSwitchCoordinator.switchBible(
-        to: target.moduleName,
-        updatesVisibleCategory: true,
-        context: makeSQLiteModuleSwitchContext()
-      ) {
-        moduleSwitchCoordinator.switchBibleDocument(
+    if activeInstalledScriptureSource().map({
+      SwordJavaStringIdentity.equals($0.info.name, target.moduleName)
+    }) != true
+      || currentCategory != .bible {
+      if sqliteRuntimeCoordinator.hasGenuineSwordModule(named: target.moduleName) {
+        guard moduleSwitchCoordinator.switchBibleDocument(
           to: sqliteRuntimeCoordinator.canonicalSwordModuleName(target.moduleName),
-          context: makeModuleSwitchContext()
-        )
+          context: makeModuleSwitchContext(),
+          prepareForSwitch: { self.showingMyNotes = false }
+        ) == .switched else { return false }
+      } else {
+        guard sqliteModuleSwitchCoordinator.switchBible(
+          to: target.moduleName,
+          updatesVisibleCategory: true,
+          context: makeSQLiteModuleSwitchContext(),
+          prepareForSwitch: { self.showingMyNotes = false }
+        ) else { return false }
       }
+    } else {
+      // Android routes same-module link results through the Bible page as well.
+      showingMyNotes = false
     }
-    guard activeInstalledScriptureSource()?.info.name == target.moduleName,
+    guard activeInstalledScriptureSource().map({
+      SwordJavaStringIdentity.equals($0.info.name, target.moduleName)
+    }) == true,
       currentCategory == .bible
     else { return false }
 
@@ -8367,14 +9088,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
       let sourceVersification: String
       let sourceOrdinal: Int?
-      if let module = activeSQLiteBibleModule, module.info.name == initials {
+      if let module = activeSQLiteBibleModule,
+        SwordJavaStringIdentity.equals(module.info.name, initials) {
         sourceVersification = BibleReaderSQLiteSourceMetadata(module: module).versification
         sourceOrdinal = JSwordKJVAVersification.verseOrdinal(
           osisId: osisBookID,
           chapter: currentChapter,
           verse: verse
         )
-      } else if let module = activeModule, module.info.name == initials {
+      } else if let module = activeModule,
+        SwordJavaStringIdentity.equals(module.info.name, initials) {
         sourceVersification = VersificationMapper.versificationName(for: module)
         sourceOrdinal = module.verseOrdinal(
           osisBookId: osisBookID,
@@ -8539,6 +9262,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       try commitBibleBookmarkNavigation(biblePlan)
     case .sword(let swordPlan):
       try commitSwordBookmarkNavigation(swordPlan)
+    case .sqlite(let sqlitePlan):
+      try commitSQLiteBookmarkNavigation(sqlitePlan)
     case .myDocument(let documentPlan):
       try commitMyDocumentBookmarkNavigation(documentPlan)
     case .epub(let epubPlan):
@@ -8546,22 +9271,45 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
   }
 
-  /** Builds the complete exact-identity inventory needed by one bookmark target. */
+  /**
+   Builds one exact-identity bookmark inventory from a fresh readable-source snapshot.
+
+   - Parameter target: Persisted Bible or generic bookmark target to plan without mutation.
+   - Returns: Authorized candidates preserving native ownership and backend registration order.
+   - Side effects: Enumerates installed source registries and local EPUB/My Documents registration
+     metadata in Android add order; no page, EPUB fragment, reader, or WebView state is read.
+   - Throws: A typed lookup failure when local registration metadata cannot be captured. Locked
+     native and registered SQLite owners suppress colliding EPUB and My Documents candidates.
+   */
   @MainActor
-  private func bookmarkNavigationInventory(
+  func bookmarkNavigationInventory(
     for target: BookmarkNavigationTarget
   ) throws -> BibleReaderBookmarkNavigationInventory {
-    let swordModules =
-      swordManager?.installedModules().compactMap { info in
-        swordManager?.module(named: info.name)
-      } ?? []
     let resolver = installedModuleResolver()
     let scriptureCandidates = resolver.modules(categories: [.bible])
       .compactMap(\.scripture)
       .map(BibleReaderBookmarkNavigationSwordCandidate.init(source:))
-    let genericSwordCandidates = swordModules
-      .filter { $0.info.category != .bible }
+    let genericSwordCategories: Set<ModuleCategory> = [
+      .commentary,
+      .dictionary,
+      .glossary,
+      .generalBook,
+      .map,
+      .dailyDevotion,
+    ]
+    let genericInstalledSources = resolver.modules(categories: genericSwordCategories)
+    let genericSwordCandidates = genericInstalledSources
+      .compactMap { source -> SwordModule? in
+        guard case .sword(let module) = source else { return nil }
+        return module
+      }
       .map(BibleReaderBookmarkNavigationSwordCandidate.init(module:))
+    let genericSQLiteCandidates = genericInstalledSources
+      .compactMap { source -> BibleReaderSQLiteModuleHandle? in
+        guard case .sqlite(let module) = source else { return nil }
+        return module
+      }
+      .map(BibleReaderBookmarkNavigationSQLiteCandidate.init(module:))
     let destinationCandidate = activeInstalledScriptureSource().map(
       BibleReaderBookmarkNavigationSwordCandidate.init(source:)
     )
@@ -8573,33 +9321,32 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       )
     }
 
-    var documentCandidates: [MyDocument] = []
-    if let store = myDocumentStore {
-      do {
-        documentCandidates = [try store.exactDocument(initials: genericTarget.moduleInitials)]
-      } catch let error as MyDocumentExactLookupError {
-        switch error {
-        case .documentNotFound, .invalidDocumentInitials:
-          break
-        case .duplicateDocuments:
-          throw BibleReaderBookmarkNavigationFailure.genericModuleAmbiguous(
-            genericTarget.moduleInitials
-          )
-        case .documentReadFailed, .pageNotFound, .duplicatePages, .pageReadFailed:
-          throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
-            moduleInitials: genericTarget.moduleInitials,
-            key: genericTarget.key
-          )
-        }
-      }
+    guard let owner = installedOrLocalGeneralBookOwner(
+      named: genericTarget.moduleInitials,
+      resolver: resolver
+    ) else {
+      throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+        moduleInitials: genericTarget.moduleInitials,
+        key: genericTarget.key
+      )
     }
-
-    let epubReaders = EpubReader.installedEpubs()
-      .filter { $0.initials == genericTarget.moduleInitials }
-      .compactMap { EpubReader(identifier: $0.identifier) }
+    let documentCandidates: [MyDocument]
+    let epubReaders: [EpubReader]
+    switch owner {
+    case .local(.myDocument(let document)):
+      documentCandidates = [document]
+      epubReaders = []
+    case .local(.epub(let reader)):
+      documentCandidates = []
+      epubReaders = [reader]
+    case .installed, .missing:
+      documentCandidates = []
+      epubReaders = []
+    }
     return BibleReaderBookmarkNavigationInventory(
       destinationBible: destinationCandidate,
       swordCandidates: scriptureCandidates + genericSwordCandidates,
+      sqliteCandidates: genericSQLiteCandidates,
       myDocumentCandidates: myDocumentStore.map { store in
         documentCandidates.map {
           BibleReaderBookmarkNavigationMyDocumentCandidate(document: $0, store: store)
@@ -8611,12 +9358,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
   /** Commits one fully mapped Bible range into the already-selected destination module. */
   @MainActor
-  private func commitBibleBookmarkNavigation(
+  func commitBibleBookmarkNavigation(
     _ plan: BibleReaderBookmarkNavigationBiblePlan
   ) throws {
     guard let source = activeInstalledScriptureSource(),
       source.info.category == .bible,
-      source.info.name == plan.destinationModuleInitials,
+      SwordJavaStringIdentity.equals(source.info.name, plan.destinationModuleInitials),
       source.versificationName == plan.destinationVersification,
       let first = plan.destinationVerses.first,
       let last = plan.destinationVerses.last,
@@ -8639,7 +9386,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     if currentCategory != .bible {
       switchBibleDocument(to: source.info.name)
-      guard activeInstalledScriptureSource()?.info.name == source.info.name,
+      guard activeInstalledScriptureSource().map({
+        SwordJavaStringIdentity.equals($0.info.name, source.info.name)
+      }) == true,
         currentCategory == .bible
       else {
         throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
@@ -8655,12 +9404,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
   }
 
-  /** Prepares and commits one exact installed SWORD generic fragment. */
+  /**
+   Reauthorizes and commits one exact installed SWORD generic fragment.
+
+   - Parameter plan: Immutable fragment identity produced from an earlier readable inventory.
+   - Side effects: Captures one fresh resolver snapshot, re-reads the exact fragment, then mutates
+     pane/WebView state only after every identity and serialization check succeeds.
+   - Throws: `genericModuleNotFound` when the module was removed, relocked, changed category, or is
+     no longer an authorized native SWORD source; typed lookup/commit failures reject stale data.
+   */
   @MainActor
-  private func commitSwordBookmarkNavigation(
+  func commitSwordBookmarkNavigation(
     _ plan: BibleReaderBookmarkNavigationSwordPlan
   ) throws {
-    guard let module = swordManager?.module(named: plan.moduleInitials),
+    let resolver = installedModuleResolver()
+    guard case .sword(let module)? = resolver.module(named: plan.moduleInitials),
       module.info.category == plan.category
     else {
       throw BibleReaderBookmarkNavigationFailure.genericModuleNotFound(plan.moduleInitials)
@@ -8741,11 +9499,98 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
   }
 
-  /** Revalidates and commits one exact My Documents page without permissive fetch fallback. */
+  /**
+   Reauthorizes and commits one exact Android SQLite commentary or dictionary bookmark.
+
+   - Parameter plan: Detached structural fragment produced by the exact bookmark planner.
+   - Side effects: Re-resolves global ownership, re-reads the exact key, serializes it, then updates
+     category-owned backend/pane state and replaces Vue content only after every proof succeeds.
+   - Throws: Typed lookup failures for removed/unreadable keys, `destinationChanged` when source
+     metadata or content changed, and `serializationFailed` before any reader mutation.
+   */
   @MainActor
-  private func commitMyDocumentBookmarkNavigation(
+  func commitSQLiteBookmarkNavigation(
+    _ plan: BibleReaderBookmarkNavigationSQLitePlan
+  ) throws {
+    let resolver = installedModuleResolver()
+    guard case .sqlite(let module)? = resolver.module(named: plan.fragment.moduleInitials),
+      module.info.category == plan.fragment.category
+    else {
+      throw BibleReaderBookmarkNavigationFailure.genericModuleNotFound(
+        plan.fragment.moduleInitials
+      )
+    }
+    let currentFragment: BibleReaderBookmarkNavigationSQLiteFragment
+    do {
+      currentFragment = try BibleReaderBookmarkNavigationSQLiteCandidate(module: module)
+        .fragmentForExactKey(plan.fragment.key)
+    } catch {
+      throw BibleReaderBookmarkNavigationFailure.genericKeyLookupFailed(
+        moduleInitials: plan.fragment.moduleInitials,
+        key: plan.fragment.key
+      )
+    }
+    guard currentFragment == plan.fragment else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
+    guard let category = Self.bookmarkDocumentCategory(for: currentFragment.category),
+      let documentJSON = documentPayloadFactory().documentJSON(
+        currentFragment.payloadRequest(
+          selectedOrdinalRange: plan.selectedOrdinalRange
+        )
+      )
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.serializationFailed
+    }
+
+    beginReplacingContentIntent()
+    resetAuxiliaryContentState()
+    applyExactSQLiteBookmarkState(
+      module: module,
+      category: category,
+      key: currentFragment.key
+    )
+    emitExactGenericBookmarkDocument(
+      documentJSON: documentJSON,
+      category: category,
+      moduleName: currentFragment.moduleInitials,
+      bookName: currentFragment.keyName,
+      key: currentFragment.key,
+      selectedOrdinalRange: plan.selectedOrdinalRange,
+      jumpToID: nil
+    )
+  }
+
+  /**
+   Reauthorizes and commits one exact My Documents page without permissive fetch fallback.
+
+   - Parameter plan: Detached local-page identity and content captured by bookmark planning.
+   - Side effects: Replays fresh combined registry ownership before reading the exact page; after
+     every identity/content proof succeeds, updates pane state, persists once, and emits one Vue
+     document.
+   - Throws: `destinationChanged` when another installed/local registration now owns the token or
+     the selected document changed; typed exact-key failures and serialization failures occur before
+     any reader mutation.
+   */
+  @MainActor
+  func commitMyDocumentBookmarkNavigation(
     _ plan: BibleReaderBookmarkNavigationMyDocumentPlan
   ) throws {
+    guard let owner = installedOrLocalGeneralBookOwner(
+      named: plan.fragment.moduleInitials
+    ), case .local(.myDocument(let authorizedDocument)) = owner,
+      authorizedDocument.id == plan.fragment.documentID,
+      SwordJavaStringIdentity.equals(
+        authorizedDocument.initials,
+        plan.fragment.moduleInitials
+      ),
+      SwordJavaStringIdentity.equals(
+        authorizedDocument.name,
+        plan.fragment.documentName
+      )
+    else {
+      throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
+    }
     guard let store = myDocumentStore else {
       throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
     }
@@ -8763,8 +9608,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         key: plan.fragment.key
       )
     }
-    guard document.id == plan.fragment.documentID,
-      document.name == plan.fragment.documentName,
+    guard document.id == authorizedDocument.id,
+      SwordJavaStringIdentity.equals(document.initials, authorizedDocument.initials),
+      SwordJavaStringIdentity.equals(document.name, authorizedDocument.name),
       page.id == plan.fragment.pageID,
       page.document?.id == document.id,
       page.title == plan.fragment.title,
@@ -8829,16 +9675,27 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
   }
 
-  /** Revalidates and commits one exact immutable EPUB generation and numeric key. */
+  /**
+   Reauthorizes and commits one exact immutable EPUB generation and numeric key.
+
+   - Parameter plan: Detached EPUB generation/content identity captured by bookmark planning.
+   - Side effects: Replays fresh combined registry ownership before opening the exact fragment; after
+     every generation/content proof succeeds, updates pane state, persists once, and emits one Vue
+     document.
+   - Throws: `destinationChanged` when an installed/local collision or replacement now owns the
+     token; typed exact-key and serialization failures occur before any reader mutation.
+   */
   @MainActor
-  private func commitEpubBookmarkNavigation(
+  func commitEpubBookmarkNavigation(
     _ plan: BibleReaderBookmarkNavigationEpubPlan
   ) throws {
-    guard let reader = EpubReader(identifier: plan.identifier),
+    guard let owner = installedOrLocalGeneralBookOwner(named: plan.moduleInitials),
+      case .local(.epub(let reader)) = owner,
+      reader.identifier == plan.identifier,
       reader.generationIdentifier == plan.generationIdentifier,
-      reader.initials == plan.moduleInitials,
-      reader.title == plan.title,
-      reader.language == plan.language
+      SwordJavaStringIdentity.equals(reader.initials, plan.moduleInitials),
+      SwordJavaStringIdentity.equals(reader.title, plan.title),
+      SwordJavaStringIdentity.equals(reader.language, plan.language)
     else {
       throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
     }
@@ -8940,6 +9797,55 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
     }
 
+  /**
+   Applies category-owned Android SQLite state after exact bookmark content is fully revalidated.
+
+   - Parameters:
+     - module: Fresh globally authorized SQLite owner.
+     - category: Executable commentary or dictionary reader category.
+     - key: Exact persisted source key.
+   - Side effects: Clears the counterpart SWORD/local backend, updates observable category state,
+     persists the module/key selection, and invokes the pane persistence callback once.
+   - Failure modes: Unsupported categories return without mutation; callers validate the category
+     before invoking this helper.
+   */
+  @MainActor
+  private func applyExactSQLiteBookmarkState(
+    module: BibleReaderSQLiteModuleHandle,
+    category: DocumentCategory,
+    key: String
+  ) {
+    guard category == .commentary || category == .dictionary else { return }
+    activeEpubReader = nil
+    activeEpubIdentifier = nil
+    activeEpubTitle = nil
+    currentEpubTitle = nil
+    currentEpubHref = nil
+    switch category {
+    case .commentary:
+      activeCommentaryModule = nil
+      activeSQLiteCommentaryModule = module
+      activeCommentaryModuleName = module.info.name
+    case .dictionary:
+      activeDictionaryModule = nil
+      activeSQLiteDictionaryModule = module
+      activeDictionaryModuleName = module.info.name
+      currentDictionaryKey = key
+    case .bible, .generalBook, .map, .epub, .dailyDevotion:
+      return
+    }
+    currentCategory = category
+    if let pageManager = activeWindow?.pageManager {
+      BibleReaderModuleSwitchPlan(
+        moduleName: module.info.name,
+        category: category,
+        updatesVisibleCategory: true,
+        retainedGenericKey: key
+      ).apply(to: pageManager)
+      onPersistState?()
+    }
+  }
+
   /** Emits one pre-serialized exact generic destination and its optional BVA highlight. */
   private func emitExactGenericBookmarkDocument(
     documentJSON: String,
@@ -8973,7 +9879,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     applyNightModeBackground()
     }
 
-  /** Maps bookmark-owning SWORD categories onto reader document categories. */
+  /**
+   Maps bookmark-owning JSword categories onto reader document categories.
+
+   - Parameter moduleCategory: Actual installed-book category attached to a generic bookmark.
+   - Returns: Reader persistence category, or nil for Bible/add-on/unknown sources handled by other
+     bookmark paths.
+   - Side effects: None.
+   - Failure modes: None; every pinned JSword category has an explicit disposition.
+   */
   private static func bookmarkDocumentCategory(
     for moduleCategory: ModuleCategory
   ) -> DocumentCategory? {
@@ -8982,7 +9896,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       return .commentary
     case .dictionary, .glossary:
       return .dictionary
-    case .generalBook, .dailyDevotion:
+    case .generalBook, .dailyDevotion, .questionable, .essays, .images:
       return .generalBook
     case .map:
       return .map
@@ -9357,16 +10271,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - bookInitials: EPUB module initials embedded in the transformed link.
        - toKey: Original EPUB manifest key; an empty key denotes a same-page anchor.
        - toId: Optional XHTML element id within the target manifest item.
-     - Side effects: Loads the resolved numeric EPUB fragment or emits an in-page setup request.
-     - Failure modes: Ignores links whose initials do not match the active EPUB, and leaves the
-       visible page unchanged when the target manifest key or id is not indexed.
+     - Side effects: After fresh combined-owner and immutable-generation authorization, loads the
+       resolved numeric EPUB fragment or emits an in-page setup request.
+     - Failure modes: Ignores links whose Java-exact initials do not match the active EPUB, whose
+       generation was replaced, or whose identity gained an installed/earlier-local owner. Missing
+       manifest keys fail without navigation; element ids are forwarded to the renderer and may be
+       absent from the target document.
      */
   public func bridge(
     _ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String
   ) {
-        guard let reader = activeEpubReader,
-      bookInitials == reader.initials
-    else { return }
+    guard let expectedReader = activeEpubReader,
+      SwordJavaStringIdentity.equals(bookInitials, expectedReader.initials),
+      let localDocument = localGeneralBookDocument(
+        named: expectedReader.initials,
+        preferredEpub: expectedReader
+      ),
+      case .epub(let reader) = localDocument,
+      reader.identifier == expectedReader.identifier,
+      reader.generationIdentifier == expectedReader.generationIdentifier,
+      SwordJavaStringIdentity.equals(reader.initials, expectedReader.initials)
+    else {
+      return
+    }
         if !toKey.isEmpty {
       guard
         let content = reader.content(
@@ -10004,12 +10931,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        active reader document.
      */
     private func annotationPayloadFactory() -> BibleReaderAnnotationPayloadFactory {
-        BibleReaderAnnotationPayloadFactory(
+        let moduleResolver = installedModuleResolver()
+        let readableActiveModule: SwordModule? = {
+            guard case .sword(let module)? = moduleResolver.module(named: activeModuleName) else {
+                return nil
+            }
+            return module
+        }()
+        return BibleReaderAnnotationPayloadFactory(
             currentBook: currentBook,
             activeModuleName: activeModuleName,
-            activeModule: activeModule,
-            sourceModuleResolver: { [weak self] initials in
-                self?.swordManager?.module(named: initials)
+            activeModule: readableActiveModule,
+            sourceModuleResolver: { initials in
+                guard case .sword(let module)? = moduleResolver.module(named: initials) else {
+                    return nil
+                }
+                return module
             },
             genericSourceResolver: { [weak self] initials, key in
                 self?.genericBookmarkSourceContent(bookInitials: initials, key: key)
@@ -10041,7 +10978,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter bookmark: Persisted generic bookmark displayed by the app-owned Bookmark route.
      - Returns: Prefix, selected text, suffix, and normalized full preview from its stored source.
      - Side effects: May read SwiftData, EPUB, or SWORD source content for the exact stored key.
-     - Failure modes: Missing or ambiguous source content returns an empty projection without using
+     - Failure modes: Missing or unauthorized source content returns an empty projection without using
        the active reader document as a substitute.
      */
     func bookmarkListTextProjection(for bookmark: GenericBookmark) -> BookmarkListTextProjection {
@@ -10057,19 +10994,21 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - key: Exact persisted page or EPUB fragment key.
      - Returns: Android-shaped source metadata, visible text, and render fragment, or `nil` when the
        stored source/key is unavailable.
-     - Side effects: Reads SwiftData or opens the installed EPUB index identified by the stored
-       initials.
-     - Failure modes: Missing documents, ambiguous EPUB identities, and stale keys return `nil`;
-       no current reader source is used as a fallback.
+     - Side effects: Resolves installed ownership first, then reads SwiftData or the exact EPUB
+       fragment only for one globally unowned local source.
+     - Failure modes: Installed owners (including locked native rows), missing local
+       documents, and stale keys return `nil`; no current reader source is used as a fallback.
      */
     private func genericBookmarkSourceContent(
         bookInitials: String,
         key: String
     ) -> GenericBookmarkSourceContent? {
-        if let store = myDocumentStore,
-           let document = store.document(initials: bookInitials),
-      let page = store.page(bookInitials: bookInitials, pageKey: key)
-    {
+        guard let localDocument = localGeneralBookDocument(named: bookInitials) else {
+            return nil
+        }
+        if case .myDocument(let document) = localDocument,
+           let store = myDocumentStore,
+           let page = store.page(bookInitials: bookInitials, pageKey: key) {
             let rawContent = page.pageContent?.content ?? ""
             let language = page.languageCode ?? Locale.current.language.languageCode?.identifier ?? "en"
             return GenericBookmarkSourceContent(
@@ -10097,13 +11036,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             )
         }
 
-        let reader: EpubReader?
-        if activeEpubReader?.initials == bookInitials {
-            reader = activeEpubReader
-        } else {
-            reader = EpubReader(initials: bookInitials)
-        }
-        guard let reader, let content = reader.content(forKey: key) else { return nil }
+        guard case .epub(let reader) = localDocument,
+              let content = reader.content(forKey: key) else { return nil }
         let ordinalRange = [content.ordinalRange.lowerBound, content.ordinalRange.upperBound]
         return GenericBookmarkSourceContent(
             bookName: reader.title,
@@ -10699,9 +11633,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   ) -> String? {
         let initials = bookInitials ?? activeModuleName
         let sourceModule: SwordModule? = {
-            if activeModule?.info.name == initials { return activeModule }
-            if activeCommentaryModule?.info.name == initials { return activeCommentaryModule }
-            if activeGeneralBookModule?.info.name == initials { return activeGeneralBookModule }
+            if activeModule.map({
+              SwordJavaStringIdentity.equals($0.info.name, initials)
+            }) == true { return activeModule }
+            if activeCommentaryModule.map({
+              SwordJavaStringIdentity.equals($0.info.name, initials)
+            }) == true { return activeCommentaryModule }
+            if activeGeneralBookModule.map({
+              SwordJavaStringIdentity.equals($0.info.name, initials)
+            }) == true { return activeGeneralBookModule }
             return swordManager?.module(named: initials)
         }()
     let sqliteSourceModule = [
@@ -10709,7 +11649,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       activeSQLiteCommentaryModule,
       activeSQLiteDictionaryModule,
     ].compactMap { $0 }.first {
-      $0.info.name.caseInsensitiveCompare(initials) == .orderedSame
+      SwordJavaStringIdentity.equals($0.info.name, initials)
     }
     let sqliteSource = sqliteSourceModule.map(BibleReaderSQLiteSourceMetadata.init(module:))
         let isBibleDocument = bookCategory == DocumentCategory.bible.rawValue
@@ -10908,7 +11848,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
-    /// Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
+    /**
+     Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
+
+     - Parameters:
+       - bookInitials: Vue-provided source initials compared with Android-37 Java identity semantics.
+       - startOrdinal: Rendered source ordinal that must belong to the visible chapter.
+       - chapter: Visible source chapter number.
+     - Returns: Verified KJVA progress identity, or `nil` when source identity or coordinates differ.
+     - Side effects: Reads active canon metadata and may perform bounded versification conversion.
+     - Failure modes: Locked/stale sources, Java-distinct Unicode identities, invalid ordinals, and
+       mismatched chapters fail closed before reading-progress history can mutate.
+     */
     private func readingProgressBridgeTarget(
         bookInitials: String,
         startOrdinal: Int,
@@ -10919,7 +11870,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               let chapterRange = currentChapterOrdinalRange(),
               currentCategory == .bible,
               !requestedInitials.isEmpty,
-              requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame,
+              SwordJavaStringIdentity.equalsIgnoreCase(
+                  requestedInitials,
+                  sourceModule.info.name
+              ),
               startOrdinal >= chapterRange.start,
               startOrdinal <= chapterRange.end,
               chapter == currentChapter,
@@ -10998,9 +11952,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        - selectionOrdinalStart: Raw source-versification Bible start ordinal.
        - selectionOrdinalEnd: Raw source-versification Bible end ordinal.
      - Returns: Source-bound identity plus independently optional canonical text and structured OSIS.
-     - Side effects: Executes read-only source queries. SWORD reads restore their prior cursor.
+     - Side effects: Resolves one fresh global/local owner snapshot, then executes read-only source
+       queries. SWORD reads restore their prior cursor.
      - Failure modes: Stale identity/generation, partial endpoint pairs, invalid/excessive ranges,
-       missing exact keys, and unreadable backends fail closed without substituting pane content.
+       missing exact keys, locked/wrong-category installed owners, and unreadable backends fail
+       closed without substituting pane content or falling through to a colliding local document.
      */
     func aiSourceContext(
         expectedDocumentInitials: String? = nil,
@@ -11024,7 +11980,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let generation = contentIntentGeneration
         let category = currentCategory
         guard let initials = aiCurrentSourceInitials(for: category), !initials.isEmpty,
-              expectedDocumentInitials == nil || expectedDocumentInitials == initials,
+              expectedDocumentInitials.map({
+                  SwordJavaStringIdentity.equals($0, initials)
+              }) ?? true,
               let pageKey = aiCurrentSourceKey(for: category),
               requestedSourceKey == nil || requestedSourceKey == pageKey else {
             return nil
@@ -11046,12 +12004,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 osisBookId: osisBookId,
                 chapter: currentChapter
             )
-            if let module = activeSQLiteBibleModule, module.info.name == initials {
+            if let module = activeSQLiteBibleModule,
+               SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.sqliteBible(
                     module: module,
                     request: request
                 )
-            } else if let module = activeModule, module.info.name == initials {
+            } else if let module = activeModule,
+                      SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.swordBible(
                     module: module,
                     request: request
@@ -11064,7 +12024,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             guard selectionBounds == nil else { return nil }
             let osisBookId = osisBookId(for: currentBook)
             guard !osisBookId.isEmpty else { return nil }
-            if let module = activeSQLiteCommentaryModule, module.info.name == initials {
+            if let module = activeSQLiteCommentaryModule,
+               SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.sqliteCommentary(
                     module: module,
                     osisBookId: osisBookId,
@@ -11073,7 +12034,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     verse: currentVerse,
                     isNewTestament: isNewTestament(currentBook)
                 )
-            } else if let module = activeCommentaryModule, module.info.name == initials {
+            } else if let module = activeCommentaryModule,
+                      SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
             } else {
                 return nil
@@ -11081,9 +12043,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         case .dictionary:
             guard selectionBounds == nil else { return nil }
-            if let module = activeSQLiteDictionaryModule, module.info.name == initials {
+            if let module = activeSQLiteDictionaryModule,
+               SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.sqliteDictionary(module: module, key: pageKey)
-            } else if let module = activeDictionaryModule, module.info.name == initials {
+            } else if let module = activeDictionaryModule,
+                      SwordJavaStringIdentity.equals(module.info.name, initials) {
                 context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
             } else {
                 return nil
@@ -11091,33 +12055,65 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
         case .generalBook:
             guard selectionBounds == nil else { return nil }
-            if let reader = activeEpubReader, reader.initials == initials {
-                context = AIReaderSourceContextExtractor.epub(reader: reader, key: pageKey)
-            } else if let store = myDocumentStore,
-                      (try? store.exactDocument(initials: initials)) != nil {
+            guard let owner = installedOrLocalGeneralBookOwner(
+                named: initials,
+                preferredEpub: activeEpubReader
+            ) else { return nil }
+            switch owner {
+            case .installed(let info, let readableSource):
+                guard SwordJavaStringIdentity.equals(info.name, initials),
+                      info.category == .generalBook,
+                      activeGeneralBookModule.map({
+                        SwordJavaStringIdentity.equals($0.info.name, info.name)
+                      }) == true,
+                      let readableSource,
+                      case .sword(let module) = readableSource else {
+                    return nil
+                }
+                context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
+
+            case .local(.myDocument(let document)):
+                guard SwordJavaStringIdentity.equals(document.initials, initials),
+                      activeGeneralBookModule == nil,
+                      activeEpubReader == nil,
+                      let store = myDocumentStore else {
+                    return nil
+                }
                 context = AIReaderSourceContextExtractor.myDocument(
                     store: store,
-                    bookInitials: initials,
+                    bookInitials: document.initials,
                     pageKey: pageKey
                 )
-            } else if let module = activeGeneralBookModule, module.info.name == initials {
-                context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
-            } else {
+
+            case .local(.epub(let reader)):
+                guard SwordJavaStringIdentity.equals(reader.initials, initials),
+                      activeGeneralBookModule == nil,
+                      activeEpubReader?.generationIdentifier == reader.generationIdentifier else {
+                    return nil
+                }
+                context = AIReaderSourceContextExtractor.epub(reader: reader, key: pageKey)
+
+            case .missing:
                 return nil
             }
 
         case .map:
             guard selectionBounds == nil,
                   let module = activeMapModule,
-                  module.info.name == initials else {
+                  SwordJavaStringIdentity.equals(module.info.name, initials) else {
                 return nil
             }
             context = AIReaderSourceContextExtractor.swordDocument(module: module, key: pageKey)
 
         case .epub:
             guard selectionBounds == nil,
-                  let reader = activeEpubReader,
-                  reader.initials == initials else {
+                  let owner = installedOrLocalGeneralBookOwner(
+                      named: initials,
+                      preferredEpub: activeEpubReader
+                  ), case .local(.epub(let reader)) = owner,
+                  SwordJavaStringIdentity.equals(reader.initials, initials),
+                  activeGeneralBookModule == nil,
+                  activeEpubReader?.generationIdentifier == reader.generationIdentifier else {
                 return nil
             }
             context = AIReaderSourceContextExtractor.epub(reader: reader, key: pageKey)
@@ -11125,7 +12121,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         case .dailyDevotion:
             guard selectionBounds == nil,
                   let module = activeGeneralBookModule,
-                  module.info.name == initials,
+                  SwordJavaStringIdentity.equals(module.info.name, initials),
                   module.info.category == .dailyDevotion else {
                 return nil
             }
@@ -11133,11 +12129,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         guard let context,
-              context.sourceDocumentInitials == initials,
+              SwordJavaStringIdentity.equals(context.sourceDocumentInitials, initials),
               context.sourceBookKey == pageKey,
               contentIntentGeneration == generation,
               currentCategory == category,
-              aiCurrentSourceInitials(for: category) == initials,
+              aiCurrentSourceInitials(for: category).map({
+                SwordJavaStringIdentity.equals($0, initials)
+              }) == true,
               aiCurrentSourceKey(for: category) == pageKey else {
             return nil
         }
@@ -11174,20 +12172,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             endOrdinal: bounds.end
         )
         let context: AIReaderSourceContext?
-        if let module = swordManager?.module(named: bookInitials),
-           module.info.name == bookInitials,
-           module.info.category == .bible {
+        let source = installedModuleResolver().scripture(named: bookInitials)
+        if case .sword(let module)? = source,
+           SwordJavaStringIdentity.equals(module.info.name, bookInitials) {
             context = AIReaderSourceContextExtractor.swordBible(module: module, request: request)
-        } else if let module = sqliteRuntimeCoordinator.preferredModule(
-            named: bookInitials,
-            category: .bible
-        ), module.info.name == bookInitials {
+        } else if case .sqlite(let module)? = source,
+                  SwordJavaStringIdentity.equals(module.info.name, bookInitials) {
             context = AIReaderSourceContextExtractor.sqliteBible(module: module, request: request)
         } else {
             return nil
         }
         guard let context,
-              context.sourceDocumentInitials == bookInitials,
+              SwordJavaStringIdentity.equals(context.sourceDocumentInitials, bookInitials),
               context.sourceOrdinalRange == bounds.closedRange,
               context.sourceOSISRange?.isEmpty == false else {
             return nil
@@ -11246,7 +12242,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         startOrdinal: Int,
         endOrdinal: Int
     ) -> ClosedRange<Int>? {
-        guard aiCurrentSourceInitials(for: .bible) == bookInitials,
+        guard aiCurrentSourceInitials(for: .bible).map({
+                  SwordJavaStringIdentity.equals($0, bookInitials)
+              }) == true,
               let sourceBounds = AIReaderSourceRange.bibleBounds(
                   start: startOrdinal,
                   end: endOrdinal
@@ -11254,7 +12252,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             return nil
         }
         if let sqliteModule = activeSQLiteBibleModule,
-           sqliteModule.info.name == bookInitials,
+           SwordJavaStringIdentity.equals(sqliteModule.info.name, bookInitials),
            JSwordKJVAVersification.verseReference(ordinal: startOrdinal) != nil,
            JSwordKJVAVersification.verseReference(ordinal: endOrdinal) != nil {
             return sourceBounds.closedRange
@@ -11282,12 +12280,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      bridge events can still update the open document using rendered ordinals.
 
      - Parameters:
+       - bookInitials: Vue-provided source initials compared with Android-37 Java identity semantics.
        - startOrdinal: First rendered ordinal reported by Vue.
        - endOrdinal: Last rendered ordinal reported by Vue.
      - Returns: KJVA storage span plus rendered-to-KJVA projections, or `nil` if the selection
        cannot be represented in KJVA.
      - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
-     - Failure modes: Returns `nil` for invalid endpoints or references outside KJVA.
+     - Failure modes: Returns `nil` for Java-distinct/stale source identities, invalid endpoints, or
+       references outside KJVA before memorization state can mutate.
      */
     private func memorizationOrdinalResolution(
         bookInitials: String,
@@ -11297,7 +12297,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         let requestedInitials = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let sourceModule = activeModule,
               !requestedInitials.isEmpty,
-      requestedInitials.caseInsensitiveCompare(sourceModule.info.name) == .orderedSame
+      SwordJavaStringIdentity.equalsIgnoreCase(requestedInitials, sourceModule.info.name)
     else {
             return nil
         }

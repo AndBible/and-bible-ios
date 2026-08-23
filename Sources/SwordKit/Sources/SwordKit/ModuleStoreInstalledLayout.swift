@@ -158,7 +158,7 @@ public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
         requireFileNameMatch: Bool = true
     ) throws -> ModuleStoreInstalledLayout {
         guard let config = SwordModuleConfig.parse(configuration.content),
-              let rawDataPath = rawConfigValue("datapath", content: configuration.content) else {
+              let rawDataPath = rawConfigValue("DataPath", content: configuration.content) else {
             throw ModuleStoreMutationError.invalidConfiguration(configuration.relativePath)
         }
         return try resolve(
@@ -488,7 +488,7 @@ public struct ModuleStoreInstalledLayoutResolver: @unchecked Sendable {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let equals = line.firstIndex(of: "=") else { continue }
             let candidate = line[..<equals].trimmingCharacters(in: .whitespacesAndNewlines)
-            if candidate.caseInsensitiveCompare(key) == .orderedSame {
+            if candidate == key {
                 return line[line.index(after: equals)...]
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }

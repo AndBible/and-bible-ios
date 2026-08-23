@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import BibleCore
 @testable import BibleUI
 @testable import BibleView
 @testable import SwordKit
@@ -8,10 +9,11 @@ import XCTest
  App-host-free package coverage for Android `ChooseDocument` and reader module picker parity.
 
  These tests protect the BibleUI-owned picker filtering, pseudo-document, document-management, and
- full-screen chooser presentation contracts without booting the app. Failures indicate visual or
+ full-screen chooser presentation contracts without booting the app. Behavioral access regressions
+ use an isolated temporary SWORD tree removed by inherited teardown. Failures indicate visual or
  behavioral drift from Android's document chooser, not app delegate or simulator lifecycle issues.
  */
-final class BibleReaderModulePickerTests: XCTestCase {
+final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
     func testBibleReaderModulePickerBuildsForBibleCategory() {
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let view = BibleReaderModulePicker(
@@ -118,6 +120,62 @@ final class BibleReaderModulePickerTests: XCTestCase {
     }
 
     /**
+     Preserves Java-distinct composed/decomposed module rows through dedupe and selection lookup.
+
+     - Setup: Supplies two visually equivalent initials with different UTF-16 spellings plus one
+       exact duplicate of the composed spelling.
+     - Expected: Only the exact duplicate is removed; each Java-distinct row has a distinct SwiftUI
+       identity and resolves only from its own exact initials token.
+     - Failure meaning: Swift canonical String equality is still collapsing or misrouting an
+       installed book that Android exposes as a separate registry identity.
+     - Side effects: None.
+     */
+    func testPickerKeepsCanonicalEquivalentJavaModuleIdentitiesSeparatelySelectable() throws {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+        let composedModule = ModuleInfo(
+            name: composed,
+            description: "Composed",
+            category: .bible,
+            language: "fr"
+        )
+        let decomposedModule = ModuleInfo(
+            name: decomposed,
+            description: "Decomposed",
+            category: .bible,
+            language: "fr"
+        )
+
+        let distinct = BibleReaderModulePicker.javaExactDistinctModules([
+            composedModule,
+            decomposedModule,
+            composedModule,
+        ])
+        let rows = BibleReaderModulePicker.allRows(from: distinct)
+            .filter { row in
+                if case .module = row { return true }
+                return false
+            }
+
+        XCTAssertEqual(distinct.count, 2)
+        XCTAssertNotEqual(try XCTUnwrap(rows.first).id, try XCTUnwrap(rows.last).id)
+        XCTAssertEqual(
+            Array(try XCTUnwrap(
+                BibleReaderModulePicker.javaExactModule(named: composed, in: distinct)
+            ).name.utf16),
+            Array(composed.utf16)
+        )
+        XCTAssertEqual(
+            Array(try XCTUnwrap(
+                BibleReaderModulePicker.javaExactModule(named: decomposed, in: distinct)
+            ).name.utf16),
+            Array(decomposed.utf16)
+        )
+    }
+
+    /**
      Guards Android `ChooseDocument` document-type parity beyond normal installed SWORD rows.
 
      Android's chooser includes visible `FakeBookFactory` pseudo-documents, hides add-ons from
@@ -192,6 +250,82 @@ final class BibleReaderModulePickerTests: XCTestCase {
                 searchText: "notes"
             ).map(\.id),
             ["pseudo:myNotes"]
+        )
+    }
+
+    /**
+     Protects the picker boundary that consumes Android's combined installed-book ownership result.
+
+     The resolver separately proves exact-initials, exact-full-name, and case-insensitive TreeSet
+     lookup across native, SQLite, EPUB, and My Documents registrations. This test supplies the
+     possible ownership outcomes for several installed EPUB files and verifies the chooser retains
+     only packages that resolve back to their own immutable library identifier. A failure means a
+     rejected or shadowed EPUB can still be advertised/selectable, or the picker reordered valid
+     EPUBs. The pure projection performs no filesystem, database, simulator, or async work.
+     */
+    func testBibleReaderModulePickerOmitsEpubsRejectedByCombinedRegistryOwnership() {
+        let admittedFirst = EpubInfo(
+            identifier: "epub-admitted-first",
+            initials: "EPUBFirst",
+            sourceFileName: "first.epub",
+            title: "First EPUB",
+            description: "First EPUB",
+            author: "",
+            language: "en"
+        )
+        let installedCollision = EpubInfo(
+            identifier: "epub-installed-collision",
+            initials: "NativeExact",
+            sourceFileName: "native-collision.epub",
+            title: "Installed collision",
+            description: "Installed collision",
+            author: "",
+            language: "en"
+        )
+        let localCollision = EpubInfo(
+            identifier: "epub-local-collision",
+            initials: "my document name",
+            sourceFileName: "local-collision.epub",
+            title: "Local collision",
+            description: "Local collision",
+            author: "",
+            language: "en"
+        )
+        let admittedLast = EpubInfo(
+            identifier: "epub-admitted-last",
+            initials: "EPUBLast",
+            sourceFileName: "last.epub",
+            title: "Last EPUB",
+            description: "Last EPUB",
+            author: "",
+            language: "fr"
+        )
+
+        let admitted = BibleReaderModulePicker.admittedEpubs(
+            from: [admittedFirst, installedCollision, localCollision, admittedLast],
+            resolvedOwnerIdentifier: { epub in
+                switch epub.identifier {
+                case admittedFirst.identifier:
+                    return admittedFirst.identifier
+                case installedCollision.identifier:
+                    return nil
+                case localCollision.identifier:
+                    return admittedFirst.identifier
+                case admittedLast.identifier:
+                    return admittedLast.identifier
+                default:
+                    return nil
+                }
+            }
+        )
+
+        XCTAssertEqual(admitted.map(\.identifier), [admittedFirst.identifier, admittedLast.identifier])
+        XCTAssertEqual(
+            BibleReaderModulePicker.allRows(from: [], epubs: admitted).compactMap { row in
+                guard case .epub(let epub) = row else { return nil }
+                return epub.identifier
+            },
+            [admittedFirst.identifier, admittedLast.identifier]
         )
     }
 
@@ -548,10 +682,17 @@ final class BibleReaderModulePickerTests: XCTestCase {
     }
 
     /**
-     Verifies locked-row selection is gated by real manager-level cipher verification.
+     Verifies the inclusive full chooser retains locked rows and gates selection through real
+     manager-level cipher verification.
 
-     A failure means a locked document can be selected without a key, or the picker has regressed to
-     the obsolete module-level setter that is not authoritative in libsword.
+     - Setup: Compares locked and unlocked Bible metadata, then inspects the private SwiftUI routing
+       boundary that consumes the shared switch outcome.
+     - Expected result: Both rows remain in the full chooser; all Bible rows reach the controller's
+       fresh preflight before prompting through `SwordManager`, and only a successful switch
+       dismisses the picker. A stale locked row already unlocked elsewhere does not prompt twice.
+     - Failure meaning: A locked document can disappear from the unlock-capable chooser, render
+       without a key, recurse on stale metadata, or dismiss without changing the reader.
+     - Side effects: Reads package source only; no module store or reader state is mutated.
      */
     func testBibleReaderModulePickerGatesLockedSelectionThroughSwordManager() throws {
         let locked = ModuleInfo(
@@ -573,18 +714,208 @@ final class BibleReaderModulePickerTests: XCTestCase {
 
         XCTAssertTrue(BibleReaderModulePicker.requiresUnlock(locked))
         XCTAssertFalse(BibleReaderModulePicker.requiresUnlock(unlocked))
+        XCTAssertEqual(
+            BibleReaderModulePicker.filteredModules(
+                [locked, unlocked],
+                selectedCategory: .bible,
+                selectedLanguage: "",
+                searchText: ""
+            ).map(\.name),
+            ["LOCKED", "OPEN"]
+        )
 
         let source = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
         )
         let selectionSource = try BibleUITestSourceLocator.extractFunction(named: "select", from: source)
+        let unlockedSelectionSource = try BibleUITestSourceLocator.extractFunction(
+            named: "selectUnlockedModule",
+            from: source
+        )
+        let beginUnlockSource = try BibleUITestSourceLocator.extractFunction(
+            named: "beginUnlock",
+            from: source
+        )
         let unlockSource = try BibleUITestSourceLocator.extractFunction(named: "attemptUnlock", from: source)
 
+        XCTAssertTrue(selectionSource.contains("if module.category == .bible"))
         XCTAssertTrue(selectionSource.contains("Self.requiresUnlock(module)"))
         XCTAssertTrue(selectionSource.contains("beginUnlock(module)"))
+        XCTAssertTrue(unlockedSelectionSource.contains("switch controller.switchBibleDocument"))
+        XCTAssertTrue(unlockedSelectionSource.contains("case .switched:"))
+        XCTAssertTrue(unlockedSelectionSource.contains("case .requiresUnlock:"))
+        XCTAssertTrue(
+            unlockedSelectionSource.contains(
+                "beginUnlock(module, authoritativeAccessState: true)"
+            )
+        )
+        XCTAssertTrue(beginUnlockSource.contains("authoritativeAccessState || Self.requiresUnlock(module)"))
         XCTAssertTrue(unlockSource.contains("controller.swordManager?.unlockModule"))
         XCTAssertTrue(unlockSource.contains("controller.refreshInstalledModules()"))
         XCTAssertFalse(unlockSource.contains("setCipherKey"))
+    }
+
+    /**
+     Verifies a commentary row that becomes locked after chooser construction enters the existing
+     authoritative unlock flow without dismissing or partially changing the pane.
+
+     - Setup: Supplies stale row metadata that still reports an encrypted commentary readable while
+       the manager's fresh installed inventory reports the same module locked, then routes selection
+       through the production picker handler against a ready KJV pane.
+     - Expected result: The typed switch fails closed, the fresh access check requests unlock for the
+       selected commentary, dismissal is not invoked, and controller, `PageManager`, persistence,
+       and bridge output remain unchanged.
+     - Failure meaning: A stale commentary row can close the picker without opening the passphrase
+       flow, or can mutate the visible pane before authorization succeeds.
+     - Side effects: Writes one isolated temporary SWORD commentary fixture and removes it through
+       inherited teardown; all reader callbacks are in-memory and synchronous.
+     */
+    @MainActor
+    func testStaleRelockedCommentarySelectionBeginsUnlockWithoutDismissOrPaneMutation() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: "LockedComm", in: modulePath)
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/lockedcomm.conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.moduleAccessState(named: "LockedComm"), .locked)
+        let staleReadableRow = ModuleInfo(
+            name: "LockedComm",
+            description: "Stale readable commentary row",
+            category: .commentary,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: true
+        )
+        XCTAssertFalse(BibleReaderModulePicker.requiresUnlock(staleReadableRow))
+
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.bible.pageManagerKey
+        )
+        pageManager.bibleDocument = "KJV"
+        pageManager.commentaryDocument = "BaselineComm"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+
+        let baselineBible = controller.activeModuleName
+        let baselineCommentary = controller.activeCommentaryModuleName
+        let baselineCategory = controller.currentCategory
+        let baselineBibleDocument = pageManager.bibleDocument
+        let baselineCommentaryDocument = pageManager.commentaryDocument
+        let baselineCategoryName = pageManager.currentCategoryName
+        let baselineScriptCount = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        var dismissCount = 0
+        var unlockModule: ModuleInfo?
+
+        BibleReaderModulePicker.handleCommentarySelection(
+            staleReadableRow,
+            controller: controller,
+            onDismiss: { dismissCount += 1 },
+            onBeginAuthoritativeUnlock: { unlockModule = $0 }
+        )
+
+        XCTAssertEqual(unlockModule?.name, "LockedComm")
+        XCTAssertEqual(dismissCount, 0)
+        XCTAssertEqual(controller.activeModuleName, baselineBible)
+        XCTAssertEqual(controller.activeCommentaryModuleName, baselineCommentary)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(pageManager.commentaryDocument, baselineCommentaryDocument)
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(recordedScripts().count, baselineScriptCount)
+    }
+
+    /**
+     Verifies failed commentary selection cannot open an unlock prompt for a freshly locked module
+     whose canonical installed category is not commentary.
+
+     - Setup: Supplies stale picker metadata claiming a locked dictionary identity is an unlocked
+       commentary while the manager's current canonical row reports `.dictionary` and `.locked`.
+     - Expected result: The production picker handler neither dismisses nor requests commentary
+       unlock, and controller, `PageManager`, persistence, and bridge state remain unchanged.
+     - Failure meaning: Replaced or stale wrong-category inventory can route users into a misleading
+       commentary passphrase flow even though the requested document can never activate there.
+     - Side effects: Writes one isolated temporary SWORD dictionary fixture and removes it through
+       inherited teardown; all reader callbacks are in-memory and synchronous.
+     */
+    @MainActor
+    func testLockedWrongCategoryCommentarySelectionRetainsPickerWithoutUnlock() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(named: "LockedDict", in: modulePath)
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/lockeddict.conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.moduleAccessState(named: "LockedDict"), .locked)
+        XCTAssertEqual(
+            manager.installedModules().first { $0.name == "LockedDict" }?.category,
+            .dictionary
+        )
+        let staleCommentaryRow = ModuleInfo(
+            name: "LockedDict",
+            description: "Stale commentary projection of a dictionary",
+            category: .commentary,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: true
+        )
+
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.bible.pageManagerKey
+        )
+        pageManager.bibleDocument = "KJV"
+        pageManager.commentaryDocument = "BaselineComm"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+
+        let baselineBible = controller.activeModuleName
+        let baselineCommentary = controller.activeCommentaryModuleName
+        let baselineCategory = controller.currentCategory
+        let baselineBibleDocument = pageManager.bibleDocument
+        let baselineCommentaryDocument = pageManager.commentaryDocument
+        let baselineCategoryName = pageManager.currentCategoryName
+        let baselineScriptCount = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        var dismissCount = 0
+        var unlockModule: ModuleInfo?
+
+        BibleReaderModulePicker.handleCommentarySelection(
+            staleCommentaryRow,
+            controller: controller,
+            onDismiss: { dismissCount += 1 },
+            onBeginAuthoritativeUnlock: { unlockModule = $0 }
+        )
+
+        XCTAssertNil(unlockModule)
+        XCTAssertEqual(dismissCount, 0)
+        XCTAssertEqual(controller.activeModuleName, baselineBible)
+        XCTAssertEqual(controller.activeCommentaryModuleName, baselineCommentary)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(pageManager.commentaryDocument, baselineCommentaryDocument)
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(recordedScripts().count, baselineScriptCount)
     }
 
     /**
@@ -611,7 +942,10 @@ final class BibleReaderModulePickerTests: XCTestCase {
 
      Private SwiftUI presentation state is source-guarded here: both overflow rows must exist, module
      backup must use the shared `.abmd.zip` service, and local files must pass preflight before the
-     policy-aware importer refreshes controller inventory.
+     policy-aware importer refreshes controller inventory. Both preflight and final import must
+     create the registry-aware service with the pane's native registry and SwiftData context so a
+     delayed overwrite decision cannot install an EPUB that Android's current combined registry
+     rejects. A failure indicates route drift; this test performs no file or database writes.
      */
     func testBibleReaderModulePickerExposesBackupAndInstallZipWorkflows() throws {
         let source = try BibleUITestSourceLocator.source(
@@ -626,6 +960,12 @@ final class BibleReaderModulePickerTests: XCTestCase {
         XCTAssertTrue(source.contains(".fileImporter("))
         XCTAssertTrue(source.contains("service.preflightDocument(request)"))
         XCTAssertTrue(source.contains("moduleOverwritePolicy: overwritePolicy"))
+        XCTAssertEqual(
+            source.components(separatedBy: "ExternalDocumentImportService.androidRegistryAware(").count - 1,
+            2
+        )
+        XCTAssertTrue(source.contains("modelContext: modelContext"))
+        XCTAssertTrue(source.contains("swordManager: controller.swordManager"))
         XCTAssertTrue(source.contains("controller.refreshInstalledModules()"))
     }
 

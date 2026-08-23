@@ -1548,3 +1548,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "雙點以離開全螢幕模式";
+
+/* Android shared translations */
+"try_again_passphrase" = "密碼無效，要再試嗎？";
+
+/* Android shared translations */
+"document_not_installed" = "請下載 \"%@\"";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@並沒有在文件%2$@中找到。";

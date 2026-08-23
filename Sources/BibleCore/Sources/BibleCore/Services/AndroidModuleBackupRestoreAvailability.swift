@@ -49,6 +49,9 @@ internal final class AndroidModuleBackupRestoreAvailabilityTransaction {
        prune rollback state.
      - Failure modes: Missing current generations are represented as fresh installs; construction
        itself does not throw.
+     - Important: The production caller constructs this value only after acquiring the canonical
+       module-store coordinator and before the first exact-overlay mutation. Generation acquisition
+       takes the recursive EPUB lock, preserving the global-coordinator-then-EPUB-lock order.
      */
     internal init(
         registration: AndroidModuleBackupPreparedRegistration,

@@ -262,8 +262,8 @@ public struct TtfFontRepository: Sendable {
     private func configuredFontPackPathKeys() -> Set<String> {
         var keys = Set<String>()
         for config in SwordModuleConfig.readAll(modulePath: swordPath) {
-            guard config.values["andbibleiosmanualttf"] == nil,
-                  let providers = config.values["andbibleprovidesfont"],
+            guard config.values["AndBibleIOSManualTtf"] == nil,
+                  let providers = config.values["AndBibleProvidesFont"],
                   config.dataPath.hasPrefix("ttf/") else {
                 continue
             }

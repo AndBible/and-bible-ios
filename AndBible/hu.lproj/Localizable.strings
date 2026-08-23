@@ -1544,3 +1544,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dupla koppintás a teljes képernyős mód bezárásához";
+
+/* Android shared translations */
+"try_again_passphrase" = "A jelszó nem működött, újra próbálja?";
+
+/* Android shared translations */
+"document_not_installed" = "Kérlek töltsd le ezt: '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ nem található %2$@ dokumentumban.";

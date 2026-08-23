@@ -7,8 +7,9 @@ import SwordKit
 /**
  Reader inventories produced from genuine SWORD modules and validated Android SQLite modules.
 
- Each category is case-insensitively de-duplicated, uses the genuine SWORD module's canonical
- metadata when both backends claim one identity, and remains sorted by the catalog contract.
+ Each category contains the owners admitted to Android's global BookSet and remains in its pinned
+ TreeSet order. Exact case variants and canonically distinct UTF-16 identities remain independently
+ visible whenever JSword's comparator retains both books.
  */
 struct BibleReaderSQLiteRuntimeInventories {
     /// Bible metadata visible to module pickers and runtime language projection.
@@ -41,20 +42,18 @@ struct BibleReaderSQLiteSelectionResolution {
 /**
  Owns Android SQLite discovery and cross-backend identity decisions for the Bible reader.
 
- The coordinator creates one fresh catalog per SWORD manager refresh, proves which installed rows
- are genuine readable SWORD modules, and applies Android's canonical case-insensitive identity
- policy. It returns immutable decisions for the controller to apply; it never mutates pane state,
- persists selections, or emits reader events.
+ The coordinator creates one fresh catalog and one shared installed-module resolver per SWORD
+ manager refresh. Every inventory, activation, restore, and speech-facing lookup therefore uses the
+ same exact maps and pinned TreeSet case tier as Android. It returns immutable decisions for the
+ controller to apply; it never mutates pane state, persists selections, unlocks content, or emits
+ reader events.
  */
 struct BibleReaderSQLiteRuntimeCoordinator {
     /// Current validated SQLite discovery snapshot and its one immutable handle per module.
     private var catalog = BibleReaderSQLiteModuleCatalog()
 
-    /// Canonical readable SWORD metadata keyed by Android's Java UTF-16 identity.
-    private var genuineSwordModulesByIdentity: [SQLiteDocumentIdentity: ModuleInfo] = [:]
-
-    /// Readable SWORD metadata in manager registration order for JSword-compatible lookup.
-    private var genuineSwordModulesInRegistrationOrder: [ModuleInfo] = []
+    /// Shared global BookSet snapshot used by every post-refresh ownership decision.
+    private var installedModuleResolver: BibleReaderInstalledModuleResolver?
 
     /**
      Rebuilds discovery and merges all reader-visible SQLite categories with SWORD.
@@ -64,11 +63,12 @@ struct BibleReaderSQLiteRuntimeCoordinator {
        - primaryBibles: Bible metadata projected by the SWORD setup coordinator.
        - primaryCommentaries: Commentary metadata projected by the SWORD setup coordinator.
        - primaryDictionaries: Dictionary metadata projected by the SWORD setup coordinator.
-     - Returns: Canonical, case-insensitively de-duplicated picker inventories.
-     - Side effects: Opens fresh SQLite library connections and asks SWORD to prove native module
-       readability. Existing catalog handles remain valid only through external references.
-     - Failure modes: Malformed SQLite modules are excluded by discovery; unreadable or synthetic
-       SWORD projection rows are excluded from precedence and primary inventories.
+     - Returns: Globally admitted picker inventories in pinned JSword TreeSet order.
+     - Side effects: Opens fresh SQLite library connections and asks SWORD to resolve native module
+       ownership. Existing catalog handles remain valid only through external references.
+     - Failure modes: Malformed SQLite modules are excluded by discovery; synthetic or unresolvable
+       SWORD projection rows are excluded. Locked native rows remain owners so SQLite cannot bypass
+       the reader's unlock route.
      - Important: Each discovered SQLite module receives exactly one immutable runtime handle.
      */
     mutating func reload(
@@ -77,54 +77,84 @@ struct BibleReaderSQLiteRuntimeCoordinator {
         primaryCommentaries: [ModuleInfo],
         primaryDictionaries: [ModuleInfo]
     ) -> BibleReaderSQLiteRuntimeInventories {
-        catalog.reload(
+        let sqliteLibrary = SQLiteDocumentModuleLibrary(
             moduleRootURL: URL(fileURLWithPath: manager.modulePath, isDirectory: true)
         )
+        return reload(
+            manager: manager,
+            sqliteLibrary: sqliteLibrary,
+            primaryBibles: primaryBibles,
+            primaryCommentaries: primaryCommentaries,
+            primaryDictionaries: primaryDictionaries
+        )
+    }
 
-        var genuine: [SQLiteDocumentIdentity: ModuleInfo] = [:]
-        var registeredGenuine: [ModuleInfo] = []
-        for info in manager.installedModules()
-        where !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) {
-            guard manager.module(named: info.name) != nil else { continue }
-            let key = Self.identity(info.name)
-            if genuine[key] == nil {
-                genuine[key] = info
-                registeredGenuine.append(info)
-            }
-        }
-        genuineSwordModulesByIdentity = genuine
-        genuineSwordModulesInRegistrationOrder = registeredGenuine
+    /**
+     Rebuilds the runtime from one validated raw SQLite discovery sequence.
 
-        let hasGenuineSwordModule: (String) -> Bool = { name in
-            genuine[Self.identity(name)] != nil
-        }
+     Android asks the complete global registry about every custom-driver candidate. The shared
+     resolver must therefore see `registrationCandidates`, not the library's custom-only admitted
+     list, before the catalog publishes selectable handles.
+
+     - Parameters:
+       - manager: Configured SWORD manager supplying native ownership and fresh access state.
+       - sqliteLibrary: Validated discovery snapshot retaining raw custom candidates in driver order.
+       - primaryBibles: Supported native Bible metadata projected by the SWORD setup coordinator.
+       - primaryCommentaries: Supported native commentary metadata from the setup coordinator.
+       - primaryDictionaries: Supported native dictionary metadata from the setup coordinator.
+     - Returns: Canonical, globally admitted picker inventories for all supported reader categories.
+     - Side effects: Resolves native handles, replays custom admission, and replaces the retained
+       catalog snapshot; no scripture content is read.
+     - Failure modes: Unreadable custom payloads are absent from discovery. Locked native owners
+       remain registered and reject collisions without exposing content or permitting fallthrough.
+     - Note: This overload is internal so parity tests can supply deterministic in-memory candidates
+       while exercising the same runtime selection path used by the controller.
+     */
+    mutating func reload(
+        manager: SwordManager,
+        sqliteLibrary: SQLiteDocumentModuleLibrary,
+        primaryBibles: [ModuleInfo],
+        primaryCommentaries: [ModuleInfo],
+        primaryDictionaries: [ModuleInfo]
+    ) -> BibleReaderSQLiteRuntimeInventories {
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteLibrary: sqliteLibrary
+        )
+        installedModuleResolver = resolver
+        catalog.reload(
+            retaining: sqliteLibrary,
+            admittedModulesInRegistrationOrder:
+                resolver.registeredSQLiteModulesInRegistrationOrder()
+        )
+        let registeredMetadata = resolver.registeredBookMetadata()
         return BibleReaderSQLiteRuntimeInventories(
-            bibles: catalog.mergedModules(
-                primary: canonicalPrimaryModules(primaryBibles, category: .bible),
+            bibles: Self.inventory(
+                registeredMetadata,
                 category: .bible,
-                hasReadableSwordModule: hasGenuineSwordModule
+                primaryNativeMetadata: primaryBibles
             ),
-            commentaries: catalog.mergedModules(
-                primary: canonicalPrimaryModules(primaryCommentaries, category: .commentary),
+            commentaries: Self.inventory(
+                registeredMetadata,
                 category: .commentary,
-                hasReadableSwordModule: hasGenuineSwordModule
+                primaryNativeMetadata: primaryCommentaries
             ),
-            dictionaries: catalog.mergedModules(
-                primary: canonicalPrimaryModules(primaryDictionaries, category: .dictionary),
+            dictionaries: Self.inventory(
+                registeredMetadata,
                 category: .dictionary,
-                hasReadableSwordModule: hasGenuineSwordModule
+                primaryNativeMetadata: primaryDictionaries
             )
         )
     }
 
     /**
-     Resolves a SQLite module only when no genuine SWORD module owns the same global identity.
+     Resolves a SQLite module only when Android's global BookSet selects that exact backend.
 
      - Parameters:
-       - name: Requested initials; matching uses Java UTF-16 case-insensitive identity.
+       - name: Requested initials/full-name token resolved by exact maps then TreeSet case scan.
        - category: Required SQLite runtime category.
      - Returns: The stable immutable handle for this catalog snapshot, or nil when absent,
-       category-mismatched, or shadowed by readable SWORD content.
+       category-mismatched, or shadowed by resolvable SWORD ownership (including locked content).
      - Side effects: None.
      - Failure modes: None; unreadable modules never enter the catalog.
      */
@@ -132,9 +162,8 @@ struct BibleReaderSQLiteRuntimeCoordinator {
         named name: String,
         category: ModuleCategory
     ) -> BibleReaderSQLiteModuleHandle? {
-        guard genuineSwordInfo(named: name) == nil,
-              let module = catalog.module(named: name),
-              genuineSwordInfo(named: module.info.name) == nil,
+        guard let source = installedModuleResolver?.module(named: name),
+              case .sqlite(let module) = source,
               module.info.category == category else {
             return nil
         }
@@ -152,9 +181,9 @@ struct BibleReaderSQLiteRuntimeCoordinator {
     func unshadowedSQLiteModules(
         category: ModuleCategory? = nil
     ) -> [BibleReaderSQLiteModuleHandle] {
-        catalog.modulesInRegistrationOrder().filter { module in
-            genuineSwordInfo(named: module.info.name) == nil
-                && (category == nil || module.info.category == category)
+        guard let installedModuleResolver else { return [] }
+        return installedModuleResolver.registeredSQLiteModulesInRegistrationOrder().filter {
+            category == nil || $0.info.category == category
         }
     }
 
@@ -169,7 +198,7 @@ struct BibleReaderSQLiteRuntimeCoordinator {
        SQLite fallback only when SWORD supplied no active fallback; dictionary remains explicit.
      - Side effects: None.
      - Failure modes: Missing, wrong-category, and SWORD-shadowed requests resolve to nil.
-     - Note: Ordering is deterministic because catalog category lists are initials-sorted.
+     - Note: Ordering is deterministic because catalog category lists use JSword TreeSet order.
      */
     func resolveSelections(
         _ selection: BibleReaderSwordSelection,
@@ -192,27 +221,32 @@ struct BibleReaderSQLiteRuntimeCoordinator {
     }
 
     /**
-     Returns the genuine SWORD spelling for one identity while preserving unresolved requests.
+     Returns the globally selected native SWORD spelling while preserving unresolved requests.
 
-     - Parameter requestedName: Case-insensitive module initials from UI or persisted state.
+     - Parameter requestedName: Initials/full-name token from UI or persisted state.
      - Returns: Canonical native SWORD initials, or the original value when SWORD does not own it.
      - Side effects: None.
      - Failure modes: None.
      */
     func canonicalSwordModuleName(_ requestedName: String) -> String {
-        genuineSwordInfo(named: requestedName)?.name ?? requestedName
+        guard let installedModuleResolver,
+              installedModuleResolver.hasNativeRegistration(named: requestedName),
+              let info = installedModuleResolver.registeredModuleInfo(named: requestedName) else {
+            return requestedName
+        }
+        return info.name
     }
 
     /**
-     Reports whether readable native SWORD content owns one case-insensitive module identity.
+     Reports whether the global BookSet selects a resolvable native SWORD owner.
 
-     - Parameter name: Requested module initials.
-     - Returns: True only for a non-SQLite-projection SWORD row proven readable during reload.
+     - Parameter name: Requested initials/full-name token.
+     - Returns: True for a resolvable non-SQLite-projection SWORD row, including a locked owner.
      - Side effects: None.
      - Failure modes: Returns false before the first successful reload.
      */
     func hasGenuineSwordModule(named name: String) -> Bool {
-        genuineSwordInfo(named: name) != nil
+        installedModuleResolver?.hasNativeRegistration(named: name) ?? false
     }
 
     /**
@@ -227,7 +261,7 @@ struct BibleReaderSQLiteRuntimeCoordinator {
     func activeLanguages(
         inventories: BibleReaderSQLiteRuntimeInventories
     ) -> [String] {
-        let all = Array(genuineSwordModulesByIdentity.values)
+        let all = (installedModuleResolver?.registeredBookMetadata() ?? [])
             + inventories.bibles
             + inventories.commentaries
             + inventories.dictionaries
@@ -235,75 +269,43 @@ struct BibleReaderSQLiteRuntimeCoordinator {
     }
 
     /**
-     Returns the first deterministic SQLite fallback not shadowed by genuine SWORD content.
+     Returns the first deterministic SQLite fallback admitted by the global BookSet.
 
      - Parameter category: Required Bible or commentary fallback category.
-     - Returns: First exact-UTF-16-sorted immutable handle, or nil when none is eligible.
+     - Returns: First JSword-TreeSet-ordered immutable handle, or nil when none is eligible.
      - Side effects: None.
      - Failure modes: An empty catalog or globally SWORD-owned category returns nil.
      */
     private func firstUnshadowedModule(
         category: ModuleCategory
     ) -> BibleReaderSQLiteModuleHandle? {
-        catalog.modules(category: category).first {
-            genuineSwordInfo(named: $0.info.name) == nil
-        }
+        catalog.modules(category: category).first
     }
 
     /**
-     Replaces synthetic/case-variant SWORD rows with canonical readable metadata.
+     Restricts one global BookSet category to the coordinator-supported native rows plus SQLite.
 
      - Parameters:
-       - primary: Category rows emitted by the existing SWORD setup coordinator.
-       - category: Category required by the merged inventory.
-     - Returns: Genuine readable SWORD metadata corresponding to primary identities.
+       - registeredMetadata: Globally admitted books in pinned TreeSet order.
+       - category: Reader picker category being projected.
+       - primaryNativeMetadata: Supported native rows from the SWORD setup coordinator.
+     - Returns: TreeSet-ordered metadata retaining every admitted SQLite row and only exact UTF-16
+       native identities already accepted by the setup coordinator.
      - Side effects: None.
-     - Failure modes: Synthetic, unreadable, absent, and wrong-category rows are omitted.
+     - Failure modes: Stale or unsupported native rows are omitted. Composed/decomposed and exact
+       case variants are never collapsed by Swift canonical equality or a case-folded dictionary.
      */
-    private func canonicalPrimaryModules(
-        _ primary: [ModuleInfo],
-        category: ModuleCategory
+    private static func inventory(
+        _ registeredMetadata: [ModuleInfo],
+        category: ModuleCategory,
+        primaryNativeMetadata: [ModuleInfo]
     ) -> [ModuleInfo] {
-        primary.compactMap { info in
-            genuineSwordModulesByIdentity[Self.identity(info.name)]
-        }.filter { $0.category == category }
-    }
-
-    /**
-     Returns the stable Java UTF-16 case-insensitive identity shared by runtime decisions.
-
-     - Parameter initials: Exact SWORD or SQLite installed-book initials.
-     - Returns: Non-normalizing, non-expanding identity matching `String.equalsIgnoreCase`.
-     - Side effects: None.
-     - Failure modes: Empty initials produce an empty identity.
-     */
-    private static func identity(_ initials: String) -> SQLiteDocumentIdentity {
-        SQLiteDocumentIdentity(initials)
-    }
-
-    /**
-     Resolves genuine SWORD metadata with JSword's global exact/full-name/case precedence.
-
-     - Parameter name: Initials or full module name supplied by a bridge, picker, or persisted row.
-     - Returns: The SWORD-owned metadata selected before SQLite registration is considered.
-     - Side effects: None.
-     - Failure modes: Returns nil when no readable genuine SWORD module matches.
-     */
-    private func genuineSwordInfo(named name: String) -> ModuleInfo? {
-        genuineSwordModulesInRegistrationOrder.first {
-            Self.javaStringEquals($0.name, name)
-        } ?? genuineSwordModulesInRegistrationOrder.last {
-            Self.javaStringEquals($0.description, name)
-        } ?? {
-            let identity = Self.identity(name)
-            return genuineSwordModulesInRegistrationOrder.first {
-                Self.identity($0.name) == identity || Self.identity($0.description) == identity
+        registeredMetadata.filter { info in
+            guard info.category == category else { return false }
+            if BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) { return true }
+            return primaryNativeMetadata.contains {
+                SwordJavaStringIdentity.equals($0.name, info.name)
             }
-        }()
-    }
-
-    /** Compares exact Java `String.equals` identities without Unicode normalization. */
-    private static func javaStringEquals(_ lhs: String, _ rhs: String) -> Bool {
-        lhs.utf16.elementsEqual(rhs.utf16)
+        }
     }
 }

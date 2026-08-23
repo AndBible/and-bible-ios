@@ -1,93 +1,30 @@
 // SQLiteAndroidCompatibility.swift -- Shared Android SQLite identity and XML contracts
 
 import Foundation
+import SwordKit
 
 /**
  Hashable installed-module identity using Java's UTF-16 `String.equalsIgnoreCase` contract.
 
- Android requires equal UTF-16 lengths, compares BMP characters without canonical normalization or
- multi-character expansion, and combines valid surrogate pairs before applying simple case mapping.
- The folded code points and original UTF-16 length therefore form one stable dictionary key while
- keeping canonically distinct spellings, such as composed and decomposed accents, separate.
+ Android requires equal UTF-16 lengths and compares each Java `char` without canonical
+ normalization, multi-character expansion, or surrogate-pair case mapping. This public wrapper
+ preserves BibleCore's installed-module API while delegating the actual identity to SwordKit's one
+ Android 37 ICU-backed contract shared with native SWORD and TagSoup.
  */
 public struct SQLiteDocumentIdentity: Hashable, Sendable {
-    /// Pinned Java-oracle lowercase table already shipped for Lucene-compatible analysis.
-    private static let javaLowercaseTable: Lucene29CharacterTables = {
-        do {
-            return try Lucene29CharacterTables.loaded()
-        } catch {
-            preconditionFailure("Missing pinned OpenJDK character tables: \(error)")
-        }
-    }()
-
-    /**
-     Lowercase characters whose OpenJDK 17 uppercase form lowers to a different representative.
-
-     This is the complete BMP delta between `Character.toLowerCase(char)` and Java's
-     `Character.toLowerCase(Character.toUpperCase(char))`, generated from Eclipse Temurin 17.0.19.
-     Keeping the aliases explicit prevents the host OS Unicode version from changing identity.
-     */
-    private static let javaUppercaseAliasFold: [UInt16: UInt16] = [
-        0x00B5: 0x03BC,
-        0x0131: 0x0069,
-        0x017F: 0x0073,
-        0x0345: 0x03B9,
-        0x03C2: 0x03C3,
-        0x03D0: 0x03B2,
-        0x03D1: 0x03B8,
-        0x03D5: 0x03C6,
-        0x03D6: 0x03C0,
-        0x03F0: 0x03BA,
-        0x03F1: 0x03C1,
-        0x03F5: 0x03B5,
-        0x1C80: 0x0432,
-        0x1C81: 0x0434,
-        0x1C82: 0x043E,
-        0x1C83: 0x0441,
-        0x1C84: 0x0442,
-        0x1C85: 0x0442,
-        0x1C86: 0x044A,
-        0x1C87: 0x0463,
-        0x1C88: 0xA64B,
-        0x1E9B: 0x1E61,
-        0x1FBE: 0x03B9,
-    ]
-
-    /**
-     OpenJDK 17 supplementary uppercase ranges and their lowercase deltas.
-
-     The ranges come from the JDK 17 `UnicodeData.txt` oracle used to generate `CharacterData01`.
-     They cover Deseret, Osage, Old Hungarian, Warang Citi, Medefaidrin, and Adlam. Lowercase code
-     points already equal their lowercase-of-uppercase representative and need no table entry.
-     */
-    private static let supplementaryLowercaseRanges: [(ClosedRange<UInt32>, UInt32)] = [
-        (0x10400...0x10427, 0x28),
-        (0x104B0...0x104D3, 0x28),
-        (0x10C80...0x10CB2, 0x40),
-        (0x118A0...0x118BF, 0x20),
-        (0x16E40...0x16E5F, 0x20),
-        (0x1E900...0x1E921, 0x22),
-    ]
-
-    /// Original Java `String.length` retained because equalsIgnoreCase rejects unequal UTF-16 sizes.
-    private let utf16Count: Int
-
-    /// Non-expanding lowercase-of-uppercase representative for every source Unicode code point.
-    private let foldedCodePoints: [UInt32]
+    /// Shared Android 37 per-`char` identity used by native and SQLite registries.
+    private let androidIdentity: SwordJavaStringIdentity
 
     /**
      Creates Android's case-insensitive identity for one exact initials string.
 
      - Parameter initials: Exact installed-module initials.
      - Side effects: None.
-     - Failure modes: A missing bundled OpenJDK oracle is a package-integrity failure and traps
+     - Failure modes: A missing bundled Android ICU oracle is a package-integrity failure and traps
        instead of silently changing module identity.
      */
     public init(_ initials: String) {
-        utf16Count = initials.utf16.count
-        foldedCodePoints = initials.unicodeScalars.map {
-            Self.javaEqualsIgnoreCaseFold($0.value)
-        }
+        androidIdentity = SwordJavaStringIdentity(initials)
     }
 
     /** Applies Android's historical MyBible/MySword `[^a-zA-z0-9]` replacement. */
@@ -110,17 +47,6 @@ public struct SQLiteDocumentIdentity: Hashable, Sendable {
         }.joined()
     }
 
-    /** Returns OpenJDK 17's non-expanding lowercase-of-uppercase code-point representative. */
-    private static func javaEqualsIgnoreCaseFold(_ codePoint: UInt32) -> UInt32 {
-        if codePoint <= UInt32(UInt16.max) {
-            let unit = UInt16(codePoint)
-            return UInt32(javaUppercaseAliasFold[unit] ?? javaLowercaseTable.lowercase(unit))
-        }
-        for (range, delta) in supplementaryLowercaseRanges where range.contains(codePoint) {
-            return codePoint + delta
-        }
-        return codePoint
-    }
 }
 
 /** XML 1.0 text and fragment projection shared by every SQLite-backed reader. */

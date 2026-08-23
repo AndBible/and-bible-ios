@@ -21,7 +21,7 @@ enum BibleReaderBookmarkNavigationFailure: Error, Equatable, LocalizedError, Sen
     case unsupportedDestinationVersification(String)
     /// A non-nil persisted source-module identity is blank.
     case invalidSourceModuleIdentity
-    /// No supplied SWORD candidate has the byte-exact persisted source initials.
+    /// No supplied SWORD candidate has the Java-exact UTF-16 persisted source initials.
     case sourceModuleNotFound(String)
     /// Multiple supplied SWORD candidates have the persisted source initials.
     case sourceModuleAmbiguous(String)
@@ -228,6 +228,189 @@ struct BibleReaderBookmarkNavigationSwordPlan: Equatable, Sendable {
 }
 
 /**
+ Detached structural payload for one exact Android SQLite commentary or dictionary key.
+
+ The value copies every source-authored field needed to recreate the Vue payload without retaining
+ a SQLite handle or a controller callback. Construction accepts only the category, module identity,
+ exact key, and ordinal domain emitted by `SQLiteReaderDocumentContentBuilder`.
+ */
+struct BibleReaderBookmarkNavigationSQLiteFragment: Equatable, Sendable {
+    /// Exact owning module initials.
+    let moduleInitials: String
+    /// Exact installed category implemented by the SQLite reader.
+    let category: ModuleCategory
+    /// Exact persisted source key.
+    let key: String
+    /// User-visible exact-key label.
+    let keyName: String
+    /// Pseudo-book or commentary OSIS book identifier.
+    let osisBookID: String
+    /// User-visible payload book name.
+    let bookName: String
+    /// One-based payload chapter.
+    let chapter: Int
+    /// Whether the commentary coordinate belongs to the New Testament.
+    let isNewTestament: Bool
+    /// Structurally processed source OSIS.
+    let xml: String
+    /// Exact nonnegative local content ordinal domain.
+    let contentOrdinalRange: ClosedRange<Int>
+    /// Optional KJVA fragment range emitted for commentary.
+    let fragmentOrdinalRange: [Int]?
+    /// Exact Vue fragment identity.
+    let fragmentKey: String?
+    /// Optional commentary OSIS identity.
+    let fragmentOsisReference: String?
+    /// Optional source-authored annotation identity.
+    let annotateReference: String?
+    /// Source-authored fragment feature map.
+    let fragmentFeatures: [String: String]
+    /// Complete covering commentary block metadata.
+    let commentaryRange: ReaderCommentaryRangePayload?
+    /// Installed module display name.
+    let moduleName: String?
+    /// Installed module abbreviation.
+    let moduleAbbreviation: String?
+    /// Exact source versification when applicable.
+    let versificationName: String?
+    /// Source language code.
+    let language: String
+    /// Source reading direction.
+    let direction: String
+    /// Source Strong's capability.
+    let sourceHasStrongs: Bool?
+
+    /**
+     Copies and validates one builder result as detached bookmark-navigation data.
+
+     - Parameters:
+       - document: Exact structural document returned by the SQLite builder.
+       - module: Owning installed module whose identity and category are authoritative.
+     - Side effects: None; only immutable request fields are copied.
+     - Throws: `genericFragmentIdentityMismatch` when any builder identity/category/shape field is
+       inconsistent, or `invalidGenericFragmentOrdinalRange` for a malformed ordinal domain.
+     */
+    init(
+        document: BibleReaderSQLiteAuxiliaryDocument,
+        module: BibleReaderSQLiteModuleHandle
+    ) throws {
+        let request = document.request
+        let documentCategory: DocumentCategory
+        switch module.info.category {
+        case .commentary:
+            documentCategory = .commentary
+        case .dictionary, .glossary:
+            documentCategory = .dictionary
+        default:
+            throw BibleReaderBookmarkNavigationFailure.unsupportedGenericCategory(
+                initials: module.info.name,
+                actual: module.info.category
+            )
+        }
+        guard let requestBookInitials = request.bookInitials,
+              let requestDocumentKey = request.documentKey,
+              let requestKeyName = request.keyName,
+              SwordJavaStringIdentity.equals(requestBookInitials, module.info.name),
+              request.bookCategory == documentCategory.rawValue,
+              SwordJavaStringIdentity.equals(requestDocumentKey, document.key),
+              SwordJavaStringIdentity.equals(requestKeyName, document.keyName),
+              request.verseCount == 1,
+              request.addChapter == false,
+              let ordinals = request.ordinalRangeOverride,
+              ordinals.count == 2 else {
+            throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
+                moduleInitials: module.info.name,
+                key: document.key
+            )
+        }
+        let ordinalRange = ordinals[0]...ordinals[1]
+        guard ordinalRange.lowerBound >= 0 else {
+            throw BibleReaderBookmarkNavigationFailure.invalidGenericFragmentOrdinalRange(
+                ordinalRange
+            )
+        }
+        moduleInitials = module.info.name
+        category = module.info.category
+        key = document.key
+        keyName = document.keyName
+        osisBookID = request.osisBookId
+        bookName = request.bookName
+        chapter = request.chapter
+        isNewTestament = request.isNewTestament
+        xml = request.xml
+        contentOrdinalRange = ordinalRange
+        fragmentOrdinalRange = request.fragmentOrdinalRange
+        fragmentKey = request.fragmentKey
+        fragmentOsisReference = request.fragmentOsisRef
+        annotateReference = request.annotateRef
+        fragmentFeatures = request.fragmentFeatures
+        commentaryRange = request.commentaryRange
+        moduleName = request.moduleName
+        moduleAbbreviation = request.moduleAbbreviation
+        versificationName = request.versificationName
+        language = request.language
+        direction = request.direction
+        sourceHasStrongs = request.sourceHasStrongs
+    }
+
+    /**
+     Recreates the exact source payload while attaching the already-validated bookmark selection.
+
+     - Parameter selectedOrdinalRange: Optional contained BVA range from the persisted bookmark.
+     - Returns: Complete request for the existing Vue document factory.
+     - Side effects: None.
+     - Failure modes: None; construction uses only validated detached fields.
+     */
+    func payloadRequest(
+        selectedOrdinalRange: ClosedRange<Int>?
+    ) -> BibleReaderDocumentPayloadRequest {
+        let documentCategory: DocumentCategory = category == .commentary
+            ? .commentary
+            : .dictionary
+        return BibleReaderDocumentPayloadRequest(
+            osisBookId: osisBookID,
+            bookName: bookName,
+            chapter: chapter,
+            verseCount: 1,
+            isNewTestament: isNewTestament,
+            xml: xml,
+            bookCategory: documentCategory.rawValue,
+            bookInitials: moduleInitials,
+            addChapter: false,
+            originalOrdinalRange: selectedOrdinalRange.map {
+                [$0.lowerBound, $0.upperBound]
+            },
+            documentKey: key,
+            keyName: keyName,
+            ordinalRangeOverride: [
+                contentOrdinalRange.lowerBound,
+                contentOrdinalRange.upperBound,
+            ],
+            fragmentOrdinalRange: fragmentOrdinalRange,
+            fragmentKey: fragmentKey,
+            fragmentOsisRef: fragmentOsisReference,
+            annotateRef: annotateReference,
+            fragmentFeatures: fragmentFeatures,
+            commentaryRange: commentaryRange,
+            moduleName: moduleName,
+            moduleAbbreviation: moduleAbbreviation,
+            versificationName: versificationName,
+            language: language,
+            direction: direction,
+            sourceHasStrongs: sourceHasStrongs
+        )
+    }
+}
+
+/** Immutable exact SQLite auxiliary destination selected by a generic bookmark. */
+struct BibleReaderBookmarkNavigationSQLitePlan: Equatable, Sendable {
+    /// Optional BVA selection retained only after containment validation.
+    let selectedOrdinalRange: ClosedRange<Int>?
+    /// Detached exact structural source content.
+    let fragment: BibleReaderBookmarkNavigationSQLiteFragment
+}
+
+/**
  Detached My Documents page content used by exact generic bookmark planning.
 
  Inputs are copied from one strict unique document/page fetch. The snapshot allows a later commit
@@ -304,6 +487,8 @@ enum BibleReaderBookmarkNavigationCommitPlan: Equatable, Sendable {
     case bible(BibleReaderBookmarkNavigationBiblePlan)
     /// Exact generic SWORD key and fragment.
     case sword(BibleReaderBookmarkNavigationSwordPlan)
+    /// Exact Android SQLite commentary or dictionary key.
+    case sqlite(BibleReaderBookmarkNavigationSQLitePlan)
     /// Exact My Documents page snapshot.
     case myDocument(BibleReaderBookmarkNavigationMyDocumentPlan)
     /// Exact EPUB persisted-key content snapshot.
@@ -434,6 +619,87 @@ struct BibleReaderBookmarkNavigationSwordCandidate {
 }
 
 /**
+ Read-only Android SQLite adapter used by exact generic bookmark planning.
+
+ It accepts only executable commentary and dictionary/glossary categories. Exact commentary keys
+ must be canonical dotted KJVA identities; dictionary keys retain Java-exact UTF-16 identity.
+ */
+struct BibleReaderBookmarkNavigationSQLiteCandidate {
+    /// Exact installed module initials.
+    let initials: String
+    /// Exact installed module category.
+    let category: ModuleCategory
+    /// Throwing exact structural fragment lookup.
+    let fragmentForExactKey: (String) throws -> BibleReaderBookmarkNavigationSQLiteFragment
+
+    /**
+     Wraps one immutable installed SQLite handle with exact builder-backed reads.
+
+     - Parameter module: Globally admitted SQLite commentary or dictionary/glossary handle.
+     - Side effects: Captures the handle only; no SQLite query occurs until exact lookup.
+     - Failure modes: Exact lookup propagates builder failures; malformed/noncanonical commentary
+       keys and unsupported categories fail without falling back to another backend.
+     */
+    init(module: BibleReaderSQLiteModuleHandle) {
+        initials = module.info.name
+        category = module.info.category
+        fragmentForExactKey = { key in
+            let document: BibleReaderSQLiteAuxiliaryDocument
+            switch module.info.category {
+            case .commentary:
+                guard let coordinate = SQLiteReaderNavigationResolver.commentaryCoordinate(for: key),
+                      coordinate.osisKey == key,
+                      let book = JSwordKJVAVersification.books.first(where: {
+                        $0.osisId == coordinate.osisBookId
+                      }) else {
+                    throw BibleReaderBookmarkNavigationFailure.genericKeyUnavailable(
+                        moduleInitials: module.info.name,
+                        key: key
+                    )
+                }
+                document = try SQLiteReaderDocumentContentBuilder(module: module).commentary(
+                    osisBookId: coordinate.osisBookId,
+                    bookName: book.longName,
+                    chapter: coordinate.chapter,
+                    verse: coordinate.verse,
+                    isNewTestament: book.isNewTestament
+                )
+            case .dictionary, .glossary:
+                document = try SQLiteReaderDocumentContentBuilder(module: module).dictionary(
+                    key: key
+                )
+            default:
+                throw BibleReaderBookmarkNavigationFailure.unsupportedGenericCategory(
+                    initials: module.info.name,
+                    actual: module.info.category
+                )
+            }
+            guard SwordJavaStringIdentity.equals(document.key, key) else {
+                throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
+                    moduleInitials: module.info.name,
+                    key: key
+                )
+            }
+            return try BibleReaderBookmarkNavigationSQLiteFragment(
+                document: document,
+                module: module
+            )
+        }
+    }
+
+    /** Creates a deterministic read-only candidate for focused planner tests. */
+    init(
+        initials: String,
+        category: ModuleCategory,
+        fragmentForExactKey: @escaping (String) throws -> BibleReaderBookmarkNavigationSQLiteFragment
+    ) {
+        self.initials = initials
+        self.category = category
+        self.fragmentForExactKey = fragmentForExactKey
+    }
+}
+
+/**
  Read-only My Documents adapter used by the exact bookmark planner.
 
  Inputs identify one supplied document and a strict parent-scoped page resolver. The output is a
@@ -466,7 +732,7 @@ struct BibleReaderBookmarkNavigationMyDocumentCandidate {
             let page = try store.exactPage(bookInitials: expectedInitials, pageKey: key)
             guard let resolvedDocument = page.document,
                   resolvedDocument.id == expectedDocumentID,
-                  resolvedDocument.initials == expectedInitials else {
+                  SwordJavaStringIdentity.equals(resolvedDocument.initials, expectedInitials) else {
                 throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
                     moduleInitials: expectedInitials,
                     key: key
@@ -587,6 +853,8 @@ struct BibleReaderBookmarkNavigationInventory {
     let destinationBible: BibleReaderBookmarkNavigationSwordCandidate?
     /// Installed SWORD candidates available for exact source/generic identity resolution.
     let swordCandidates: [BibleReaderBookmarkNavigationSwordCandidate]
+    /// Installed Android SQLite candidates available for exact generic identity resolution.
+    let sqliteCandidates: [BibleReaderBookmarkNavigationSQLiteCandidate]
     /// My Documents candidates available for exact generic identity resolution.
     let myDocumentCandidates: [BibleReaderBookmarkNavigationMyDocumentCandidate]
     /// Open immutable EPUB candidates available for exact generic identity resolution.
@@ -608,6 +876,7 @@ struct BibleReaderBookmarkNavigationInventory {
     init(
         destinationBible: SwordModule?,
         swordModules: [SwordModule],
+        sqliteModules: [BibleReaderSQLiteModuleHandle] = [],
         myDocuments: [MyDocument],
         myDocumentStore: MyDocumentStore?,
         epubReaders: [EpubReader]
@@ -617,6 +886,9 @@ struct BibleReaderBookmarkNavigationInventory {
         )
         swordCandidates = swordModules.map(
             BibleReaderBookmarkNavigationSwordCandidate.init(module:)
+        )
+        sqliteCandidates = sqliteModules.map(
+            BibleReaderBookmarkNavigationSQLiteCandidate.init(module:)
         )
         if let myDocumentStore {
             myDocumentCandidates = myDocuments.map {
@@ -647,11 +919,13 @@ struct BibleReaderBookmarkNavigationInventory {
     init(
         destinationBible: BibleReaderBookmarkNavigationSwordCandidate?,
         swordCandidates: [BibleReaderBookmarkNavigationSwordCandidate] = [],
+        sqliteCandidates: [BibleReaderBookmarkNavigationSQLiteCandidate] = [],
         myDocumentCandidates: [BibleReaderBookmarkNavigationMyDocumentCandidate] = [],
         epubCandidates: [BibleReaderBookmarkNavigationEpubCandidate] = []
     ) {
         self.destinationBible = destinationBible
         self.swordCandidates = swordCandidates
+        self.sqliteCandidates = sqliteCandidates
         self.myDocumentCandidates = myDocumentCandidates
         self.epubCandidates = epubCandidates
     }
@@ -800,9 +1074,9 @@ struct BibleReaderBookmarkNavigationCoordinator {
      - Parameters:
        - target: Exact bookmark target emitted by BibleCore.
        - inventory: Explicit already-selected destination and candidate inventories.
-     - Returns: Detached Bible, SWORD, My Documents, or EPUB commit instructions.
-     - Side effects: Performs read-only lookups. SWORD adapters restore cursors; no controller,
-       PageManager, persistence, or render callback is retained or invoked.
+     - Returns: Detached Bible, SWORD, SQLite, My Documents, or EPUB commit instructions.
+     - Side effects: Performs read-only lookups. SWORD adapters restore cursors and SQLite adapters
+       use operation-owned connections; no controller, persistence, or renderer callback is retained.
      - Throws: `BibleReaderBookmarkNavigationFailure` for every unresolved, ambiguous, mismatched,
        non-strict, non-addressable, or out-of-fragment target.
      */
@@ -1002,9 +1276,12 @@ struct BibleReaderBookmarkNavigationCoordinator {
                     key: target.key
                 )
             }
-            guard fragment.source.initials == target.moduleInitials,
+            guard SwordJavaStringIdentity.equals(
+                      fragment.source.initials,
+                      target.moduleInitials
+                  ),
                   fragment.source.category == sword.category,
-                  fragment.key == target.key else {
+                  SwordJavaStringIdentity.equals(fragment.key, target.key) else {
                 throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
                     moduleInitials: target.moduleInitials,
                     key: target.key
@@ -1015,6 +1292,43 @@ struct BibleReaderBookmarkNavigationCoordinator {
                 moduleInitials: target.moduleInitials,
                 category: sword.category,
                 key: target.key,
+                selectedOrdinalRange: target.ordinalRange,
+                fragment: fragment
+            ))
+
+        case .sqlite(let sqlite):
+            guard Self.genericSQLiteCategories.contains(sqlite.category) else {
+                throw BibleReaderBookmarkNavigationFailure.unsupportedGenericCategory(
+                    initials: sqlite.initials,
+                    actual: sqlite.category
+                )
+            }
+            let fragment: BibleReaderBookmarkNavigationSQLiteFragment
+            do {
+                fragment = try sqlite.fragmentForExactKey(target.key)
+            } catch {
+                throw genericLookupFailure(
+                    error,
+                    moduleInitials: target.moduleInitials,
+                    key: target.key
+                )
+            }
+            guard SwordJavaStringIdentity.equals(
+                      fragment.moduleInitials,
+                      target.moduleInitials
+                  ),
+                  fragment.category == sqlite.category,
+                  SwordJavaStringIdentity.equals(fragment.key, target.key) else {
+                throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
+                    moduleInitials: target.moduleInitials,
+                    key: target.key
+                )
+            }
+            try validateGenericRange(
+                target.ordinalRange,
+                available: fragment.contentOrdinalRange
+            )
+            return .sqlite(.init(
                 selectedOrdinalRange: target.ordinalRange,
                 fragment: fragment
             ))
@@ -1031,8 +1345,11 @@ struct BibleReaderBookmarkNavigationCoordinator {
                 )
             }
             guard fragment.documentID == document.documentID,
-                  fragment.moduleInitials == target.moduleInitials,
-                  fragment.key == target.key else {
+                  SwordJavaStringIdentity.equals(
+                      fragment.moduleInitials,
+                      target.moduleInitials
+                  ),
+                  SwordJavaStringIdentity.equals(fragment.key, target.key) else {
                 throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
                     moduleInitials: target.moduleInitials,
                     key: target.key
@@ -1055,9 +1372,9 @@ struct BibleReaderBookmarkNavigationCoordinator {
                     key: target.key
                 )
             }
-            guard epub.initials == target.moduleInitials,
-                  content.key == target.key,
-                  content.persistedKey == target.key else {
+            guard SwordJavaStringIdentity.equals(epub.initials, target.moduleInitials),
+                  SwordJavaStringIdentity.equals(content.key, target.key),
+                  SwordJavaStringIdentity.equals(content.persistedKey, target.key) else {
                 throw BibleReaderBookmarkNavigationFailure.genericFragmentIdentityMismatch(
                     moduleInitials: target.moduleInitials,
                     key: target.key
@@ -1112,7 +1429,7 @@ struct BibleReaderBookmarkNavigationCoordinator {
      Resolves a non-nil source exactly, while nil source identity uses only the destination.
 
      - Parameters:
-       - initials: Optional byte-exact persisted source initials.
+       - initials: Optional Java-exact UTF-16 persisted source initials.
        - destination: Already-validated selected destination.
        - inventory: SWORD candidates available for explicit-source resolution.
      - Returns: The destination for nil identity, otherwise the sole exact SWORD candidate.
@@ -1128,7 +1445,9 @@ struct BibleReaderBookmarkNavigationCoordinator {
         guard !initials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw BibleReaderBookmarkNavigationFailure.invalidSourceModuleIdentity
         }
-        let matches = inventory.swordCandidates.filter { $0.initials == initials }
+        let matches = inventory.swordCandidates.filter {
+            SwordJavaStringIdentity.equals($0.initials, initials)
+        }
         guard !matches.isEmpty else {
             throw BibleReaderBookmarkNavigationFailure.sourceModuleNotFound(initials)
         }
@@ -1236,11 +1555,11 @@ struct BibleReaderBookmarkNavigationCoordinator {
     }
 
     /**
-     Enumerates byte-exact generic identity matches across all supplied backend inventories.
+     Enumerates Java-exact UTF-16 generic identity matches across all supplied backend inventories.
 
      - Parameters:
        - initials: Persisted identity to compare without normalization.
-       - inventory: Complete SWORD, My Documents, and EPUB candidate inventories.
+       - inventory: Complete SWORD, SQLite, My Documents, and EPUB candidate inventories.
      - Returns: Every exact match, retaining duplicates and backend provenance.
      - Side effects: None; no key lookup closure is invoked.
      - Failure modes: None; zero and multiple results are validated by the caller.
@@ -1250,13 +1569,16 @@ struct BibleReaderBookmarkNavigationCoordinator {
         inventory: BibleReaderBookmarkNavigationInventory
     ) -> [GenericCandidate] {
         inventory.swordCandidates
-            .filter { $0.initials == initials }
+            .filter { SwordJavaStringIdentity.equals($0.initials, initials) }
             .map(GenericCandidate.sword)
+            + inventory.sqliteCandidates
+                .filter { SwordJavaStringIdentity.equals($0.initials, initials) }
+                .map(GenericCandidate.sqlite)
             + inventory.myDocumentCandidates
-                .filter { $0.initials == initials }
+                .filter { SwordJavaStringIdentity.equals($0.initials, initials) }
                 .map(GenericCandidate.myDocument)
             + inventory.epubCandidates
-                .filter { $0.initials == initials }
+                .filter { SwordJavaStringIdentity.equals($0.initials, initials) }
                 .map(GenericCandidate.epub)
     }
 
@@ -1311,7 +1633,11 @@ struct BibleReaderBookmarkNavigationCoordinator {
             switch failure {
             case .invalidKey, .keyNotFound:
                 return .genericKeyUnavailable(moduleInitials: moduleInitials, key: key)
-            case .unsupportedCategory, .malformedOSIS:
+            case .unsupportedCategory,
+                 .unsupportedDictionaryDriver,
+                 .unsupportedGenBookDriver,
+                 .malformedOSIS,
+                 .missingCommentaryVerse:
                 return .genericKeyLookupFailed(moduleInitials: moduleInitials, key: key)
             }
         }
@@ -1334,6 +1660,14 @@ struct BibleReaderBookmarkNavigationCoordinator {
                 return .genericKeyLookupFailed(moduleInitials: moduleInitials, key: key)
             }
         }
+        if let failure = error as? SQLiteReaderDocumentContentError {
+            switch failure {
+            case .noContent:
+                return .genericKeyUnavailable(moduleInitials: moduleInitials, key: key)
+            case .invalidMarkup:
+                return .genericKeyLookupFailed(moduleInitials: moduleInitials, key: key)
+            }
+        }
         return .genericKeyLookupFailed(moduleInitials: moduleInitials, key: key)
     }
 
@@ -1352,6 +1686,13 @@ struct BibleReaderBookmarkNavigationCoordinator {
         .glossary,
     ]
 
+    /** Executable Android SQLite categories backed by the structural auxiliary builder. */
+    private static let genericSQLiteCategories: Set<ModuleCategory> = [
+        .commentary,
+        .dictionary,
+        .glossary,
+    ]
+
     /**
      One backend candidate selected only after cross-inventory identity counting.
 
@@ -1361,6 +1702,8 @@ struct BibleReaderBookmarkNavigationCoordinator {
     private enum GenericCandidate {
         /// Exact SWORD candidate.
         case sword(BibleReaderBookmarkNavigationSwordCandidate)
+        /// Exact Android SQLite commentary or dictionary candidate.
+        case sqlite(BibleReaderBookmarkNavigationSQLiteCandidate)
         /// Exact My Documents candidate.
         case myDocument(BibleReaderBookmarkNavigationMyDocumentCandidate)
         /// Exact EPUB candidate.

@@ -7,9 +7,10 @@ private let chapterBuilderLogger = Logger(subsystem: "org.andbible", category: "
 /**
  Reconstructs one Bible chapter OSIS payload from a SWORD verse-key module.
 
- Android reads a whole OSIS fragment for a rendered chapter range. iOS does not currently expose the
- same low-level SWORD fragment API, so this builder centralizes the best available approximation:
- preserve verse-level raw OSIS, stitch in verse-0 intro material when enabled, and insert a real
+ Android filters every raw key through JSword `OSISFilter`, applies `SwordBook.addOSIS`, and then
+ aggregates the repaired entries for a rendered chapter range. iOS does not expose that range API,
+ so this builder owns the equivalent sequence: apply the pinned repair ladder per entry, project
+ verse/pre-verse ownership, stitch in verse-0 intro material when enabled, and insert a real
  `<chapter>` marker when the source fragment does not already provide one.
 
  The raw OSIS stream is the authoritative source for headings. Some modules surface the same heading
@@ -23,15 +24,61 @@ struct BibleChapterDocumentBuilder {
         let addChapter: Bool
     }
 
-    private struct VerseEntry {
+    /**
+     Stores one exact native verse before chapter-level OSIS reconstruction.
+
+     Entries are immutable, ordered by the caller, and retain source XML without trimming so the
+     shared projector can preserve Android-significant edge whitespace. Construction performs no
+     I/O and cannot fail; `buildVerseChunkXML` owns structural repair and wrapper emission.
+     */
+    struct VerseEntry {
+        /// One-based source verse number used by the synthetic OSIS wrapper.
         let verse: Int
+
+        /// Active-versification ordinal emitted for Android-compatible reader navigation.
         let ordinal: Int
+
+        /// Exact native OSIS entry supplied to the shared structural projection boundary.
         let xml: String
+
+        /**
+         Creates one immutable captured verse for reconstruction and focused contract tests.
+
+         - Parameters:
+           - verse: One-based source verse number.
+           - ordinal: Active-versification ordinal used by reader navigation.
+           - xml: Exact native OSIS fragment, including meaningful edge whitespace.
+         - Side effects: None.
+         - Failure modes: Inputs are retained verbatim; the later projection boundary handles
+           malformed XML without throwing.
+         */
+        init(verse: Int, ordinal: Int, xml: String) {
+            self.verse = verse
+            self.ordinal = ordinal
+            self.xml = xml
+        }
     }
 
     let module: SwordModule
     let includeHeadings: Bool
 
+    /**
+     Reconstructs one chapter from exact source-filtered OSIS entries.
+
+     - Parameters:
+       - osisBookId: Canonical OSIS book identifier in the module's active versification.
+       - chapter: One-based chapter number to capture.
+     - Returns: Well-formed reader XML, emitted verse count, and chapter-marker state; returns `nil`
+       when the exact chapter is unavailable, every positive verse is empty, source bounds cannot be
+       resolved, or the native cursor cannot be restored.
+     - Side effects: Reads optional book/chapter introductions, captures one bounded positive-verse
+       range through SWORD's option/source/encoding filters, and parses each copied OSIS fragment.
+     - Failure modes: Native positioning/filter/restoration errors fail the complete chapter closed
+       rather than publishing content from a stale or mismatched cursor. Individually irreparable
+       OSIS entries are omitted by the pinned JSword repair ladder.
+     - Important: Positive verses are captured under one `SwordRuntime` lease so another SWORD
+       caller cannot interleave cursor movement between entry metadata and source content.
+     */
     func loadChapter(osisBookId: String, chapter: Int) -> LoadedChapterContent? {
         var verseCount = 0
         var currentVerseChunk: [VerseEntry] = []
@@ -50,55 +97,51 @@ struct BibleChapterDocumentBuilder {
             hasChapterMarker = hasChapterMarker || chapterIntroXML.contains("<chapter")
         }
 
-        let startKey = "\(osisBookId) \(chapter):1"
-        module.setKey(startKey)
-
-        guard let firstKey = module.currentVerseKeyChildren(),
-              firstKey.osisBookName == osisBookId,
-              firstKey.chapter == chapter else {
-            chapterBuilderLogger.warning("SWORD: No content at \(startKey)")
+        guard let firstEntry = inspectedSourceEntry(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: 1
+        ), firstEntry.verseKey.verseMax > 0,
+        let lastEntry = inspectedSourceEntry(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: firstEntry.verseKey.verseMax
+        ) else {
+            chapterBuilderLogger.warning("SWORD: No content at \(osisBookId) \(chapter):1")
             return nil
         }
 
-        while true {
-            guard let key = module.currentVerseKeyChildren(),
-                  key.osisBookName == osisBookId else {
-                break
-            }
+        let sourceRange: SwordVerseSourceRange
+        do {
+            sourceRange = try module.inspectVerseSourceRangeRestoringPrevious(
+                startOrdinal: firstEntry.verseKey.index,
+                endOrdinal: lastEntry.verseKey.index
+            )
+        } catch {
+            chapterBuilderLogger.error(
+                "SWORD: Could not capture \(osisBookId) \(chapter) with cursor integrity: \(String(describing: error))"
+            )
+            return nil
+        }
 
-            if key.chapter != chapter {
-                break
-            }
-
-            let parsedVerse = key.verse
-            if parsedVerse <= 0 {
-                if !module.next() { break }
-                continue
-            }
-
+        for sourceEntry in sourceRange.entries {
+            let reference = sourceEntry.reference
+            guard reference.osisBookId == osisBookId,
+                  reference.chapter == chapter,
+                  let text = sourceEntry.osisFragment,
+                  !text.isEmpty else { continue }
             if !hasChapterMarker {
                 appendPreservedOsisContent(chapterMarkerXML(osisBookId: osisBookId, chapter: chapter), to: &xmlParts)
                 hasChapterMarker = true
             }
 
-            let text = module.rawEntry()
-            if !text.isEmpty {
-                guard let ordinal = ordinal(osisBookId: osisBookId, chapter: chapter, verse: parsedVerse) else {
-                    chapterBuilderLogger.warning("SWORD: Could not resolve ordinal for \(osisBookId) \(chapter):\(parsedVerse)")
-                    return nil
-                }
-                let verseEntry = VerseEntry(
-                    verse: parsedVerse,
-                    ordinal: ordinal,
-                    xml: text
-                )
-                verseCount += 1
-                currentVerseChunk.append(verseEntry)
-            }
-
-            if !module.next() {
-                break
-            }
+            let verseEntry = VerseEntry(
+                verse: reference.verse,
+                ordinal: reference.ordinal,
+                xml: text
+            )
+            verseCount += 1
+            currentVerseChunk.append(verseEntry)
         }
 
         appendCurrentVerseChunk(osisBookId: osisBookId, chapter: chapter, verseChunk: &currentVerseChunk, xmlParts: &xmlParts)
@@ -121,27 +164,6 @@ struct BibleChapterDocumentBuilder {
         (chapter - 1) * 40 + max(1, verse)
     }
 
-    /**
-     Resolves the verse ordinal used in reader OSIS output.
-
-     Android receives verse ordinals from JSword's active `Versification`; SWORD exposes the same
-     concept through `VerseKey.getIndex()`. The fallback exists only for placeholder/unavailable
-     module paths and preserves historical rendering when the bridge cannot resolve a real
-     `VerseKey`.
-
-     - Parameters:
-       - osisBookId: OSIS book identifier for the verse being rendered.
-       - chapter: One-based chapter number.
-       - verse: One-based verse number.
-     - Returns: The active module's versification ordinal, or `nil` if the exact verse cannot be
-       resolved through the module.
-     - Side effects: May temporarily move the SWORD module cursor through `SwordModule`; the module
-       restores its previous key before returning.
-     */
-    private func ordinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
-        module.verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
-    }
-
     private func normalizedOsisSegment(_ xml: String) -> String {
         let trimmed = xml.trimmingCharacters(in: .whitespacesAndNewlines)
         return "<div>\(trimmed)</div>"
@@ -153,18 +175,67 @@ struct BibleChapterDocumentBuilder {
         )
     }
 
+    /**
+     Loads and repairs one exact verse-zero introduction through JSword's source filter boundary.
+
+     - Parameters:
+       - osisBookId: Exact OSIS book identifier used to position and validate the native cursor.
+       - chapter: Chapter component of the requested introduction key.
+       - verse: Verse component, normally zero for book/chapter pre-verse material.
+     - Returns: One structurally valid wrapper around repaired source children, or nil when the key
+       is absent, its raw entry is empty, or every pinned repair stage rejects the entry.
+     - Side effects: Moves the shared native module cursor to the requested exact key and parses one
+       bounded source fragment in memory.
+     - Failure modes: Never substitutes stripped/rendered text; invalid or irreparable source is
+       omitted so it cannot invalidate the complete Vue chapter template.
+     */
     private func rawEntryFragment(osisBookId: String, chapter: Int, verse: Int) -> String? {
-        module.setKey("=\(osisBookId).\(chapter).\(verse)")
-        guard let key = module.currentVerseKeyChildren(),
-              key.osisBookName == osisBookId,
-              key.chapter == chapter,
-              key.verse == verse else {
+        guard let sourceEntry = inspectedSourceEntry(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: verse
+        ), !sourceEntry.osisFragment.isEmpty else { return nil }
+        let repaired = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+            sourceEntry.osisFragment,
+            moduleInitials: module.info.name
+        )
+        guard !repaired.isEmpty else { return nil }
+        return "<div>\(repaired)</div>"
+    }
+
+    /**
+     Resolves one exact verse and its source-neutral OSIS without leaking native cursor movement.
+
+     - Parameters:
+       - osisBookId: Expected canonical OSIS book identifier.
+       - chapter: Expected chapter, including zero for a book introduction.
+       - verse: Expected verse, including zero for introduction material.
+     - Returns: Exact copied VerseKey metadata and filtered OSIS, or `nil` when SWORD snaps to a
+       different key or cannot restore the caller's cursor.
+     - Side effects: Temporarily positions and source-filters the module under `SwordRuntime`.
+     - Failure modes: Logs restoration failures and rejects snapped/missing coordinates; empty
+       source content remains a successful exact inspection for the caller to classify.
+     */
+    private func inspectedSourceEntry(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int
+    ) -> (verseKey: VerseKeyChildren, osisFragment: String)? {
+        do {
+            let inspection = try module.inspectVerseKeyOSISSourceRestoringPrevious(
+                "=\(osisBookId).\(chapter).\(verse)"
+            )
+            guard let key = inspection.verseKey,
+                  key.osisBookName == osisBookId,
+                  key.chapter == chapter,
+                  key.verse == verse else { return nil }
+            return (key, inspection.osisFragment)
+        } catch {
+            chapterBuilderLogger.error(
+                "SWORD: Could not inspect \(osisBookId).\(chapter).\(verse) with cursor integrity: \(String(describing: error))"
+            )
             return nil
         }
-
-        let raw = module.rawEntry().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-        return normalizedOsisSegment(raw)
     }
 
     private func osisFragmentBody(_ xml: String) -> String {
@@ -189,16 +260,54 @@ struct BibleChapterDocumentBuilder {
                                          verseChunk: inout [VerseEntry],
                                          xmlParts: inout [String]) {
         guard !verseChunk.isEmpty else { return }
-        appendOsisContent(buildVerseChunkXML(osisBookId: osisBookId, chapter: chapter, verses: verseChunk), to: &xmlParts)
+        appendOsisContent(
+            Self.buildVerseChunkXML(
+                osisBookId: osisBookId,
+                chapter: chapter,
+                verses: verseChunk,
+                moduleInitials: module.info.name
+            ),
+            to: &xmlParts
+        )
         verseChunk.removeAll(keepingCapacity: true)
     }
 
-    private func buildVerseChunkXML(osisBookId: String, chapter: Int, verses: [VerseEntry]) -> String {
+    /**
+     Builds one structurally projected run of native SWORD verse entries.
+
+     - Parameters:
+       - osisBookId: Canonical OSIS book identifier shared by the chunk.
+       - chapter: One-based chapter number shared by the chunk.
+       - verses: Ordered exact raw entries with their source verse/ordinal identities.
+       - moduleInitials: Exact installed initials controlling pinned module-specific source repair.
+     - Returns: One wrapper containing chapter-level preambles and synthetic verse elements.
+     - Side effects: Parses each bounded verse fragment in memory.
+     - Failure modes: Every raw entry first follows pinned JSword's structural repair ladder;
+       irreparable entries are omitted rather than emitting malformed Vue templates. No caller
+       pre-trim may discard Java-significant NBSP before that compatibility boundary.
+     */
+    static func buildVerseChunkXML(
+        osisBookId: String,
+        chapter: Int,
+        verses: [VerseEntry],
+        moduleInitials: String? = nil
+    ) -> String {
         var xml = "<div>"
         for verse in verses {
-            let cleanText = verse.xml.trimmingCharacters(in: .whitespacesAndNewlines)
-            let projection = SwordVerseOSISProjection.project(cleanText)
+            let repairedSource = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+                verse.xml,
+                moduleInitials: moduleInitials
+            )
+            guard !repairedSource.isEmpty else { continue }
+            let projection = SwordVerseOSISProjection.project(
+                repairedSource,
+                verseOrdinal: verse.ordinal
+            )
             xml += projection.preVerseXML
+            if projection.isAlreadyWrapped {
+                xml += projection.verseBodyXML
+                continue
+            }
             xml += "<verse osisID=\"\(osisBookId).\(chapter).\(verse.verse)\" verseOrdinal=\"\(verse.ordinal)\">"
             xml += "\(projection.verseBodyXML) "
             xml += "</verse>"

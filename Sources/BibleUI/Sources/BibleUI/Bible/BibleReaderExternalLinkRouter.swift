@@ -2,6 +2,20 @@ import Foundation
 import BibleCore
 
 /**
+ One ordered definition child collected from an Android-compatible reader link.
+
+ Android builds a `BibleLink` list before choosing its single-link or `openMulti` execution path.
+ Keeping the definition kind attached to each value lets iOS preserve that list's fragment order
+ instead of regrouping every Strong's definition ahead of every morphology definition.
+ */
+enum BibleReaderDefinitionItem: Equatable {
+    /// Resolve one Greek or Hebrew Strong's value.
+    case strong(String)
+    /// Resolve one Robinson morphology value.
+    case robinson(String)
+}
+
+/**
  Classifies Android-compatible reader links into typed native reader routes.
 
  Android separates pseudo-link classification from execution: `BibleJavascriptInterface` and
@@ -18,8 +32,10 @@ struct BibleReaderExternalLinkRouter {
      bridge emission, navigation, persistence, or platform URL opening.
      */
     enum Route: Equatable {
-        /// Open a Strong's/morphology multi-document with collected Strong's and Robinson keys.
-        case definition(strongs: [String], robinson: [String])
+        /// Open one Strong's or morphology definition link.
+        case definition(items: [BibleReaderDefinitionItem])
+        /// Open Android's `ab-w` multi-link document even when every child lookup misses.
+        case multiDefinition(items: [BibleReaderDefinitionItem])
         /// Show all occurrences for a normalized Strong's key.
         case findAllOccurrences(String)
         /// Open the native error-report target.
@@ -100,38 +116,60 @@ struct BibleReaderExternalLinkRouter {
         }
         if link.hasPrefix("S:") {
             let strongRef = String(link.dropFirst(2))
-            return strongRef.isEmpty ? nil : .definition(strongs: [strongRef], robinson: [])
+            return strongRef.isEmpty ? nil : .definition(items: [.strong(strongRef)])
         }
         if link.hasPrefix("#b") {
             return mySwordBibleRoute(from: link)
         }
         if link.hasPrefix("#s") || link.hasPrefix("#d") {
             let strongRef = String(link.dropFirst(2))
-            return strongRef.isEmpty ? nil : .definition(strongs: [strongRef], robinson: [])
+            return strongRef.isEmpty ? nil : .definition(items: [.strong(strongRef)])
         }
         return URL(string: link).map(Route.platformURL)
     }
 
     /**
-     Parses `ab-w://` Strong's and morphology query values into a definition route.
+     Reproduces Android's `ab-w://` single-versus-multi definition dispatch contract.
+
+     - Parameter link: Absolute `ab-w://` link whose raw query children may contain `strong`,
+       `robinson`, unsupported, empty, or malformed values.
+     - Returns: A single-definition route for one raw query child containing a supported nonempty
+       value, a multi-definition route whenever the parsed URL has more than one raw query child,
+       or `nil` when a single/missing child provides no supported value. Multi routes intentionally
+       retain an empty recognized-item list because Android still opens an empty Multi document.
+     - Side effects: None. Supported children are projected in Android's first-seen query-name
+       order and then in value order within each name; unsupported and empty values affect raw
+       multi cardinality but do not become definition items.
+     - Failure modes: Invalid URL component syntax returns `nil`; malformed individual values are
+       omitted without reordering the remaining supported children.
      */
     private func definitionRoute(fromAbWordLink link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
-        var strongs: [String] = []
-        var robinson: [String] = []
-        for item in components.queryItems ?? [] {
-            guard let value = item.value, !value.isEmpty else { continue }
-            switch item.name {
-            case "strong":
-                strongs.append(value)
-            case "robinson":
-                robinson.append(value)
-            default:
-                break
+        let queryItems = components.queryItems ?? []
+        var orderedNames: [String] = []
+        for item in queryItems where !orderedNames.contains(item.name) {
+            orderedNames.append(item.name)
+        }
+
+        var definitionItems: [BibleReaderDefinitionItem] = []
+        for name in orderedNames {
+            for item in queryItems where item.name == name {
+                guard let value = item.value, !value.isEmpty else { continue }
+                switch name {
+                case "strong":
+                    definitionItems.append(.strong(value))
+                case "robinson":
+                    definitionItems.append(.robinson(value))
+                default:
+                    break
+                }
             }
         }
-        guard !strongs.isEmpty || !robinson.isEmpty else { return nil }
-        return .definition(strongs: strongs, robinson: robinson)
+        if queryItems.count > 1 {
+            return .multiDefinition(items: definitionItems)
+        }
+        guard !definitionItems.isEmpty else { return nil }
+        return .definition(items: definitionItems)
     }
 
     /**
@@ -140,7 +178,7 @@ struct BibleReaderExternalLinkRouter {
     private func standaloneStrongsRoute(from link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
         let ref = components.host ?? components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return ref.isEmpty ? nil : .definition(strongs: [ref], robinson: [])
+        return ref.isEmpty ? nil : .definition(items: [.strong(ref)])
     }
 
     /**
@@ -149,7 +187,7 @@ struct BibleReaderExternalLinkRouter {
     private func standaloneMorphologyRoute(from link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
         let code = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return code.isEmpty ? nil : .definition(strongs: [], robinson: [code])
+        return code.isEmpty ? nil : .definition(items: [.robinson(code)])
     }
 
     /**

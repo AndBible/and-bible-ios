@@ -1685,3 +1685,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Ketuk dua kali skrin untuk keluar skrin penuh";
+
+/* Android shared translations */
+"try_again_passphrase" = "Kata laluan tidak berfungsi, cuba lagi?";
+
+/* Android shared translations */
+"document_not_installed" = "Sila muat turun '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ tidak ditemui dalam dokumen %2$@.";

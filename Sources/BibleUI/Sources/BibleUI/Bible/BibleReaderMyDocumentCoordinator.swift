@@ -76,7 +76,7 @@ struct BibleReaderMyDocumentCoordinator {
      - Failure modes: None.
      */
     mutating func clearActivePageUnless(category: DocumentCategory, moduleName: String?) {
-        if category != .generalBook || moduleName != activeBookInitials {
+        if category != .generalBook || !Self.javaExactMatch(moduleName, activeBookInitials) {
             clearActivePage()
         }
     }
@@ -90,7 +90,7 @@ struct BibleReaderMyDocumentCoordinator {
      - Failure modes: None.
      */
     func activePageKey(for bookInitials: String) -> String? {
-        activeBookInitials == bookInitials ? activePageKey : nil
+        Self.javaExactMatch(activeBookInitials, bookInitials) ? activePageKey : nil
     }
 
     /**
@@ -102,7 +102,7 @@ struct BibleReaderMyDocumentCoordinator {
      - Failure modes: None.
      */
     func isActiveDocument(_ context: MyDocumentAIPageActionContext) -> Bool {
-        activeBookInitials == context.bookInitials
+        Self.javaExactMatch(activeBookInitials, context.bookInitials)
     }
 
     /**
@@ -114,7 +114,8 @@ struct BibleReaderMyDocumentCoordinator {
      - Failure modes: None.
      */
     func isActivePage(_ context: MyDocumentAIPageActionContext) -> Bool {
-        activeBookInitials == context.bookInitials && activePageKey == context.pageKey
+        Self.javaExactMatch(activeBookInitials, context.bookInitials)
+          && Self.javaExactMatch(activePageKey, context.pageKey)
     }
 
     /**
@@ -203,7 +204,7 @@ struct BibleReaderMyDocumentCoordinator {
             "isNativeHtml": true,
             "highlightedOrdinalRange": NSNull(),
             "isMyDocument": true,
-            "isAiDocument": document.initials == "AIDocuments",
+            "isAiDocument": SwordJavaStringIdentity.equals(document.initials, "AIDocuments"),
             "myDocumentPageId": page.id.uuidString,
             "sourcePromptId": Self.jsonValue(sourcePromptId?.uuidString),
             "sourcePromptName": Self.jsonValue(metadata?.sourcePromptName),
@@ -234,6 +235,18 @@ struct BibleReaderMyDocumentCoordinator {
             }
             return "_"
         }.joined()
+    }
+
+    /** Compares optional persisted identities with Java UTF-16 equality and nil symmetry. */
+    private static func javaExactMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        switch (lhs, rhs) {
+        case (.some(let lhs), .some(let rhs)):
+            return SwordJavaStringIdentity.equals(lhs, rhs)
+        case (nil, nil):
+            return true
+        default:
+            return false
+        }
     }
 
     /**

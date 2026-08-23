@@ -27,6 +27,12 @@ public enum ModuleStoreMutationKind: String, Sendable, Equatable {
     /// An app-owned TTF addon config and optional font payload publication.
     case ttfAddon
 
+    /// An app-owned EPUB generation install, replacement, or deletion.
+    case epub
+
+    /// A My Documents identity-graph save containing create, rename, or deletion changes.
+    case myDocument
+
     /// A SWORD or MyBible uninstall.
     case uninstall
 }

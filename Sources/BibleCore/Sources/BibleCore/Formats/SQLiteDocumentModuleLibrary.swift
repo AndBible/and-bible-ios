@@ -12,6 +12,20 @@ public enum SQLiteDocumentModuleOrigin: Equatable, Sendable {
     case myBiblePackage
 }
 
+/** Classifies whether a SQLite diagnostic makes the registration inventory uncertain. */
+public enum SQLiteDocumentModuleDiagnosticKind: Equatable, Sendable {
+    /// Discovery or validation could not establish whether the candidate owns an identity.
+    case discoveryFailure
+
+    /// Android's add-order replay deterministically omitted an otherwise-readable duplicate.
+    case duplicateRegistration
+
+    /// Whether global identity admission must fail closed rather than replay the raw candidates.
+    fileprivate var preventsStrictRegistrationSnapshot: Bool {
+        self == .discoveryFailure
+    }
+}
+
 /** Records one rejected database without hiding other readable Android modules. */
 public struct SQLiteDocumentModuleDiagnostic: Equatable, Sendable {
     /// Candidate file or sidecar that could not enter the installed catalog.
@@ -20,10 +34,55 @@ public struct SQLiteDocumentModuleDiagnostic: Equatable, Sendable {
     /// Stable user-facing explanation produced by the format reader or catalog validator.
     public let message: String
 
-    /** Creates one immutable discovery diagnostic. */
-    public init(sourceURL: URL, message: String) {
+    /// Typed reason used to separate uncertain discovery from deterministic Android omission.
+    public let kind: SQLiteDocumentModuleDiagnosticKind
+
+    /**
+     Creates one immutable discovery diagnostic.
+
+     - Parameters:
+       - sourceURL: Candidate file or sidecar associated with the diagnostic.
+       - message: Stable user-facing explanation.
+       - kind: Whether strict identity admission must fail closed; defaults to discovery failure so
+         legacy producers cannot accidentally make an uncertain candidate non-blocking.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public init(
+        sourceURL: URL,
+        message: String,
+        kind: SQLiteDocumentModuleDiagnosticKind = .discoveryFailure
+    ) {
         self.sourceURL = sourceURL
         self.message = message
+        self.kind = kind
+    }
+}
+
+/** Fail-closed error raised when strict SQLite discovery cannot establish complete ownership. */
+public struct SQLiteDocumentModuleRegistrySnapshotError: LocalizedError, Equatable, Sendable {
+    /// Every malformed, unreadable, or unsafe candidate in Android discovery order.
+    public let diagnostics: [SQLiteDocumentModuleDiagnostic]
+
+    /**
+     Creates one immutable strict-snapshot failure.
+
+     - Parameter diagnostics: Non-empty discovery diagnostics that prevent complete registration.
+     - Side effects: None.
+     - Failure modes: Empty input violates the caller contract and traps in debug builds.
+     */
+    public init(diagnostics: [SQLiteDocumentModuleDiagnostic]) {
+        precondition(!diagnostics.isEmpty)
+        self.diagnostics = diagnostics
+    }
+
+    /// Stable summary suitable for the external-import fail-closed diagnostic.
+    public var errorDescription: String? {
+        let first = diagnostics[0]
+        let suffix = diagnostics.count == 1
+            ? ""
+            : " (and \(diagnostics.count - 1) more SQLite registration failures)"
+        return "\(first.sourceURL.lastPathComponent): \(first.message)\(suffix)"
     }
 }
 
@@ -51,8 +110,11 @@ public final class SQLiteDocumentModule {
        - reader: Open read-only format reader.
        - origin: Discovery source used by export and diagnostics.
        - identity: Optional package metadata that owns repository initials and provenance only.
-     - Side effects: None; built-in readers validate the file without retaining a shared handle.
-     - Failure modes: None; database readers own Android's generated metadata projection.
+     - Side effects: Reads immutable reader metadata; built-in readers validate the file without
+       retaining a shared handle.
+     - Failure modes: None during construction. Android's generated config projection Java-trims
+       only `Description`, `Lang`, and `Abbreviation`: empty description remains empty, empty language
+       becomes `und`, and empty abbreviation later falls back to initials; U+00A0 is not trimmed.
      */
     fileprivate init(
         reader: any SQLiteDocumentReading,
@@ -62,6 +124,9 @@ public final class SQLiteDocumentModule {
         self.reader = reader
         self.origin = origin
         let metadata = reader.metadata
+        let initials = identity?.initials ?? metadata.initials
+        let trimmedDescription = SwordJavaStringIdentity.trim(metadata.description)
+        let trimmedLanguage = SwordJavaStringIdentity.trim(metadata.language)
         var features: ModuleFeatures = []
         if metadata.hasStrongs {
             features.insert(.strongsNumbers)
@@ -73,17 +138,17 @@ public final class SQLiteDocumentModule {
             features.insert(.redLetterWords)
         }
         self.info = ModuleInfo(
-            name: identity?.initials ?? metadata.initials,
-            description: metadata.description,
+            name: initials,
+            description: trimmedDescription,
             category: Self.moduleCategory(format: metadata.format, category: metadata.category),
-            language: metadata.language,
+            language: trimmedLanguage.isEmpty ? "und" : trimmedLanguage,
             moduleDriver: Self.moduleDriver(format: metadata.format, category: metadata.category),
             version: metadata.version,
             features: features,
             isRightToLeft: metadata.direction == .rtl,
             aboutMetadata: ModuleAboutMetadata(
                 versification: JSwordKJVAVersification.name,
-                osisId: identity?.initials ?? metadata.initials,
+                osisId: initials,
                 repository: identity?.repository ?? ""
             )
         )
@@ -127,7 +192,7 @@ public final class SQLiteDocumentModule {
     }
 
     /**
-     Reads every present verse in one Bible chapter without inventing gaps.
+     Reads every present verse in one Bible or commentary chapter without inventing gaps.
 
      - Returns: Source rows ordered by verse number.
      - Side effects: Executes one read-only chapter query on an operation-owned connection.
@@ -135,7 +200,7 @@ public final class SQLiteDocumentModule {
      */
     public func chapterContent(osisId: String, chapter: Int) throws
         -> [(verse: Int, text: String)] {
-        guard info.category == .bible,
+        guard info.category == .bible || info.category == .commentary,
               let book = sourceBookNumber(forOsisId: osisId) else { return [] }
         return try reader.chapterContent(book: book, chapter: chapter)
     }
@@ -248,6 +313,20 @@ public struct SQLiteDocumentModuleLibrary {
     /// Readable modules after JSword initials/full-name duplicate registration.
     public let modules: [SQLiteDocumentModule]
 
+    /**
+     Every readable SQLite candidate in Android driver-discovery order, before book registration.
+
+     Android's custom drivers ask the one combined native-plus-custom `Books` registry whether each
+     proposed initials token is already owned. Keeping the raw sequence lets the reader resolver
+     replay that admission after native books have registered, including cascades where a candidate
+     rejected by native ownership must not suppress a later SQLite candidate.
+
+     - Returns: Validated MyBible, MySword, and e-Sword candidates in discovery order.
+     - Side effects: None; this immutable snapshot reuses readers already opened by discovery.
+     - Failure modes: Malformed payloads remain diagnostics and never enter this collection.
+     */
+    public let registrationCandidates: [SQLiteDocumentModule]
+
     /// Rejected payloads retained for diagnostics without hiding valid siblings.
     public let diagnostics: [SQLiteDocumentModuleDiagnostic]
 
@@ -299,9 +378,233 @@ public struct SQLiteDocumentModuleLibrary {
             Self.load(url: url, reader: ESwordReader.init(fileURL:), into: &discovered, rejected: &rejected)
         }
 
+        self.registrationCandidates = discovered
         let registration = Self.register(discovered)
         self.modules = registration.modules
         self.diagnostics = rejected + registration.diagnostics
+    }
+
+    /**
+     Captures a complete read-only SQLite registration snapshot or fails closed.
+
+     Normal runtime discovery retains per-file diagnostics so one bad database does not hide its
+     healthy siblings from reader UI. Global identity admission has a stricter contract: omitting a
+     candidate could admit an EPUB identity Android would otherwise resolve to that SQLite book.
+
+     - Parameter moduleRootURL: Root containing Android's MyBible, MySword, and e-Sword families.
+     - Returns: Fresh immutable discovery state in Android family and filesystem registration order.
+     - Side effects: Enumerates family roots and opens candidate databases read-only; no root,
+       sidecar, database, or cache file is created or modified.
+     - Throws: `SQLiteDocumentModuleRegistrySnapshotError` when a candidate is malformed,
+       unreadable, unsafe, or otherwise uncertain. Deterministic duplicate-registration diagnostics
+       remain observable but do not fail the snapshot because callers replay `registrationCandidates`
+       in Android add order and reach the same first-owner omission.
+     */
+    public static func throwingRegistrationSnapshot(
+        moduleRootURL: URL
+    ) throws -> SQLiteDocumentModuleLibrary {
+        let discoveryDiagnostics = strictDiscoveryDiagnostics(moduleRootURL: moduleRootURL)
+        guard discoveryDiagnostics.isEmpty else {
+            throw SQLiteDocumentModuleRegistrySnapshotError(
+                diagnostics: discoveryDiagnostics
+            )
+        }
+        let snapshot = SQLiteDocumentModuleLibrary(moduleRootURL: moduleRootURL)
+        let blockingDiagnostics = snapshot.diagnostics.filter {
+            $0.kind.preventsStrictRegistrationSnapshot
+        }
+        guard blockingDiagnostics.isEmpty else {
+            throw SQLiteDocumentModuleRegistrySnapshotError(
+                diagnostics: blockingDiagnostics
+            )
+        }
+        return snapshot
+    }
+
+    /**
+     Validates that strict registration can observe every Android SQLite candidate.
+
+     The ordinary reader catalog intentionally suppresses traversal errors so healthy siblings stay
+     usable. Identity admission cannot make that tradeoff: an omitted SQLite owner could let a later
+     EPUB or MyDocument claim its lookup token. This preflight mirrors each family's traversal depth
+     without opening database contents, then the normal snapshot performs format validation.
+
+     - Parameter moduleRootURL: Parent of Android's three format-family directories.
+     - Returns: Discovery diagnostics in Android family and native filesystem traversal order.
+     - Side effects: Reads directory entries, metadata, and readability only; never creates roots or
+       follows symbolic-link directories.
+     - Failure modes: Existing non-directory/unreadable family roots, failed enumeration or metadata,
+       recursive symbolic-link directories, and unreadable/unsafe candidate files become diagnostics.
+     */
+    private static func strictDiscoveryDiagnostics(
+        moduleRootURL: URL
+    ) -> [SQLiteDocumentModuleDiagnostic] {
+        let root = moduleRootURL.standardizedFileURL
+        var diagnostics: [SQLiteDocumentModuleDiagnostic] = []
+        diagnostics += strictDiscoveryDiagnostics(
+            familyRootURL: root.appendingPathComponent("mybible", isDirectory: true),
+            recursively: true,
+            acceptsCandidate: { url, depth in
+                let name = url.lastPathComponent.lowercased()
+                return name.hasSuffix(".sqlite3") || (depth == 2 && name == "module.json")
+            }
+        )
+        diagnostics += strictDiscoveryDiagnostics(
+            familyRootURL: root.appendingPathComponent("mysword", isDirectory: true),
+            recursively: true,
+            acceptsCandidate: { url, _ in
+                url.lastPathComponent.lowercased().hasSuffix(".mybible")
+            }
+        )
+        diagnostics += strictDiscoveryDiagnostics(
+            familyRootURL: root.appendingPathComponent("esword", isDirectory: true),
+            recursively: false,
+            acceptsCandidate: { url, _ in
+                let name = url.lastPathComponent.lowercased()
+                return name.hasSuffix(".bblx") || name.hasSuffix(".bbli")
+            }
+        )
+        return diagnostics
+    }
+
+    /**
+     Strictly traverses one existing family root without changing permissive reader discovery.
+
+     - Parameters:
+       - familyRootURL: Exact Android-format directory to inspect.
+       - recursively: Whether Android descends through this format family.
+       - acceptsCandidate: Identifies files whose omission could change registry ownership; depth is
+         one for direct children.
+     - Returns: Every traversal or candidate-visibility failure in native enumeration order.
+     - Side effects: Reads filesystem metadata and directory entries only.
+     - Failure modes: Missing roots are valid empty families. All other uncertainty is diagnosed.
+     */
+    private static func strictDiscoveryDiagnostics(
+        familyRootURL: URL,
+        recursively: Bool,
+        acceptsCandidate: (URL, Int) -> Bool
+    ) -> [SQLiteDocumentModuleDiagnostic] {
+        let fileManager = FileManager.default
+        let root = familyRootURL.standardizedFileURL
+
+        do {
+            let values = try root.resourceValues(forKeys: [
+                .isDirectoryKey,
+                .isSymbolicLinkKey,
+            ])
+            guard values.isDirectory == true,
+                  values.isSymbolicLink != true,
+                  fileManager.isReadableFile(atPath: root.path) else {
+                return [strictDiscoveryDiagnostic(
+                    url: root,
+                    message: "SQLite family root is not a readable non-symbolic-link directory."
+                )]
+            }
+        } catch {
+            let metadataError = error as NSError
+            if metadataError.domain == NSCocoaErrorDomain,
+               metadataError.code == NSFileReadNoSuchFileError {
+                return []
+            }
+            return [strictDiscoveryDiagnostic(
+                url: root,
+                message: "Could not read SQLite family-root metadata: \(error.localizedDescription)"
+            )]
+        }
+
+        var diagnostics: [SQLiteDocumentModuleDiagnostic] = []
+
+        /**
+         Traverses one SQLite discovery directory in filesystem enumeration order.
+
+         - Parameters:
+           - directory: Directory whose immediate children are inspected without following links.
+           - depth: Current depth used to enforce the bounded recursive discovery contract.
+         - Returns: Nothing; valid descendants are visited recursively.
+         - Side effects: Appends unsafe, unreadable, or ambiguous entries to captured `diagnostics`.
+         - Failure modes: Enumeration and metadata errors become diagnostics instead of throwing;
+           the traversal performs no filesystem writes.
+         */
+        func traverse(_ directory: URL, depth: Int) {
+            let children: [URL]
+            do {
+                children = try fileManager.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [
+                        .isDirectoryKey,
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey,
+                    ],
+                    options: []
+                )
+            } catch {
+                diagnostics.append(strictDiscoveryDiagnostic(
+                    url: directory,
+                    message: "Could not enumerate SQLite discovery directory: \(error.localizedDescription)"
+                ))
+                return
+            }
+
+            for child in children {
+                let childDepth = depth + 1
+                let values: URLResourceValues
+                do {
+                    values = try child.resourceValues(forKeys: [
+                        .isDirectoryKey,
+                        .isRegularFileKey,
+                        .isSymbolicLinkKey,
+                    ])
+                } catch {
+                    diagnostics.append(strictDiscoveryDiagnostic(
+                        url: child,
+                        message: "Could not read SQLite discovery-entry metadata: \(error.localizedDescription)"
+                    ))
+                    continue
+                }
+
+                if values.isSymbolicLink == true {
+                    guard recursively || acceptsCandidate(child, childDepth) else { continue }
+                    diagnostics.append(strictDiscoveryDiagnostic(
+                        url: child,
+                        message: "SQLite discovery entry is a symbolic link."
+                    ))
+                    continue
+                }
+
+                if values.isDirectory == true {
+                    guard recursively else { continue }
+                    guard fileManager.isReadableFile(atPath: child.path) else {
+                        diagnostics.append(strictDiscoveryDiagnostic(
+                            url: child,
+                            message: "Recursive SQLite discovery directory is unreadable."
+                        ))
+                        continue
+                    }
+                    traverse(child.standardizedFileURL, depth: childDepth)
+                    continue
+                }
+
+                guard acceptsCandidate(child, childDepth) else { continue }
+                guard values.isRegularFile == true,
+                      fileManager.isReadableFile(atPath: child.path) else {
+                    diagnostics.append(strictDiscoveryDiagnostic(
+                        url: child,
+                        message: "SQLite candidate is not a readable non-symbolic-link regular file."
+                    ))
+                    continue
+                }
+            }
+        }
+        traverse(root, depth: 0)
+        return diagnostics
+    }
+
+    /** Creates one stable diagnostic for strict traversal failures. */
+    private static func strictDiscoveryDiagnostic(
+        url: URL,
+        message: String
+    ) -> SQLiteDocumentModuleDiagnostic {
+        SQLiteDocumentModuleDiagnostic(sourceURL: url, message: message)
     }
 
     /**
@@ -315,6 +618,7 @@ public struct SQLiteDocumentModuleLibrary {
      - Failure modes: Duplicate candidate initials become diagnostics instead of throwing.
      */
     init(discoveredModules: [SQLiteDocumentModule]) {
+        self.registrationCandidates = discoveredModules
         let registration = Self.register(discoveredModules)
         self.modules = registration.modules
         self.diagnostics = registration.diagnostics
@@ -392,7 +696,8 @@ public struct SQLiteDocumentModuleLibrary {
             guard lookup(module.info.name, in: accepted) == nil else {
                 duplicates.append(SQLiteDocumentModuleDiagnostic(
                     sourceURL: module.reader.metadata.sourceURL,
-                    message: "Duplicate installed module lookup identity \(module.info.name)."
+                    message: "Duplicate installed module lookup identity \(module.info.name).",
+                    kind: .duplicateRegistration
                 ))
                 continue
             }

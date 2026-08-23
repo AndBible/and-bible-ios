@@ -1551,3 +1551,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "نقراً مزدوجاً على الشاشة للخروج من وضع ملء الشاشة";
+
+/* Android shared translations */
+"try_again_passphrase" = "كلمة المرور لم تعمل، جرب مجدداً؟";
+
+/* Android shared translations */
+"document_not_installed" = "برجاء تحميل '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ غير موجود في المستند %2$@.";

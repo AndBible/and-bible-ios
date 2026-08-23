@@ -243,14 +243,293 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     }
 
     /**
+     Protects the shared activation boundary from selecting or rendering a locked Bible.
+
+     - Setup: Marks a real temporary Bible alias encrypted with an empty `CipherKey`, attaches a
+       ready reader pane whose current KJV is readable, and records persistence plus bridge scripts.
+     - Expected result: Inclusive installed inventory retains the locked row, normal reader
+       candidates exclude it, and both public switches leave active module, category, `PageManager`,
+       persistence count, and rendered scripts byte-for-byte unchanged. The outcome-returning API
+       classifies the target `.requiresUnlock`; its `@discardableResult` sibling remains source-safe.
+     - Failure meaning: A non-picker caller can bypass the passphrase workflow and restore the empty
+       locked-reader regression from issue #389.
+     - Side effects: Writes only the inherited temporary SWORD fixture and removes it through the
+       test-case cleanup contract; no shared app module store is touched.
+     */
+    @MainActor
+    func testLockedBibleDocumentSwitchRequiresUnlockBeforeAnyStateMutation() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "LOCKED",
+            description: "Locked test Bible",
+            in: modulePath
+        )
+        let configURL = URL(fileURLWithPath: modulePath)
+            .appendingPathComponent("mods.d/locked.conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKED"), .locked)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
+        pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(controller.installedBibleModules.contains { $0.name == "LOCKED" })
+        XCTAssertFalse(controller.readableBibleModules.contains { $0.name == "LOCKED" })
+        XCTAssertTrue(controller.readableBibleModules.contains { $0.name == "KJV" })
+
+        let baselineModuleName = controller.activeModuleName
+        let baselineCategory = controller.currentCategory
+        let baselineBibleDocument = pageManager.bibleDocument
+        let baselineCategoryName = pageManager.currentCategoryName
+        let baselineScriptCount = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        let outcome = controller.switchBibleDocument(to: "LOCKED")
+        controller.switchModule(to: "LOCKED")
+
+        XCTAssertEqual(outcome, .requiresUnlock(moduleName: "LOCKED"))
+        XCTAssertEqual(controller.activeModuleName, baselineModuleName)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(recordedScripts().count, baselineScriptCount)
+    }
+
+    /**
+     Protects public quick-selector and full-document routes from activating locked auxiliaries.
+
+     - Setup: Installs locked commentary, dictionary, general-book, and map descriptors, attaches a
+       ready KJV pane with non-default persisted auxiliary selections, and invokes each category's
+       module-only quick switch plus full document switch.
+     - Expected result: Both commentary calls and all six generic calls fail while active handles,
+       category, `PageManager`, persistence count, and bridge script count remain unchanged.
+     - Failure meaning: A controller wrapper can bypass the coordinator's fresh readable preflight
+       or interpret a rejected quick selection as a completed document change.
+     - Side effects: Writes only inherited temporary fixtures and records in-memory pane callbacks.
+     - Failure modes: Fixture discovery and filesystem failures throw through XCTest.
+     */
+    @MainActor
+    func testLockedAuxiliaryQuickAndDocumentSwitchesLeaveReadablePaneUntouched() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: "LockedComm", in: modulePath)
+        try seedEmptyRawDictionaryModule(named: "LockedDict", in: modulePath)
+        try seedEmptyRawGeneralBookModule(named: "LockedGB", in: modulePath)
+        try seedEmptyRawMapModule(named: "LockedMap", in: modulePath)
+        for moduleName in ["LockedComm", "LockedDict", "LockedGB", "LockedMap"] {
+            let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+            var configuration = try String(contentsOf: configURL, encoding: .utf8)
+            configuration.append("\nCipherKey=\n")
+            try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.bible.pageManagerKey
+        )
+        pageManager.bibleDocument = "KJV"
+        pageManager.commentaryDocument = "BaselineComm"
+        pageManager.dictionaryDocument = "BaselineDict"
+        pageManager.dictionaryKey = "baseline-dictionary-key"
+        pageManager.generalBookDocument = "BaselineGB"
+        pageManager.generalBookKey = "baseline-general-book-key"
+        pageManager.mapDocument = "BaselineMap"
+        pageManager.mapKey = "baseline-map-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+
+        let baselineModuleName = controller.activeModuleName
+        let baselineCommentaryName = controller.activeCommentaryModuleName
+        let baselineDictionaryName = controller.activeDictionaryModuleName
+        let baselineGeneralBookName = controller.activeGeneralBookModuleName
+        let baselineMapName = controller.activeMapModuleName
+        let baselineCategory = controller.currentCategory
+        let baselineScriptCount = recordedScripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        XCTAssertEqual(controller.switchCommentaryModule(to: "LockedComm"), .failed)
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "LockedComm"), .failed)
+        let genericOutcomes = [
+            controller.switchDictionaryModule(to: "LockedDict"),
+            controller.switchDictionaryDocument(to: "LockedDict"),
+            controller.switchGeneralBookModule(to: "LockedGB"),
+            controller.switchGeneralBookDocument(to: "LockedGB"),
+            controller.switchMapModule(to: "LockedMap"),
+            controller.switchMapDocument(to: "LockedMap"),
+        ]
+        for outcome in genericOutcomes {
+            guard case .failed = outcome else {
+                XCTFail("Expected locked auxiliary switch to fail, received \(outcome).")
+                continue
+            }
+        }
+
+        XCTAssertEqual(controller.activeModuleName, baselineModuleName)
+        XCTAssertEqual(controller.activeCommentaryModuleName, baselineCommentaryName)
+        XCTAssertEqual(controller.activeDictionaryModuleName, baselineDictionaryName)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, baselineGeneralBookName)
+        XCTAssertEqual(controller.activeMapModuleName, baselineMapName)
+        XCTAssertEqual(controller.currentCategory, baselineCategory)
+        XCTAssertEqual(pageManager.bibleDocument, "KJV")
+        XCTAssertEqual(pageManager.commentaryDocument, "BaselineComm")
+        XCTAssertEqual(pageManager.dictionaryDocument, "BaselineDict")
+        XCTAssertEqual(pageManager.dictionaryKey, "baseline-dictionary-key")
+        XCTAssertEqual(pageManager.generalBookDocument, "BaselineGB")
+        XCTAssertEqual(pageManager.generalBookKey, "baseline-general-book-key")
+        XCTAssertEqual(pageManager.mapDocument, "BaselineMap")
+        XCTAssertEqual(pageManager.mapKey, "baseline-map-key")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertEqual(persistCount, 0)
+        XCTAssertEqual(recordedScripts().count, baselineScriptCount)
+    }
+
+    /**
+     Protects My Notes from being dismissed by locked or unavailable Bible-link destinations.
+
+     - Setup: Opens My Notes over readable KJV, retains one inclusive locked Bible row, and builds
+       forced-module OSIS links for that locked row and a missing identity.
+     - Expected result: Both navigations return false while My Notes visibility, active Bible,
+       persisted page category, and persistence count remain unchanged.
+     - Failure meaning: A caller-owned mode transition ran before the shared access/category
+       preflight, so a rejected link can partially mutate the visible reader.
+     - Side effects: Writes only the inherited temporary SWORD fixture and opens an in-memory pending
+       My Notes document without a ready WebView client.
+     */
+    @MainActor
+    func testLockedAndUnavailableBibleLinksPreserveMyNotesState() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "LOCKED",
+            description: "Locked test Bible",
+            in: modulePath
+        )
+        let configURL = URL(fileURLWithPath: modulePath)
+            .appendingPathComponent("mods.d/locked.conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+        controller.loadMyNotesDocument()
+        XCTAssertTrue(controller.showingMyNotes)
+        persistCount = 0
+
+        let lockedLink = OsisRef(
+            book: "Genesis",
+            chapter: 1,
+            verse: 1,
+            osisId: "Gen",
+            targetBookInitials: "LOCKED"
+        )
+        let unavailableLink = OsisRef(
+            book: "Genesis",
+            chapter: 1,
+            verse: 1,
+            osisId: "Gen",
+            targetBookInitials: "MISSING"
+        )
+        let baselineCategoryName = pageManager.currentCategoryName
+
+        XCTAssertFalse(controller.navigateToBibleLink(lockedLink))
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(controller.activeModuleName, "KJV")
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+
+        XCTAssertFalse(controller.navigateToBibleLink(unavailableLink))
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(controller.activeModuleName, "KJV")
+        XCTAssertEqual(pageManager.currentCategoryName, baselineCategoryName)
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Verifies a readable forced-module Bible link leaves My Notes at the coordinator commit edge.
+
+     - Setup: Opens My Notes over KJV and targets a second readable real SWORD Bible alias.
+     - Expected result: Link navigation succeeds, clears My Notes before persistence, activates and
+       persists the target Bible/category, and leaves no partially prepared state.
+     - Failure meaning: The post-preflight preparation callback was omitted, invoked too late, or
+       invoked only for failure paths.
+     - Side effects: Writes only the inherited temporary SWORD fixture and mutates an in-memory pane;
+       the WebView client remains unready so no bridge rendering occurs.
+     */
+    @MainActor
+    func testReadableBibleLinkClearsMyNotesBeforeSwitchPersistence() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "WEB",
+            description: "World English Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        controller.loadMyNotesDocument()
+        XCTAssertTrue(controller.showingMyNotes)
+        var myNotesStateAtPersistence: [Bool] = []
+        controller.onPersistState = {
+            myNotesStateAtPersistence.append(controller.showingMyNotes)
+        }
+
+        let readableLink = OsisRef(
+            book: "Genesis",
+            chapter: 1,
+            verse: 1,
+            osisId: "Gen",
+            targetBookInitials: "WEB"
+        )
+
+        XCTAssertTrue(controller.navigateToBibleLink(readableLink))
+        XCTAssertFalse(controller.showingMyNotes)
+        XCTAssertEqual(controller.activeModuleName, "WEB")
+        XCTAssertEqual(pageManager.bibleDocument, "WEB")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+        XCTAssertFalse(myNotesStateAtPersistence.isEmpty)
+        XCTAssertTrue(myNotesStateAtPersistence.allSatisfy { !$0 })
+    }
+
+    /**
      Protects the controller-level Bible switch API from accepting non-Bible modules.
 
      The quick selector and module picker currently pass Bible-filtered rows, but
-     `BibleReaderController.switchBibleDocument(to:)` is public controller API and mirrors Android's
-     current-document transition only for Bible documents. A non-Bible SWORD module must therefore
-     leave the active Bible, document category, PageManager state, and persistence callbacks
-     unchanged. A failure means an accidental non-Bible caller can corrupt pane state by forcing the
-     reader into Bible mode with a commentary/dictionary module name.
+     `BibleReaderController.switchBibleDocument(to:)` and `switchModule(to:)` are public controller
+     APIs and mirror Android Bible transitions only for Bible documents. A non-Bible SWORD module
+     must therefore return `.unavailable` and leave the active Bible, document category,
+     `PageManager` state, persistence callbacks, and render state unchanged. A failure means an
+     accidental non-Bible caller can corrupt pane state with a commentary/dictionary module name.
      */
     @MainActor
     func testBibleDocumentSwitchRejectsNonBibleModulesWithoutStateMutation() throws {
@@ -271,8 +550,11 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
 
-        controller.switchBibleDocument(to: "UITestComm")
+        let documentOutcome = controller.switchBibleDocument(to: "UITestComm")
+        let moduleOutcome = controller.switchModule(to: "UITestComm")
 
+        XCTAssertEqual(documentOutcome, .unavailable)
+        XCTAssertEqual(moduleOutcome, .unavailable)
         XCTAssertEqual(controller.currentCategory, baselineCategory)
         XCTAssertEqual(controller.activeModuleName, baselineBibleModuleName)
         XCTAssertEqual(pageManager.bibleDocument, baselineBibleDocument)
@@ -387,6 +669,116 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
 
         XCTAssertEqual(controller.activeModuleName, "KJV", "A persisted unknown-versification Bible must not be restored as active.")
         XCTAssertEqual(controller.activeModule?.info.name, "KJV")
+    }
+
+    /**
+     Protects pane restoration from replacing a readable fallback with a persisted locked Bible.
+
+     - Setup: Configures the reader with plain KJV plus an encrypted empty-key Bible, then restores a
+       `PageManager` whose saved Bible identity names the locked module.
+     - Expected result: KJV remains active, the locked saved identity is preserved for a future
+       app-owned unlock workflow, and restore performs no normalization persistence.
+     - Failure meaning: Session restore can bypass the shared activation preflight or erase the user's
+       locked selection before they have a chance to unlock it.
+     - Side effects: Writes only the temporary SWORD fixture and records persistence callbacks.
+     */
+    @MainActor
+    func testRestoreSavedPositionKeepsReadableFallbackForPersistedLockedBible() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "LOCKED",
+            description: "Locked test Bible",
+            in: modulePath
+        )
+        let configURL = URL(fileURLWithPath: modulePath)
+            .appendingPathComponent("mods.d/locked.conf")
+        var configuration = try String(contentsOf: configURL, encoding: .utf8)
+        configuration.append("\nCipherKey=\n")
+        try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        XCTAssertEqual(controller.activeModuleName, "KJV")
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "LOCKED"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertEqual(controller.activeModuleName, "KJV")
+        XCTAssertEqual(controller.activeModule?.info.name, "KJV")
+        XCTAssertEqual(pageManager.bibleDocument, "LOCKED")
+        XCTAssertEqual(persistCount, 0)
+    }
+
+    /**
+     Prevents persisted auxiliary selections from reactivating relocked native content handles.
+
+     - Setup: Installs locked commentary, dictionary, general-book, and map rows, attaches a page
+       manager that persisted every row and its category-owned key, then restores the pane.
+     - Expected result: Each requested identity remains available for a later unlock retry, but all
+       four native content handles stay nil; only non-sensitive general-book/map keys remain staged.
+     - Failure meaning: The post-configuration restore path has bypassed the shared readable-source
+       resolver and reopened encrypted content after relaunch or pane reconstruction.
+     - Side effects: Writes isolated SWORD fixture descriptors and records persistence callbacks;
+       inherited teardown removes the temporary module root.
+     */
+    @MainActor
+    func testRestoreSavedPositionPreservesLockedAuxiliarySelectionsWithoutActivatingHandles() throws {
+        let (bridge, _) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: "LockedComm", in: modulePath)
+        try seedEmptyRawDictionaryModule(named: "LockedDict", in: modulePath)
+        try seedEmptyRawGeneralBookModule(named: "LockedGB", in: modulePath)
+        try seedEmptyRawMapModule(named: "LockedMap", in: modulePath)
+        for moduleName in ["LockedComm", "LockedDict", "LockedGB", "LockedMap"] {
+            let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mods.d/\(moduleName.lowercased()).conf")
+            var configuration = try String(contentsOf: configURL, encoding: .utf8)
+            configuration.append("\nCipherKey=\n")
+            try configuration.write(to: configURL, atomically: true, encoding: .utf8)
+        }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.commentaryDocument = "LockedComm"
+        pageManager.dictionaryDocument = "LockedDict"
+        pageManager.dictionaryKey = "locked-dictionary-key"
+        pageManager.generalBookDocument = "LockedGB"
+        pageManager.generalBookKey = "locked-general-book-key"
+        pageManager.mapDocument = "LockedMap"
+        pageManager.mapKey = "locked-map-key"
+        window.pageManager = pageManager
+        controller.activeWindow = window
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
+
+        controller.restoreSavedPosition()
+
+        XCTAssertNil(controller.activeCommentaryModule)
+        XCTAssertEqual(controller.activeCommentaryModuleName, "LockedComm")
+        XCTAssertNil(controller.activeDictionaryModule)
+        XCTAssertEqual(controller.activeDictionaryModuleName, "LockedDict")
+        XCTAssertNil(controller.currentDictionaryKey)
+        XCTAssertNil(controller.activeGeneralBookModule)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, "LockedGB")
+        XCTAssertEqual(controller.currentGeneralBookKey, "locked-general-book-key")
+        XCTAssertNil(controller.activeMapModule)
+        XCTAssertEqual(controller.activeMapModuleName, "LockedMap")
+        XCTAssertEqual(controller.currentMapKey, "locked-map-key")
+        XCTAssertEqual(pageManager.commentaryDocument, "LockedComm")
+        XCTAssertEqual(pageManager.dictionaryDocument, "LockedDict")
+        XCTAssertEqual(pageManager.dictionaryKey, "locked-dictionary-key")
+        XCTAssertEqual(pageManager.generalBookDocument, "LockedGB")
+        XCTAssertEqual(pageManager.mapDocument, "LockedMap")
+        XCTAssertEqual(persistCount, 0)
     }
 
     /**

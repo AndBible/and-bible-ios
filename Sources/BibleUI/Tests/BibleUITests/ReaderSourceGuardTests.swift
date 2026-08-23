@@ -66,6 +66,42 @@ final class ReaderSourceGuardTests: XCTestCase {
     }
 
     /**
+     Guards Android's split between unlocked normal shortcuts and the inclusive full chooser.
+
+     - Setup: Extracts the private toolbar menu, next-document, suggested-Bible, Search, and chooser
+       inventory boundaries from BibleUI source.
+     - Expected result: Every automatic/quick/Search Bible path consumes the controller's
+       one-snapshot readable projection, while the full picker still consumes
+       `installedModules(for:)`.
+     - Failure meaning: Locked Bibles can re-enter a no-prompt shortcut, or disappear from the only
+       chooser that owns the existing passphrase flow.
+     - Side effects: Reads package source only.
+     */
+    func testBibleNormalSelectorsExcludeLockedRowsWithoutNarrowingFullChooser() throws {
+        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
+        let pickerSource = try bibleUISource(named: "BibleReaderModulePicker.swift")
+        let menuActionSource = try BibleUITestSourceLocator.extractFunction(
+            named: "performBibleMenuAction",
+            from: readerSource
+        )
+        let nextActionSource = try BibleUITestSourceLocator.extractFunction(
+            named: "performBibleNextDocumentAction",
+            from: readerSource
+        )
+        let suggestedSource = try BibleUITestSourceLocator.extractFunction(
+            named: "suggestedBibleDocumentName",
+            from: readerSource
+        )
+
+        XCTAssertTrue(menuActionSource.contains("for: controller.readableBibleModules"))
+        XCTAssertTrue(nextActionSource.contains("modules: controller.readableBibleModules"))
+        XCTAssertTrue(suggestedSource.contains("let readableModules = controller.readableBibleModules"))
+        XCTAssertTrue(readerSource.contains("installedBibleModules: controller?.readableBibleModules ?? []"))
+        XCTAssertTrue(pickerSource.contains("controller.installedModules(for: $0)"))
+        XCTAssertFalse(pickerSource.contains("controller.readableBibleModules"))
+    }
+
+    /**
      Guards the commentary toolbar quick-menu route against preserving the old iOS sheet.
 
      Android default commentary taps show an anchored `PopupMenu` with commentaries, general books,

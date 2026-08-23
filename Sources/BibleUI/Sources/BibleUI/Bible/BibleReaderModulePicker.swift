@@ -1,5 +1,6 @@
 import BibleCore
 import SwiftUI
+import SwiftData
 import SwordKit
 import UniformTypeIdentifiers
 
@@ -58,6 +59,9 @@ struct BibleReaderModulePicker: View {
 
     /// Search-index service used by Android's Delete Index row action.
     @Environment(SearchIndexService.self) private var searchIndexService
+
+    /// SwiftData context used to replay current My Documents ownership before EPUB import.
+    @Environment(\.modelContext) private var modelContext
 
     /// Active scheme used only for the shared popup elevation/accent projection.
     @Environment(\.colorScheme) private var colorScheme
@@ -165,12 +169,11 @@ struct BibleReaderModulePicker: View {
        - onOpenStudyPadSelector: Follow-up route for Android's visible Journal/StudyPad pseudo-document.
        - onDeleteEpub: Reader-owner callback emitted only after durable EPUB deletion succeeds.
 
-     Side effects:
-     - initializes SwiftUI state only; controller mutations happen later from row selection.
+     - Side effects: Initializes SwiftUI state only; controller mutations happen later from row
+       selection.
 
-     Failure modes:
-     - The caller must wait for a ready pane controller before constructing the picker; a missing
-       controller is a pane-readiness state, not an empty installed-document state.
+     - Failure modes: The caller must wait for a ready pane controller before constructing the
+       picker; a missing controller is a pane-readiness state, not an empty installed-document state.
      */
     init(
         controller: BibleReaderController,
@@ -202,27 +205,60 @@ struct BibleReaderModulePicker: View {
      All installed modules Android's document-type spinner can expose.
 
      - Returns: Installed Bible, commentary, dictionary, general book, map, and add-on modules,
-       de-duplicated by module initials.
+       de-duplicated only by Java-exact UTF-16 initials while preserving registry order.
      */
     private var allSelectableModules: [ModuleInfo] {
-        var seen = Set<String>()
         let documentModules = Self.documentCategoryFilterOrder
             .flatMap { controller.installedModules(for: $0) }
         let addonModules = controller.swordManager?.installedModules(category: .addon) ?? []
 
-        return (documentModules + addonModules).filter { seen.insert($0.name).inserted }
+        return Self.javaExactDistinctModules(documentModules + addonModules)
     }
 
-    /// Android chooser rows before filters are applied.
+    /**
+     Returns only EPUBs that own their Android book identity in the current combined registry.
+
+     The on-disk EPUB library can contain a legacy or concurrently imported package whose initials
+     are rejected by an earlier native, SQLite, EPUB, or My Documents registration. Android never
+     exposes that package through `ChooseDocument`, because the corresponding `Book` was not added
+     to `Books.installed()`. Resolving each candidate through the controller keeps the picker on the
+     same exact-initials, exact-full-name, and case-insensitive TreeSet contract as every reader
+     entry point.
+
+     - Returns: Admitted EPUB metadata in stable library enumeration order.
+     - Side effects: Enumerates installed EPUB metadata, opens immutable EPUB generations, and asks
+       the controller to replay installed/local registration metadata; no EPUB fragment or My
+       Documents page is read and reader state is not mutated.
+     - Failure modes: Missing generations, metadata failures, installed owners, and a different
+       local owner all omit the candidate so it cannot be advertised or selected.
+     */
+    private var selectableEpubs: [EpubInfo] {
+        Self.admittedEpubs(
+            from: EpubReader.installedEpubs(),
+            resolvedOwnerIdentifier: { epub in
+                guard let reader = EpubReader(identifier: epub.identifier),
+                      let owner = controller.localGeneralBookDocument(
+                          named: epub.initials,
+                          preferredEpub: reader
+                      ),
+                      case .epub(let admittedReader) = owner else {
+                    return nil
+                }
+                return admittedReader.identifier
+            }
+        )
+    }
+
+    /// Android chooser rows before filters are applied, including only globally admitted EPUBs.
     private var allRows: [DocumentChooserRow] {
-        Self.allRows(from: allSelectableModules, epubs: EpubReader.installedEpubs())
+        Self.allRows(from: allSelectableModules, epubs: selectableEpubs)
     }
 
-    /// Rows after applying Android-compatible type, language, and free-text filters.
+    /// Rows after applying Android-compatible admission, type, language, and free-text filters.
     private var filteredDocumentRows: [DocumentChooserRow] {
         Self.filteredRows(
             allSelectableModules,
-            epubs: EpubReader.installedEpubs(),
+            epubs: selectableEpubs,
             selectedFilter: selectedFilter,
             selectedLanguage: selectedLanguage,
             searchText: searchText
@@ -232,13 +268,13 @@ struct BibleReaderModulePicker: View {
     /// Installed row currently driving Android's contextual document menu.
     private var contextualModule: ModuleInfo? {
         guard case .module(let moduleName) = contextualDocument else { return nil }
-        return allSelectableModules.first { $0.name == moduleName }
+        return Self.javaExactModule(named: moduleName, in: allSelectableModules)
     }
 
     /// Installed EPUB currently driving Android's contextual document menu.
     private var contextualEpub: EpubInfo? {
         guard case .epub(let identifier) = contextualDocument else { return nil }
-        return EpubReader.installedEpubs().first { $0.identifier == identifier }
+        return selectableEpubs.first { $0.identifier == identifier }
     }
 
     /// Android-ordered contextual actions for the currently selected installed row.
@@ -840,7 +876,7 @@ struct BibleReaderModulePicker: View {
         let actions = Self.rowActions(for: module, installedModules: allSelectableModules)
         return androidRowContainer(
             accessibilityIdentifier: "modulePickerRow::\(module.name)",
-            isSelected: contextualDocument == .module(module.name),
+            isSelected: isContextualModuleSelected(module.name),
             onLongPress: { beginContextualModuleSelection(module) },
             leading: {
                 AndroidDocumentListLeadingColumn(
@@ -1067,10 +1103,11 @@ struct BibleReaderModulePicker: View {
      - Parameter epub: Long-pressed installed EPUB general book.
      - Side effects: Closes the ordinary overflow popup and selects the EPUB for shared document
        About, Delete, and Delete Index actions.
-     - Failure modes: A concurrently removed EPUB makes `contextualEpub` resolve to nil and the
-       normal activity bar safely returns on the next render.
+     - Failure modes: A concurrently removed, replaced, or globally rejected EPUB is ignored before
+       contextual state changes; a later removal makes `contextualEpub` resolve to nil safely.
      */
     private func beginContextualEpubSelection(_ epub: EpubInfo) {
+        guard selectableEpubs.contains(epub) else { return }
         showOverflowMenu = false
         contextualDocument = .epub(epub.identifier)
     }
@@ -1089,7 +1126,20 @@ struct BibleReaderModulePicker: View {
             return
         }
         let selection = ContextualDocument.module(module.name)
-        contextualDocument = contextualDocument == selection ? nil : selection
+        contextualDocument = isContextualModuleSelected(module.name) ? nil : selection
+    }
+
+    /**
+     Tests contextual module selection with Java `String.equals` identity.
+
+     - Parameter initials: Installed module initials represented by the row being rendered/tapped.
+     - Returns: True only when the selected module has the same UTF-16 code units.
+     - Side effects: None.
+     - Failure modes: None; canonically equivalent Swift strings intentionally remain distinct.
+     */
+    private func isContextualModuleSelected(_ initials: String) -> Bool {
+        guard case .module(let selectedInitials) = contextualDocument else { return false }
+        return SwordJavaStringIdentity.equals(selectedInitials, initials)
     }
 
     /**
@@ -1098,9 +1148,17 @@ struct BibleReaderModulePicker: View {
      - Parameter epub: Tapped installed EPUB row.
      - Side effects: Activates and opens the EPUB TOC in normal mode; otherwise changes or clears
        the single contextual selection without opening a document.
-     - Failure modes: `switchEpub(identifier:)` fails closed if the EPUB disappeared after render.
+     - Failure modes: A stale row whose package disappeared, changed generation metadata, or lost
+       global ownership is rejected before controller mutation; `switchEpub(identifier:)` also
+       fails closed if the package disappears after this fresh admission check.
      */
     private func handleEpubRowTap(_ epub: EpubInfo) {
+        guard selectableEpubs.contains(epub) else {
+            if contextualDocument == .epub(epub.identifier) {
+                clearContextualModuleSelection()
+            }
+            return
+        }
         if hasContextualDocumentSelection {
             let selection = ContextualDocument.epub(epub.identifier)
             contextualDocument = contextualDocument == selection ? nil : selection
@@ -1159,17 +1217,23 @@ struct BibleReaderModulePicker: View {
      Selects a module and applies the category-specific reader transition.
 
      - Parameter module: Installed module selected from the chooser.
-     Side effects:
-     - mutates the reader controller's active module/category for normal reader modules
-     - dismisses the chooser for selectable reader documents
-     - opens the auxiliary browser for dictionary, general book, or map selections
-
-     Failure modes:
-     - locked encrypted modules open the cipher-key prompt without changing reader state
-     - add-on rows are intentionally non-selecting, matching Android's AND_BIBLE guard in
-       `ChooseDocument.handleDocumentSelection`
+     - Side effects:
+       - routes every Bible row through the controller's fresh access preflight before switching or
+         opening the existing cipher-key prompt
+       - mutates the reader controller's active module/category for other normal reader modules
+       - dismisses the chooser for selectable reader documents
+       - opens the auxiliary browser for dictionary, general book, or map selections
+     - Failure modes:
+       - locked encrypted modules open the cipher-key prompt without changing reader state
+       - stale locked Bible rows that became readable avoid a duplicate prompt and switch normally
+       - add-on rows are intentionally non-selecting, matching Android's AND_BIBLE guard in
+         `ChooseDocument.handleDocumentSelection`
      */
     private func select(_ module: ModuleInfo) {
+        if module.category == .bible {
+            selectUnlockedModule(module)
+            return
+        }
         if Self.requiresUnlock(module) {
             beginUnlock(module)
             return
@@ -1178,14 +1242,17 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Applies a category-specific reader transition after lock validation succeeds.
+     Applies a category-specific reader transition after chooser-row validation succeeds.
 
-     - Parameter module: Installed module already known to be selectable and unlocked.
-     - Side effects: Switches the pane document; exact generic keys dismiss without another chooser,
-       invalid/missing keys replace the picker with the matching key browser, and key validation or
-       enumeration failures keep the picker visible with Retry/Cancel actions.
-     - Failure modes: Add-ons and unsupported categories are ignored. Repeated SWORD failures retain
-       the selected module for retry without mutating the pane.
+     - Parameter module: Installed module selected from the inclusive full chooser.
+     - Side effects: Switches the pane document after the controller's authoritative access
+       preflight; exact generic keys dismiss without another chooser, invalid/missing keys replace
+       the picker with the matching key browser, and key validation or enumeration failures keep the
+       picker visible with Retry/Cancel actions.
+     - Failure modes: A Bible or commentary that became locked after row construction reuses the
+       existing passphrase prompt without dismissing or mutating the pane. Other unavailable,
+       add-on, and unsupported rows remain in the picker. Repeated generic SWORD failures retain the
+       selected module for retry.
      */
     private func selectUnlockedModule(_ module: ModuleInfo) {
         guard let selectedDocumentCategory = Self.documentCategory(for: module.category) else {
@@ -1194,8 +1261,14 @@ struct BibleReaderModulePicker: View {
 
         switch selectedDocumentCategory {
         case .commentary:
-            controller.switchCommentaryDocument(to: module.name)
-            onDismiss()
+            Self.handleCommentarySelection(
+                module,
+                controller: controller,
+                onDismiss: onDismiss,
+                onBeginAuthoritativeUnlock: {
+                    beginUnlock($0, authoritativeAccessState: true)
+                }
+            )
         case .dictionary:
             handleGenericModuleSwitch(
                 controller.switchDictionaryDocument(to: module.name),
@@ -1215,8 +1288,56 @@ struct BibleReaderModulePicker: View {
                 onOpenBrowser: onOpenMapBrowser
             )
         default:
-            controller.switchBibleDocument(to: module.name)
+            switch controller.switchBibleDocument(to: module.name) {
+            case .switched:
+                onDismiss()
+            case .requiresUnlock:
+                beginUnlock(module, authoritativeAccessState: true)
+            case .unavailable:
+                break
+            }
+        }
+    }
+
+    /**
+     Routes one commentary row through the controller's typed authorization outcome.
+
+     The chooser row is only a snapshot and can become stale before selection. A failed switch
+     therefore re-resolves the canonical installed row and manager access instead of trusting
+     `ModuleInfo`: only a freshly locked commentary enters the existing authoritative cipher-key
+     flow, while missing, unsupported, replaced, and category-incompatible targets keep the picker
+     visible.
+
+     - Parameters:
+       - module: Commentary row selected from the inclusive installed inventory.
+       - controller: Pane controller that owns the atomic commentary document switch and manager.
+       - onDismiss: Callback that closes the picker only after a completed switch.
+       - onBeginAuthoritativeUnlock: Callback that presents the existing unlock flow after fresh
+         manager classification reports `.locked`.
+     - Side effects: A successful controller switch mutates and persists the pane before dismissal;
+       a locked failure invokes the unlock callback. Other failures produce no picker or pane mutation.
+     - Failure modes: A missing manager, non-commentary canonical row, and every non-locked failure
+       retain the picker. Fresh classification is deliberately performed only after `.failed`, so
+       successful switches do not race redundant inventory reads.
+     */
+    static func handleCommentarySelection(
+        _ module: ModuleInfo,
+        controller: BibleReaderController,
+        onDismiss: () -> Void,
+        onBeginAuthoritativeUnlock: (ModuleInfo) -> Void
+    ) {
+        switch controller.switchCommentaryDocument(to: module.name) {
+        case .switched:
             onDismiss()
+        case .failed:
+            guard let manager = controller.swordManager,
+                  manager.installedModules().first(where: {
+                      SwordJavaStringIdentity.equalsIgnoreCase($0.name, module.name)
+                  })?.category == .commentary,
+                  manager.moduleAccessState(named: module.name) == .locked else {
+                return
+            }
+            onBeginAuthoritativeUnlock(module)
         }
     }
 
@@ -1251,12 +1372,20 @@ struct BibleReaderModulePicker: View {
     /**
      Starts Android's passphrase prompt for an encrypted locked module.
 
-     - Parameter module: Locked chooser row selected directly or through its context action.
-     - Side Effects: Clears stale key/error state and presents the module-scoped unlock alert.
-     - Failure Modes: Already-unlocked and unencrypted modules bypass the prompt and select normally.
+     - Parameters:
+       - module: Locked chooser row selected directly or through its context action.
+       - authoritativeAccessState: Whether the shared controller preflight freshly classified the
+         module locked, even if the chooser's older metadata snapshot says otherwise.
+     - Side effects: Clears stale key/error state and presents the module-scoped unlock alert.
+     - Failure modes: Without an authoritative locked result, already-unlocked and unencrypted
+       modules bypass the prompt and select normally. The authoritative path prevents a stale-row
+       recursion between selection and preflight.
      */
-    private func beginUnlock(_ module: ModuleInfo) {
-        guard Self.requiresUnlock(module) else {
+    private func beginUnlock(
+        _ module: ModuleInfo,
+        authoritativeAccessState: Bool = false
+    ) {
+        guard authoritativeAccessState || Self.requiresUnlock(module) else {
             selectUnlockedModule(module)
             return
         }
@@ -1658,14 +1787,18 @@ struct BibleReaderModulePicker: View {
      Inspects a selected archive before any local SWORD destination is overwritten.
 
      - Parameter request: Selected document URL and provider metadata.
-     - Side Effects: Runs inspection off the main actor, then starts import, presents exact overwrite
-       conflicts, or reports validation failure.
-     - Failure Modes: Failed preflight never runs installer writes.
+     - Side Effects: Captures installed/local registration metadata, runs archive inspection off the
+       main actor, then starts import, presents exact overwrite conflicts, or reports validation.
+     - Failure Modes: My Documents metadata failure reserves every EPUB identity; failed archive
+       preflight never runs installer writes.
      */
     private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
         isImportingExternalDocument = true
         externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext,
+            swordManager: controller.swordManager
+        )
         Task { @MainActor in
             let preflight = await Task.detached(priority: .userInitiated) {
                 service.preflightDocument(request)
@@ -1696,9 +1829,11 @@ struct BibleReaderModulePicker: View {
      - Parameters:
        - request: Selected ZIP, EPUB, font, or Android module-backup request.
        - overwritePolicy: Conflict policy, with replacement used only after explicit consent.
-     - Side Effects: Runs installer I/O off the main actor, publishes progress, refreshes controller
-       module inventory, and surfaces structured feedback without dismissing the chooser.
-     - Failure Modes: Installer failures are returned as user-visible feedback and preserve retry.
+     - Side Effects: Captures Android's installed/local registry, runs installer I/O off the main
+       actor, publishes progress, refreshes controller module inventory, and surfaces structured
+       feedback without dismissing the chooser.
+     - Failure Modes: EPUB identity collisions and installer failures are returned as user-visible
+       feedback and preserve retry; My Documents metadata failure rejects EPUB admission closed.
      */
     private func importExternalDocument(
         _ request: ExternalDocumentImportRequest,
@@ -1706,7 +1841,10 @@ struct BibleReaderModulePicker: View {
     ) {
         isImportingExternalDocument = true
         externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext,
+            swordManager: controller.swordManager
+        )
         Task { @MainActor in
             await Task.yield()
             let importResult = await Task.detached(priority: .userInitiated) {
@@ -1776,6 +1914,89 @@ struct BibleReaderModulePicker: View {
             }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    /**
+     Projects the EPUB library through Android's current global-book ownership result.
+
+     Candidate admission and identity lookup belong to `BibleReaderInstalledModuleResolver`; this
+     helper deliberately performs no second approximation of those rules. It only retains a
+     candidate when the resolver-selected local EPUB has the same immutable library identifier,
+     preventing a rejected candidate from borrowing an earlier owner's chooser row.
+
+     - Parameters:
+       - epubs: Complete installed EPUB metadata in stable library order.
+       - resolvedOwnerIdentifier: Combined-registry lookup returning the selected local EPUB
+         identifier, or `nil` when an installed book, My Document, missing generation, or metadata
+         failure owns/blocks the candidate token.
+     - Returns: Only candidates whose own identifier is the resolver-selected owner, preserving
+       input order.
+     - Side effects: None directly; the supplied resolver closure may perform metadata reads.
+     - Failure modes: A nil or different owner identifier rejects the candidate without fallback.
+     */
+    static func admittedEpubs(
+        from epubs: [EpubInfo],
+        resolvedOwnerIdentifier: (EpubInfo) -> String?
+    ) -> [EpubInfo] {
+        epubs.filter { epub in
+            resolvedOwnerIdentifier(epub) == epub.identifier
+        }
+    }
+
+    /**
+     Removes repeated installed rows with Java `String.equals` identity while preserving order.
+
+     - Parameter modules: Category-concatenated installed module snapshots.
+     - Returns: First occurrence of each exact UTF-16 initials value; composed/decomposed and
+       case-variant names remain distinct just as they do in JSword's exact-name maps.
+     - Side effects: None.
+     - Failure modes: None; Swift strings expose valid UTF-16 views.
+     */
+    static func javaExactDistinctModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
+        var seenInitials: [String] = []
+        return modules.filter { module in
+            guard !seenInitials.contains(where: {
+                SwordJavaStringIdentity.equals($0, module.name)
+            }) else {
+                return false
+            }
+            seenInitials.append(module.name)
+            return true
+        }
+    }
+
+    /**
+     Selects one installed row with Java `String.equals` identity.
+
+     - Parameters:
+       - initials: Exact module initials retained by picker state.
+       - modules: Current selectable module rows.
+     - Returns: The first row with the same UTF-16 code units, or nil when that exact identity is
+       no longer installed.
+     - Side effects: None.
+     - Failure modes: None; canonically equivalent Swift strings intentionally do not alias.
+     */
+    static func javaExactModule(named initials: String, in modules: [ModuleInfo]) -> ModuleInfo? {
+        modules.first { SwordJavaStringIdentity.equals($0.name, initials) }
+    }
+
+    /**
+     Builds a SwiftUI row ID that cannot canonically fold Java-distinct module identities.
+
+     - Parameters:
+       - namespace: Stable backend namespace such as `module` or `epub`.
+       - value: Exact JSword initials value.
+     - Returns: The legacy readable ASCII ID for ASCII values, or a lowercase UTF-16 hexadecimal
+       ID for non-ASCII values so composed/decomposed spellings remain distinct to SwiftUI.
+     - Side effects: None.
+     - Failure modes: None; every Swift string has a valid UTF-16 view.
+     */
+    private static func javaExactRowID(namespace: String, value: String) -> String {
+        guard value.utf16.contains(where: { $0 > 0x7f }) else {
+            return "\(namespace):\(value)"
+        }
+        let encoded = value.utf16.map { String($0, radix: 16) }.joined(separator: "-")
+        return "\(namespace):utf16:\(encoded)"
     }
 
     /**
@@ -2224,9 +2445,15 @@ struct BibleReaderModulePicker: View {
         var id: String {
             switch self {
             case .module(let module):
-                return "module:\(module.name)"
+                return BibleReaderModulePicker.javaExactRowID(
+                    namespace: "module",
+                    value: module.name
+                )
             case .epub(let epub):
-                return "epub:\(epub.initials)"
+                return BibleReaderModulePicker.javaExactRowID(
+                    namespace: "epub",
+                    value: epub.initials
+                )
             case .pseudoDocument(let document):
                 return "pseudo:\(document.rawValue)"
             }

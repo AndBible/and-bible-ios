@@ -58,13 +58,20 @@ enum AIReaderReferenceEnvironmentResolver {
         guard let excludedInitials = try? aiSettingsStore.globalSettings().aiExcludedDocuments else {
             return .empty
         }
-        var seen = Set<String>()
-        let installedModules = (swordManager.installedModules() + sqliteLibrary.modules.map(\.info))
-            .filter { seen.insert(normalizedIdentity($0.name)).inserted }
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: swordManager,
+            sqliteLibrary: sqliteLibrary
+        )
+        let installedModules = resolver.registeredBookMetadata().filter {
+            resolver.module(named: $0.name) != nil
+        }
         return resolve(
             installedModules: installedModules,
             excludedInitials: excludedInitials,
-            indexedModule: searchIndexService.hasIndex(for:),
+            indexedModule: { name in
+                guard let source = resolver.searchIndexSource(named: name) else { return false }
+                return searchIndexService.hasIndex(for: source.searchIndexSourceIdentity)
+            },
             selectedStrongsHebrew: settingsStore.getStringSet(.strongsHebrewDictionary),
             selectedStrongsGreek: settingsStore.getStringSet(.strongsGreekDictionary),
             selectedGreekMorphology: settingsStore.getStringSet(.robinsonGreekMorphology)
@@ -88,15 +95,14 @@ enum AIReaderReferenceEnvironmentResolver {
      */
     static func resolve(
         installedModules: [ModuleInfo],
-        excludedInitials: Set<String>,
+        excludedInitials: AIExcludedDocumentIdentities,
         indexedModule: (String) -> Bool,
         selectedStrongsHebrew: [String],
         selectedStrongsGreek: [String],
         selectedGreekMorphology: [String]
     ) -> Environment {
-        let excluded = Set(excludedInitials.map(normalizedIdentity))
         let allowedModules = installedModules.filter {
-            !excluded.contains(normalizedIdentity($0.name))
+            !excludedInitials.contains($0.name)
         }
         let defaultBible = allowedModules.first {
             $0.category == .bible && indexedModule($0.name)
@@ -114,21 +120,21 @@ enum AIReaderReferenceEnvironmentResolver {
                 feature: .hebrewDef,
                 androidPlaceholder: "StrongsHebrew",
                 installedModules: installedModules,
-                excludedIdentities: excluded
+                excludedIdentities: excludedInitials
             ),
             preferredStrongsGreek: preferredDictionary(
                 selectedInitials: selectedStrongsGreek,
                 feature: .greekDef,
                 androidPlaceholder: "StrongsGreek",
                 installedModules: installedModules,
-                excludedIdentities: excluded
+                excludedIdentities: excludedInitials
             ),
             preferredGreekMorphology: preferredDictionary(
                 selectedInitials: selectedGreekMorphology,
                 feature: .greekParse,
                 androidPlaceholder: "Robinson",
                 installedModules: installedModules,
-                excludedIdentities: excluded
+                excludedIdentities: excludedInitials
             )
         )
     }
@@ -139,29 +145,27 @@ enum AIReaderReferenceEnvironmentResolver {
         feature: ModuleFeatures,
         androidPlaceholder: String,
         installedModules: [ModuleInfo],
-        excludedIdentities: Set<String>
+        excludedIdentities: AIExcludedDocumentIdentities
     ) -> String? {
         if !selectedInitials.isEmpty {
             for selected in selectedInitials {
-                let identity = normalizedIdentity(selected)
-                guard !excludedIdentities.contains(identity) else { continue }
-                if let installed = installedModules.first(where: {
-                    normalizedIdentity($0.name) == identity
-                }) {
-                    return installed.name
-                }
+                guard let installed = BibleReaderInstalledModuleLookup.module(
+                    named: selected,
+                    in: installedModules
+                ), !excludedIdentities.contains(installed.name) else { continue }
+                return installed.name
             }
             return nil
         }
 
         if let featured = installedModules.first(where: {
             $0.features.contains(feature)
-                && !excludedIdentities.contains(normalizedIdentity($0.name))
+                && !excludedIdentities.contains($0.name)
         }) {
             return featured.name
         }
 
-        return excludedIdentities.contains(normalizedIdentity(androidPlaceholder))
+        return excludedIdentities.contains(androidPlaceholder)
             ? nil
             : androidPlaceholder
     }
@@ -174,8 +178,4 @@ enum AIReaderReferenceEnvironmentResolver {
         return Locale(identifier: "en").localizedString(forLanguageCode: languageCode) ?? trimmed
     }
 
-    /** Matches Android's case-insensitive installed-book initials identity. */
-    private static func normalizedIdentity(_ value: String) -> String {
-        value.folding(options: [.caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
-    }
 }

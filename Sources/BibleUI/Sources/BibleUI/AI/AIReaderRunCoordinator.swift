@@ -402,7 +402,8 @@ final class AIReaderRunCoordinator {
   private let runGate: AIReaderWorkspaceRunGate
   private let referenceEnvironmentProvider:
     @MainActor () -> AIReaderReferenceEnvironmentResolver.Environment
-  private let isInstalledBible: (String) -> Bool
+  /// Fresh installed-owner check that prevents AI runs from reading a locked or shadowed Bible.
+  private let isReadableBible: (String) -> Bool
   private let openMyDocument: (String, String) -> Void
   private let openStudyPad: (UUID, UUID?) -> Void
   private let showTransientDocument: (AIReaderTransientDocument) -> Void
@@ -432,7 +433,7 @@ final class AIReaderRunCoordinator {
      - runGate: Process-wide workspace execution gate.
      - referenceEnvironmentProvider: Live search-Bible and reference-dictionary defaults. The empty
        default keeps construction testable until the pane injects installed-module state.
-     - isInstalledBible: Exact installed-Bible predicate used by regeneration validation.
+     - isReadableBible: Exact fresh-readable-Bible predicate used by regeneration validation.
      - openMyDocument: Reader navigation boundary for generated My Documents pages.
      - openStudyPad: Reader navigation boundary for generated StudyPad results.
      - showTransientDocument: Reader-local loading and terminal state presentation.
@@ -459,7 +460,7 @@ final class AIReaderRunCoordinator {
           preferredGreekMorphology: nil
         )
       },
-    isInstalledBible: @escaping (String) -> Bool,
+    isReadableBible: @escaping (String) -> Bool,
     openMyDocument: @escaping (String, String) -> Void,
     openStudyPad: @escaping (UUID, UUID?) -> Void,
     showTransientDocument: @escaping (AIReaderTransientDocument) -> Void,
@@ -478,12 +479,25 @@ final class AIReaderRunCoordinator {
     )
     self.client = client
     self.domain = domain
-    generatedPageStore = AIGeneratedPageStore(modelContext: modelContext)
+    generatedPageStore = AIGeneratedPageStore(
+      modelContext: modelContext,
+      moduleStoreRootURL: URL(
+        fileURLWithPath: swordManager.modulePath,
+        isDirectory: true
+      ),
+      isDocumentInitialsUnavailable: {
+        [modelContainer = modelContext.container, modulePath = swordManager.modulePath] initials in
+        try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+          modelContainer: modelContainer,
+          modulePath: modulePath
+        ).ownsDocument(named: initials)
+      }
+    )
     textTargetStore = AITextTargetStore(backing: textTargetBacking)
     self.myDocumentStore = myDocumentStore
     self.runGate = runGate
     self.referenceEnvironmentProvider = referenceEnvironmentProvider
-    self.isInstalledBible = isInstalledBible
+    self.isReadableBible = isReadableBible
     self.openMyDocument = openMyDocument
     self.openStudyPad = openStudyPad
     self.showTransientDocument = showTransientDocument
@@ -685,7 +699,7 @@ final class AIReaderRunCoordinator {
       guard
         let sourceInitials = source.activeDocumentInitials
           ?? pageContext.sourceBookInitials,
-        isInstalledBible(sourceInitials)
+        isReadableBible(sourceInitials)
       else {
         throw AIReaderRunError.sourceUnavailable
       }

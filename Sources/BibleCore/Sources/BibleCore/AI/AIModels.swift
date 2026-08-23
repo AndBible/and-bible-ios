@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwordKit
 
 /**
  Wire formats supported by Android's v23 AI provider configuration.
@@ -629,8 +630,90 @@ public final class AgentPrompt {
 }
 
 /**
- Persists Android's singleton global AI settings in CloudKit-capable user data.
+ Android-compatible set of AI-excluded document initials with Java UTF-16 identity.
+
+ Swift `Set<String>` merges canonically equivalent composed/decomposed spellings, while Java
+ `HashSet<String>` uses exact UTF-16 `String.equals`. This value keeps a sorted exact-identity array
+ so both spellings can coexist, mutations are set-like, equality is order-insensitive, and persisted
+ JSON remains deterministic without changing Android's raw string-array schema.
  */
+public struct AIExcludedDocumentIdentities: Equatable, Sendable, ExpressibleByArrayLiteral, Sequence {
+    /// Deterministic storage sorted by unsigned Java UTF-16 code-unit order.
+    private var storage: [String]
+
+    /** Creates a de-duplicated, deterministic exact-identity collection. */
+    public init<S: Sequence>(_ values: S) where S.Element == String {
+        var seen = Set<SwordJavaExactStringIdentity>()
+        storage = values.filter {
+            seen.insert(SwordJavaExactStringIdentity($0)).inserted
+        }.sorted(by: Self.javaUTF16Precedes)
+    }
+
+    /** Creates a collection from an array literal without Swift canonical normalization. */
+    public init(arrayLiteral elements: String...) {
+        self.init(elements)
+    }
+
+    /// Number of Java-exact identities.
+    public var count: Int { storage.count }
+
+    /// Whether no document identities are excluded.
+    public var isEmpty: Bool { storage.isEmpty }
+
+    /// Deterministically ordered values used by Android-compatible JSON serialization.
+    public var values: [String] { storage }
+
+    /** Returns whether one exact Java UTF-16 identity is present. */
+    public func contains(_ value: String) -> Bool {
+        let identity = SwordJavaExactStringIdentity(value)
+        return storage.contains { SwordJavaExactStringIdentity($0) == identity }
+    }
+
+    /** Inserts one Java-exact identity and restores deterministic serialization order. */
+    @discardableResult
+    public mutating func insert(_ value: String) -> Bool {
+        guard !contains(value) else { return false }
+        storage.append(value)
+        storage.sort(by: Self.javaUTF16Precedes)
+        return true
+    }
+
+    /** Removes only the Java-exact identity supplied by the caller. */
+    @discardableResult
+    public mutating func remove(_ value: String) -> Bool {
+        let identity = SwordJavaExactStringIdentity(value)
+        guard let index = storage.firstIndex(where: {
+            SwordJavaExactStringIdentity($0) == identity
+        }) else { return false }
+        storage.remove(at: index)
+        return true
+    }
+
+    /** Iterates deterministic Java-exact values without exposing mutable backing storage. */
+    public func makeIterator() -> IndexingIterator<[String]> {
+        storage.makeIterator()
+    }
+
+    /** Compares deterministic storage with Java exactness rather than Swift normalization. */
+    public static func == (
+        lhs: AIExcludedDocumentIdentities,
+        rhs: AIExcludedDocumentIdentities
+    ) -> Bool {
+        lhs.storage.count == rhs.storage.count
+            && zip(lhs.storage, rhs.storage).allSatisfy {
+                SwordJavaExactStringIdentity($0.0) == SwordJavaExactStringIdentity($0.1)
+            }
+    }
+
+    /** Orders strings lexicographically by unsigned Java UTF-16 code units. */
+    private static func javaUTF16Precedes(_ lhs: String, _ rhs: String) -> Bool {
+        SwordJavaExactStringIdentity(lhs).utf16CodeUnits.lexicographicallyPrecedes(
+            SwordJavaExactStringIdentity(rhs).utf16CodeUnits
+        )
+    }
+}
+
+/** Persists Android's singleton global AI settings in CloudKit-capable user data. */
 @Model
 public final class GlobalAISettings {
     /// Android's cross-device singleton identity.
@@ -693,10 +776,10 @@ public final class GlobalAISettings {
         set { permanentlyDeniedToolsRawValue = newValue.map(AIModelValueCodec.encodeSet) }
     }
 
-    /// Typed excluded-document initials.
-    public var aiExcludedDocuments: Set<String> {
-        get { AIModelValueCodec.decodeStrings(aiExcludedDocumentsRawValue) }
-        set { aiExcludedDocumentsRawValue = AIModelValueCodec.encodeStrings(newValue) }
+    /// Typed excluded-document initials retaining Java-distinct Unicode spellings.
+    public var aiExcludedDocuments: AIExcludedDocumentIdentities {
+        get { AIModelValueCodec.decodeExactStrings(aiExcludedDocumentsRawValue) }
+        set { aiExcludedDocumentsRawValue = AIModelValueCodec.encodeExactStrings(newValue) }
     }
 
     /// Typed hidden built-in prompt IDs.
@@ -894,6 +977,21 @@ private enum AIModelValueCodec {
             return []
         }
         return Set(values)
+    }
+
+    /** Encodes AI document exclusions in stable Java UTF-16 order without canonical collapsing. */
+    static func encodeExactStrings(_ values: AIExcludedDocumentIdentities) -> String {
+        guard let data = try? JSONEncoder().encode(values.values) else { return "[]" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /** Decodes AI document exclusions while retaining Java-distinct Unicode spellings. */
+    static func decodeExactStrings(_ value: String) -> AIExcludedDocumentIdentities {
+        guard let data = value.data(using: .utf8),
+              let values = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return AIExcludedDocumentIdentities(values)
     }
 
     /** Encodes UUID sets as stable lowercase JSON strings. */

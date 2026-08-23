@@ -1310,6 +1310,13 @@ jobs:
           --create-dedicated-device
           --device-name-prefix "AndBible CI UI"
 
+      - name: Require software keyboard for UI tests
+        if: needs.repo-standards.outputs.required_checks_only != 'true'
+        run: |
+          # Reader IME regressions must exercise the software-keyboard safe-area transition.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          test "$(defaults read com.apple.iphonesimulator ConnectHardwareKeyboard)" = "0"
+
       - name: Boot selected simulator
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         run: >-

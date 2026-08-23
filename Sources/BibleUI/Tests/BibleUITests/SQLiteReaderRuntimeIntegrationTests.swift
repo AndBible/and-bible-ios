@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SQLite3
 import XCTest
@@ -47,6 +48,57 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertTrue(languageScript.contains("eng"))
         XCTAssertTrue(languageScript.contains("heb"))
+    }
+
+    /**
+     Verifies generic bookmark navigation executes installed SQLite dictionary and commentary keys.
+
+     - Setup: Installs the real Android SQLite fixtures, attaches a pane, and navigates typed generic
+       targets to one exact dictionary key and one canonical dotted KJVA commentary key.
+     - Expected result: Each target is planned through the installed SQLite owner, rendered with
+       authored content, and persisted in its category without SWORD or local-document fallback.
+     - Failure meaning: Rendered SQLite pages can create bookmarks that the bookmark list cannot
+       reopen, or commit mutates a different backend/key than the exact persisted destination.
+     - Side effects: Creates temporary fixture files and records controller bridge/pane mutations.
+     */
+    @MainActor
+    func testGenericBookmarksNavigateExactSQLiteDictionaryAndCommentaryKeys() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let pageManager = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+
+        var baseline = scripts().count
+        try controller.navigate(toBookmarkTarget: .generic(.init(
+            moduleInitials: "MyBible-dictionary",
+            key: "H0430",
+            ordinalRange: nil
+        )))
+        var payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        var fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-dictionary")
+        XCTAssertEqual(payload["key"] as? String, "H0430")
+        XCTAssertTrue((fragment["xml"] as? String)?.contains("Hebrew definition") == true)
+        XCTAssertEqual(controller.currentCategory, .dictionary)
+        XCTAssertEqual(pageManager.dictionaryDocument, "MyBible-dictionary")
+        XCTAssertEqual(pageManager.dictionaryKey, "H0430")
+
+        baseline = scripts().count
+        try controller.navigate(toBookmarkTarget: .generic(.init(
+            moduleInitials: "MyBible-commentary",
+            key: "Gen.1.1",
+            ordinalRange: nil
+        )))
+        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-commentary")
+        XCTAssertEqual(payload["key"] as? String, "Gen.1.1")
+        XCTAssertFalse((fragment["xml"] as? String ?? "").isEmpty)
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(pageManager.commentaryDocument, "MyBible-commentary")
     }
 
     /**
@@ -905,6 +957,216 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies SQLite Bible speech synchronization uses Android-37 Java document identity.
+
+     - Setup: Installs a SWORD Bible with precomposed `é` initials and a SQLite Bible with the
+       canonically equivalent decomposed spelling. It starts both a normal reader speech session and
+       a Daily Reading speech action from SQLite while the accepting speech double synchronously
+       moves the pane to the SWORD identity before queued synchronization executes.
+     - Expected result: Both production synchronization callbacks treat the identities as distinct
+       and switch the pane back to the exact SQLite source before applying its position.
+     - Failure meaning: Foundation normalization can suppress a required backend switch, causing
+       normal or Daily Reading speech positions to navigate an unrelated active Bible.
+     - Side effects: Creates isolated SWORD/SQLite fixtures, starts deterministic synthetic speech,
+       and mutates only the in-memory reader pane.
+     - Failure modes: Fixture discovery, speech preparation, or reading-plan parsing can throw.
+     */
+    @MainActor
+    func testSQLiteBibleSpeechSynchronizationRejectsCanonicalEquivalentJavaDistinctIdentity() async throws {
+        let composedInitials = "Caf\u{00E9}Bible"
+        let decomposedInitials = "Cafe\u{0301}Bible"
+        XCTAssertEqual(composedInitials.caseInsensitiveCompare(decomposedInitials), .orderedSame)
+        XCTAssertFalse(
+            SwordJavaStringIdentity.equalsIgnoreCase(composedInitials, decomposedInitials)
+        )
+
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: composedInitials,
+            description: "Java identity SWORD speech fixture",
+            in: modulePath
+        )
+        try installMyBiblePackage(
+            initials: decomposedInitials,
+            directoryName: "java-identity-speech-bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        _ = attachWindow(to: controller)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: decomposedInitials), .switched)
+        let ordinarySynthesizer = SQLiteIdentitySpeechSynthesizer()
+        let ordinaryService = SpeakService(synthesizer: ordinarySynthesizer)
+        let ordinarySession = try XCTUnwrap(
+            controller.defaultSpeechSession(service: ordinaryService)
+        )
+        ordinarySynthesizer.onAccept = { _ in
+            MainActor.assumeIsolated {
+                XCTAssertEqual(controller.switchBibleDocument(to: composedInitials), .switched)
+            }
+        }
+        XCTAssertTrue(ordinaryService.start(
+            provider: ordinarySession.provider,
+            callbacks: ordinarySession.callbacks
+        ).succeeded)
+        XCTAssertEqual(controller.activeModuleName, composedInitials)
+        XCTAssertEqual(controller.activeModule?.info.name, composedInitials)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(controller.activeModuleName, decomposedInitials)
+        XCTAssertNil(controller.activeModule)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: decomposedInitials), .switched)
+        let dailySynthesizer = SQLiteIdentitySpeechSynthesizer()
+        let dailyService = SpeakService(synthesizer: dailySynthesizer)
+        controller.speakService = dailyService
+        dailySynthesizer.onAccept = { _ in
+            MainActor.assumeIsolated {
+                XCTAssertEqual(controller.switchBibleDocument(to: composedInitials), .switched)
+            }
+        }
+        let request = try DailyReadingActionRequestFactory.makeRequest(
+            planID: UUID(uuidString: "c1000000-0000-0000-0000-000000000389")!,
+            planCode: "java-identity-speech",
+            dayNumber: 1,
+            assignment: ReadingPlanDayAssignment(rawValue: "Gen.1.1"),
+            planVersification: "KJV",
+            kind: .speak,
+            readingNumbers: [1]
+        )
+        try await controller.performDailyReadingAction(request)
+        XCTAssertEqual(controller.activeModuleName, composedInitials)
+        XCTAssertEqual(controller.activeModule?.info.name, composedInitials)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(controller.activeModuleName, decomposedInitials)
+        XCTAssertNil(controller.activeModule)
+    }
+
+    /**
+     Verifies SQLite commentary and dictionary speech switch Java-distinct active SWORD identities.
+
+     - Setup: Installs composed-name SWORD commentary/dictionary modules beside decomposed-name
+       SQLite sources containing real speech text. Each SQLite session starts while its deterministic
+       synthesizer synchronously activates the visually equivalent SWORD document.
+     - Expected result: Commentary and dictionary synchronization both restore the exact SQLite
+       source identity and apply its exact key after the queued callback runs.
+     - Failure meaning: Foundation normalization can send SQLite speech coordinates into the wrong
+       SWORD commentary or dictionary backend.
+     - Side effects: Creates isolated module fixtures, starts deterministic synthetic speech, and
+       mutates only the in-memory reader pane.
+     - Failure modes: Fixture discovery, SQLite decoding, or speech preparation can throw.
+     */
+    @MainActor
+    func testSQLiteGenericSpeechSynchronizationRejectsCanonicalEquivalentJavaDistinctIdentity() async throws {
+        let composedCommentary = "Caf\u{00E9}Comm"
+        let decomposedCommentary = "Cafe\u{0301}Comm"
+        let composedDictionary = "Caf\u{00E9}Dict"
+        let decomposedDictionary = "Cafe\u{0301}Dict"
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawCommentaryModule(named: composedCommentary, in: modulePath)
+        try seedReadableRawDictionaryModule(
+            named: composedDictionary,
+            entryKey: "OTHER",
+            in: modulePath
+        )
+        try installMyBibleAuxiliaryPackage(
+            initials: decomposedCommentary,
+            directoryName: "java-identity-commentary",
+            fixtureName: "mybible-commentary.SQLite3",
+            category: "Commentaries",
+            in: modulePath
+        )
+        try installMyBibleAuxiliaryPackage(
+            initials: decomposedDictionary,
+            directoryName: "java-identity-dictionary",
+            fixtureName: "mybible-dictionary.SQLite3",
+            category: "Lexicons / Dictionaries",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager
+        )
+        _ = attachWindow(to: controller)
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        XCTAssertEqual(controller.switchCommentaryDocument(to: decomposedCommentary), .switched)
+        XCTAssertEqual(
+            Array(try XCTUnwrap(controller.activeCommentaryModuleName).utf8),
+            Array(decomposedCommentary.utf8)
+        )
+        XCTAssertNil(controller.activeCommentaryModule)
+        let commentarySynthesizer = SQLiteIdentitySpeechSynthesizer()
+        let commentaryService = SpeakService(synthesizer: commentarySynthesizer)
+        let commentarySession = try XCTUnwrap(
+            controller.defaultSpeechSession(service: commentaryService)
+        )
+        commentarySynthesizer.onAccept = { _ in
+            MainActor.assumeIsolated {
+                XCTAssertEqual(
+                    controller.switchCommentaryDocument(to: composedCommentary),
+                    .switched
+                )
+            }
+        }
+        XCTAssertTrue(commentaryService.start(
+            provider: commentarySession.provider,
+            callbacks: commentarySession.callbacks
+        ).succeeded)
+        XCTAssertEqual(controller.activeCommentaryModuleName, composedCommentary)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(
+            Array(try XCTUnwrap(controller.activeCommentaryModuleName).utf8),
+            Array(decomposedCommentary.utf8)
+        )
+        XCTAssertNil(controller.activeCommentaryModule)
+
+        let dictionaryOutcome = controller.switchDictionaryDocument(to: decomposedDictionary)
+        guard case .switchedRequiringKeySelection = dictionaryOutcome else {
+            return XCTFail("Expected SQLite dictionary selection before exact key navigation.")
+        }
+        XCTAssertEqual(
+            Array(try XCTUnwrap(controller.activeDictionaryModuleName).utf8),
+            Array(decomposedDictionary.utf8)
+        )
+        XCTAssertNil(controller.activeDictionaryModule)
+        controller.loadDictionaryEntry(key: "H0430")
+        let dictionarySynthesizer = SQLiteIdentitySpeechSynthesizer()
+        let dictionaryService = SpeakService(synthesizer: dictionarySynthesizer)
+        let dictionarySession = try XCTUnwrap(
+            controller.defaultSpeechSession(service: dictionaryService)
+        )
+        dictionarySynthesizer.onAccept = { _ in
+            MainActor.assumeIsolated {
+                let outcome = controller.switchDictionaryDocument(to: composedDictionary)
+                guard case .switchedRequiringKeySelection = outcome else {
+                    return XCTFail("Expected empty SWORD dictionary to require key selection.")
+                }
+            }
+        }
+        XCTAssertTrue(dictionaryService.start(
+            provider: dictionarySession.provider,
+            callbacks: dictionarySession.callbacks
+        ).succeeded)
+        XCTAssertEqual(controller.activeDictionaryModuleName, composedDictionary)
+        await Task.yield()
+        await Task.yield()
+        XCTAssertEqual(
+            Array(try XCTUnwrap(controller.activeDictionaryModuleName).utf8),
+            Array(decomposedDictionary.utf8)
+        )
+        XCTAssertNil(controller.activeDictionaryModule)
+        XCTAssertEqual(controller.currentDictionaryKey, "H0430")
+    }
+
+    /**
      Verifies SQLite speech advances across a missing requested verse like Android.
 
      - Setup: Copies a MySword Bible, removes Genesis 1:2, and adds Genesis 1:3 as the next real
@@ -1476,6 +1738,48 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Installs one package-owned MyBible commentary or dictionary with exact caller initials.
+
+     - Parameters:
+       - initials: Exact Java-compatible document identity written to the package sidecar.
+       - directoryName: ASCII package directory and payload basename.
+       - fixtureName: Checked-in MyBible SQLite fixture to copy.
+       - category: Android module category string for the auxiliary source.
+       - modulePath: Temporary installed-module root.
+     - Side effects: Copies one SQLite fixture and writes a sorted package `module.json` sidecar.
+     - Failure modes: Fixture lookup, copy, JSON serialization, and sidecar writes can throw.
+     */
+    private func installMyBibleAuxiliaryPackage(
+        initials: String,
+        directoryName: String,
+        fixtureName: String,
+        category: String,
+        in modulePath: String
+    ) throws {
+        let package = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/\(directoryName)", isDirectory: true)
+        let payloadName = "\(directoryName).SQLite3"
+        let packageFileName = "\(payloadName).zip"
+        try copySQLiteFixture(
+            fixtureName,
+            to: "mybible/\(directoryName)/\(payloadName)",
+            in: modulePath
+        )
+        let sidecar = try JSONSerialization.data(withJSONObject: [
+            "name": initials,
+            "description": "Java identity auxiliary fixture",
+            "category": category,
+            "language": "en",
+            "version": "1",
+            "sourceName": "Fixture",
+            "packageFileName": packageFileName,
+            "downloadURL": "https://example.invalid/\(packageFileName)",
+            "installedAt": 0,
+        ], options: [.sortedKeys])
+        try sidecar.write(to: package.appendingPathComponent("module.json"))
+    }
+
+    /**
      Seeds one readable RawLD entry for exact-key SWORD switch preflight.
 
      - Parameters:
@@ -1613,6 +1917,35 @@ private final class ScriptureBoundarySQLiteCommentaryReader: SQLiteDocumentReadi
             return (verse, content.text)
         }
     }
+}
+
+/**
+ Deterministic speech-engine double for SQLite identity synchronization tests.
+
+ The double accepts utterances synchronously without platform audio and invokes `onAccept` at the
+ exact service boundary used by the tests to change the active pane before queued synchronization.
+ Stop, pause, and resume always succeed. It retains no utterance content and cannot fail on its own.
+ */
+private final class SQLiteIdentitySpeechSynthesizer: SpeechSynthesizing {
+    /// Delegate retained weakly to mirror `AVSpeechSynthesizer` ownership.
+    weak var delegate: AVSpeechSynthesizerDelegate?
+
+    /// Test hook invoked synchronously after one utterance is accepted.
+    var onAccept: ((AVSpeechUtterance) -> Void)?
+
+    /** Records synchronous acceptance through `onAccept` without platform audio. */
+    func speak(_ utterance: AVSpeechUtterance) {
+        onAccept?(utterance)
+    }
+
+    /** Reports a successful immediate stop. */
+    func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool { true }
+
+    /** Reports a successful pause. */
+    func pauseSpeaking(at boundary: AVSpeechBoundary) -> Bool { true }
+
+    /** Reports a successful resume. */
+    func continueSpeaking() -> Bool { true }
 }
 
 /**

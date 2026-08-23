@@ -1538,3 +1538,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvojitým klepnutím opustiť režim celej obrazovky";
+
+/* Android shared translations */
+"try_again_passphrase" = "Heslo nefungovalo, skúsiť znova?";
+
+/* Android shared translations */
+"document_not_installed" = "Prosím stiahnete '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ nebolo nájdené v dokumente %2$@.";

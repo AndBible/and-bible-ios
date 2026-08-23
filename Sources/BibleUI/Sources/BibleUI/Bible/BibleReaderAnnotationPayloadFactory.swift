@@ -176,8 +176,9 @@ struct BibleReaderAnnotationPayloadFactory {
        - currentBook: Display name for the reader's current Bible book.
        - activeModuleName: Initials/name of the active module.
        - activeModule: Active SWORD module, if one is loaded.
-       - sourceModuleResolver: Installed-module lookup keyed by stored initials. When omitted, only
-         the matching active module is visible to the factory.
+       - sourceModuleResolver: Readable-module lookup keyed by stored initials. When omitted, only
+         the matching active module is visible to the factory. Explicit unresolved initials never
+         fall back to a different active module.
        - genericSourceResolver: My Documents/EPUB lookup keyed by stored initials and key.
        - bookCatalog: Active-module-aware catalog boundary for OSIS and ordinal projection.
        - unlabeledLabelID: Stable identifier for the synthetic unlabeled label.
@@ -264,9 +265,14 @@ struct BibleReaderAnnotationPayloadFactory {
      - Parameter bookmark: Persisted Bible bookmark whose active-module text should be displayed.
      - Returns: Prefix, selected text, suffix, and full preview with UTF-16 offsets clamped safely.
      - Side effects: May move the active SWORD module cursor while loading verse text.
-     - Failure modes: Missing modules or unresolved verses return an empty projection.
+     - Failure modes: Explicit source initials that do not resolve to a readable module, missing
+       active modules, or unresolved verses return an empty projection.
      */
     func bookmarkListTextProjection(_ bookmark: BibleBookmark) -> BookmarkListTextProjection {
+        let sourceInitials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sourceInitials.isEmpty, sourceModuleResolver(sourceInitials) == nil {
+            return .empty
+        }
         let bookmarkBook = bookmark.book ?? currentBook
         let range = bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
@@ -276,7 +282,7 @@ struct BibleReaderAnnotationPayloadFactory {
             kjvEndOrdinal: bookmark.kjvOrdinalEnd,
             ordinalProjection: .activeModule
         )
-        let hasSourceModule = !sourceModuleMetadata(for: bookmark).initials.isEmpty
+        let hasSourceModule = !sourceInitials.isEmpty
         return Self.bookmarkTextProjection(
             sourceTexts: loadVerseTexts(for: range),
             startOffset: bookmark.startOffset,
@@ -572,6 +578,12 @@ struct BibleReaderAnnotationPayloadFactory {
             return DocumentCategory.generalBook.rawValue
         case .map:
             return "MAPS"
+        case .questionable:
+            return "QUESTIONABLE"
+        case .essays:
+            return "ESSAYS"
+        case .images:
+            return "IMAGES"
         }
     }
 
@@ -998,7 +1010,8 @@ struct BibleReaderAnnotationPayloadFactory {
      Builds Android's per-bookmark OSIS fragment for the expanded `BookmarkText` view.
 
      Android's `BookmarkControl.addText` renders every serialized Bible bookmark's verse range
-     from the bookmark's own module (falling back to the default Bible) via `readOsisFragment`.
+     from the bookmark's own module via `readOsisFragment`; only legacy rows without stored source
+     initials may use the active Bible as their default source.
      The shared `BookmarkText` component renders that fragment when a row expands, so a null
      fragment makes expansion collapse the visible quote into empty content — the "text
      disappears" defect in My Notes rows.
@@ -1008,11 +1021,12 @@ struct BibleReaderAnnotationPayloadFactory {
        the stored canon cannot resolve the ordinals, or content is incomplete — Android's
        `OsisError` null path, which keeps the collapsed one-liner.
      - Side effects: Reads SWORD content on the shared serialization queue.
-     - Failure modes: Returns `nil`; the web client keeps the collapsed quote.
+     - Failure modes: Explicit missing or unreadable sources, unresolved canons, and incomplete
+       content return `nil`; the web client keeps the collapsed quote.
      */
     private func bibleBookmarkOsisFragment(for bookmark: BibleBookmark) -> OsisFragment? {
         let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
-        let module = (initials.isEmpty ? nil : sourceModuleResolver(initials)) ?? activeModule
+        let module = initials.isEmpty ? activeModule : sourceModuleResolver(initials)
         guard let module, module.info.category == .bible else { return nil }
         let source = BibleReaderInstalledScriptureSource.sword(module)
         let sourceV11n = bookmark.v11n

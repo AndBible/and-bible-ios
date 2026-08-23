@@ -1662,3 +1662,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "I-double-tap ang screen para lumabas sa fullscreen";
+
+/* Android shared translations */
+"try_again_passphrase" = "Hindi gumana ang passphrase, subukan muli?";
+
+/* Android shared translations */
+"document_not_installed" = "Mangyaring i-download ang '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "Hindi nahanap ang %1$@ sa dokumento %2$@.";

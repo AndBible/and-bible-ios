@@ -700,3 +700,6 @@
 
 /* Android shared translations */
 "delete_module_index_title" = "അന്വേഷണപട്ടിക നീക്കി കളയുക";
+
+/* Android shared translations */
+"document_not_installed" = "ദയവായി ഡൌൺലോഡ് ചെയ്യുക '%@'";

@@ -1091,7 +1091,22 @@ public final class AndroidModuleBackupService {
         "jpg", "jpeg", "png", "webp",
     ]
 
-    /** Publishes all custom content before SWORD configuration activation files. */
+    /**
+     Publishes all custom content before SWORD configuration activation files.
+
+     - Parameters:
+       - plan: Accepted archive entries in Android family order.
+       - registration: Prepared custom-family identities and generated activation paths.
+       - stagingDirectory: Isolated tree containing every accepted overlay file.
+       - authorizedExistingPaths: Exact live paths approved for replacement by preflight.
+     - Side effects: Under the canonical module-store lease, captures rollback-owned EPUB
+       generations, publishes the exact overlay, validates live registrations, and either commits
+       or restores both module files and EPUB pointers.
+     - Throws: Conflict, publication, registration, EPUB, filesystem, or combined rollback errors.
+     - Important: EPUB rollback state is acquired by `onCommitStarted`, after the global lease is
+       held and before the first overlay mutation. This preserves global-coordinator-then-EPUB-lock
+       ordering and prevents a stale preflight snapshot from erasing a newer normal EPUB commit.
+     */
     private func publishAndroidRestore(
         plan: AndroidModuleBackupArchivePlan,
         registration: AndroidModuleBackupPreparedRegistration,
@@ -1103,12 +1118,7 @@ public final class AndroidModuleBackupService {
         } + registration.generatedConfigurationPaths
         let activationSet = Set(activationPaths)
         let contentPaths = plan.entries.map(\.relativePath).filter { !activationSet.contains($0) }
-        let availability = AndroidModuleBackupRestoreAvailabilityTransaction(
-            registration: registration,
-            moduleDirectory: moduleDirectory,
-            epubLibraryRootURL: epubLibraryRootURL,
-            fileManager: fileManager
-        )
+        var availability: AndroidModuleBackupRestoreAvailabilityTransaction?
         do {
             try mutationPublisher.publishExactOverlay(
                 ModuleStoreExactOverlayManifest(
@@ -1118,14 +1128,27 @@ public final class AndroidModuleBackupService {
                 from: stagingDirectory,
                 authorizedExistingPaths: authorizedExistingPaths,
                 kind: .androidModuleBackup,
+                onCommitStarted: {
+                    availability = AndroidModuleBackupRestoreAvailabilityTransaction(
+                        registration: registration,
+                        moduleDirectory: self.moduleDirectory,
+                        epubLibraryRootURL: self.epubLibraryRootURL,
+                        fileManager: self.fileManager
+                    )
+                },
                 validatePublishedState: {
+                    guard let availability else {
+                        throw AndroidModuleBackupError.invalidModuleLayout(
+                            "Restore availability was not initialized before publication."
+                        )
+                    }
                     try availability.validatePublishedState()
                 },
                 rollbackPublishedState: {
-                    try availability.rollback()
+                    try availability?.rollback()
                 },
                 completePublishedState: {
-                    availability.complete()
+                    availability?.complete()
                 }
             )
         } catch ModuleStoreMutationError.destinationFilesExist(let paths) {

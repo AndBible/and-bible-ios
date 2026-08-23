@@ -1535,3 +1535,12 @@ Google డ్రైవ్ ని ఉపయోగిస్తున్నప�
 
 /* Android shared translations */
 "exit_fullscreen" = "పూర్తి స్క్రీన్ నుండి నిష్క్రమించడానికి స్క్రీన్‌పై రెండుసార్లు నొక్కండి";
+
+/* Android shared translations */
+"try_again_passphrase" = "పాస్‌ఫ్రేజ్ పని చేయలేదు, మళ్లీ ప్రయత్నించాలా?";
+
+/* Android shared translations */
+"document_not_installed" = "దయచేసి డవున్ లోడ్ చేసుకొండి '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "పత్రం %2$@లో %1$@ కనుగొనబడలేదు.";

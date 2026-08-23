@@ -1531,3 +1531,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "फ़ुलस्क्रीन से बाहर निकलने के लिए स्क्रीन पर दो बार टैप करें";
+
+/* Android shared translations */
+"try_again_passphrase" = "पासफ़्रेज़ काम नहीं किया, पुन: प्रयास करें?";
+
+/* Android shared translations */
+"document_not_installed" = "कृपया डाउनलोड करें '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@, %2$@ दस्तावेज़ में नहीं मिली";

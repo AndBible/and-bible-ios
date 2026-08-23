@@ -2,6 +2,7 @@
 
 import Foundation
 import SwiftData
+import SwordKit
 
 /**
  Identifies one persisted AI-generated My Documents page without exposing managed SwiftData rows.
@@ -30,6 +31,10 @@ public struct AIGeneratedPageLocation: Equatable, Sendable {
 public enum AIGeneratedPageStoreError: Error, Equatable, LocalizedError, Sendable {
   /// More than one document claims Android's reserved AI Documents initials.
   case duplicateAIDocuments
+  /// Another installed book already owns the reserved identity, so iOS rejects the first graph.
+  case documentIdentityOwned(String)
+  /// The complete installed-book registry could not be captured before first publication.
+  case registryUnavailable(String)
   /// A generated page could not be associated with its parent after insertion.
   case invalidGeneratedGraph
   /// A regeneration source no longer exists.
@@ -46,6 +51,10 @@ public enum AIGeneratedPageStoreError: Error, Equatable, LocalizedError, Sendabl
     switch self {
     case .duplicateAIDocuments:
       return "More than one AI Documents collection exists."
+    case .documentIdentityOwned(let initials):
+      return "Another installed document already owns module identity \(initials)."
+    case .registryUnavailable:
+      return "The installed document registry could not be read."
     case .invalidGeneratedGraph:
       return "The generated page could not be linked to AI Documents."
     case .regenerationPageNotFound:
@@ -72,6 +81,9 @@ public enum AIGeneratedPageStoreError: Error, Equatable, LocalizedError, Sendabl
 
  - Important: The store is main-actor isolated because SwiftData contexts and marker publication
    participate in app-owned UI persistence.
+ - Important: First-time identity collision is an intentional fail-closed safety divergence.
+   Android persists the AI Documents row/page and then lets JSword skip its hidden registration;
+   iOS rejects before graph mutation so generated content cannot become durable but reader-invisible.
  */
 @MainActor
 public final class AIGeneratedPageStore {
@@ -84,6 +96,10 @@ public final class AIGeneratedPageStore {
   private let markerEventCenter: MyDocumentAIDocMarkerEventCenter
   /// Language resolver kept injectable for deterministic tests.
   private let languageCodeProvider: () -> String?
+  /// Canonical root-wide lease shared by every installed-book identity publisher.
+  private let mutationCoordinator: ModuleStoreMutationCoordinator
+  /// Throwing live ownership check used only before first-time AI Documents publication.
+  private let isDocumentInitialsUnavailable: (String) throws -> Bool
 
   /**
    Creates a generated-page store over the app's My Documents container.
@@ -92,19 +108,31 @@ public final class AIGeneratedPageStore {
      - modelContext: Context whose container owns My Documents and sync-journal models.
      - markerEventCenter: Shared marker broadcast channel.
      - languageCodeProvider: BCP-47 language code assigned to new pages.
+     - moduleStoreRootURL: Canonical SWORD root shared by every installed-book publisher.
+     - isDocumentInitialsUnavailable: Fresh complete-registry ownership check invoked only when the
+       reserved AI Documents row does not already exist. A positive result intentionally rejects
+       the complete first graph instead of reproducing Android's durable-but-unregistered row.
    - Side effects: Retains the container only; no reads or writes occur.
-   - Failure modes: None.
+   - Failure modes: Initialization itself cannot fail; the injected registry check may fail later
+     while saving the first generated page.
    */
   public init(
     modelContext: ModelContext,
     markerEventCenter: MyDocumentAIDocMarkerEventCenter = .shared,
     languageCodeProvider: @escaping () -> String? = {
       Locale.current.language.languageCode?.identifier
-    }
+    },
+    moduleStoreRootURL: URL = URL(
+      fileURLWithPath: SwordManager.defaultModulePath(),
+      isDirectory: true
+    ),
+    isDocumentInitialsUnavailable: @escaping (String) throws -> Bool = { _ in false }
   ) {
     modelContainer = modelContext.container
     self.markerEventCenter = markerEventCenter
     self.languageCodeProvider = languageCodeProvider
+    mutationCoordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: moduleStoreRootURL)
+    self.isDocumentInitialsUnavailable = isDocumentInitialsUnavailable
   }
 
   /**
@@ -177,10 +205,11 @@ public final class AIGeneratedPageStore {
      - usedWriteTools: Whether this run committed at least one permission-requiring tool.
      - sourceModelName: Provider model identifier, omitted when blank.
    - Returns: Durable page location for reader navigation.
-   - Side effects: May create AI Documents, inserts page/content/cache rows, commits the sync
-     journal once, and broadcasts the committed marker.
-   - Throws: Duplicate reserved identities, context serialization/hash failures, or atomic
-     persistence errors. Failed saves roll back every staged row.
+   - Side effects: Under the canonical installed-book lease, may create AI Documents, inserts
+     page/content/cache rows, commits the sync journal once, and broadcasts the committed marker.
+   - Throws: Duplicate or foreign reserved identities, strict registry failures, context
+     serialization/hash failures, or atomic persistence errors. Failed saves roll back every staged
+     row and release the root-wide lease before a queued identity publisher proceeds.
    */
   public func save(
     content: String,
@@ -197,47 +226,53 @@ public final class AIGeneratedPageStore {
       sourceModelName: sourceModelName
     )
 
-    let modelContext = ModelContext(modelContainer)
-    do {
-      let now = Date()
-      let document = try resolveOrCreateAIDocument(in: modelContext, now: now)
-      let staged = try stagePage(
-        in: modelContext,
-        document: document,
-        content: content,
-        title: title,
-        orderNumber: nil,
-        metadata: metadata,
-        now: now
-      )
-      try RemoteSyncMutationJournalService.savePendingGraphChanges(
-        for: .myDocuments,
-        modelContext: modelContext
-      )
+    return try mutationCoordinator.withExclusiveTransaction(
+      kind: .myDocument,
+      prepare: { () },
+      commit: { _ in
+        let modelContext = ModelContext(modelContainer)
+        do {
+          let now = Date()
+          let document = try resolveOrCreateAIDocument(in: modelContext, now: now)
+          let staged = try stagePage(
+            in: modelContext,
+            document: document,
+            content: content,
+            title: title,
+            orderNumber: nil,
+            metadata: metadata,
+            now: now
+          )
+          try RemoteSyncMutationJournalService.savePendingGraphChanges(
+            for: .myDocuments,
+            modelContext: modelContext
+          )
 
-      guard let cache = staged.cache else {
-        throw AIGeneratedPageStoreError.invalidGeneratedGraph
-      }
-      let location = Self.location(document: document, page: staged.page)
-      markerEventCenter.post(
-        MyDocumentAIDocMarkersChangedEvent(
-          markers: [
-            Self.marker(
-              document: document,
-              page: staged.page,
-              cache: cache
+          guard let cache = staged.cache else {
+            throw AIGeneratedPageStoreError.invalidGeneratedGraph
+          }
+          let location = Self.location(document: document, page: staged.page)
+          markerEventCenter.post(
+            MyDocumentAIDocMarkersChangedEvent(
+              markers: [
+                Self.marker(
+                  document: document,
+                  page: staged.page,
+                  cache: cache
+                )
+              ]
             )
-          ]
-        )
-      )
-      return location
-    } catch let error as AIGeneratedPageStoreError {
-      modelContext.rollback()
-      throw error
-    } catch {
-      modelContext.rollback()
-      throw AIGeneratedPageStoreError.persistenceFailed(error.localizedDescription)
-    }
+          )
+          return location
+        } catch let error as AIGeneratedPageStoreError {
+          modelContext.rollback()
+          throw error
+        } catch {
+          modelContext.rollback()
+          throw AIGeneratedPageStoreError.persistenceFailed(error.localizedDescription)
+        }
+      }
+    )
   }
 
   /**
@@ -422,8 +457,14 @@ public final class AIGeneratedPageStore {
      - modelContext: Operation-scoped SwiftData context.
      - now: Shared creation timestamp for the new graph.
    - Returns: The sole reserved AI Documents row.
-   - Side effects: May renumber existing documents and insert the reserved container.
-   - Throws: Fetch failures or `duplicateAIDocuments` when the reserved identity is ambiguous.
+   - Side effects: When no container exists, reads the injected complete registry before renumbering
+     existing documents and inserting the reserved container into the operation context.
+   - Throws: Fetch failures, `duplicateAIDocuments`, foreign identity ownership, or strict registry
+     capture failures. Registry checks occur before any staged graph mutation.
+   - Important: The caller must hold `mutationCoordinator` so admission and publication are one
+     serialization boundary with native, SQLite, EPUB, and interactive My Documents writers.
+   - Important: Foreign ownership is an intentional safety divergence from Android, which saves the
+     row/page before its BookSet registration can be skipped. iOS leaves zero invisible AI graph.
    */
   private func resolveOrCreateAIDocument(
     in modelContext: ModelContext,
@@ -435,6 +476,18 @@ public final class AIGeneratedPageStore {
       throw AIGeneratedPageStoreError.duplicateAIDocuments
     }
     if let existing = aiDocuments.first { return existing }
+
+    let identityIsUnavailable: Bool
+    do {
+      identityIsUnavailable = try isDocumentInitialsUnavailable(Self.documentInitials)
+    } catch let error as AIGeneratedPageStoreError {
+      throw error
+    } catch {
+      throw AIGeneratedPageStoreError.registryUnavailable(error.localizedDescription)
+    }
+    guard !identityIsUnavailable else {
+      throw AIGeneratedPageStoreError.documentIdentityOwned(Self.documentInitials)
+    }
 
     let orderedDocuments = allDocuments.sorted { lhs, rhs in
       if lhs.orderNumber != rhs.orderNumber { return lhs.orderNumber < rhs.orderNumber }

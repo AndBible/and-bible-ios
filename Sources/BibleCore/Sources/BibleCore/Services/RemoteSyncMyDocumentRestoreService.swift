@@ -2,6 +2,7 @@
 
 import Foundation
 import SQLite3
+import SwordKit
 import SwiftData
 
 private let remoteSyncMyDocumentSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -208,6 +209,20 @@ public struct RemoteSyncMyDocumentRestoreReport: Sendable, Equatable {
 
 /**
  Reads staged Android My Documents databases and restores them into iOS SwiftData.
+
+ This is an authoritative synced-graph replacement, not a new local document registration. Android
+ retains restored My Documents rows even when an earlier native, SQLite, or EPUB registration owns
+ the same lookup identity. iOS therefore preserves those rows as sync data and lets the combined
+ reader resolver replay native, SQLite, EPUB, then My Documents admission to choose the visible
+ owner. Restore intentionally does not reject the remote graph against the live module registry.
+
+ Side effects:
+ - reads staged SQLite databases without mutating them
+ - replaces the complete local My Documents graph in one caller-owned or direct SwiftData commit
+
+ Failure modes:
+ - malformed schemas, invalid graphs, fetch failures, and persistence failures abort or roll back the
+   replacement; registry collisions are retained and resolved later by Android registration order
  */
 public final class RemoteSyncMyDocumentRestoreService {
     public static let supportedAndroidSchemaVersion = 4
@@ -429,8 +444,10 @@ public final class RemoteSyncMyDocumentRestoreService {
      Returns staged My Documents initials that would violate Android bridge uniqueness.
 
      Android exposes each My Document as a generated general-book module and keeps `initials`
-     unique. iOS must preserve that contract at import time because CloudKit-backed SwiftData
-     stores cannot use a native unique constraint on the synced model attribute.
+     unique by SQLite BINARY/Java `String.equals` identity. iOS must preserve that exact UTF-16
+     contract at import time because CloudKit-backed SwiftData stores cannot use a native unique
+     constraint on the synced model attribute and Swift `String` equality normalizes canonical
+     equivalents.
 
      - Parameter documents: Android-shaped My Documents rows decoded from restore or patch data.
      - Returns: Sorted duplicate initials values; empty when the staged rows are unique.
@@ -438,16 +455,19 @@ public final class RemoteSyncMyDocumentRestoreService {
      - Failure modes: This helper cannot fail.
      */
     private static func duplicateInitials(in documents: [RemoteSyncAndroidMyDocument]) -> [String] {
-        var seen: Set<String> = []
-        var duplicates: Set<String> = []
+        var seen: Set<SwordJavaExactStringIdentity> = []
+        var duplicates: [SwordJavaExactStringIdentity: String] = [:]
         for document in documents {
-            if seen.contains(document.initials) {
-                duplicates.insert(document.initials)
-            } else {
-                seen.insert(document.initials)
+            let identity = SwordJavaExactStringIdentity(document.initials)
+            if !seen.insert(identity).inserted {
+                duplicates[identity] = document.initials
             }
         }
-        return duplicates.sorted()
+        return duplicates.values.sorted {
+            SwordJavaExactStringIdentity($0).utf16CodeUnits.lexicographicallyPrecedes(
+                SwordJavaExactStringIdentity($1).utf16CodeUnits
+            )
+        }
     }
 
     private static func orphanReferences(

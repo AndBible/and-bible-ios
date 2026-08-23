@@ -1,97 +1,100 @@
-// SwordVerseOSISProjection.swift -- Chapter-level projection for verse-entry OSIS
+// SwordVerseOSISProjection.swift -- JSword SwordBook verse-entry projection
 
 import Foundation
 
 /**
- Separates chapter-level pre-verse structure from one SWORD verse entry.
+ Reconstructs pinned JSword's chapter/pre-verse boundary for one SWORD verse entry.
 
- Android asks JSword for a chapter-range OSIS fragment, where section titles and paragraph
- milestones are siblings of the following `<verse>`. The iOS SWORD bridge reads one entry at a
- time, and those leading nodes arrive in the same entry as the verse text. This projection restores
- the chapter-level structure before `BibleChapterDocumentBuilder` adds its synthetic verse wrapper.
+ `SwordBook.addOSIS` leaves already-wrapped verse content intact. Otherwise it finds the last direct
+ `div`/`title` with `subType="x-preverse"` (including repaired Psalm titles), keeps everything
+ through that node at chapter level, and wraps the complete suffix as the verse body.
  */
 public struct SwordVerseOSISProjection: Equatable, Sendable {
-    /// Leading title, chapter, and milestone XML that belongs before the synthetic verse.
+    /// Full lossless source after JSword's Psalm-title attribute repair.
+    public let sourceXML: String
+    /// Content retained at chapter level before a synthetic verse.
     public let preVerseXML: String
-    /// Remaining inline and textual XML that belongs inside the synthetic verse.
+    /// Complete suffix to wrap, or all source content when a direct verse already exists.
     public let verseBodyXML: String
+    /// Whether JSword found a direct top-level verse and therefore skips synthetic wrapping.
+    public let isAlreadyWrapped: Bool
 
     /**
-     Parses and partitions one raw SWORD verse-entry fragment.
+     Parses and partitions one raw SWORD verse-entry fragment using pinned `SwordBook.addOSIS`.
 
-     - Parameter fragmentXML: Raw OSIS content for one exact verse key.
-     - Returns: A projection whose concatenated fields preserve the source node order.
-     - Side effects: Parses an in-memory XML document without resolving external entities.
-     - Failure modes: Malformed XML is retained entirely as `verseBodyXML`; no source content is
-       discarded and `preVerseXML` is empty.
+     - Parameters:
+       - fragmentXML: Raw source fragment; outer spaces/tabs remain content.
+       - verseOrdinal: Optional source ordinal applied to direct existing verse elements, matching
+         JSword's reader assembly. Search projection omits it because it does not affect text.
+     - Returns: Full repaired source plus exact pre-verse/body ownership and wrapper state.
+     - Side effects: Parses and mutates a bounded in-memory XML tree only.
+     - Failure modes: Malformed XML remains wholly in `sourceXML`/`verseBodyXML`, with no invented
+       preamble and `isAlreadyWrapped == false`.
      */
-    public static func project(_ fragmentXML: String) -> SwordVerseOSISProjection {
-        let trimmed = fragmentXML.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let root = try? SwordXMLTreeParser.parse(xml: "<osis-fragment>\(trimmed)</osis-fragment>") else {
-            return SwordVerseOSISProjection(preVerseXML: "", verseBodyXML: trimmed)
+    public static func project(
+        _ fragmentXML: String,
+        verseOrdinal: Int? = nil
+    ) -> SwordVerseOSISProjection {
+        guard let root = try? SwordXMLTreeParser.parse(
+            xml: "<osis-fragment>\(fragmentXML)</osis-fragment>"
+        ) else {
+            return SwordVerseOSISProjection(
+                sourceXML: fragmentXML,
+                preVerseXML: "",
+                verseBodyXML: fragmentXML,
+                isAlreadyWrapped: false
+            )
         }
 
-        var preVerseNodes: [SwordXMLNode] = []
-        var pendingWhitespace: [SwordXMLNode] = []
-        var bodyNodes: [SwordXMLNode] = []
-        var reachedVerseBody = false
+        var lastPreVerseIndex: Int?
+        var alreadyWrapped = false
+        for (index, node) in root.children.enumerated() where node.isElement {
+            if node.localName == "verse" {
+                alreadyWrapped = true
+                if let verseOrdinal {
+                    node.setAttribute(named: "verseOrdinal", value: String(verseOrdinal))
+                }
+                continue
+            }
 
-        for node in root.children {
-            if reachedVerseBody {
-                bodyNodes.append(node)
-            } else if node.isWhitespaceOnlyText {
-                pendingWhitespace.append(node)
-            } else if node.isChapterLevelVersePreamble {
-                preVerseNodes.append(contentsOf: pendingWhitespace)
-                pendingWhitespace.removeAll(keepingCapacity: true)
-                preVerseNodes.append(node)
-            } else {
-                bodyNodes.append(contentsOf: pendingWhitespace)
-                pendingWhitespace.removeAll(keepingCapacity: true)
-                bodyNodes.append(node)
-                reachedVerseBody = true
+            let subtype = node.attribute(named: "subType")
+            if subtype == "x-preverse", node.localName == "div" || node.localName == "title" {
+                lastPreVerseIndex = index
+            } else if node.localName == "title", node.attribute(named: "type") == "psalm" {
+                if node.attribute(named: "canonical") == nil {
+                    node.setAttribute(named: "canonical", value: "true")
+                }
+                if subtype == nil {
+                    node.setAttribute(named: "subType", value: "x-preverse")
+                    lastPreVerseIndex = index
+                }
             }
         }
 
-        if reachedVerseBody {
-            bodyNodes.append(contentsOf: pendingWhitespace)
-        } else {
-            preVerseNodes.append(contentsOf: pendingWhitespace)
+        let serialized = root.children.map { $0.serializedXML() }
+        let fullSource = serialized.joined()
+        if alreadyWrapped {
+            return SwordVerseOSISProjection(
+                sourceXML: fullSource,
+                preVerseXML: "",
+                verseBodyXML: fullSource,
+                isAlreadyWrapped: true
+            )
         }
 
+        guard let lastPreVerseIndex else {
+            return SwordVerseOSISProjection(
+                sourceXML: fullSource,
+                preVerseXML: "",
+                verseBodyXML: fullSource,
+                isAlreadyWrapped: false
+            )
+        }
         return SwordVerseOSISProjection(
-            preVerseXML: preVerseNodes.map { $0.serializedXML() }.joined(),
-            verseBodyXML: bodyNodes.map { $0.serializedXML() }.joined()
+            sourceXML: fullSource,
+            preVerseXML: serialized[...lastPreVerseIndex].joined(),
+            verseBodyXML: serialized[(lastPreVerseIndex + 1)...].joined(),
+            isAlreadyWrapped: false
         )
-    }
-}
-
-private extension SwordXMLNode {
-    /// Whether this node is formatting-only whitespace between top-level fragment nodes.
-    var isWhitespaceOnlyText: Bool {
-        isTextLike && stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /**
-     Whether this leading node occupies JSword's chapter level rather than the verse body.
-
-     Titles and chapter markers are always pre-verse structure. SWORD represents paired section,
-     paragraph, poetic line-group, and pre-verse boundaries as empty milestone elements carrying
-     `sID` or `eID`. Comments and processing instructions are non-rendering metadata and can remain
-     with the adjacent preamble without changing visible content.
-     */
-    var isChapterLevelVersePreamble: Bool {
-        guard isElement else {
-            return !isTextLike
-        }
-        if localName == "title" || localName == "chapter" {
-            return true
-        }
-        if attribute(named: "subType")?.lowercased() == "x-preverse" {
-            return true
-        }
-        return (localName == "div" || localName == "lg" || localName == "milestone")
-            && (attribute(named: "sID") != nil || attribute(named: "eID") != nil)
     }
 }

@@ -227,7 +227,7 @@ struct SQLiteReaderSpeechSessionBuilder {
         if let checkpoint {
             if checkpoint.version == 0 {
                 let cursor = checkpoint.current
-                guard cursor.bookInitials == module.info.name,
+                guard SwordJavaStringIdentity.equals(cursor.bookInitials, module.info.name),
                       cursor.category == category,
                       let ordinal = cursor.ordinalStart,
                       cursor.ordinalEnd == ordinal else {
@@ -405,9 +405,12 @@ struct SQLiteReaderSpeechSessionBuilder {
               checkpoint.current.category == category,
               checkpoint.lowerBound.category == category,
               checkpoint.upperBound.category == category,
-              checkpoint.current.bookInitials == module.info.name,
-              checkpoint.lowerBound.bookInitials == module.info.name,
-              checkpoint.upperBound.bookInitials == module.info.name,
+              SwordJavaStringIdentity.equals(
+                checkpoint.current.bookInitials, module.info.name),
+              SwordJavaStringIdentity.equals(
+                checkpoint.lowerBound.bookInitials, module.info.name),
+              SwordJavaStringIdentity.equals(
+                checkpoint.upperBound.bookInitials, module.info.name),
               checkpoint.current.versification == JSwordKJVAVersification.name,
               checkpoint.lowerBound.versification == JSwordKJVAVersification.name,
               checkpoint.upperBound.versification == JSwordKJVAVersification.name,

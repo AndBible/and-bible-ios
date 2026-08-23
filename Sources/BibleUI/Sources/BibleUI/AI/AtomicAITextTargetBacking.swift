@@ -15,6 +15,8 @@ import Foundation
 public final class BibleUIAITextTargetBacking: AITextTargetBacking {
     private let bookmarkService: BookmarkService
     private let myDocumentStore: MyDocumentStore
+    /// Fresh combined-registry proof required before a My Documents page is read or written.
+    private let isMyDocumentPageAuthorized: (UUID) -> Bool
 
     /**
      Creates production text-target routing over existing persistence services.
@@ -22,15 +24,19 @@ public final class BibleUIAITextTargetBacking: AITextTargetBacking {
      - Parameters:
        - bookmarkService: Existing Bible/generic bookmark and StudyPad service.
        - myDocumentStore: Existing rollback-aware My Documents page store.
+       - isMyDocumentPageAuthorized: Fresh reader-ownership proof for My Documents page ids. The
+         default preserves explicit non-reader management callers that already own their store.
      - Side effects: None.
      - Failure modes: None; both dependencies retain ownership of their model contexts.
      */
     public init(
         bookmarkService: BookmarkService,
-        myDocumentStore: MyDocumentStore
+        myDocumentStore: MyDocumentStore,
+        isMyDocumentPageAuthorized: @escaping (UUID) -> Bool = { _ in true }
     ) {
         self.bookmarkService = bookmarkService
         self.myDocumentStore = myDocumentStore
+        self.isMyDocumentPageAuthorized = isMyDocumentPageAuthorized
     }
 
     /**
@@ -40,7 +46,8 @@ public final class BibleUIAITextTargetBacking: AITextTargetBacking {
      - Returns: Current value, including an empty body when the owning entity exists without a
        detached content row, or nil when the owning entity is absent.
      - Side effects: Reads model-context-backed services on the main actor.
-     - Failure modes: None; missing entities return nil.
+     - Failure modes: Missing entities and My Documents pages no longer owned by the reader's fresh
+       combined registry return nil before page content is read.
      */
     public func read(_ target: AITextTarget) async throws -> AITextTargetValue? {
         currentValue(for: target)
@@ -86,15 +93,22 @@ public final class BibleUIAITextTargetBacking: AITextTargetBacking {
         case .studyPadText(let id):
             bookmarkService.updateStudyPadTextEntryText(id: id, text: value.content)
         case .myDocumentPage(let id):
-            guard let page = myDocumentStore.page(pageId: id),
+            guard isMyDocumentPageAuthorized(id) else {
+                return .staleContent
+            }
+            guard let page = myDocumentStore.page(pageId: id) else {
+                return .targetNotFound
+            }
+            guard
                   let initials = page.document?.initials,
                   myDocumentStore.savePageContent(
                       bookInitials: initials,
                       pageId: id,
                       content: value.content,
                       title: nil
-                  ) else {
-                return myDocumentStore.page(pageId: id) == nil ? .targetNotFound : .staleContent
+                  )
+            else {
+                return .staleContent
             }
         }
 
@@ -123,7 +137,8 @@ public final class BibleUIAITextTargetBacking: AITextTargetBacking {
                 contentType: Self.noteContentType(entry.contentType)
             )
         case .myDocumentPage(let id):
-            guard let page = myDocumentStore.page(pageId: id) else { return nil }
+            guard isMyDocumentPageAuthorized(id),
+                  let page = myDocumentStore.page(pageId: id) else { return nil }
             return AITextTargetValue(
                 content: page.pageContent?.content ?? "",
                 contentType: page.contentType.aiTextContentType

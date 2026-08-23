@@ -1544,3 +1544,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Toque duas vezes para sair de ecran inteiro";
+
+/* Android shared translations */
+"try_again_passphrase" = "A Palavra passe não foi reconhecida, tentar de novo?";
+
+/* Android shared translations */
+"document_not_installed" = "Por favor faça o download: '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ não foi encontrado no documento %2$@";

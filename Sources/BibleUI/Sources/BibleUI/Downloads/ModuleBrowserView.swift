@@ -1482,7 +1482,10 @@ public struct ModuleBrowserView: View {
     private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
         isImportingExternalDocument = true
         externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext,
+            swordManager: swordManager
+        )
         Task { @MainActor in
             let preflight = await Task.detached(priority: .userInitiated) {
                 service.preflightDocument(request)
@@ -1523,7 +1526,10 @@ public struct ModuleBrowserView: View {
     ) {
         isImportingExternalDocument = true
         externalDocumentImportProgress = ModuleInstallProgress(phase: .queued)
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: modelContext,
+            swordManager: swordManager
+        )
         Task { @MainActor in
             let importResult = await Task.detached(priority: .userInitiated) {
                 service.importDocument(

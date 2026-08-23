@@ -976,3 +976,12 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 
 /* Android shared translations */
 "exit_fullscreen" = "Толық бейне бетінен шығу үшін бейне бетін екі рез түртіңіз";
+
+/* Android shared translations */
+"try_again_passphrase" = "Құпия сөзді қабылдамады, қайталап көрдіңіз бе?";
+
+/* Android shared translations */
+"document_not_installed" = "Жүктеңіз '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ %2$@ құжатында табылмады.";

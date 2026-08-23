@@ -222,6 +222,50 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         XCTAssertEqual(documents.map(\.initials), ["EXISTING"])
     }
 
+    /**
+     Preserves canonically equivalent initials that Android SQLite stores as distinct identities.
+
+     - Setup: Builds an authoritative Android snapshot containing composed and decomposed UTF-16
+       spellings that Swift `String` considers equal but Java `String.equals` keeps distinct.
+     - Expected result: Restore accepts and persists both documents without reporting a duplicate.
+     - Failure meaning: Swift canonical-equivalence leaked into the Android BINARY uniqueness
+       boundary and would reject a valid synchronized My Documents graph before mutation.
+     - Side effects: Creates one temporary Android SQLite fixture and an in-memory SwiftData graph.
+     */
+    func testRemoteSyncMyDocumentRestorePreservesJavaDistinctCanonicalInitials() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let composed = "Remote-Caf\u{00E9}"
+        let decomposed = "Remote-Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: [
+                .init(id: UUID(), name: "Composed", initials: composed),
+                .init(id: UUID(), name: "Decomposed", initials: decomposed),
+            ],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let service = RemoteSyncMyDocumentRestoreService()
+        let snapshot = try service.readSnapshot(from: databaseURL)
+        let report = try service.replaceLocalMyDocuments(
+            from: snapshot,
+            modelContext: modelContext
+        )
+
+        XCTAssertEqual(report.restoredDocumentCount, 2)
+        let restored = try modelContext.fetch(FetchDescriptor<MyDocument>()).map(\.initials)
+        XCTAssertEqual(Set(restored.map { Array($0.utf16) }), Set([
+            Array(composed.utf16),
+            Array(decomposed.utf16),
+        ]))
+    }
+
     func testRemoteSyncMyDocumentRestoreRejectsMalformedContentType() throws {
         let documentID = UUID(uuidString: "d1000000-0000-0000-0000-000000000001")!
         let pageID = UUID(uuidString: "d1000000-0000-0000-0000-000000000011")!

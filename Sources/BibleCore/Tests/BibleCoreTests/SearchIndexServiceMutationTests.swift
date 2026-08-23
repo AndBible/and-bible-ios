@@ -127,7 +127,7 @@ final class SearchIndexServiceMutationTests: XCTestCase {
 
      - Setup: Writes a version-seven-style FTS/metadata pair without opaque-token, display-mode, or
        durable source-generation columns, then opens the database through production initialization.
-     - Expected result: Version eight tables contain every required column and legacy readiness is gone.
+     - Expected result: Version nine tables contain every required column and legacy readiness is gone.
      - Failure meaning: An upgraded app can continue advertising an incompatible generated index.
      - Side effects: Creates and removes one isolated SQLite database.
      */
@@ -162,7 +162,7 @@ final class SearchIndexServiceMutationTests: XCTestCase {
         sqlite3_close(legacyDatabase)
 
         let service = SearchIndexService(databasePath: databaseURL.path)
-        XCTAssertEqual(SearchIndexService.currentSchemaVersion, 8)
+        XCTAssertEqual(SearchIndexService.currentSchemaVersion, 9)
         XCTAssertFalse(service.hasIndex(for: "KJV"))
 
         let ftsColumns = try tableColumns(named: "verse_fts", databaseURL: databaseURL)
@@ -175,6 +175,49 @@ final class SearchIndexServiceMutationTests: XCTestCase {
             try tableColumns(named: "search_index_state", databaseURL: databaseURL),
             Set(["id", "store_generation"])
         )
+    }
+
+    /**
+     Verifies version-eight rows are invalidated when structured Search text projection changes.
+
+     - Setup: Creates the current generated schema, seeds one ready module, then marks only its
+       metadata as version eight to model an index built from SWORD stripped/rendered text.
+     - Expected result: Reopening production initialization removes stale readiness while leaving the
+       generated row inaccessible until normal transactional replacement rebuilds the module.
+     - Failure meaning: Upgraded installations can keep returning annotation-bearing Search rows.
+     - Side effects: Creates, mutates, and removes one isolated SQLite index database.
+     */
+    func testVersionEightTextProjectionMetadataRequiresReindex() throws {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-index-v8-projection-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let currentService = SearchIndexService(databasePath: databaseURL.path)
+        try seedSearchIndexFixture(moduleName: "FINRK", databaseURL: databaseURL)
+        XCTAssertTrue(currentService.hasIndex(for: "FINRK"))
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
+              let db else {
+            throw SearchIndexFixtureError.openFailed
+        }
+        guard sqlite3_exec(
+            db,
+            "UPDATE indexed_modules SET schema_version = 8 WHERE module_name = 'FINRK'",
+            nil,
+            nil,
+            nil
+        ) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw SearchIndexFixtureError.writeFailed
+        }
+        sqlite3_close(db)
+
+        let reopenedService = SearchIndexService(databasePath: databaseURL.path)
+        XCTAssertFalse(reopenedService.hasIndex(for: "FINRK"))
+        let counts = try searchIndexFixtureCounts(moduleName: "FINRK", databaseURL: databaseURL)
+        XCTAssertEqual(counts.rows, 1)
+        XCTAssertEqual(counts.metadata, 0)
     }
 
     /**

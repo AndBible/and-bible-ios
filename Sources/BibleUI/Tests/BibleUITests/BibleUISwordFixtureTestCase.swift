@@ -106,6 +106,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
      - Parameters:
        - moduleName: SWORD module initials to publish in `mods.d`.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - features: Optional SWORD `Feature` values written in declaration order.
      - Side effects: Writes a `.conf` file and empty `RawCom` data files under `modulePath`.
      - Failure modes: Propagates filesystem write errors.
      */
@@ -151,15 +152,29 @@ class BibleUISwordFixtureTestCase: XCTestCase {
 
      Reader coordinator parity tests need a real dictionary category because Android's multi-window
      state tracks auxiliary documents separately from Bible/commentary documents. The empty RawLD
-     payload is enough for SWORD discovery and controller switching without fixture content.
+     payload is enough for SWORD discovery and controller switching without fixture content. Tests
+     may also publish definition features so an empty module can model an installed Strong's source
+     whose requested entry is absent.
 
      - Parameters:
        - moduleName: SWORD module initials to publish in `mods.d`.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
+       - category: SWORD category string used to exercise global book selection independently from
+         the RawLD backend's exact-key capability.
+       - features: Optional SWORD `Feature` values, such as `GreekDef`, written in declaration order.
+       - caseSensitiveKeys: Optional RawLD `CaseSensitiveKeys` value; `nil` omits the config entry.
+       - strongsPadding: Optional RawLD `StrongsPadding` value; `nil` omits the config entry.
      - Side effects: Writes a `.conf` file and empty `RawLD` data files under `modulePath`.
      - Failure modes: Propagates filesystem write errors.
      */
-    func seedEmptyRawDictionaryModule(named moduleName: String = "UITestDict", in modulePath: String) throws {
+    func seedEmptyRawDictionaryModule(
+        named moduleName: String = "UITestDict",
+        in modulePath: String,
+        category: String = "Lexicons / Dictionaries",
+        features: [String] = [],
+        caseSensitiveKeys: Bool? = nil,
+        strongsPadding: Bool? = nil
+    ) throws {
         let fileManager = FileManager.default
         let moduleKey = moduleName.lowercased()
         let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
@@ -179,15 +194,22 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             }
         }
 
+        let featureEntries = features.map { "Feature=\($0)" }.joined(separator: "\n")
+        let keyBehaviorEntries = [
+            caseSensitiveKeys.map { "CaseSensitiveKeys=\($0 ? "true" : "false")" },
+            strongsPadding.map { "StrongsPadding=\($0 ? "true" : "false")" },
+        ].compactMap { $0 }.joined(separator: "\n")
         let conf = """
         [\(moduleName)]
         Description=UI Test Dictionary
-        Category=Lexicons / Dictionaries
+        Category=\(category)
         DataPath=./modules/lexdict/rawld/\(moduleKey)/\(moduleKey)
         ModDrv=RawLD
         SourceType=OSIS
         Encoding=UTF-8
         Lang=en
+        \(featureEntries)
+        \(keyBehaviorEntries)
         About=Deterministic empty dictionary module for iOS parity tests.
         """
         try conf.write(
@@ -210,7 +232,11 @@ class BibleUISwordFixtureTestCase: XCTestCase {
      - Side effects: Writes a `.conf` file and empty `RawGenBook` data files under `modulePath`.
      - Failure modes: Propagates filesystem write errors.
      */
-    func seedEmptyRawGeneralBookModule(named moduleName: String = "UITestGB", in modulePath: String) throws {
+    func seedEmptyRawGeneralBookModule(
+        named moduleName: String = "UITestGB",
+        in modulePath: String,
+        features: [String] = []
+    ) throws {
         let fileManager = FileManager.default
         let moduleKey = moduleName.lowercased()
         let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
@@ -230,6 +256,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
             }
         }
 
+        let featureEntries = features.map { "Feature=\($0)" }.joined(separator: "\n")
         let conf = """
         [\(moduleName)]
         Description=UI Test General Book
@@ -239,6 +266,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         SourceType=OSIS
         Encoding=UTF-8
         Lang=en
+        \(featureEntries)
         About=Deterministic empty general book module for iOS parity tests.
         """
         try conf.write(
@@ -312,6 +340,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
        - description: Human-readable module name stored in the alias descriptor.
        - language: ISO language code used by quick-selector ordering and labels.
        - versification: SWORD canon name assigned to the alias descriptor.
+       - moduleDriver: Optional driver override for metadata/classification tests.
        - modulePath: Temporary SWORD root returned by `makeTemporarySwordFixturePath()`.
      - Side effects: Writes a `.conf` file under `modulePath/mods.d`.
      - Failure modes: Propagates filesystem read/write errors, including a missing KJV test fixture
@@ -322,6 +351,7 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         description: String,
         language: String = "en",
         versification: String = "KJV",
+        moduleDriver: String? = nil,
         in modulePath: String
     ) throws {
         let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
@@ -332,6 +362,9 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         config = replaceConfigLine(named: "Description", with: description, in: config)
         config = replaceConfigLine(named: "Lang", with: language, in: config)
         config = replaceConfigLine(named: "Versification", with: versification, in: config)
+        if let moduleDriver {
+            config = replaceConfigLine(named: "ModDrv", with: moduleDriver, in: config)
+        }
 
         try config.write(
             to: modsDURL.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),

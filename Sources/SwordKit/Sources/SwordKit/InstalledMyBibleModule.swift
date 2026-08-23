@@ -6,9 +6,10 @@ import Foundation
  Persisted metadata for one installed MyBible package.
 
  Android exposes MyBible packages through `Books.installed().books` after the SQLite payload is
- imported. iOS stores manifest-installed MyBible packages outside libsword with a `module.json`
- sidecar; this value type owns the shared projection from that sidecar into `ModuleInfo` so all
- installed-module callers use one Android-compatible inventory contract.
+ imported. iOS stores manifest/install provenance outside libsword in `module.json`, but Android's
+ installed identity, description, language, and category come from the actual database. This value
+ therefore decodes only durable sidecar provenance; `InstalledMyBibleBookReader` owns inventory
+ projection from the payload.
  */
 struct InstalledMyBibleModule: Codable, Sendable {
     /// Installed module initials used by Downloads, reader lists, and uninstall.
@@ -38,79 +39,4 @@ struct InstalledMyBibleModule: Codable, Sendable {
     /// Local install timestamp for diagnostics and future migrations.
     var installedAt: Date
 
-    /// Converts sidecar metadata into the common installed-module row model.
-    var moduleInfo: ModuleInfo {
-        let resolvedCategory = ModuleCategory(typeString: category)
-        return ModuleInfo(
-            name: name,
-            description: description,
-            category: resolvedCategory,
-            language: language,
-            moduleDriver: Self.moduleDriver(for: resolvedCategory),
-            version: version,
-            aboutMetadata: ModuleAboutMetadata(
-                versification: "KJVA",
-                osisId: name,
-                repository: sourceName
-            )
-        )
-    }
-
-    /**
-     Resolves the Android custom driver represented by a MyBible package sidecar.
-
-     The sidecar predates explicit driver storage but is written only by the MyBible repository
-     installer, so its category identifies the same three custom `BookType`s Android registers.
-
-     - Parameter category: Category captured from the MyBible repository manifest.
-     - Returns: Registered MyBible driver for Bible, commentary, or dictionary packages; otherwise an
-       empty unsupported value.
-     - Side effects: None.
-     - Failure modes: Categories MyBible cannot represent fail closed during module admission.
-     */
-    private static func moduleDriver(for category: ModuleCategory) -> String {
-        switch category {
-        case .bible:
-            return "MyBibleBible"
-        case .commentary:
-            return "MyBibleCommentary"
-        case .dictionary:
-            return "MyBibleDictionary"
-        default:
-            return ""
-        }
-    }
-
-    /**
-     Checks whether the installed module directory still contains a readable MyBible payload.
-
-     Android only adds MyBible books to `Books.installed()` when the source SQLite file can be read.
-     Matching that behavior keeps stale `module.json` files from creating fake installed modules.
-
-     - Parameter moduleDirectory: Directory containing `module.json` and extracted package payloads.
-     - Returns: `true` when at least one expected SQLite/MyBible file is readable.
-     - Side effects: Reads directory metadata.
-     - Failure modes: Missing or unreadable directories return `false`.
-     */
-    func hasReadablePayload(in moduleDirectory: URL) -> Bool {
-        let fm = FileManager.default
-        let urls = (try? fm.contentsOfDirectory(
-            at: moduleDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        let expectedPayloadName = (packageFileName as NSString).deletingPathExtension
-
-        return urls.contains { url in
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
-                  fm.isReadableFile(atPath: url.path) else {
-                return false
-            }
-            let fileName = url.lastPathComponent
-            let lowercased = fileName.lowercased()
-            return lowercased.hasSuffix(".sqlite3") ||
-                lowercased.hasSuffix(".mybible") ||
-                (!expectedPayloadName.isEmpty && fileName == expectedPayloadName)
-        }
-    }
 }

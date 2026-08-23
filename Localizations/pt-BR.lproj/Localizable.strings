@@ -1528,3 +1528,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Duplo toque para sair da tela cheia";
+
+/* Android shared translations */
+"try_again_passphrase" = "A senha não foi reconhecida, tentar novamente?";
+
+/* Android shared translations */
+"document_not_installed" = "Por favor baixe: '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ não foi encontrado no documento %2$@";

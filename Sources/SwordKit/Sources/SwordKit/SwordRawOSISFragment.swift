@@ -17,6 +17,12 @@ public enum SwordRawOSISFragmentError: Error, Equatable, LocalizedError, Sendabl
     case keyNotFound(requested: String, resolved: String)
     /// The source entry could not be parsed as the XML emitted by JSword's OSIS pipeline.
     case malformedOSIS(key: String, reason: String)
+    /// A commentary-category dictionary entry contains no direct verse for Android to unwrap.
+    case missingCommentaryVerse(key: String, keyName: String, osisRef: String)
+    /// The requested native module is not represented by JSword as a `SwordDictionary`.
+    case unsupportedDictionaryDriver(String)
+    /// The requested native module is not represented by JSword as a `SwordGenBook`.
+    case unsupportedGenBookDriver(String)
 
     /// Human-readable diagnostic suitable for logs and reader error documents.
     public var errorDescription: String? {
@@ -29,6 +35,12 @@ public enum SwordRawOSISFragmentError: Error, Equatable, LocalizedError, Sendabl
             return "The SWORD key '\(requested)' resolved to '\(resolved)' instead of an exact entry."
         case .malformedOSIS(let key, let reason):
             return "The SWORD entry '\(key)' contains malformed OSIS: \(reason)"
+        case .missingCommentaryVerse(let key, _, _):
+            return "The SWORD commentary entry '\(key)' has no direct verse element."
+        case .unsupportedDictionaryDriver(let driver):
+            return "The SWORD driver '\(driver)' is not a JSword SwordDictionary backend."
+        case .unsupportedGenBookDriver(let driver):
+            return "The SWORD driver '\(driver)' is not a JSword SwordGenBook backend."
         }
     }
 }
@@ -185,7 +197,180 @@ public extension SwordModule {
        deterministic no-content behavior.
      */
     func rawOSISFragment(forKey keyText: String) throws -> SwordRawOSISFragment {
-        guard Self.rawOSISCategories.contains(info.category) else {
+        try rawOSISFragment(
+            forKey: keyText,
+            insertsGeneratedDictionaryTitle: false,
+            usesDriverOwnedGenericKey: false
+        )
+    }
+
+    /**
+     Reads one exact native `SwordDictionary` entry with its generated title and BVA anchors.
+
+     Android inserts the resolved key title before the source-filtered dictionary body and processes
+     the combined tree once. This narrow API keeps existing generic/commentary callers unchanged
+     while allowing Strong's and word-lookup routes to preserve structured links, an exact empty
+     title-only entry, and continuous title/body ordinal numbering.
+
+     - Parameter keyText: Exact backend-selected RawLD/zLD key from the source index.
+     - Returns: Immutable source metadata and payload-ready anchored dictionary OSIS.
+     - Side effects: Temporarily moves the module cursor under `SwordRuntime` and restores it.
+     - Failure modes: Throws for non-dictionary drivers, non-exact keys, backend conversion failures,
+       or malformed source OSIS.
+     */
+    func rawDictionaryOSISFragment(forKey keyText: String) throws -> SwordRawOSISFragment {
+        let driver = info.moduleDriver
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard ["rawld", "rawld4", "zld"].contains(driver) else {
+            throw SwordRawOSISFragmentError.unsupportedDictionaryDriver(info.moduleDriver)
+        }
+        return try rawOSISFragment(
+            forKey: keyText,
+            insertsGeneratedDictionaryTitle: true,
+            usesDriverOwnedGenericKey: true
+        )
+    }
+
+    /**
+     Reads one JSword-selected RawLD-family record by physical source-index position.
+
+     A stored dictionary can contain distinct keys that libsword collapses after case or Strong's
+     padding normalization. Android selects the first matching physical RawLD index record; this
+     boundary preserves that record identity and asks the native source filters to process its exact
+     body without performing a second ambiguous key search.
+
+     - Parameters:
+       - index: Zero-based physical index returned by the JSword-compatible search.
+       - storedKey: Exact decoded key at that index, used for fragment identity and generated title.
+     - Returns: Payload-ready dictionary OSIS with actual source metadata and hidden generated title.
+     - Side effects: Reads/caches the fixed-width source index, temporarily changes the native key
+       used as filter context, and restores the previous key under `SwordRuntime` serialization.
+     - Failure modes: Throws for unsupported drivers, changed/mismatched slots, zero-size records,
+       contained-file read failures, native decompression/filter failures, or malformed OSIS.
+     */
+    func rawDictionaryOSISFragment(
+        forIndex index: Int,
+        storedKey: String
+    ) throws -> SwordRawOSISFragment {
+        let driver = info.moduleDriver
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard ["rawld", "rawld4", "zld"].contains(driver) else {
+            throw SwordRawOSISFragmentError.unsupportedDictionaryDriver(info.moduleDriver)
+        }
+        guard let slots = try loadRawDictionaryIndexSlots(),
+              slots.indices.contains(index),
+              let slotKey = slots[index].key,
+              slotKey == storedKey,
+              slots[index].size > 0 else {
+            throw SwordRawOSISFragmentError.keyNotFound(requested: storedKey, resolved: "")
+        }
+        let slot = slots[index]
+        let rawRecord = driver == "zld" ? nil : try rawDictionaryRecord(for: slot)
+
+        let capture: RawOSISEntryCapture = SwordRuntime.sync {
+            let previousKey = String(cString: SWModule_getKeyText(handle))
+            defer { SWModule_setKeyText(handle, previousKey) }
+            SWModule_setKeyText(handle, storedKey)
+
+            let converted: String = rawRecord?.withUnsafeBytes { bytes in
+                let pointer = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self)
+                return SWModule_getRawDictionaryOSISFragmentAtIndex(
+                    handle,
+                    Int(index),
+                    pointer,
+                    UInt(bytes.count)
+                ).map(String.init(cString:)) ?? ""
+            } ?? SWModule_getRawDictionaryOSISFragmentAtIndex(
+                handle,
+                Int(index),
+                nil,
+                0
+            ).map(String.init(cString:)) ?? ""
+
+            let abbreviation = Self.nonEmptyConfigValue(handle: handle, key: "Abbreviation") ?? info.name
+            let versification = info.aboutMetadata.versification.isEmpty
+                ? "KJV"
+                : info.aboutMetadata.versification
+            return RawOSISEntryCapture(
+                xml: converted,
+                key: storedKey,
+                keyName: storedKey,
+                osisRef: storedKey,
+                source: SwordRawOSISSource(
+                    initials: info.name,
+                    name: info.description,
+                    abbreviation: abbreviation,
+                    category: info.category,
+                    language: info.language,
+                    direction: info.isRightToLeft ? "rtl" : "ltr",
+                    versification: versification,
+                    hasStrongs: info.features.contains(.strongsNumbers),
+                    moduleFeatures: info.features
+                ),
+                keyOrdinalRange: nil,
+                isNewTestament: false
+            )
+        }
+        return try processedRawOSISFragment(
+            capture: capture,
+            insertsGeneratedDictionaryTitle: true,
+            usesDriverOwnedGenericKey: true,
+            genBookTreeKeyCardinality: nil
+        )
+    }
+
+    /**
+     Reads one exact native `SwordGenBook` TreeKey under its actual configured category.
+
+     - Parameters:
+       - keyText: Exact backend-selected full TreeKey path from the module key map.
+       - treeKeyCardinality: Selected TreeKey plus descendants, derived from the activated key map.
+     - Returns: Immutable actual-key metadata and category-processed payload-ready OSIS.
+     - Side effects: Temporarily moves the module cursor under `SwordRuntime` and restores it.
+     - Failure modes: Throws for a non-RawGenBook driver, non-exact key, malformed OSIS, or a
+       Commentary-configured leaf entry without Android's required direct verse.
+     */
+    func rawGenBookOSISFragment(
+        forKey keyText: String,
+        treeKeyCardinality: Int
+    ) throws -> SwordRawOSISFragment {
+        let driver = info.moduleDriver
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard driver == "rawgenbook" else {
+            throw SwordRawOSISFragmentError.unsupportedGenBookDriver(info.moduleDriver)
+        }
+        return try rawOSISFragment(
+            forKey: keyText,
+            insertsGeneratedDictionaryTitle: false,
+            usesDriverOwnedGenericKey: true,
+            genBookTreeKeyCardinality: treeKeyCardinality
+        )
+    }
+
+    /**
+     Captures and processes one exact source entry under the requested JSword document contract.
+
+     - Parameters:
+       - keyText: Exact source key.
+       - insertsGeneratedDictionaryTitle: Whether to prepend `SwordDictionary`'s hidden key title
+         before the one OSIS processor pass.
+       - usesDriverOwnedGenericKey: Whether a validated dictionary/GenBook driver owns key type
+         independently from configured category.
+       - genBookTreeKeyCardinality: Selected TreeKey subtree size for Android's Commentary branch.
+     - Returns: Immutable processed fragment and exact source metadata.
+     - Side effects: Temporarily moves and restores the module cursor under `SwordRuntime`.
+     - Failure modes: Propagates the public raw-fragment semantic errors.
+     */
+    private func rawOSISFragment(
+        forKey keyText: String,
+        insertsGeneratedDictionaryTitle: Bool,
+        usesDriverOwnedGenericKey: Bool,
+        genBookTreeKeyCardinality: Int? = nil
+    ) throws -> SwordRawOSISFragment {
+        guard usesDriverOwnedGenericKey || Self.rawOSISCategories.contains(info.category) else {
             throw SwordRawOSISFragmentError.unsupportedCategory(info.category)
         }
 
@@ -205,7 +390,7 @@ public extension SwordModule {
             let isNewTestament: Bool
             let osis: String
 
-            if info.category == .commentary {
+            if !usesDriverOwnedGenericKey, info.category == .commentary {
                 guard let requestedVerse = SwordOSISVerseAddress(keyText: requestedKey) else {
                     throw SwordRawOSISFragmentError.invalidKey(keyText)
                 }
@@ -278,12 +463,56 @@ public extension SwordModule {
             )
         }
 
+        return try processedRawOSISFragment(
+            capture: capture,
+            insertsGeneratedDictionaryTitle: insertsGeneratedDictionaryTitle,
+            usesDriverOwnedGenericKey: usesDriverOwnedGenericKey,
+            genBookTreeKeyCardinality: genBookTreeKeyCardinality
+        )
+    }
+
+    /**
+     Applies actual-category document processing and assembles immutable fragment metadata.
+
+     - Parameters:
+       - capture: Exact source XML and resolved book/key metadata.
+       - insertsGeneratedDictionaryTitle: Whether to prepend SwordDictionary's hidden title.
+       - usesDriverOwnedGenericKey: Whether category-independent RawLD/RawGenBook processing applies.
+       - genBookTreeKeyCardinality: Selected TreeKey subtree size for Commentary behavior.
+     - Returns: Canonical payload-ready OSIS and Android fragment identity.
+     - Side effects: Parses and serializes copied XML only.
+     - Failure modes: Maps missing Commentary verses to the typed fragment error and other processor
+       failures to `malformedOSIS` with the exact selected key.
+     */
+    private func processedRawOSISFragment(
+        capture: RawOSISEntryCapture,
+        insertsGeneratedDictionaryTitle: Bool,
+        usesDriverOwnedGenericKey: Bool,
+        genBookTreeKeyCardinality: Int?
+    ) throws -> SwordRawOSISFragment {
         do {
-            let processed = try SwordOSISFragmentProcessor.process(
-                sourceXML: capture.xml,
-                category: capture.source.category,
-                moduleInitials: capture.source.initials
-            )
+            let processed: SwordProcessedOSISFragment
+            if insertsGeneratedDictionaryTitle {
+                processed = try SwordOSISFragmentProcessor.processDictionarySource(
+                    sourceXML: capture.xml,
+                    keyName: capture.keyName,
+                    moduleInitials: capture.source.initials,
+                    category: capture.source.category
+                )
+            } else if usesDriverOwnedGenericKey {
+                processed = try SwordOSISFragmentProcessor.processGenBookSource(
+                    sourceXML: capture.xml,
+                    moduleInitials: capture.source.initials,
+                    category: capture.source.category,
+                    treeKeyCardinality: genBookTreeKeyCardinality ?? 1
+                )
+            } else {
+                processed = try SwordOSISFragmentProcessor.process(
+                    sourceXML: capture.xml,
+                    category: capture.source.category,
+                    moduleInitials: capture.source.initials
+                )
+            }
             let uniqueID = SwordRawOSISIdentity.uniqueID(
                 key: capture.key,
                 keyOrdinalRange: capture.keyOrdinalRange
@@ -306,6 +535,12 @@ public extension SwordModule {
                 comparablePlainText: processed.comparablePlainText,
                 hasRenderableContent: processed.hasRenderableContent
             )
+        } catch SwordOSISProcessorError.missingCommentaryVerse {
+            throw SwordRawOSISFragmentError.missingCommentaryVerse(
+                key: capture.key,
+                keyName: capture.keyName,
+                osisRef: capture.osisRef
+            )
         } catch {
             throw SwordRawOSISFragmentError.malformedOSIS(
                 key: capture.key,
@@ -314,9 +549,26 @@ public extension SwordModule {
         }
     }
 
-    /// Generic/commentary categories routed through Android's `BookData.osisFragment` path.
+    /**
+     Lists configured categories supported by the legacy category-owned generic OSIS path.
+
+     - Returns: Every pinned non-Bible category whose ordinary SWORD reader uses a generic key.
+     - Side effects: Allocates an immutable set on access.
+     - Failure modes: Bible remains excluded because its verse-key path is separate. Validated
+       RawLD/RawGenBook drivers bypass this list because JSword chooses their key class by driver.
+     */
     private static var rawOSISCategories: Set<ModuleCategory> {
-        [.commentary, .dictionary, .generalBook, .map, .dailyDevotion, .glossary]
+        [
+            .commentary,
+            .dictionary,
+            .generalBook,
+            .map,
+            .dailyDevotion,
+            .glossary,
+            .questionable,
+            .essays,
+            .images,
+        ]
     }
 
     /**

@@ -19,6 +19,44 @@ enum BibleReaderModuleSwitchFailure: Error, Equatable {
 }
 
 /**
+ Reports whether a requested native SWORD Bible activation completed or needs user authorization.
+
+ The outcome is produced before any controller, `PageManager`, persistence, or WebView mutation when
+ a target is locked or unavailable. Full document pickers can use `.requiresUnlock` to present the
+ existing passphrase workflow, while non-interactive callers fail closed and keep their readable
+ current document.
+
+ The value is deterministic for the manager snapshot used by one synchronous switch attempt and has
+ no side effects by itself.
+ */
+public enum BibleReaderBibleModuleSwitchOutcome: Equatable, Sendable {
+    /// The module was activated and the existing persistence/render sequence completed.
+    case switched
+
+    /// The installed encrypted module needs a verified key before activation can continue.
+    case requiresUnlock(moduleName: String)
+
+    /// The requested native module was missing, unsupported, unreadable, or category-incompatible.
+    case unavailable
+}
+
+/**
+ Reports whether a commentary module or document switch completed.
+
+ Commentary does not own a separate generic-key chooser, but callers still need a typed success
+ boundary so authorization failures cannot be mistaken for a completed switch. Locked, missing,
+ and unsupported targets fail before controller, persistence, or WebView mutation; document
+ switches also reject category-incompatible targets at that boundary.
+ */
+public enum BibleReaderCommentaryModuleSwitchOutcome: Equatable, Sendable {
+    /// The readable commentary target was activated and the requested persistence/render work ran.
+    case switched
+
+    /// Fresh access or category validation failed without changing reader state.
+    case failed
+}
+
+/**
  Reports the user-visible result of switching a dictionary, general-book, or map document.
 
  Android retains the current generic key when the target book contains it and opens the key chooser
@@ -256,13 +294,31 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed Bible module initials to activate.
        - context: Controller-owned state and callbacks for the active pane.
+     - Returns: `.switched` after successful activation, `.requiresUnlock` before any mutation when
+       the encrypted target is locked, or `.unavailable` when no readable Bible target resolves.
      - Side effects: Mutates active Bible module state, refreshes the book list, persists
        `PageManager.bibleDocument`, and reloads current content when the client is ready.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved.
+     - Failure modes: Locked, missing, unsupported, and non-Bible modules leave controller,
+       persistence, and rendered state unchanged.
      */
-    func switchModule(to moduleName: String, context: BibleReaderModuleSwitchContext) {
-        guard let mod = module(named: moduleName, context: context, logSubject: "module") else {
-            return
+    func switchModule(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderBibleModuleSwitchOutcome {
+        let mod: SwordModule
+        switch readableModule(named: moduleName, context: context, logSubject: "module") {
+        case .readable(let resolvedModule):
+            mod = resolvedModule
+        case .requiresUnlock:
+            return .requiresUnlock(moduleName: moduleName)
+        case .unavailable:
+            return .unavailable
+        }
+        guard mod.info.category == .bible else {
+            moduleSwitchLogger.warning(
+                "Cannot switch to module \(moduleName) — expected Bible, found \(mod.info.category.rawValue)"
+            )
+            return .unavailable
         }
 
         context.setBibleModule(mod, moduleName)
@@ -274,8 +330,10 @@ struct BibleReaderModuleSwitchCoordinator {
             context: context
         )
 
-        guard context.clientReady else { return }
-        context.loadCurrentContent()
+        if context.clientReady {
+            context.loadCurrentContent()
+        }
+        return .switched
     }
 
     /**
@@ -288,13 +346,29 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed SWORD Bible module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
-     - Side effects: Mutates active Bible module/category state, persists `bibleDocument` and
-       `currentCategoryName` together, and reloads once when the client is ready.
-     - Failure modes: Logs and leaves state unchanged when the module is missing or is not a Bible.
+       - prepareForSwitch: Optional caller-owned visible-mode transition invoked after every access
+         and category preflight succeeds, immediately before the existing mutation sequence.
+     - Returns: `.switched` after the atomic document/category transition, `.requiresUnlock` before
+       mutation for a locked target, or `.unavailable` for missing and wrong-category targets.
+     - Side effects: Invokes `prepareForSwitch` only for a validated readable target, mutates active
+       Bible module/category state, persists `bibleDocument` and `currentCategoryName` together, and
+       reloads once when the client is ready.
+     - Failure modes: Locked, missing, unsupported, and non-Bible targets leave controller,
+       caller-preparation, `PageManager`, persistence, and rendered state unchanged.
      */
-    func switchBibleDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
-        guard let mod = module(named: moduleName, context: context, logSubject: "Bible document") else {
-            return
+    func switchBibleDocument(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
+    ) -> BibleReaderBibleModuleSwitchOutcome {
+        let mod: SwordModule
+        switch readableModule(named: moduleName, context: context, logSubject: "Bible document") {
+        case .readable(let resolvedModule):
+            mod = resolvedModule
+        case .requiresUnlock:
+            return .requiresUnlock(moduleName: moduleName)
+        case .unavailable:
+            return .unavailable
         }
         guard let plan = validatedDocumentSwitchPlan(
             moduleName: moduleName,
@@ -302,9 +376,10 @@ struct BibleReaderModuleSwitchCoordinator {
             targetCategory: .bible,
             logSubject: "Bible document"
         ) else {
-            return
+            return .unavailable
         }
 
+        prepareForSwitch?()
         context.setBibleModule(mod, moduleName)
         context.setCurrentCategory(plan.category)
         context.refreshBookList()
@@ -312,8 +387,10 @@ struct BibleReaderModuleSwitchCoordinator {
 
         persist(plan, context: context)
 
-        guard context.clientReady else { return }
-        context.loadCurrentContent()
+        if context.clientReady {
+            context.loadCurrentContent()
+        }
+        return .switched
     }
 
     /**
@@ -322,13 +399,24 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed commentary module initials to activate.
        - context: Controller-owned state and callbacks for the active pane.
+     - Returns: `.switched` after readable activation or `.failed` before mutation.
      - Side effects: Mutates active commentary module state, persists
        `PageManager.commentaryDocument`, and reloads only when commentary is already visible.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules log and return
+       `.failed` without reading keys or changing controller, persistence, or rendered state.
      */
-    func switchCommentaryModule(to moduleName: String, context: BibleReaderModuleSwitchContext) {
-        guard let mod = module(named: moduleName, context: context, logSubject: "commentary module") else {
-            return
+    @discardableResult
+    func switchCommentaryModule(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderCommentaryModuleSwitchOutcome {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .commentary,
+            context: context,
+            logSubject: "commentary module"
+        ) else {
+            return .failed
         }
 
         context.setCommentaryModule(mod, moduleName)
@@ -339,8 +427,10 @@ struct BibleReaderModuleSwitchCoordinator {
             context: context
         )
 
-        guard context.clientReady, context.currentCategory == .commentary else { return }
-        context.loadCurrentContent()
+        if context.clientReady, context.currentCategory == .commentary {
+            context.loadCurrentContent()
+        }
+        return .switched
     }
 
     /**
@@ -349,13 +439,24 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed commentary module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
+     - Returns: `.switched` after readable activation or `.failed` before mutation.
      - Side effects: Mutates active commentary module/category state, persists
        `commentaryDocument` and `currentCategoryName` together, and reloads once when ready.
-     - Failure modes: Logs and leaves state unchanged when the module is missing or not commentary.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules log and return
+       `.failed` without reading content or changing controller, persistence, or rendered state.
      */
-    func switchCommentaryDocument(to moduleName: String, context: BibleReaderModuleSwitchContext) {
-        guard let mod = module(named: moduleName, context: context, logSubject: "commentary document") else {
-            return
+    @discardableResult
+    func switchCommentaryDocument(
+        to moduleName: String,
+        context: BibleReaderModuleSwitchContext
+    ) -> BibleReaderCommentaryModuleSwitchOutcome {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .commentary,
+            context: context,
+            logSubject: "commentary document"
+        ) else {
+            return .failed
         }
         guard let plan = validatedDocumentSwitchPlan(
             moduleName: moduleName,
@@ -363,7 +464,7 @@ struct BibleReaderModuleSwitchCoordinator {
             targetCategory: .commentary,
             logSubject: "commentary document"
         ) else {
-            return
+            return .failed
         }
 
         context.setCommentaryModule(mod, moduleName)
@@ -372,8 +473,10 @@ struct BibleReaderModuleSwitchCoordinator {
 
         persist(plan, context: context)
 
-        guard context.clientReady else { return }
-        context.loadCurrentContent()
+        if context.clientReady {
+            context.loadCurrentContent()
+        }
+        return .switched
     }
 
     /**
@@ -385,15 +488,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
      - Side effects: Mutates active dictionary state, retains an exact target key or clears an invalid
        key, and persists the dictionary module/key fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
-       backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchDictionaryModule(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "dictionary module") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .dictionary,
+            context: context,
+            logSubject: "dictionary module"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         let resolution = resolveGenericKey(
@@ -426,15 +534,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Side effects: Mutates active dictionary/category state, retains an exact target key or clears
        an invalid key, persists dictionary document/category fields together, and reloads only when
        an exact key can render immediately.
-     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
-       category, or its key backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchDictionaryDocument(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "dictionary document") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .dictionary,
+            context: context,
+            logSubject: "dictionary document"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         guard let basePlan = validatedDocumentSwitchPlan(
@@ -475,15 +588,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
      - Side effects: Mutates active general-book state, retains an exact target key or clears an
        invalid key, and persists the selected module/key fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
-       backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchGeneralBookModule(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "general book module") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .generalBook,
+            context: context,
+            logSubject: "general book module"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         let resolution = resolveGenericKey(
@@ -516,15 +634,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Side effects: Mutates active general-book/category state, retains an exact target key or
        clears an invalid key, persists document/category fields together, and reloads only when an
        exact key can render immediately.
-     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
-       category, or its key backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchGeneralBookDocument(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "general book document") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .generalBook,
+            context: context,
+            logSubject: "general book document"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         guard let basePlan = validatedDocumentSwitchPlan(
@@ -565,15 +688,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
      - Side effects: Mutates active map state, retains an exact target key or clears an invalid key,
        and persists map module/key fields.
-     - Failure modes: Logs and leaves state unchanged when the module cannot be resolved or its key
-       backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchMapModule(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "map module") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .map,
+            context: context,
+            logSubject: "map module"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         let resolution = resolveGenericKey(
@@ -610,15 +738,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Side effects: Mutates active map/category state, retains an exact target key or clears an
        invalid key, persists map document/category fields together, and reloads only when an exact
        key can render immediately.
-     - Failure modes: Logs and leaves state unchanged when the module is missing, has the wrong
-       category, or its key backend cannot be read.
+     - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
+       inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchMapDocument(
         to moduleName: String,
         context: BibleReaderModuleSwitchContext
     ) -> BibleReaderGenericModuleSwitchOutcome {
-        guard let mod = module(named: moduleName, context: context, logSubject: "map document") else {
+        guard let mod = module(
+            named: moduleName,
+            expectedCategory: .map,
+            context: context,
+            logSubject: "map document"
+        ) else {
             return .failed(message: "Could not switch to \(moduleName).")
         }
         guard let basePlan = validatedDocumentSwitchPlan(
@@ -768,7 +901,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return .commentary
         case .dictionary:
             return .dictionary
-        case .generalBook:
+        case .generalBook, .questionable, .essays, .images:
             return .generalBook
         case .map:
             return .map
@@ -816,27 +949,95 @@ struct BibleReaderModuleSwitchCoordinator {
     }
 
     /**
-     Resolves an installed module for a switch workflow.
+     Result of the manager-owned access preflight performed before a Bible switch mutates state.
+
+     The readable case carries the inclusive native module handle only after the manager's fresh
+     lock snapshot authorizes content access. Other cases contain no handle, preventing callers from
+     accidentally reading or persisting an inaccessible module.
+     */
+    private enum ReadableModuleResolution {
+        /// Manager-authorized native module handle ready for category validation and activation.
+        case readable(SwordModule)
+
+        /// Installed encrypted module requiring the existing passphrase workflow.
+        case requiresUnlock
+
+        /// Missing, unsupported, custom-driver, or otherwise unresolvable native module.
+        case unavailable
+    }
+
+    /**
+     Resolves a native module only after the manager confirms current content-read access.
 
      - Parameters:
-       - moduleName: Installed module initials to resolve.
-       - context: Controller state containing the current SWORD manager.
-       - logSubject: Human-readable switch target used in warning logs.
-     - Returns: The resolved module, or nil when the manager/module is unavailable.
-     - Side effects: Emits a warning when resolution fails.
-     - Failure modes: Missing manager or module returns nil without mutating state.
+       - moduleName: Installed module initials to classify and resolve.
+       - context: Controller snapshot containing the active manager.
+       - logSubject: Human-readable target used in diagnostics.
+     - Returns: A readable module handle, an explicit unlock requirement, or unavailable state.
+     - Side effects: Reads fresh manager inventory, may populate the manager's module cache, and logs
+       inaccessible requests; it does not mutate controller, `PageManager`, persistence, or WebView
+       state.
+     - Failure modes: Missing managers, unsupported/custom projections, and native resolution races
+       fail closed as `.unavailable`. Locked modules return `.requiresUnlock` without resolving them
+       into the activation path.
      */
-    private func module(
+    private func readableModule(
         named moduleName: String,
         context: BibleReaderModuleSwitchContext,
         logSubject: String
-    ) -> SwordModule? {
-        guard let mgr = context.swordManager,
-              let mod = mgr.module(named: moduleName) else {
+    ) -> ReadableModuleResolution {
+        guard let manager = context.swordManager else {
+            moduleSwitchLogger.warning("Cannot switch to \(logSubject) \(moduleName) — manager unavailable")
+            return .unavailable
+        }
+        switch manager.moduleAccessState(named: moduleName) {
+        case .locked:
+            moduleSwitchLogger.info("Cannot switch to \(logSubject) \(moduleName) before unlock")
+            return .requiresUnlock
+        case .unavailable:
             moduleSwitchLogger.warning("Cannot switch to \(logSubject) \(moduleName) — not found")
+            return .unavailable
+        case .readable:
+            guard let module = manager.readableModule(named: moduleName) else {
+                moduleSwitchLogger.warning("Cannot switch to \(logSubject) \(moduleName) — not found")
+                return .unavailable
+            }
+            return .readable(module)
+        }
+    }
+
+    /**
+     Resolves a currently readable installed module for an auxiliary switch workflow.
+
+     - Parameters:
+       - moduleName: Installed module initials to resolve.
+       - expectedCategory: Required auxiliary category before any key inspection or mutation.
+       - context: Controller state containing the current SWORD manager.
+       - logSubject: Human-readable switch target used in warning logs.
+     - Returns: The manager-owned readable native handle only after fresh access and category checks.
+     - Side effects: Reads installed configuration, may populate the manager cache, and logs rejected
+       access; controller, persistence, keys, and rendered content remain unchanged.
+     - Failure modes: Missing managers, locked/relocked modules, unavailable native handles, and
+       unsupported projections or wrong-category targets return nil before any key or content read.
+     */
+    private func module(
+        named moduleName: String,
+        expectedCategory: ModuleCategory,
+        context: BibleReaderModuleSwitchContext,
+        logSubject: String
+    ) -> SwordModule? {
+        switch readableModule(named: moduleName, context: context, logSubject: logSubject) {
+        case .readable(let module):
+            guard module.info.category == expectedCategory else {
+                moduleSwitchLogger.warning(
+                    "Cannot switch to \(logSubject) \(moduleName) — expected \(expectedCategory.rawValue), found \(module.info.category.rawValue)"
+                )
+                return nil
+            }
+            return module
+        case .requiresUnlock, .unavailable:
             return nil
         }
-        return mod
     }
 
 

@@ -255,7 +255,7 @@ public enum ModuleStoreInstalledRegistrationReader {
 
     /** Returns whether a config declares iOS' durable Android-family registration marker. */
     private static func isGeneratedRegistration(_ config: SwordModuleConfig) -> Bool {
-        config.values["andbibleiosgeneratedregistration"]?.first?
+        config.values["AndBibleIOSGeneratedRegistration"]?.first?
             .caseInsensitiveCompare("true") == .orderedSame
     }
 
@@ -329,14 +329,14 @@ public enum ModuleStoreInstalledRegistrationReader {
     private static func generatedRegistrationDescriptor(
         _ config: SwordModuleConfig
     ) -> (family: String, relativePath: String)? {
-        if let family = nonEmpty(config.values["andbibleiosregistrationfamily"]?.first),
-           let relativePath = nonEmpty(config.values["andbibleiosregistrationpath"]?.first) {
+        if let family = nonEmpty(config.values["AndBibleIOSRegistrationFamily"]?.first),
+           let relativePath = nonEmpty(config.values["AndBibleIOSRegistrationPath"]?.first) {
             return (family, relativePath)
         }
-        guard config.values["andbibleiosmanualttf"]?.first?
+        guard config.values["AndBibleIOSManualTtf"]?.first?
             .caseInsensitiveCompare("true") == .orderedSame,
-            config.values["andbibleprovidesfont"]?.count == 1,
-            let provider = config.values["andbibleprovidesfont"]?.first,
+            config.values["AndBibleProvidesFont"]?.count == 1,
+            let provider = config.values["AndBibleProvidesFont"]?.first,
             let separator = provider.firstIndex(of: ";") else {
             return nil
         }
@@ -386,7 +386,7 @@ public enum ModuleStoreInstalledRegistrationReader {
             return values[0]
         }
         let categoryMatches: (String) -> Bool = { expected in
-            singleValue("category")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            singleValue("Category")?.trimmingCharacters(in: .whitespacesAndNewlines)
                 .caseInsensitiveCompare(expected) == .orderedSame
         }
         let markerEquals: (String, String) -> Bool = { key, expected in
@@ -413,8 +413,8 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && config.name.caseInsensitiveCompare(
                     "MyBible-" + sanitizeMyBibleModuleName(stem)
                 ) == .orderedSame
-                && markerEquals("andbiblemybiblemodule", "1")
-                && markerEquals("andbibledbfile", relativePath)
+                && markerEquals("AndBibleMyBibleModule", "1")
+                && markerEquals("AndBibleDbFile", relativePath)
                 && dataPath == expectedParent
         case "mySword":
             return isRegularFile
@@ -424,8 +424,8 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && config.name.caseInsensitiveCompare(
                     "MySword-" + sanitizeMyBibleModuleName(stem)
                 ) == .orderedSame
-                && markerEquals("andbiblemyswordmodule", "1")
-                && markerEquals("andbibledbfile", relativePath)
+                && markerEquals("AndBibleMySwordModule", "1")
+                && markerEquals("AndBibleDbFile", relativePath)
                 && dataPath == expectedParent
         case "eSword":
             return isRegularFile
@@ -436,8 +436,8 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && config.name.caseInsensitiveCompare(
                     "ESword-" + sanitizeESwordModuleName(stem)
                 ) == .orderedSame
-                && markerEquals("andbibleeswordmodule", "1")
-                && markerEquals("andbibledbfile", relativePath)
+                && markerEquals("AndBibleESwordModule", "1")
+                && markerEquals("AndBibleDbFile", relativePath)
                 && dataPath == expectedParent
         case "epub":
             return isDirectory
@@ -445,17 +445,17 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && driver == "epubbook"
                 && categoryMatches("Generic Books")
                 && config.name.caseInsensitiveCompare(epubInitials(fileName)) == .orderedSame
-                && markerEquals("andbibleepubmodule", "1")
-                && markerEquals("andbibleepubdir", relativePath)
+                && markerEquals("AndBibleEpubModule", "1")
+                && markerEquals("AndBibleEpubDir", relativePath)
                 && dataPath == relativePath
         case "ttf":
-            let description = singleValue("description") ?? ""
+            let description = singleValue("Description") ?? ""
             return isRegularFile
                 && fileExtension == "ttf"
                 && driver == "rawgenbook"
                 && categoryMatches("And Bible")
                 && config.name.caseInsensitiveCompare("TTF_\(stem)") == .orderedSame
-                && markerEquals("andbibleprovidesfont", "\(description);\(fileName)")
+                && markerEquals("AndBibleProvidesFont", "\(description);\(fileName)")
                 && dataPath == expectedParent
         case "background":
             let base = "BGIMG_" + syntheticResourceSuffix(stem)
@@ -464,14 +464,14 @@ public enum ModuleStoreInstalledRegistrationReader {
             let validSuffix = name.caseInsensitiveCompare(base) == .orderedSame
                 || (name.lowercased().hasPrefix(base.lowercased() + "_")
                     && (Int(suffix.dropFirst()) ?? 0) >= 2)
-            let description = singleValue("description") ?? ""
+            let description = singleValue("Description") ?? ""
             return isRegularFile
                 && backgroundExtensions.contains(fileExtension)
                 && driver == "rawgenbook"
                 && categoryMatches("And Bible")
                 && validSuffix
                 && markerEquals(
-                    "andbibleprovidesbackgroundimage",
+                    "AndBibleProvidesBackgroundImage",
                     "\(description);\(fileName)"
                 )
                 && dataPath == expectedParent
@@ -482,7 +482,7 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && driver == "rawgenbook"
                 && categoryMatches("And Bible")
                 && config.name.caseInsensitiveCompare("Prompts_\(stem)") == .orderedSame
-                && markerEquals("andbibleprovidesprompts", fileName)
+                && markerEquals("AndBibleProvidesPrompts", fileName)
                 && dataPath == expectedParent
         default:
             return false

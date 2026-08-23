@@ -200,6 +200,28 @@ public final class MyDocumentStore {
     }
 
     /**
+     Lists My Documents in Android registration order for global book identity resolution.
+
+     - Returns: Persisted documents ordered by `orderNumber` with deterministic metadata tie-breakers.
+     - Side effects: Reads document rows from the supplied SwiftData context without saving.
+     - Throws: Re-throws SwiftData metadata fetch failures so callers fail the combined local
+       registry closed instead of substituting an EPUB or another document.
+     - Important: This method does not access page content. Registration consumers must resolve an
+       owner before calling `page(bookInitials:pageKey:)` or another content API.
+     */
+    public func documentsInRegistrationOrder() throws -> [MyDocument] {
+        let descriptor = FetchDescriptor<MyDocument>(
+            sortBy: [
+                SortDescriptor(\.orderNumber),
+                SortDescriptor(\.createdAt),
+                SortDescriptor(\.name),
+                SortDescriptor(\.initials),
+            ]
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    /**
      Resolves exactly one document by its byte-exact Android bridge initials.
 
      Unlike `document(initials:)`, this lookup does not sort and select one row when persisted
@@ -632,6 +654,15 @@ public final class MyDocumentStore {
 
     /**
      Inserts a My Documents graph and saves immediately.
+
+     - Parameter document: Detached graph whose exact initials must be absent from My Documents.
+     - Returns: `true` after the graph and sync journal save, otherwise `false` after rollback.
+     - Side effects: Inserts the graph, records pending remote-sync mutations, updates AI markers,
+       and saves through the journal service.
+     - Failure modes: Duplicate My Documents initials or any persistence error returns `false`.
+     - Important: This compatibility API has no production caller and does not participate in the
+       complete native/SQLite/EPUB/MyDocument admission lease. New application publishers must use
+       `MyDocumentLibraryStore` or another globally coordinated strict publication boundary.
      */
     @discardableResult
     public func insert(_ document: MyDocument) -> Bool {

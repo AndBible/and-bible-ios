@@ -1,6 +1,7 @@
 // MyDocumentManagementSession.swift -- Save/cancel reducer for My Documents management
 
 import Foundation
+import SwordKit
 
 /**
  Value-based editing session for the complete My Documents library.
@@ -68,18 +69,21 @@ public struct MyDocumentManagementSession: Sendable {
      - Parameters:
        - name: User-visible document name.
        - documentDescription: Optional description.
-       - reservedInitials: Installed module initials that must not collide with generated documents.
+       - reservedInitials: Legacy installed identities compared with Java-exact UTF-16 semantics.
+       - isInitialsUnavailable: Optional live JSword-registry predicate applied to every explicit or
+         generated candidate after the legacy exact reserved set.
        - initials: Explicit Android module identity, or `nil` to generate one from `name`.
        - sourcePromptId: Prompt that owns an AI-created document, or `nil` for user-created content.
      - Returns: Stable ID of the new draft.
      - Side effects: Appends the draft and marks the session dirty.
-     - Failure modes: Throws when the trimmed name is empty.
+     - Failure modes: Throws when the trimmed name is empty or an explicit identity is unavailable.
      */
     @discardableResult
     public mutating func createDocument(
         name: String,
         documentDescription: String? = nil,
         reservedInitials: Set<String> = [],
+        isInitialsUnavailable: ((String) -> Bool)? = nil,
         initials explicitInitials: String? = nil,
         sourcePromptId: UUID? = nil
     ) throws -> UUID {
@@ -90,17 +94,27 @@ public struct MyDocumentManagementSession: Sendable {
 
         let id = UUID()
         let now = Date()
-        let unavailableInitials = reservedInitials.union(documents.map(\.initials))
+        let unavailableInitials = Array(reservedInitials)
+        let pendingDocuments = documents
+        let isPendingInitialsUnavailable: (String) -> Bool = { candidate in
+            Self.pendingDocumentsOwnInitials(candidate, documents: pendingDocuments)
+                || isInitialsUnavailable?(candidate) == true
+        }
         let initials: String
         if let explicitInitials {
             let normalizedInitials = explicitInitials.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalizedInitials.isEmpty,
-                  !unavailableInitials.contains(normalizedInitials) else {
+                  !Self.containsJavaExact(unavailableInitials, normalizedInitials),
+                  !isPendingInitialsUnavailable(normalizedInitials) else {
                 throw MyDocumentManagementError.duplicateInitials(normalizedInitials)
             }
             initials = normalizedInitials
         } else {
-            initials = Self.generateInitials(for: trimmedName, unavailable: unavailableInitials)
+            initials = Self.generateInitials(
+                for: trimmedName,
+                unavailableValues: unavailableInitials,
+                isUnavailable: isPendingInitialsUnavailable
+            )
         }
         documents.append(MyDocumentDraft(
             id: id,
@@ -117,19 +131,35 @@ public struct MyDocumentManagementSession: Sendable {
     }
 
     /**
-     Imports sorted text files as one document using Android filename and content-type rules.
+     Imports sorted text files as one globally admissible My Documents book.
+
+     - Parameters:
+       - name: User-visible document name used to generate the Android initials stem.
+       - files: Selected text/Markdown/HTML files projected into ordered pages.
+       - reservedInitials: Legacy installed identities compared with Java-exact UTF-16 semantics.
+       - isInitialsUnavailable: Optional complete JSword-registry predicate applied to every
+         generated candidate before a draft is appended.
+     - Returns: Stable ID of the imported document draft.
+     - Side effects: Parses supplied file values, appends one document, and assigns imported pages.
+     - Failure modes: Propagates empty/unsupported import, identity, and draft invariant failures;
+       no document remains appended if page conversion fails before creation.
      */
     @discardableResult
     public mutating func importDocument(
         name: String,
         files: [MyDocumentImportFile],
-        reservedInitials: Set<String> = []
+        reservedInitials: Set<String> = [],
+        isInitialsUnavailable: ((String) -> Bool)? = nil
     ) throws -> UUID {
         let importedPages = try MyDocumentTransferService.importPages(
             from: files,
             stripsDocumentOrderPrefix: true
         )
-        let documentID = try createDocument(name: name, reservedInitials: reservedInitials)
+        let documentID = try createDocument(
+            name: name,
+            reservedInitials: reservedInitials,
+            isInitialsUnavailable: isInitialsUnavailable
+        )
         guard let index = documents.firstIndex(where: { $0.id == documentID }) else {
             throw MyDocumentManagementError.documentNotFound(documentID)
         }
@@ -301,8 +331,45 @@ public struct MyDocumentManagementSession: Sendable {
 
     /**
      Generates initials with Android's `MyDocumentBookManager.generateInitials` algorithm.
+
+     - Parameters:
+       - baseName: Document name whose first ten ASCII alphanumeric scalars form the initials stem.
+       - unavailable: Existing My Documents/legacy-reserved initials compared as Java UTF-16.
+       - isUnavailable: Optional complete JSword `Books.getBook` predicate evaluated for every
+         base/suffixed candidate.
+     - Returns: First candidate absent from both availability authorities.
+     - Side effects: Repeatedly evaluates `isUnavailable` until a candidate is admitted.
+     - Failure modes: None for finite registries; an adversarial predicate that rejects every
+       generated suffix does not terminate, matching the caller's responsibility.
      */
-    public static func generateInitials(for baseName: String, unavailable: Set<String>) -> String {
+    public static func generateInitials(
+        for baseName: String,
+        unavailable: Set<String>,
+        isUnavailable: ((String) -> Bool)? = nil
+    ) -> String {
+        generateInitials(
+            for: baseName,
+            unavailableValues: Array(unavailable),
+            isUnavailable: isUnavailable
+        )
+    }
+
+    /**
+     Generates initials against exact Java-string values without Swift canonical folding.
+
+     - Parameters:
+       - baseName: Document name used to derive the ASCII initials stem.
+       - unavailableValues: Existing identities whose UTF-16 sequences are already registered.
+       - isUnavailable: Optional live global-registry predicate for each candidate.
+     - Returns: First Android-generated candidate absent from both availability authorities.
+     - Side effects: Repeatedly evaluates `isUnavailable` until a candidate is admitted.
+     - Failure modes: A predicate that rejects every suffix does not terminate.
+     */
+    private static func generateInitials(
+        for baseName: String,
+        unavailableValues: [String],
+        isUnavailable: ((String) -> Bool)?
+    ) -> String {
         let sanitized = String(baseName.unicodeScalars
             .filter { scalar in
                 (scalar.value >= 48 && scalar.value <= 57)
@@ -314,11 +381,83 @@ public struct MyDocumentManagementSession: Sendable {
         let stem = sanitized.isEmpty ? "MyDoc" : sanitized
         var candidate = "MyDoc_\(stem)"
         var counter = 1
-        while unavailable.contains(candidate) {
+        while containsJavaExact(unavailableValues, candidate)
+            || isUnavailable?(candidate) == true {
             candidate = "MyDoc_\(stem)_\(counter)"
             counter += 1
         }
         return candidate
+    }
+
+    /**
+     Tests exact identity membership with Java `String.equals` semantics.
+
+     - Parameters:
+       - values: Registered or reserved identity strings.
+       - candidate: Candidate identity being admitted.
+     - Returns: True only when one value has the same UTF-16 code units as the candidate.
+     - Side effects: None.
+     - Failure modes: None; Swift strings expose valid UTF-16 views.
+     */
+    private static func containsJavaExact(_ values: [String], _ candidate: String) -> Bool {
+        values.contains { SwordJavaStringIdentity.equals($0, candidate) }
+    }
+
+    /**
+     Replays Android's sequential My Documents registration and resolves a candidate initials token.
+
+     Each pending document is admitted only when `Books.getBook(document.initials)` would not find
+     an earlier admitted document by exact initials/full name or Android case-insensitive
+     initials/full name. Replaying is necessary because iOS keeps new documents as drafts until
+     Save, while Android inserts and registers each document immediately.
+
+     - Parameters:
+       - candidate: Candidate initials passed to Android's global `Books.getBook` preflight.
+       - documents: Existing drafts in registration order.
+     - Returns: True when an earlier Android-admitted draft owns the candidate token.
+     - Side effects: Loads the pinned Android case table on first case-insensitive comparison.
+     - Failure modes: Traps only when the bundled Android compatibility table is missing/corrupt.
+     */
+    static func pendingDocumentsOwnInitials(
+        _ candidate: String,
+        documents: [MyDocumentDraft]
+    ) -> Bool {
+        var admitted: [MyDocumentDraft] = []
+        for document in documents {
+            guard !pendingDocumentsOwnInitials(document.initials, admittedDocuments: admitted) else {
+                continue
+            }
+            admitted.append(document)
+        }
+        return pendingDocumentsOwnInitials(candidate, admittedDocuments: admitted)
+    }
+
+    /**
+     Resolves one initials token against already-admitted My Documents metadata.
+
+     - Parameters:
+       - candidate: Exact initials token supplied to JSword.
+       - admittedDocuments: Earlier documents that survived sequential registration preflight.
+     - Returns: True for Android `Books.getBook` exact/case-insensitive initials or full-name tiers.
+     - Side effects: Loads the pinned Android case table on first case-insensitive comparison.
+     - Failure modes: Traps only when the bundled Android compatibility table is missing/corrupt.
+     */
+    private static func pendingDocumentsOwnInitials(
+        _ candidate: String,
+        admittedDocuments: [MyDocumentDraft]
+    ) -> Bool {
+        let identities = admittedDocuments.map {
+            (initials: $0.initials, fullName: SwordJavaStringIdentity.trim($0.name))
+        }
+        return identities.contains {
+            SwordJavaStringIdentity.equals($0.initials, candidate)
+        } || identities.contains {
+            SwordJavaStringIdentity.equals($0.fullName, candidate)
+        } || identities.contains {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.initials, candidate)
+        } || identities.contains {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.fullName, candidate)
+        }
     }
 
     private mutating func mutateDocument(

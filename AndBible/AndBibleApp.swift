@@ -1092,7 +1092,9 @@ struct AndBibleApp: App {
     private func preflightExternalDocumentImport(_ request: ExternalDocumentImportRequest) {
         isImportingExternalDocument = true
         externalDocumentImportMessage = nil
-        let service = ExternalDocumentImportService()
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(modelContainer)
+        )
         Task { @MainActor in
             let preflight = await Task.detached(priority: .userInitiated) {
                 service.preflightDocument(request)
@@ -1135,9 +1137,12 @@ struct AndBibleApp: App {
     ) {
         isImportingExternalDocument = true
         externalDocumentImportMessage = nil
+        let service = ExternalDocumentImportService.androidRegistryAware(
+            modelContext: ModelContext(modelContainer)
+        )
         Task { @MainActor in
             let result = await Task.detached(priority: .userInitiated) {
-                ExternalDocumentImportService().importDocument(
+                service.importDocument(
                     request,
                     moduleOverwritePolicy: overwritePolicy,
                     progressState: nil

@@ -1546,3 +1546,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dubbel tik op die skerm om die volle skerm te verlaat";
+
+/* Android shared translations */
+"try_again_passphrase" = "Wagfrase het nie gewerk nie. Probeer weer?";
+
+/* Android shared translations */
+"document_not_installed" = "Laai '%@' asseblief af";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ is nie in dokument %2$@ gevind nie.";

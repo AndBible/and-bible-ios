@@ -195,7 +195,7 @@ public enum BibleSpeakSourceResolver {
         guard request.category == .bible || request.category == .memorization else {
             throw BibleSpeakSourceResolutionError.unsupportedCategory(request.category)
         }
-        guard let module = manager.module(named: request.bookInitials) else {
+        guard let module = manager.readableModule(named: request.bookInitials) else {
             throw BibleSpeakSourceResolutionError.moduleUnavailable(request.bookInitials)
         }
         guard module.info.category == .bible else {
@@ -376,7 +376,7 @@ public enum BibleSpeakSourceResolver {
         ranges: [SpeakVerseRange],
         manager: SwordManager
     ) throws -> ResolvedBibleSpeakSource {
-        guard let module = manager.module(named: bookInitials) else {
+        guard let module = manager.readableModule(named: bookInitials) else {
             throw BibleSpeakSourceResolutionError.moduleUnavailable(bookInitials)
         }
         guard module.info.category == .bible else {
@@ -483,14 +483,21 @@ public enum BibleSpeakSourceResolver {
             )
         }
 
+        let persistedModuleInitials = passageCheckpoints[0].bookInitials
+        guard !persistedModuleInitials.isEmpty,
+              passageCheckpoints.allSatisfy({ $0.bookInitials == persistedModuleInitials }),
+              let module = manager.readableModule(named: persistedModuleInitials) else {
+            throw BibleSpeakSourceResolutionError.invalidCheckpoint(
+                "semantic passages do not identify one readable installed module"
+            )
+        }
+
         var resolvedPassages: [ResolvedBibleSpeakPassage] = []
         var flattenedPositions: [SpeakStreamPosition] = []
         var currentFlatIndex: Int?
         for (passageIndex, persistedPassage) in passageCheckpoints.enumerated() {
-            guard !persistedPassage.bookInitials.isEmpty,
-                  !persistedPassage.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !persistedPassage.positions.isEmpty,
-                  let module = manager.module(named: persistedPassage.bookInitials) else {
+            guard !persistedPassage.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !persistedPassage.positions.isEmpty else {
                 throw BibleSpeakSourceResolutionError.invalidCheckpoint(
                     "a semantic passage does not identify an installed module"
                 )
@@ -577,7 +584,7 @@ public enum BibleSpeakSourceResolver {
         guard cursor.category == .bible,
               !checkpoint.isMemorizationLoop,
               !cursor.bookInitials.isEmpty,
-              let module = manager.module(named: cursor.bookInitials) else {
+              let module = manager.readableModule(named: cursor.bookInitials) else {
             throw BibleSpeakSourceResolutionError.invalidCheckpoint(
                 "Android Bible state does not identify an installed module"
             )

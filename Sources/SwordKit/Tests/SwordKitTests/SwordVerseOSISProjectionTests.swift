@@ -74,9 +74,71 @@ final class SwordVerseOSISProjectionTests: XCTestCase {
     }
 
     /**
+     Pins JSword's last-qualified-preverse boundary instead of broad title/milestone lifting.
+
+     - Setup: Projects an ordinary title, body before a late x-preverse div, and trailing prose.
+     - Expected result: Ordinary title remains body content; the late marker makes every preceding
+       node chapter-level, and only the suffix after the last marker remains the verse body.
+     - Failure meaning: iOS can omit ordinary title text or wrap a different node range than Android.
+     - Side effects: Parses bounded in-memory fragments.
+     */
+    func testLastExactPreVerseBoundaryMatchesSwordBook() {
+        let ordinaryTitle = SwordVerseOSISProjection.project("<title>Heading</title>Body")
+        XCTAssertEqual(ordinaryTitle.preVerseXML, "")
+        XCTAssertEqual(ordinaryTitle.verseBodyXML, "<title>Heading</title>Body")
+
+        let lateBoundary = SwordVerseOSISProjection.project(
+            "Before<div subType=\"x-preverse\" type=\"x-milestone\"/>After"
+        )
+        XCTAssertTrue(lateBoundary.preVerseXML.hasPrefix("Before<div"))
+        XCTAssertEqual(lateBoundary.verseBodyXML, "After")
+    }
+
+    /**
+     Verifies pinned Psalm-title repair becomes canonical preverse source before both consumers.
+
+     - Setup: Supplies a type=psalm title without canonical or subtype attributes.
+     - Expected result: Shared source gains canonical=true and x-preverse; the title is retained at
+       chapter level and prose alone remains the synthetic verse body.
+     - Failure meaning: Psalm superscriptions can disappear from canonical Search or leak preview.
+     - Side effects: Mutates one bounded parsed tree before deterministic serialization.
+     */
+    func testPsalmTitleRepairMatchesSwordBook() {
+        let projection = SwordVerseOSISProjection.project(
+            "<title type=\"psalm\">Superscription</title>Verse"
+        )
+
+        XCTAssertTrue(projection.sourceXML.contains("canonical=\"true\""))
+        XCTAssertTrue(projection.sourceXML.contains("subType=\"x-preverse\""))
+        XCTAssertTrue(projection.preVerseXML.contains("Superscription"))
+        XCTAssertEqual(projection.verseBodyXML, "Verse")
+    }
+
+    /**
+     Verifies an existing direct verse is never synthetically wrapped a second time.
+
+     - Setup: Supplies a sibling title and direct verse while requesting an emitted ordinal.
+     - Expected result: Full source remains one already-wrapped body and the existing verse receives
+       the ordinal JSword adds; no preverse split is applied.
+     - Failure meaning: Native modules with verse markup can produce nested verse elements.
+     - Side effects: Mutates one bounded parsed verse attribute.
+     */
+    func testExistingVerseSkipsSyntheticWrapperAndReceivesOrdinal() {
+        let projection = SwordVerseOSISProjection.project(
+            "<title>Outside</title><verse osisID=\"Gen.1.1\">Body</verse>",
+            verseOrdinal: 4
+        )
+
+        XCTAssertTrue(projection.isAlreadyWrapped)
+        XCTAssertEqual(projection.preVerseXML, "")
+        XCTAssertTrue(projection.verseBodyXML.contains("<verse osisID=\"Gen.1.1\" verseOrdinal=\"4\">"))
+        XCTAssertTrue(projection.verseBodyXML.contains("<title>Outside</title>"))
+    }
+
+    /**
      Verifies malformed source takes the lossless compatibility path.
 
-     A malformed entry cannot be structurally partitioned, so the original trimmed fragment must
+     A malformed entry cannot be structurally partitioned, so the exact original fragment must
      remain in the verse body and no preamble may be invented.
      */
     func testMalformedFragmentRemainsInVerseBody() {
@@ -85,5 +147,24 @@ final class SwordVerseOSISProjectionTests: XCTestCase {
 
         XCTAssertEqual(projection.preVerseXML, "")
         XCTAssertEqual(projection.verseBodyXML, malformed)
+    }
+
+    /**
+     Verifies all outer source whitespace survives the shared fragment boundary.
+
+     - Setup: Projects a verse body surrounded by NBSP while ordinary ASCII whitespace surrounds it.
+     - Expected result: ASCII formatting and both NBSP remain in the serialized verse body; each
+       downstream canonical/preview domain applies its own distinct whitespace rules.
+     - Failure meaning: Foundation whitespace classification can erase source content before reader
+       rendering or canonical Search traversal observes it.
+     - Side effects: Parses one bounded in-memory fragment.
+     */
+    func testOuterWhitespaceAndNBSPRemainLossless() {
+        let projection = SwordVerseOSISProjection.project(
+            " \n\u{00A0}edge\u{00A0}\n "
+        )
+
+        XCTAssertEqual(projection.preVerseXML, "")
+        XCTAssertEqual(projection.verseBodyXML, " \n\u{00A0}edge\u{00A0}\n ")
     }
 }

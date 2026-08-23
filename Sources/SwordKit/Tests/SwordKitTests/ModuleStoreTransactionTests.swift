@@ -246,6 +246,184 @@ final class ModuleStoreTransactionTests: XCTestCase {
     }
 
     /**
+     Verifies EPUB and My Documents join native and SQLite publication's canonical FIFO lease.
+
+     - Setup: Races an EPUB-kind transaction with a real staged SWORD publication, a real staged
+       MyBible publication with an EPUB-kind transaction, and a My Documents-kind transaction with
+       an EPUB-kind transaction. Each pair uses the coordinator's deterministic mutation barrier.
+     - Expected: In all three pairs, the queued writer reaches `.willMutate` only after the first
+       writer commits, proving one root-wide lease rather than per-feature locks.
+     - Failure meaning: EPUB admission can snapshot before a native/SQLite/My Documents owner is
+       published, or a later identity writer can bypass an in-flight EPUB publication.
+     - Side effects: Creates and removes one isolated module root plus staged fixture files.
+     */
+    func testEpubAndMyDocumentKindsSerializeWithNativeAndSQLiteWriters() async throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: context.root)
+        let native = try makeStagedInstall(
+            context: context,
+            name: "EPUBNATIVE",
+            dataPath: "./modules/texts/rawtext/epubnative/",
+            payloadPath: "modules/texts/rawtext/epubnative/ot",
+            marker: "native"
+        )
+
+        try await assertSerialized(
+            root: context.root,
+            firstKind: .epub,
+            secondKind: .remoteSword,
+            first: {
+                try coordinator.withExclusiveTransaction(
+                    kind: .epub,
+                    prepare: { () },
+                    commit: { _ in () }
+                )
+            },
+            second: {
+                try context.firstPublisher.publishStagedInstall(
+                    native.plan,
+                    from: native.stagingRoot,
+                    allowOverwrite: true,
+                    kind: .remoteSword
+                )
+            }
+        )
+
+        let sqliteStaging = context.parent.appendingPathComponent(
+            "epub-sqlite-staging",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: sqliteStaging,
+            withIntermediateDirectories: true
+        )
+        try Data("{}".utf8).write(to: sqliteStaging.appendingPathComponent("module.json"))
+        try Data("sqlite".utf8).write(to: sqliteStaging.appendingPathComponent("race.SQLite3"))
+        try await assertSerialized(
+            root: context.root,
+            firstKind: .remoteMyBible,
+            secondKind: .epub,
+            first: {
+                try context.firstPublisher.publishStagedMyBibleInstall(
+                    from: sqliteStaging,
+                    moduleName: "EPUBSQLITE"
+                )
+            },
+            second: {
+                try coordinator.withExclusiveTransaction(
+                    kind: .epub,
+                    prepare: { () },
+                    commit: { _ in () }
+                )
+            }
+        )
+
+        try await assertSerialized(
+            root: context.root,
+            firstKind: .myDocument,
+            secondKind: .epub,
+            first: {
+                try coordinator.withExclusiveTransaction(
+                    kind: .myDocument,
+                    prepare: { () },
+                    commit: { _ in () }
+                )
+            },
+            second: {
+                try coordinator.withExclusiveTransaction(
+                    kind: .epub,
+                    prepare: { () },
+                    commit: { _ in () }
+                )
+            }
+        )
+
+        XCTAssertEqual(try payloadString(context.root, native.payloadPath), "native")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: context.root.appendingPathComponent(
+            "mybible/EPUBSQLITE/module.json"
+        ).path))
+        try assertNoTransactionBackups(in: context.root)
+    }
+
+    /**
+     Verifies an EPUB rollback releases the canonical lease to an already queued native writer.
+
+     - Setup: Holds an EPUB-kind transaction at `.willMutate`, queues a real staged SWORD install,
+       then makes the EPUB commit throw its typed test error.
+     - Expected: EPUB emits rollback and release, the queued native transaction publishes, and its
+       mutation boundary occurs strictly after EPUB release.
+     - Failure meaning: A failed EPUB admission/publication can strand every later module writer or
+       release before rollback finishes.
+     - Side effects: Creates and removes one isolated module root and staged SWORD fixture.
+     */
+    func testEpubRollbackReleasesQueuedNativeWriterAfterRollback() async throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: context.root)
+        let native = try makeStagedInstall(
+            context: context,
+            name: "AFTEREPUBROLLBACK",
+            dataPath: "./modules/texts/rawtext/afterepubrollback/",
+            payloadPath: "modules/texts/rawtext/afterepubrollback/ot",
+            marker: "published-after-rollback"
+        )
+        let gate = ModuleStoreTransactionGate()
+        let observation = ModuleStoreMutationCoordinator.observeTransactions(
+            forModuleRoot: context.root,
+            observer: { event in gate.observe(event) }
+        )
+        defer { observation.cancel() }
+
+        let epubTask = Task.detached {
+            try coordinator.withExclusiveTransaction(
+                kind: .epub,
+                prepare: { () },
+                commit: { _ in throw ModuleStoreTransactionTestError.registrationRejected }
+            )
+        }
+        try gate.waitForFirstMutationBoundary()
+        let nativeTask = Task.detached {
+            try context.secondPublisher.publishStagedInstall(
+                native.plan,
+                from: native.stagingRoot,
+                allowOverwrite: true,
+                kind: .remoteSword
+            )
+        }
+        try gate.waitForSecondWriterToQueue()
+        gate.releaseFirstWriter()
+
+        do {
+            try await epubTask.value
+            XCTFail("Expected deterministic EPUB rollback.")
+        } catch ModuleStoreTransactionTestError.registrationRejected {
+            // Expected rollback while the native writer remains queued.
+        }
+        try await nativeTask.value
+
+        let events = gate.events
+        let epubID = try XCTUnwrap(gate.firstTransactionID)
+        let nativeID = try XCTUnwrap(gate.secondTransactionID)
+        let rollback = try XCTUnwrap(events.firstIndex {
+            $0.transactionID == epubID && $0.stage == .rolledBack
+        })
+        let release = try XCTUnwrap(events.firstIndex {
+            $0.transactionID == epubID && $0.stage == .released
+        })
+        let nativeMutation = try XCTUnwrap(events.firstIndex {
+            $0.transactionID == nativeID && $0.stage == .willMutate
+        })
+        XCTAssertLessThan(rollback, release)
+        XCTAssertLessThan(release, nativeMutation)
+        XCTAssertEqual(
+            try payloadString(context.root, native.payloadPath),
+            "published-after-rollback"
+        )
+        try assertNoTransactionBackups(in: context.root)
+    }
+
+    /**
      Verifies independent `ModuleRepository` instances share the root coordinator for uninstalls.
 
      - Setup: Installs two Bibles, holds the first repository at the deterministic mutation boundary,

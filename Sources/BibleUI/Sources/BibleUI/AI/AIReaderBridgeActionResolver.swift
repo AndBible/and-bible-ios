@@ -3,6 +3,7 @@
 import BibleCore
 import BibleView
 import Foundation
+import SwordKit
 
 /** Immutable source generation captured when an AI action is requested. */
 struct AIReaderPaneSnapshot: Equatable, Sendable {
@@ -82,7 +83,8 @@ enum AIReaderBridgeActionResolver {
     verifiedKJVARange: ClosedRange<Int>?
   ) -> AIReaderActionRequest? {
     guard !request.bookInitials.isEmpty,
-      request.bookInitials == pane.activeDocumentInitials
+      let activeDocumentInitials = pane.activeDocumentInitials,
+      SwordJavaStringIdentity.equals(request.bookInitials, activeDocumentInitials)
     else {
       return nil
     }

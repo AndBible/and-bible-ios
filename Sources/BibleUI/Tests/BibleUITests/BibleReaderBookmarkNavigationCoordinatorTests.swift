@@ -156,6 +156,64 @@ final class BibleReaderBookmarkNavigationCoordinatorTests: BibleUISwordFixtureTe
     }
 
     /**
+     Resolves an explicit SWORD source by Java-exact UTF-16 initials.
+
+     - Setup: Supplies composed and decomposed spellings that Swift considers equal, with the
+       composed spelling persisted by the bookmark and the decomposed candidate listed first.
+     - Expected: Only the composed source is selected and the decomposed source is never read.
+     - Failure meaning: Swift canonical equality can make one Android-distinct installed source
+       ambiguous or route the bookmark through the wrong module.
+     - Side effects: Increments only the deterministic lookup probe if the wrong source is read.
+     */
+    func testBibleSourceIdentityKeepsCanonicalEquivalentJavaNamesDistinct() throws {
+        let composed = "Sourc\u{00E9}"
+        let decomposed = "Source\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+        let ignoredReads = LookupProbe()
+        let decomposedSource = BibleReaderBookmarkNavigationSwordCandidate(
+            initials: decomposed,
+            category: .bible,
+            versification: "KJV",
+            referenceForOrdinal: { _ in
+                ignoredReads.readCount += 1
+                return nil
+            },
+            ordinalForReference: { _ in
+                ignoredReads.readCount += 1
+                return nil
+            },
+            fragmentForExactKey: { _ in throw StubLookupError.failed }
+        )
+        let composedSource = makeSwordCandidate(
+            initials: composed,
+            category: .bible,
+            verses: baseSourceVerses
+        )
+
+        let result = try BibleReaderBookmarkNavigationCoordinator(canon: makeCanon()).plan(
+            target: makeBibleTarget(sourceModuleInitials: composed),
+            inventory: .init(
+                destinationBible: makeSwordCandidate(
+                    initials: "DESTINATION",
+                    category: .bible,
+                    verses: baseDestinationVerses
+                ),
+                swordCandidates: [decomposedSource, composedSource]
+            )
+        )
+
+        guard case .bible(let plan) = result else {
+            return XCTFail("Expected a Bible commit plan")
+        }
+        XCTAssertEqual(
+            Array(plan.resolvedSourceModuleInitials.utf16),
+            Array(composed.utf16)
+        )
+        XCTAssertEqual(ignoredReads.readCount, 0)
+    }
+
+    /**
      Rejects absent, malformed, non-Bible, and unsupported destination candidates.
 
      Deterministic metadata-only candidates exercise each destination guard before source lookup.
@@ -596,6 +654,54 @@ final class BibleReaderBookmarkNavigationCoordinatorTests: BibleUISwordFixtureTe
             inventory: .init(destinationBible: nil, swordCandidates: [unsupported])
         )
         XCTAssertEqual(reads.readCount, 0)
+    }
+
+    /**
+     Keeps canonical-equivalent generic identities distinct across SWORD and local backends.
+
+     - Setup: Supplies a composed SWORD dictionary and a decomposed My Documents candidate whose
+       initials Swift considers equal; the target retains the composed UTF-16 spelling.
+     - Expected: Planning selects and reads only the exact SWORD candidate without reporting a
+       cross-backend ambiguity or consulting local content.
+     - Failure meaning: Generic bookmark planning can alias an Android-distinct local/native owner
+       and read or reject the wrong backend.
+     - Side effects: Increments deterministic SWORD/My Documents read probes only.
+     */
+    func testGenericIdentityKeepsCanonicalEquivalentBackendsDistinct() throws {
+        let composed = "Dict-Caf\u{00E9}"
+        let decomposed = "Dict-Cafe\u{0301}"
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+        let swordReads = LookupProbe()
+        let localReads = LookupProbe()
+        let sword = makeSwordCandidate(
+            initials: composed,
+            category: .dictionary,
+            fragmentForExactKey: { key in
+                swordReads.readCount += 1
+                return self.makeSwordFragment(initials: composed, key: key)
+            }
+        )
+        let document = makeMyDocumentCandidate(
+            fragment: makeMyDocumentFragment(initials: decomposed, key: "entry"),
+            onLookup: { localReads.readCount += 1 }
+        )
+
+        let result = try BibleReaderBookmarkNavigationCoordinator(canon: makeCanon()).plan(
+            target: makeGenericTarget(initials: composed, key: "entry"),
+            inventory: .init(
+                destinationBible: nil,
+                swordCandidates: [sword],
+                myDocumentCandidates: [document]
+            )
+        )
+
+        guard case .sword(let plan) = result else {
+            return XCTFail("Expected an exact SWORD generic plan")
+        }
+        XCTAssertEqual(Array(plan.moduleInitials.utf16), Array(composed.utf16))
+        XCTAssertEqual(swordReads.readCount, 1)
+        XCTAssertEqual(localReads.readCount, 0)
     }
 
     /**

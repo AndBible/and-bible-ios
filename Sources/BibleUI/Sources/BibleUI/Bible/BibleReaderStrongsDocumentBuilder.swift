@@ -7,12 +7,42 @@ import os.log
 private let strongsDocumentBuilderLogger = Logger(subsystem: "org.andbible", category: "BibleReaderStrongsDocumentBuilder")
 
 /**
+ Resolves builder copy from the application bundle while declaring Android-owned keys literally.
+
+ - Parameters:
+   - key: Localization resource key requested by the document builder.
+   - defaultValue: English fallback used for non-Android-owned future keys.
+ - Returns: The localized bundle value or its caller-provided fallback.
+ - Side effects: Reads `Bundle.main` localization resources.
+ - Failure modes: Missing `document_not_installed` resources use Android's exact English sentence;
+   other missing keys use `defaultValue`.
+ */
+func bibleReaderAndroidDocumentLocalizedString(
+    _ key: String,
+    _ defaultValue: String
+) -> String {
+    if key == "document_not_installed" {
+        return Bundle.main.localizedString(
+            forKey: "document_not_installed",
+            value: "Please download '%s'",
+            table: nil
+        )
+    }
+    return Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
+}
+
+/**
  Builds Android-style Strong's, morphology, and dictionary `MultiDocument` payloads.
 
  `BibleReaderController` owns reader orchestration and bridge routing; this builder owns the
  dictionary-document rules needed to produce the Vue payload. The rules here intentionally mirror the
  Android/JSword behavior iOS depends on for Strong's lookup key families, selected dictionary
  preferences, morphology module selection, and missing-dictionary fallback documents.
+
+ - Side effects: Reads installed-book metadata/preferences, performs exact backend lookups, updates
+   the injected per-module preferred-family cache after accepted Strong's hits, and serializes JSON.
+ - Failure modes: Returns no payload for installed-book misses, unresolved explicit selections, or
+   encoding/read failures; only automatic true-absence paths synthesize localized download content.
  */
 struct BibleReaderStrongsDocumentBuilder {
     /// Reads a persisted string-set preference such as selected Strong's dictionary modules.
@@ -21,11 +51,20 @@ struct BibleReaderStrongsDocumentBuilder {
     /// Resolves a localized string by key with a caller-provided default value.
     typealias LocalizedString = (_ key: String, _ defaultValue: String) -> String
 
+    /// Resolves one explicit persisted book token through Android's global installed-book identity.
+    typealias InstalledDictionarySourceNamed = (String) -> BibleReaderInstalledDictionarySource?
+
     /// Active SWORD manager used to resolve installed dictionary and morphology modules.
     private let swordManager: SwordManager?
 
     /// Android-style global dictionary inventory used by production SWORD/SQLite lookup.
     private let installedDictionarySources: (() -> [BibleReaderInstalledDictionarySource])?
+
+    /// Inclusive global registry metadata used to distinguish locked installation from absence.
+    private let installedBookMetadata: (() -> [ModuleInfo])?
+
+    /// Global JSword-identity resolver used only for nonempty explicit dictionary preferences.
+    private let installedDictionarySourceNamed: InstalledDictionarySourceNamed?
 
     /// Preference reader for Android-parity Strong's and morphology module selections.
     private let selectedPreferenceValues: SelectedPreferenceValues
@@ -35,6 +74,9 @@ struct BibleReaderStrongsDocumentBuilder {
 
     /// Localized string lookup used for synthetic fallback documents.
     private let localizedString: LocalizedString
+
+    /// Per-book Android key-family history shared across production builder lifetimes.
+    private let strongsLookupKeyPreferenceCache: AndroidStrongsKeyPreferenceCache
 
     /**
      Common lookup facade for SWORD and restored MyBible Strong's dictionary modules.
@@ -59,8 +101,60 @@ struct BibleReaderStrongsDocumentBuilder {
         /// Source reading direction exposed to Vue.
         let direction: String
 
+        /// Actual globally resolved book category serialized into Android's fragment payload.
+        let category: ModuleCategory
+
+        /// Actual installed-book features used for fragment metadata and aggregate content type.
+        let features: ModuleFeatures
+
         /// Exact-key dictionary lookup closure for the backing module type.
         let lookup: ([String]) -> DictionaryLookupResult?
+    }
+
+    /**
+     Records whether dictionary candidates came from an explicit user selection or automatic
+     installed-module discovery.
+
+     A nonempty preference is authoritative even when none of its named modules can be resolved.
+     Keeping that state distinct from automatic discovery prevents a stale or unavailable explicit
+     selection from silently opening a different dictionary or an automatic download fallback.
+     */
+    private enum LexiconModuleResolution {
+        /// Modules resolved from a nonempty explicit preference; the array may be empty.
+        case explicit([LexiconModule])
+
+        /// Modules resolved through automatic installed-module discovery; the array may be empty.
+        case automatic([LexiconModule], hasInstalledCompatibleBook: Bool)
+
+        /**
+         Returns the resolved candidates without discarding their selection provenance.
+
+         - Returns: Explicitly selected or automatically discovered dictionary candidates.
+         - Side effects: None.
+         - Failure modes: Returns an empty array when no candidate resolved.
+         */
+        var modules: [LexiconModule] {
+            switch self {
+            case .explicit(let modules), .automatic(let modules, _):
+                return modules
+            }
+        }
+
+        /**
+         Reports whether Android's synthetic missing-module document is appropriate.
+
+         - Returns: `true` only when automatic discovery found no compatible module.
+         - Side effects: None.
+         - Failure modes: Explicit selections always return `false`, including unresolved ones.
+         */
+        var shouldEmitMissingModuleFallback: Bool {
+            switch self {
+            case .explicit:
+                return false
+            case .automatic(let modules, let hasInstalledCompatibleBook):
+                return modules.isEmpty && !hasInstalledCompatibleBook
+            }
+        }
     }
 
     /**
@@ -71,6 +165,7 @@ struct BibleReaderStrongsDocumentBuilder {
        - selectedPreferenceValues: Preference lookup for selected dictionary/morphology modules.
        - moduleDisplayLabel: Display-label projection for SWORD modules.
        - localizedString: Localization lookup with default-value fallback.
+       - strongsLookupKeyPreferenceCache: Isolated per-book preferred-family state for this builder.
      - Side effects: None during construction.
      - Failure modes: Missing SWORD or preferences are handled by payload-building methods.
      */
@@ -78,15 +173,17 @@ struct BibleReaderStrongsDocumentBuilder {
         swordManager: SwordManager?,
         selectedPreferenceValues: @escaping SelectedPreferenceValues,
         moduleDisplayLabel: @escaping (SwordModule) -> String = Self.moduleDisplayLabel,
-        localizedString: @escaping LocalizedString = { key, defaultValue in
-            Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
-        }
+        localizedString: @escaping LocalizedString = bibleReaderAndroidDocumentLocalizedString,
+        strongsLookupKeyPreferenceCache: AndroidStrongsKeyPreferenceCache = .init()
     ) {
         self.swordManager = swordManager
         self.installedDictionarySources = nil
+        self.installedBookMetadata = nil
+        self.installedDictionarySourceNamed = nil
         self.selectedPreferenceValues = selectedPreferenceValues
         self.moduleDisplayLabel = moduleDisplayLabel
         self.localizedString = localizedString
+        self.strongsLookupKeyPreferenceCache = strongsLookupKeyPreferenceCache
     }
 
     /**
@@ -94,109 +191,171 @@ struct BibleReaderStrongsDocumentBuilder {
 
      - Parameters:
        - installedDictionarySources: Deferred globally resolved SWORD and SQLite dictionary sources.
+       - installedBookMetadata: Deferred inclusive admitted-book metadata, including locked books.
+       - installedDictionarySourceNamed: Global resolver for explicit initials or full-name tokens.
        - selectedPreferenceValues: Preference lookup for selected dictionary/morphology modules.
        - localizedString: Localization lookup with default-value fallback.
+       - strongsLookupKeyPreferenceCache: Shared per-book preferred-family state.
      - Side effects: None during construction; installed books and settings are read for each build.
-     - Failure modes: Missing, shadowed, wrong-category, and feature-incompatible sources are omitted.
+     - Failure modes: Missing, shadowed, locked, and unsupported SQLite sources are omitted.
      */
     init(
         installedDictionarySources: @escaping () -> [BibleReaderInstalledDictionarySource],
+        installedBookMetadata: @escaping () -> [ModuleInfo],
+        installedDictionarySourceNamed: @escaping InstalledDictionarySourceNamed,
         selectedPreferenceValues: @escaping SelectedPreferenceValues,
-        localizedString: @escaping LocalizedString = { key, defaultValue in
-            Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
-        }
+        localizedString: @escaping LocalizedString = bibleReaderAndroidDocumentLocalizedString,
+        strongsLookupKeyPreferenceCache: AndroidStrongsKeyPreferenceCache = .shared
     ) {
         self.swordManager = nil
         self.installedDictionarySources = installedDictionarySources
+        self.installedBookMetadata = installedBookMetadata
+        self.installedDictionarySourceNamed = installedDictionarySourceNamed
         self.selectedPreferenceValues = selectedPreferenceValues
         self.moduleDisplayLabel = Self.moduleDisplayLabel
         self.localizedString = localizedString
+        self.strongsLookupKeyPreferenceCache = strongsLookupKeyPreferenceCache
     }
 
     /**
-     Builds a Vue `MultiDocument` payload from Strong's numbers and Robinson morphology codes.
+     Builds a Vue `MultiDocument` payload from an ordered Android definition-link sequence.
 
-     Android opens these results as a special `Multi` general-book document with
-     `contentType: "strongs"`. iOS preserves that shape so dictionary tabs, recursive Strong's
-     links, missing-dictionary fallbacks, and links-window identity stay aligned with Android.
+     Android opens these results as a special `Multi` general-book document. Real Strong's or
+     morphology definitions set `contentType: "strongs"`; fake missing-module fragments and empty
+     Robinson results retain a null content type. iOS preserves that distinction so dictionary tabs,
+     recursive Strong's links, per-request fallbacks, and links-window identity stay aligned. A
+     compatible installed dictionary contributes only successful entries; a missing key never
+     masquerades as a missing installation. Explicit module selections remain authoritative even
+     when their selected module is unavailable.
 
      - Parameters:
-       - strongs: Strong's numbers parsed from `ab-w://` query items.
-       - robinson: Morphology codes parsed from `ab-w://` query items.
+       - items: Ordered Strong's and morphology children collected by Android-style link routing.
        - stateJSON: Optional opaque Vue state to restore into the result document.
-     - Returns: Serialized Vue `MultiDocument` JSON, or `nil` when no content or fallback exists.
+       - emitsEmptyMultiOnMiss: Whether Android dispatched the request through `openMulti`, which
+         still opens an empty `MultiDocument` when every child lookup misses.
+     - Returns: Serialized Vue `MultiDocument` JSON, including Android's empty `Multi` for a handled
+       Robinson miss or multi-link miss, or `nil` for a single Strong-only installed-entry miss.
      - Side effects: Reads installed SWORD modules and temporarily moves dictionary cursors.
-     - Failure modes: Missing dictionaries produce the Android-style download fallback for Strong's
-       links. Missing morphology definitions are skipped.
+     - Failure modes: Automatic discovery with no compatible Strong's or morphology dictionary
+       produces the Android-style download fallback. Unresolved explicit selections and installed
+       Strong dictionaries with no matching entry are omitted. Robinson and multi-link misses retain
+       Android's empty `Multi` navigation contract.
      */
-    func buildStrongsMultiDocumentJSON(strongs: [String], robinson: [String], stateJSON: String? = nil) -> String? {
+    func buildStrongsMultiDocumentJSON(
+        items: [BibleReaderDefinitionItem],
+        stateJSON: String? = nil,
+        emitsEmptyMultiOnMiss: Bool = false
+    ) -> String? {
         strongsDocumentBuilderLogger.info(
-            "buildStrongsMultiDocumentJSON: strongs=\(strongs), robinson=\(robinson), swordManager=\(self.swordManager == nil ? "nil" : "alive")"
+            "buildStrongsMultiDocumentJSON: items=\(String(describing: items)), swordManager=\(self.swordManager == nil ? "nil" : "alive")"
         )
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
-
-        for num in strongs {
-            let lexModules = findAllLexiconModules(for: num)
-            strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
-            let keyOptions = Self.strongsLookupKeyOptions(for: num)
-            strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: keyOptions=\(keyOptions)")
-            for mod in lexModules {
-                if let lookup = mod.lookup(keyOptions) {
-                    let isHebrew = num.hasPrefix("H") || (!num.hasPrefix("G") && (Int(String(num.drop(while: { $0.isLetter || $0 == "0" }))) ?? 0) > 5624)
-                    let featureType = isHebrew ? "hebrew" : "greek"
-                    let keyName = Self.canonicalStrongsKeyName(requested: num, actualKey: lookup.actualKey, rawEntry: lookup.rawEntry)
-                    let strongsLinkPrefix = Self.strongsLinkPrefix(for: num)
-                    let xml = lookup.isNativeHtml
-                        ? Self.buildDictionaryEntryHTML(
-                            renderedText: lookup.renderedText,
-                            strongsLinkPrefix: strongsLinkPrefix
-                        )
-                        : Self.buildDictionaryEntryXML(
-                            rawEntry: lookup.rawEntry,
-                            renderedText: lookup.renderedText,
-                            strongsLinkPrefix: strongsLinkPrefix
-                        )
-                    let features = OsisFeatures(type: featureType, keyName: keyName)
-
-                    fragments.append((
-                        xml: xml,
-                        key: "\(mod.name)--\(keyName)",
-                        keyName: keyName,
-                        bookInitials: mod.name,
-                        bookAbbreviation: mod.abbreviation,
-                        v11n: mod.v11n,
-                        language: mod.language,
-                        direction: mod.direction,
-                        features: features,
-                        isNativeHtml: lookup.isNativeHtml
-                    ))
-                }
+        var containsStrongsOrMorphologyContent = false
+        let containsRobinsonRequest = items.contains { item in
+            if case .robinson = item {
+                return true
             }
+            return false
         }
 
-        if !robinson.isEmpty {
-            let morphModules = findMorphologyModules()
-            for code in robinson {
-                for mod in morphModules {
-                    let morphKeys = [code, code.uppercased(), code.lowercased()]
-                    if let lookup = mod.lookup(morphKeys) {
-                        let xml = lookup.isNativeHtml
-                            ? Self.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
-                            : Self.buildDictionaryEntryXML(
-                                rawEntry: lookup.rawEntry,
-                                renderedText: lookup.renderedText,
-                                fallbackTitle: "Morphology: \(code)"
-                            )
+        for item in items {
+            switch item {
+            case .strong(let num):
+                let lexiconResolution = findAllLexiconModules(for: num)
+                let lexModules = lexiconResolution.modules
+                strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: num=\(num), lexModules=\(lexModules.map { $0.name })")
+                guard !lexModules.isEmpty else {
+                    if lexiconResolution.shouldEmitMissingModuleFallback {
+                        fragments.append(missingStrongsDictionaryFragment(for: num))
+                    }
+                    continue
+                }
+
+                let keyCandidates = Self.strongsLookupKeyCandidates(for: num)
+                strongsDocumentBuilderLogger.info(
+                    "buildStrongsMultiDocumentJSON: keyOptions=\(keyCandidates.map(\.value))"
+                )
+                for mod in lexModules {
+                    if let lookup = lookupStrongs(in: mod, candidates: keyCandidates) {
+                        let isHebrew = Self.isHebrewStrongsNumber(num)
+                        let keyName = lookup.actualKey
+                        let strongsLinkPrefix = isHebrew ? "H" : "G"
+                        let xml = dictionaryEntryXML(
+                            for: lookup,
+                            moduleInitials: mod.name,
+                            strongsLinkPrefix: strongsLinkPrefix
+                        )
+                        let features = AndroidDictionaryFragmentMetadata.features(
+                            from: mod.features,
+                            keyName: keyName
+                        )
+                        containsStrongsOrMorphologyContent =
+                            containsStrongsOrMorphologyContent
+                            || AndroidDictionaryFragmentMetadata.usesStrongsContentType(mod.features)
+
                         fragments.append((
                             xml: xml,
-                            key: "\(mod.name)--\(code)",
-                            keyName: code,
+                            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                                bookInitials: mod.name,
+                                keyOsisID: lookup.osisID
+                            ),
+                            keyName: keyName,
+                            osisRef: lookup.osisRef,
+                            bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
+                                for: mod.category
+                            ),
                             bookInitials: mod.name,
                             bookAbbreviation: mod.abbreviation,
                             v11n: mod.v11n,
                             language: mod.language,
                             direction: mod.direction,
-                            features: OsisFeatures(),
+                            features: features,
+                            hasStrongs: mod.features.contains(.strongsNumbers),
+                            isNativeHtml: lookup.isNativeHtml
+                        ))
+                    }
+                }
+            case .robinson(let code):
+                let morphologyResolution = findMorphologyModules()
+                let morphModules = morphologyResolution.modules
+                guard !morphModules.isEmpty else {
+                    if morphologyResolution.shouldEmitMissingModuleFallback {
+                        fragments.append(missingMorphologyDictionaryFragment(for: code))
+                    }
+                    continue
+                }
+                for mod in morphModules {
+                    if let lookup = mod.lookup([code]) {
+                        let keyName = lookup.actualKey
+                        let xml = dictionaryEntryXML(
+                            for: lookup,
+                            moduleInitials: mod.name
+                        )
+                        let features = AndroidDictionaryFragmentMetadata.features(
+                            from: mod.features,
+                            keyName: keyName
+                        )
+                        containsStrongsOrMorphologyContent =
+                            containsStrongsOrMorphologyContent
+                            || AndroidDictionaryFragmentMetadata.usesStrongsContentType(mod.features)
+                        fragments.append((
+                            xml: xml,
+                            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                                bookInitials: mod.name,
+                                keyOsisID: lookup.osisID
+                            ),
+                            keyName: keyName,
+                            osisRef: lookup.osisRef,
+                            bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
+                                for: mod.category
+                            ),
+                            bookInitials: mod.name,
+                            bookAbbreviation: mod.abbreviation,
+                            v11n: mod.v11n,
+                            language: mod.language,
+                            direction: mod.direction,
+                            features: features,
+                            hasStrongs: mod.features.contains(.strongsNumbers),
                             isNativeHtml: lookup.isNativeHtml
                         ))
                     }
@@ -204,27 +363,154 @@ struct BibleReaderStrongsDocumentBuilder {
             }
         }
 
-        if fragments.isEmpty, let firstStrongs = strongs.first {
-            fragments.append(missingStrongsDictionaryFragment(for: firstStrongs))
-        }
-
         if fragments.isEmpty {
             strongsDocumentBuilderLogger.info("buildStrongsMultiDocumentJSON: no definitions found")
-            return nil
+            guard containsRobinsonRequest || emitsEmptyMultiOnMiss else { return nil }
         }
 
         return BibleReaderMultiFragmentDocumentBuilder.buildJSON(
             fragments: fragments,
-            contentType: "strongs",
+            contentType: containsStrongsOrMorphologyContent ? "strongs" : nil,
             stateJSON: stateJSON
         )
+    }
+
+    /**
+     Builds a grouped definition payload for existing direct callers.
+
+     - Parameters:
+       - strongs: Strong's values appended first in their supplied order.
+       - robinson: Robinson morphology values appended after Strong's values in supplied order.
+       - stateJSON: Optional opaque Vue state to restore into the result document.
+     - Returns: The same serialized document as the ordered-item API.
+     - Side effects: Reads installed dictionaries and may update preferred Strong's key families.
+     - Failure modes: Delegates missing-book, missing-entry, read, and serialization behavior to the
+       ordered-item API.
+     */
+    func buildStrongsMultiDocumentJSON(
+        strongs: [String],
+        robinson: [String],
+        stateJSON: String? = nil
+    ) -> String? {
+        buildStrongsMultiDocumentJSON(
+            items: strongs.map(BibleReaderDefinitionItem.strong)
+                + robinson.map(BibleReaderDefinitionItem.robinson),
+            stateJSON: stateJSON
+        )
+    }
+
+    /**
+     Projects one exact dictionary lookup into Android's final fragment XML contract.
+
+     - Parameters:
+       - lookup: Exact backend-owned key plus either processed payload or typed read failure.
+       - moduleInitials: Actual selected book initials used by localized error text.
+       - strongsLinkPrefix: Optional compatibility prefix for legacy unprocessed entry bodies.
+     - Returns: Payload-ready OSIS, localized unanchored error OSIS, native HTML compatibility body,
+       or the legacy structured dictionary wrapper in that precedence order.
+     - Side effects: Reads the injected localization source only for a typed commentary read error.
+     - Failure modes: Missing localized resources use Android's exact English message; malformed
+       unprocessed legacy markup retains the existing deterministic wrapper behavior.
+     */
+    private func dictionaryEntryXML(
+        for lookup: DictionaryLookupResult,
+        moduleInitials: String,
+        strongsLinkPrefix: String? = nil
+    ) -> String {
+        if lookup.payloadFailure == .keyNotInDocument {
+            return Self.keyNotInDocumentXML(
+                keyName: lookup.actualKey,
+                moduleInitials: moduleInitials,
+                localizedString: localizedString
+            )
+        }
+        if let payloadReadyXML = lookup.payloadReadyXML {
+            return payloadReadyXML
+        }
+        if lookup.isNativeHtml {
+            return Self.buildDictionaryEntryHTML(
+                renderedText: lookup.renderedText,
+                strongsLinkPrefix: strongsLinkPrefix
+            )
+        }
+        return Self.buildDictionaryEntryXML(
+            rawEntry: lookup.rawEntry,
+            renderedText: lookup.renderedText,
+            strongsLinkPrefix: strongsLinkPrefix
+        )
+    }
+
+    /**
+     Builds Android's localized `DocumentNotFound` payload for an already-resolved book/key.
+
+     - Parameters:
+       - keyName: Exact resolved `Key.name` used as Android format argument one.
+       - moduleInitials: Exact selected `Book.initials` used as format argument two.
+     - Returns: One plain `<div>` containing XML-safe localized text and no BVA anchors.
+     - Side effects: Reads the injected localization source.
+     - Failure modes: Missing resources use Android's English default; unsupported placeholder
+       syntax remains literal instead of being evaluated as an unsafe format string.
+     */
+    static func keyNotInDocumentXML(
+        keyName: String,
+        moduleInitials: String,
+        localizedString: LocalizedString
+    ) -> String {
+        let format = localizedString(
+            "error_key_not_in_document2",
+            "%1$s was not found in document %2$s."
+        )
+        let keySentinel = "ANDBIBLE_MISSING_KEY_SENTINEL"
+        let moduleSentinel = "ANDBIBLE_MISSING_KEY_MODULE_SENTINEL"
+        let localizedMessage = format
+            .replacingOccurrences(of: "%1$s", with: keySentinel)
+            .replacingOccurrences(of: "%1$@", with: keySentinel)
+            .replacingOccurrences(of: "%2$s", with: moduleSentinel)
+            .replacingOccurrences(of: "%2$@", with: moduleSentinel)
+        let escapedMessage = Self.escapeXML(localizedMessage)
+            .replacingOccurrences(of: keySentinel, with: Self.escapeXML(keyName))
+            .replacingOccurrences(of: moduleSentinel, with: Self.escapeXML(moduleInitials))
+        return "<div>\(escapedMessage)</div>"
+    }
+
+    /**
+     Resolves one Strong's entry using Android's per-book preferred key-family history.
+
+     - Parameters:
+       - module: Installed dictionary facade whose canonical initials key the preference cache.
+       - candidates: Four typed candidates in Android default order.
+     - Returns: First exact accepted lookup, or `nil` when every family misses.
+     - Side effects: Reads the module, may move and restore a SWORD cursor, and records only the
+       family that produced accepted exact content.
+     - Failure modes: Backend failures and nearest-entry mismatches fail the affected family closed;
+       no preference is recorded for rejected or missing content.
+     - Important: Cache ordering and update are lock-protected, while backend lookup retains each
+       source's existing serialization contract.
+     */
+    private func lookupStrongs(
+        in module: LexiconModule,
+        candidates: [AndroidStrongsKeyCandidate]
+    ) -> DictionaryLookupResult? {
+        let orderedCandidates = strongsLookupKeyPreferenceCache.orderedCandidates(
+            candidates,
+            moduleInitials: module.name
+        )
+        for candidate in orderedCandidates {
+            guard let result = module.lookup([candidate.value]) else { continue }
+            strongsLookupKeyPreferenceCache.record(
+                candidate.family,
+                moduleInitials: module.name
+            )
+            return result
+        }
+        return nil
     }
 
     /**
      Builds the Android-style missing-document fallback for unavailable Strong's dictionaries.
 
      - Parameter strongsNumber: Strong's number whose dictionary module could not be resolved.
-     - Returns: A synthetic dictionary fragment with a Downloads link.
+     - Returns: Android's fake-book fragment with the raw requested key and embedded module link.
      - Side effects: Reads localized strings through the injected localization closure.
      - Failure modes: Empty or malformed numbers still produce a deterministic fallback key.
      */
@@ -233,101 +519,183 @@ struct BibleReaderStrongsDocumentBuilder {
     ) -> BibleReaderMultiFragmentDocumentBuilder.Fragment {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let moduleName = isHebrew ? "StrongsHebrew" : "StrongsGreek"
-        let featureType = isHebrew ? "hebrew" : "greek"
-        let numericKey = Self.normalizeNumericKey(strongsNumber)
-        let keyName = numericKey.count < 5
-            ? String(repeating: "0", count: max(0, 5 - numericKey.count)) + numericKey
-            : numericKey
-        let message = Self.escapeXML(
-            localizedString(
-                "no_dictionary_installed",
-                "No dictionary module installed. Download Strong's Hebrew/Greek from Downloads."
-            )
-        )
-        let downloadsLabel = Self.escapeXML(
-            localizedString(
-                "downloads",
-                "Downloads"
-            )
-        )
+        let message = missingDocumentMessage(moduleName: moduleName)
         let xml = """
-        <div>
-        <title type="x-gen">\(message)</title>
-        <p><a href="download://">\(downloadsLabel)</a></p>
-        </div>
+        <div>\(message)</div>
         """
         return (
             xml: xml,
-            key: "\(moduleName)--\(keyName)--missing",
-            keyName: keyName,
+            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                bookInitials: moduleName,
+                keyOsisID: strongsNumber
+            ),
+            keyName: strongsNumber,
+            osisRef: strongsNumber,
+            bookCategory: DocumentCategory.dictionary.rawValue,
             bookInitials: moduleName,
             bookAbbreviation: moduleName,
             v11n: nil,
             language: "en",
             direction: "ltr",
-            features: OsisFeatures(type: featureType, keyName: keyName),
+            features: OsisFeatures(),
+            hasStrongs: false,
             isNativeHtml: false
         )
     }
 
     /**
-     Returns Strong's key variants using the same families Android tries for dictionary lookup.
+     Builds Android's missing-document fallback for an automatically unresolved Robinson module.
 
-     Android parity matters here because installed Strong's dictionaries do not all expose the same
-     key shape. Some expect zero-padded numeric keys, some want a prefixed category key such as
-     `G1234` / `H1234`, and some zLD modules require a trailing carriage return.
+     - Parameter morphologyCode: Robinson morphology code whose backing module is unavailable.
+     - Returns: A synthetic morphology fragment linking directly to the Robinson download.
+     - Side effects: Reads localized strings through the injected localization closure.
+     - Failure modes: Empty or malformed codes still produce a deterministic fallback key.
      */
-    static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
-        let original = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        let numberOnly = String(original.drop(while: { $0.isLetter }))
-        let stripped = numberOnly.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        let sanitizedBase = stripped.isEmpty ? numberOnly : stripped
-
-        let categoryPrefix = isHebrewStrongsNumber(original) ? "H" : "G"
-
-        var keys: [String] = []
-
-        func appendUnique(_ candidate: String) {
-            guard !candidate.isEmpty, !keys.contains(candidate) else { return }
-            keys.append(candidate)
-        }
-
-        var digitVariants: [String] = [numberOnly]
-        var currentDigits = numberOnly
-        while currentDigits.hasPrefix("0"), currentDigits.count > 1 {
-            currentDigits.removeFirst()
-            digitVariants.append(currentDigits)
-        }
-
-        appendUnique(original)
-        for digits in digitVariants {
-            appendUnique(digits)
-            appendUnique(digits + "\r")
-            appendUnique("\(categoryPrefix)\(digits)")
-        }
-        appendUnique(sanitizedBase)
-
-        return keys
+    private func missingMorphologyDictionaryFragment(
+        for morphologyCode: String
+    ) -> BibleReaderMultiFragmentDocumentBuilder.Fragment {
+        let moduleName = "Robinson"
+        let message = missingDocumentMessage(moduleName: moduleName)
+        let xml = """
+        <div>\(message)</div>
+        """
+        return (
+            xml: xml,
+            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                bookInitials: moduleName,
+                keyOsisID: morphologyCode
+            ),
+            keyName: morphologyCode,
+            osisRef: morphologyCode,
+            bookCategory: DocumentCategory.dictionary.rawValue,
+            bookInitials: moduleName,
+            bookAbbreviation: moduleName,
+            v11n: nil,
+            language: "en",
+            direction: "ltr",
+            features: OsisFeatures(),
+            hasStrongs: false,
+            isNativeHtml: false
+        )
     }
 
     /**
-     Mirrors Android's heuristic for inferring Hebrew-vs-Greek when the prefix is omitted.
+     Formats Android's localized missing-document sentence around a module-specific download link.
+
+     Android resources use `%s`, while imported Apple resources may use `%@` or positional `%1$s`.
+     A sentinel is substituted before XML escaping so localized punctuation remains text and only
+     the module-name argument becomes Android's `AndBibleLink` markup.
+
+     - Parameter moduleName: Canonical fake-book initials used as both link text and Downloads seed.
+     - Returns: XML-safe localized sentence containing one clickable module-name link.
+     - Side effects: Reads the injected localization source.
+     - Failure modes: Missing translations use Android's English default. Unknown placeholder forms
+       remain visible rather than interpreting an unsafe format string.
+     */
+    private func missingDocumentMessage(moduleName: String) -> String {
+        let format = localizedString(
+            "document_not_installed",
+            "Please download '%s'"
+        )
+        let sentinel = "ANDBIBLE_MISSING_MODULE_LINK_SENTINEL"
+        let localizedMessage = format
+            .replacingOccurrences(of: "%1$s", with: sentinel)
+            .replacingOccurrences(of: "%s", with: sentinel)
+            .replacingOccurrences(of: "%@", with: sentinel)
+        let escapedMessage = Self.escapeXML(localizedMessage)
+        let escapedModuleName = Self.escapeXML(moduleName)
+        let link = "<AndBibleLink href=\"download://?initials=\(escapedModuleName)\">\(escapedModuleName)</AndBibleLink>"
+        return escapedMessage.replacingOccurrences(of: sentinel, with: link)
+    }
+
+    /**
+     Returns Strong's key strings in Android's typed family order.
+
+     - Parameter strongsNumber: Decoded external Strong's key, including any trailing decoration.
+     - Returns: Raw, five-digit, five-digit-plus-carriage-return, and category values. Duplicate
+       strings remain present because Android caches and reorders the typed family, not the value.
+     - Side effects: None.
+     - Failure modes: Invalid grammar retains Android's literal null-base family outputs rather than
+       inventing valid numeric aliases.
+    */
+    static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
+        strongsLookupKeyCandidates(for: strongsNumber).map(\.value)
+    }
+
+    /**
+     Builds Android's four typed Strong's lookup families.
+
+     Android's `LinkControl.getStrongsKey` parses an optional uppercase `G`/`H`, greedily consumes
+     leading zeroes, accepts decorations after the digits, and tries raw, five-digit, five-digit plus
+     carriage return, then category-plus-unpadded keys. No libsword-only aliases are added because
+     doing so could turn an Android miss into iOS content or select a distinct logical record.
+
+     - Parameter strongsNumber: Decoded external Strong's key before normalization.
+     - Returns: Ordered typed candidates with duplicate values retained under distinct families.
+     - Side effects: None.
+     - Failure modes: Values outside Android's anchored grammar retain Android's raw, empty,
+       carriage-return, and category-plus-`null` typed family values.
+     */
+    static func strongsLookupKeyCandidates(
+        for strongsNumber: String
+    ) -> [AndroidStrongsKeyCandidate] {
+        let categoryPrefix = isHebrewStrongsNumber(strongsNumber) ? "H" : "G"
+        return AndroidStrongsKeyResolution.candidates(
+            for: strongsNumber,
+            categoryPrefix: categoryPrefix
+        )
+    }
+
+    /**
+     Mirrors Android's external Strong's URI category rule.
+
+     Android reads the raw first UTF-16 `Char` without trimming or case folding and treats only code
+     unit `0x0047` (`G`) as Greek. This differs from Swift grapheme clustering when `G` is followed
+     by a combining mark. `H`-prefixed, prefixless numeric, lowercase `g`, leading-space, and legacy
+     non-`G` values all route to the Hebrew key family.
+
+     - Parameter strongsNumber: External Strong's value before dictionary-key normalization.
+     - Returns: `false` only when the raw first UTF-16 code unit is uppercase `G` (`0x0047`).
+     - Side effects: None.
+     - Failure modes: Empty or malformed values deterministically classify as Hebrew.
      */
     static func isHebrewStrongsNumber(_ strongsNumber: String) -> Bool {
-        let normalized = strongsNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if normalized.hasPrefix("H") { return true }
-        if normalized.hasPrefix("G") { return false }
-
-        let digits = String(normalized.drop(while: { $0.isLetter || $0 == "0" }))
-        return (Int(digits) ?? 0) > 5624
+        strongsNumber.utf16.first != 0x0047
     }
 
     /**
-     Result of an exact-enough dictionary lookup.
+     Captures one backend-resolved key and its Android document projection.
+
+     Identity fields come from the actual accepted `Key`; body fields either carry a fully processed
+     OSIS fragment or the legacy adapter inputs. A typed payload failure remains a successful key
+     resolution so callers can emit Android's actual-book error fragment instead of retrying.
+
+     - Side effects: None; values are immutable after construction.
+     - Failure modes: Backend misses are represented by the absence of this value, while supported
+       post-resolution read failures use `payloadFailure`.
      */
     struct DictionaryLookupResult {
-        /// Key SWORD reported after positioning the module.
+        /**
+         Typed Android document outcome retained after a backend has resolved an exact key.
+
+         A commentary-category `SwordDictionary` still owns its resolved key when its assembled
+         BookData has no direct verse. Android catches that read failure and emits a localized error
+         fragment for the actual book/key instead of treating the definition as an absent entry.
+         */
+        enum PayloadFailure: Equatable {
+            /// Emit Android's localized key-not-in-document OSIS error without BVA anchors.
+            case keyNotInDocument
+        }
+
+        /// Exact user-visible `Key.name` reported by the selected book.
         let actualKey: String
+
+        /// Exact `Key.osisID` used for Android's sanitized fragment identity.
+        let osisID: String
+
+        /// Exact `Key.osisRef` serialized into the fragment payload.
+        let osisRef: String
+
         /// Raw entry XML/text for the matched key.
         let rawEntry: String
         /// SWORD-rendered text for the matched key.
@@ -335,70 +703,221 @@ struct BibleReaderStrongsDocumentBuilder {
         /// Whether `renderedText` is browser HTML that should bypass OSIS conversion.
         let isNativeHtml: Bool
 
+        /// Complete Android-processed fragment XML that must bypass dictionary wrapping.
+        let payloadReadyXML: String?
+
+        /// Typed post-resolution error rendered as an Android `OsisError` fragment.
+        let payloadFailure: PayloadFailure?
+
         /**
          Creates a dictionary lookup result with explicit renderer expectations.
 
          - Parameters:
-           - actualKey: Key resolved by the backing module.
-           - rawEntry: Raw entry payload used for key validation and canonicalization.
-           - renderedText: Display-ready dictionary body from the backing module.
-           - isNativeHtml: `true` for Android MyBible dictionary HTML that should render as native
-             browser markup; `false` for SWORD output that remains in the OSIS fragment path.
+           - actualKey: User-visible `Key.name` resolved by the backing module.
+           - osisID: Resolved `Key.osisID`; defaults to `actualKey` for flat dictionary keys.
+           - osisRef: Resolved `Key.osisRef`; defaults to `actualKey` for flat dictionary keys.
+           - rawEntry: Raw entry payload preserved for non-SwordDictionary compatibility paths.
+           - renderedText: Display-ready body preserved for non-SwordDictionary compatibility paths.
+           - isNativeHtml: Whether the compatibility result is browser HTML. Android
+             `SwordDictionary` sources, including MyBible, leave this `false` and use
+             `payloadReadyXML`.
+           - payloadReadyXML: Optional fully processed fragment XML used without further wrapping.
+           - payloadFailure: Optional typed Android read failure for this already-resolved key.
          - Side effects: None.
          - Failure modes: None.
          */
-        init(actualKey: String, rawEntry: String, renderedText: String, isNativeHtml: Bool = false) {
+        init(
+            actualKey: String,
+            osisID: String? = nil,
+            osisRef: String? = nil,
+            rawEntry: String,
+            renderedText: String,
+            isNativeHtml: Bool = false,
+            payloadReadyXML: String? = nil,
+            payloadFailure: PayloadFailure? = nil
+        ) {
             self.actualKey = actualKey
+            self.osisID = osisID ?? actualKey
+            self.osisRef = osisRef ?? actualKey
             self.rawEntry = rawEntry
             self.renderedText = renderedText
             self.isNativeHtml = isNativeHtml
+            self.payloadReadyXML = payloadReadyXML
+            self.payloadFailure = payloadFailure
         }
     }
 
     /**
-     Tries each key variant in a module and returns the first valid render result.
+     Tries each Android key candidate through the selected SWORD book's JSword key contract.
 
-     SWORD positions to the nearest entry when a key is absent, so the resolved key, raw entry, and
-     rendered text are all validated before accepting a candidate.
+     RawLD backends normalize case and optional Strong's padding before exact index comparison.
+     JSword derives padding from the first binary-search midpoint, so iOS resolves the selected
+     source-index key before asking libsword to read that exact stored record.
+     Body/headword text is deliberately not used as a second ownership test: Android accepts the
+     key returned by `Book.getKey` and renders `BookData` even when entry markup names another key.
+
+     - Parameters:
+       - module: Readable SWORD module queried through serialized cursor access.
+       - keyOptions: Ordered keys; Strong's callers pass one typed family per invocation and
+         Robinson callers pass exactly the raw code.
+     - Returns: First JSword-owned record, preserving its exact stored key, raw body, and rendering.
+     - Side effects: Enumerates and caches RawLD keys, then moves the module cursor to accepted keys.
+     - Failure modes: Empty/unresolved keys, unrelated nearest-key results, backend enumeration
+       failures, and unsupported non-RawLD normalization fail the affected candidate closed.
      */
     static func lookupInModule(_ module: SwordModule, keyOptions: [String]) -> DictionaryLookupResult? {
         strongsDocumentBuilderLogger.info("lookupInModule: \(module.info.name), keyOptions=\(keyOptions)")
 
-        for key in keyOptions {
-            let inspection = module.setKeyAndInspect(key)
-            let actualKey = inspection.actualKey
-            let candidate = inspection.renderedText
-            let trimmedKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            strongsDocumentBuilderLogger.info("lookupInModule: tried key='\(key)', actualKey='\(trimmedKey)', renderLen=\(candidate.count)")
+        let driver = module.info.moduleDriver
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if driver == "rawgenbook" {
+            return lookupInGenBook(module, keyOptions: keyOptions)
+        }
+        let usesRawLDKeyContract = ["rawld", "rawld4", "zld"].contains(driver)
+        let rawLDConfiguration = AndroidJSwordRawLDKeyResolution.Configuration(
+            moduleInitials: module.info.name,
+            category: module.info.category,
+            features: module.info.features,
+            caseSensitiveKeys: AndroidJSwordRawLDKeyResolution.javaBoolean(
+                module.configEntry("CaseSensitiveKeys")
+            ),
+            // SwordBookMetaData.DEFAULTS supplies true when this property is absent.
+            strongsPadding: module.configEntry("StrongsPadding").map(
+                AndroidJSwordRawLDKeyResolution.javaBoolean
+            ) ?? true
+        )
 
-            switch dictionaryLookupCandidateRejectionReason(
-                requested: key,
-                actualKey: trimmedKey,
-                rawEntry: inspection.rawEntry,
-                renderedText: candidate
-            ) {
-            case .none:
-                break
-            case .actualKeyMismatch:
-                strongsDocumentBuilderLogger.info("lookupInModule: key mismatch, skipping")
-                continue
-            case let .rawEntryMismatch(rawEntryKey):
-                strongsDocumentBuilderLogger.info("lookupInModule: raw entry key mismatch (\(rawEntryKey)), skipping")
-                continue
-            case .emptyRenderedText:
-                continue
-            case .renderedEntryMismatch:
-                strongsDocumentBuilderLogger.info("lookupInModule: rendered entry key mismatch, skipping")
-                continue
-            case .renderedTextMissingRequestedNumericKey:
-                strongsDocumentBuilderLogger.info("lookupInModule: rendered text missing requested numeric key, skipping")
-                continue
+        let rawLDStoredSlots: [SwordRawDictionaryIndexSlot]?
+        if usesRawLDKeyContract {
+            rawLDStoredSlots = try? module.loadRawDictionaryIndexSlots()
+        } else {
+            rawLDStoredSlots = nil
+        }
+        for key in keyOptions {
+            let selectedStoredKey: String?
+            let selectedStoredIndex: Int?
+            if usesRawLDKeyContract {
+                guard let rawLDStoredSlots else { return nil }
+                let resolution = AndroidJSwordRawLDKeyResolution.resolve(
+                    requestedKey: key,
+                    storedSlots: rawLDStoredSlots,
+                    configuration: rawLDConfiguration
+                )
+                selectedStoredKey = resolution?.storedKey
+                selectedStoredIndex = resolution?.index
+            } else {
+                selectedStoredKey = key
+                selectedStoredIndex = nil
+            }
+            guard let selectedStoredKey else { continue }
+
+            if usesRawLDKeyContract {
+                guard let selectedStoredIndex else { continue }
+                let fragment: SwordRawOSISFragment
+                do {
+                    fragment = try module.rawDictionaryOSISFragment(
+                        forIndex: selectedStoredIndex,
+                        storedKey: selectedStoredKey
+                    )
+                } catch SwordRawOSISFragmentError.missingCommentaryVerse(
+                    let key,
+                    let keyName,
+                    let osisRef
+                ) {
+                    return DictionaryLookupResult(
+                        actualKey: keyName,
+                        osisID: key,
+                        osisRef: osisRef,
+                        rawEntry: "",
+                        renderedText: "",
+                        payloadFailure: .keyNotInDocument
+                    )
+                } catch {
+                    continue
+                }
+                strongsDocumentBuilderLogger.info(
+                    "lookupInModule: tried key='\(key)', actualKey='\(fragment.keyName)', accepted=true, xmlLen=\(fragment.xml.count)"
+                )
+                return DictionaryLookupResult(
+                    actualKey: fragment.keyName,
+                    osisID: fragment.key,
+                    osisRef: fragment.osisRef,
+                    rawEntry: fragment.originalXML,
+                    renderedText: fragment.originalXML,
+                    payloadReadyXML: fragment.xml
+                )
             }
 
+            let inspection = module.setKeyAndInspect(selectedStoredKey)
+            let accepted = inspection.actualKey.utf16.elementsEqual(key.utf16)
+
+            strongsDocumentBuilderLogger.info(
+                "lookupInModule: tried key='\(key)', actualKey='\(inspection.actualKey)', accepted=\(accepted), renderLen=\(inspection.renderedText.count)"
+            )
+            guard accepted else { continue }
             return DictionaryLookupResult(
-                actualKey: trimmedKey,
-                rawEntry: inspection.rawEntry.trimmingCharacters(in: .whitespacesAndNewlines),
-                renderedText: candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+                actualKey: selectedStoredKey,
+                rawEntry: inspection.rawEntry,
+                renderedText: inspection.renderedText
+            )
+        }
+        return nil
+    }
+
+    /**
+     Resolves one candidate through pinned `SwordGenBook.getKey` and reads the selected TreeKey.
+
+     - Parameters:
+       - module: Readable RawGenBook whose global TreeKey list backs JSword's local key map.
+       - keyOptions: Ordered Strong's typed families or the one raw Robinson code.
+     - Returns: First resolved entry with leaf `Key.name` and distinct full-path OSIS identity.
+     - Side effects: Enumerates/caches the module key list and performs one cursor-restoring raw OSIS
+       read for the selected exact full path.
+     - Failure modes: Key-list errors, unmatched candidates, and malformed/unreadable selected OSIS
+       fail closed without substituting a nearest tree node.
+     */
+    private static func lookupInGenBook(
+        _ module: SwordModule,
+        keyOptions: [String]
+    ) -> DictionaryLookupResult? {
+        guard let sourceKeys = try? module.loadAllKeys() else { return nil }
+        for key in keyOptions {
+            guard let resolution = AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: key,
+                sourceKeys: sourceKeys
+            ) else {
+                continue
+            }
+            let fragment: SwordRawOSISFragment
+            do {
+                fragment = try module.rawGenBookOSISFragment(
+                    forKey: resolution.sourceKey,
+                    treeKeyCardinality: resolution.subtreeCardinality
+                )
+            } catch SwordRawOSISFragmentError.missingCommentaryVerse(
+                let sourceKey,
+                let keyName,
+                let osisRef
+            ) {
+                return DictionaryLookupResult(
+                    actualKey: keyName,
+                    osisID: resolution.osisRef.isEmpty ? sourceKey : resolution.osisRef,
+                    osisRef: resolution.osisRef.isEmpty ? osisRef : resolution.osisRef,
+                    rawEntry: "",
+                    renderedText: "",
+                    payloadFailure: .keyNotInDocument
+                )
+            } catch {
+                continue
+            }
+            return DictionaryLookupResult(
+                actualKey: fragment.keyName,
+                osisID: resolution.osisRef,
+                osisRef: resolution.osisRef,
+                rawEntry: fragment.originalXML,
+                renderedText: fragment.originalXML,
+                payloadReadyXML: fragment.xml
             )
         }
         return nil
@@ -408,21 +927,38 @@ struct BibleReaderStrongsDocumentBuilder {
      Tries Android's Strong's key variants against a restored MyBible dictionary.
 
      MyBible dictionary topics are exact keys, so unlike SWORD there is no nearest-entry cursor to
-     reject. The matched topic key is still returned as `actualKey` so canonical key-name derivation
-     can preserve Android's category-prefixed `H430` / `G123` MyBible lookup branch.
+     reject. Android exposes the driver as a `SwordDictionary`: an exact row, including an empty
+     definition, receives the hidden generated key title before one OSIS/BVA processing pass.
+
+     - Parameters:
+       - reader: Validated read-only MyBible dictionary backend.
+       - keyOptions: Ordered Android Strong/Robinson candidates; the first exact topic wins.
+       - moduleInitials: Actual installed initials used by source-specific OSIS compatibility rules.
+     - Returns: Actual topic identity plus payload-ready OSIS, or `nil` when no topic/processable
+       entry exists.
+     - Side effects: Opens short-lived SQLite reads and runs one OSIS parser/anchor pass per exact row.
+     - Failure modes: Missing topics and malformed OSIS continue to the next candidate; all misses
+       return `nil`. An exact empty definition remains a successful hidden-title-only fragment.
      */
-    static func lookupInMyBibleDictionary(_ reader: MyBibleReader, keyOptions: [String]) -> DictionaryLookupResult? {
+    static func lookupInMyBibleDictionary(
+        _ reader: MyBibleReader,
+        keyOptions: [String],
+        moduleInitials: String? = nil
+    ) -> DictionaryLookupResult? {
         for key in keyOptions {
-            guard let entry = reader.getDictionaryEntry(key: key)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !entry.isEmpty else {
+            guard let entry = reader.getDictionaryEntry(key: key),
+                  let processed = try? SwordOSISFragmentProcessor.processDictionarySource(
+                    sourceXML: entry,
+                    keyName: key,
+                    moduleInitials: moduleInitials
+                  ) else {
                 continue
             }
             return DictionaryLookupResult(
-                actualKey: key.trimmingCharacters(in: .whitespacesAndNewlines),
-                rawEntry: entry,
-                renderedText: entry,
-                isNativeHtml: true
+                actualKey: key,
+                rawEntry: processed.originalXML,
+                renderedText: processed.originalXML,
+                payloadReadyXML: processed.xml
             )
         }
         return nil
@@ -531,7 +1067,7 @@ struct BibleReaderStrongsDocumentBuilder {
                 trimmedRawEntry,
                 defaultPrefix: strongsLinkPrefix
             )
-            if let fallbackTitle, !trimmedRawEntry.localizedCaseInsensitiveContains("<title") {
+            if let fallbackTitle {
                 let escapedTitle = escapeXML(fallbackTitle)
                 return "<div><title type=\"x-gen\">\(escapedTitle)</title>\(linkifiedRawEntry)</div>"
             }
@@ -543,16 +1079,25 @@ struct BibleReaderStrongsDocumentBuilder {
             defaultPrefix: strongsLinkPrefix
         )
         let titlePrefix = fallbackTitle.map { "<title type=\"x-gen\">\(escapeXML($0))</title>" } ?? ""
+        if renderedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "<div>\(titlePrefix)</div>"
+        }
         return "<div>\(titlePrefix)<div type=\"paragraph\">\(linkifiedHtml)</div></div>"
     }
 
     /**
-     Builds native HTML for restored Android MyBible dictionary entries.
+     Builds native HTML for browser-oriented non-SwordDictionary entries.
 
-     Android reads MyBible dictionary `definition` values directly and lets the WebView render their
-     browser-oriented markup. iOS keeps the same content contract by only linkifying supported Strong's
-     references and then marking the fragment as native HTML instead of coercing tags such as `<ol>`,
-     `<li>`, `<b>`, and `<he>` into OSIS components.
+     Android-compatible MyBible and MySword dictionaries are real `SwordDictionary` instances and
+     use the shared OSIS processor instead. This helper remains for sources whose backing contract is
+     genuinely browser HTML and only linkifies supported Strong's references.
+
+     - Parameters:
+       - renderedText: Exact browser-oriented definition body.
+       - strongsLinkPrefix: Optional default prefix for numeric Strong's references.
+     - Returns: One native-HTML root preserving the source body.
+     - Side effects: None.
+     - Failure modes: Malformed source HTML remains source-owned and is sanitized by the bridge.
      */
     static func buildDictionaryEntryHTML(
         renderedText: String,
@@ -587,214 +1132,19 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Produces the canonical five-digit Strong's key name used by Vue fragments.
-     */
-    static func canonicalStrongsKeyName(requested: String, actualKey: String, rawEntry: String) -> String {
-        let resolvedKey = dictionaryEntryKey(actualKey: actualKey, rawEntry: rawEntry) ?? requested
-        let numericKey = normalizeNumericKey(resolvedKey)
-        guard !numericKey.isEmpty else {
-            return normalizeNumericKey(requested)
-        }
-        return numericKey.count < 5
-            ? String(repeating: "0", count: 5 - numericKey.count) + numericKey
-            : numericKey
-    }
+     Returns the JSword-compatible user-facing abbreviation for a SWORD module.
 
-    /**
-     Extracts the dictionary entry key from SWORD current-key or raw XML metadata.
-     */
-    static func dictionaryEntryKey(actualKey: String, rawEntry: String) -> String? {
-        let trimmedActualKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedActualKey.isEmpty {
-            return trimmedActualKey
-        }
-
-        let titlePattern = try? NSRegularExpression(pattern: #"<title>([^<]+)</title>"#, options: [])
-        if let regex = titlePattern,
-           let match = regex.firstMatch(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry)),
-           let range = Range(match.range(at: 1), in: rawEntry) {
-            return String(rawEntry[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        let entryPattern = try? NSRegularExpression(
-            pattern: #"<entryFree\b[^>]*\bn\s*=\s*"([^"]+)""#,
-            options: []
-        )
-        if let regex = entryPattern,
-           let match = regex.firstMatch(in: rawEntry, range: NSRange(rawEntry.startIndex..., in: rawEntry)),
-           let range = Range(match.range(at: 1), in: rawEntry) {
-            return String(rawEntry[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return nil
-    }
-
-    /**
-     Validates that a raw dictionary entry still refers to the requested lookup key.
-     */
-    static func rawDictionaryEntryMatchesRequestedKey(requested: String, rawEntry: String) -> Bool {
-        guard let resolvedKey = dictionaryEntryKey(actualKey: "", rawEntry: rawEntry) else {
-            return true
-        }
-
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedResolvedKey = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRequested.caseInsensitiveCompare(trimmedResolvedKey) == .orderedSame {
-            return true
-        }
-
-        let requestedNumeric = normalizeNumericKey(trimmedRequested)
-        let resolvedNumeric = normalizeNumericKey(trimmedResolvedKey)
-        return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
-    }
-
-    /**
-     Reason a candidate SWORD dictionary lookup was rejected.
-     */
-    enum DictionaryLookupCandidateRejectionReason: Equatable {
-        /// SWORD reported a current key that does not match the requested key family.
-        case actualKeyMismatch
-        /// Raw entry metadata identifies a different dictionary key.
-        case rawEntryMismatch(String)
-        /// Rendered text is empty or a known missing-entry placeholder.
-        case emptyRenderedText
-        /// Rendered text begins with a different dictionary headword.
-        case renderedEntryMismatch
-        /// Modules without current-key support did not render the requested numeric key.
-        case renderedTextMissingRequestedNumericKey
-    }
-
-    /**
-     Validates one rendered dictionary lookup candidate.
-     */
-    static func dictionaryLookupCandidateRejectionReason(
-        requested: String,
-        actualKey: String,
-        rawEntry: String,
-        renderedText: String
-    ) -> DictionaryLookupCandidateRejectionReason? {
-        let trimmedActualKey = actualKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedRenderedText = renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if !trimmedActualKey.isEmpty,
-           !keysMatchNormalized(requested: requested, actual: trimmedActualKey) {
-            return .actualKeyMismatch
-        }
-
-        if let rawEntryKey = dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
-           !rawDictionaryEntryMatchesRequestedKey(requested: requested, rawEntry: rawEntry) {
-            return .rawEntryMismatch(rawEntryKey)
-        }
-
-        if trimmedRenderedText.isEmpty || trimmedRenderedText.contains("@@@@") {
-            return .emptyRenderedText
-        }
-
-        if !renderedDictionaryEntryMatchesRequestedKey(
-            requested: requested,
-            renderedText: trimmedRenderedText
-        ) {
-            return .renderedEntryMismatch
-        }
-
-        if trimmedActualKey.isEmpty {
-            let numericKey = normalizeNumericKey(requested)
-            if !numericKey.isEmpty && !trimmedRenderedText.contains(numericKey) {
-                return .renderedTextMissingRequestedNumericKey
-            }
-        }
-
-        return nil
-    }
-
-    /**
-     Extracts a leading rendered dictionary headword from HTML/text content.
-     */
-    static func renderedDictionaryEntryKey(renderedText: String) -> String? {
-        let withoutTags = renderedText.replacingOccurrences(
-            of: #"<[^>]+>"#,
-            with: " ",
-            options: .regularExpression
-        )
-        let normalized = withoutTags
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !normalized.isEmpty else { return nil }
-
-        let pattern = try? NSRegularExpression(
-            pattern: #"^([HG]?\d{1,5})\b"#,
-            options: [.caseInsensitive]
-        )
-        guard let regex = pattern,
-              let match = regex.firstMatch(
-                in: normalized,
-                range: NSRange(normalized.startIndex..., in: normalized)
-              ),
-              let range = Range(match.range(at: 1), in: normalized) else {
-            return nil
-        }
-
-        return String(normalized[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /**
-     Validates that rendered dictionary content still belongs to the requested key.
-     */
-    static func renderedDictionaryEntryMatchesRequestedKey(requested: String, renderedText: String) -> Bool {
-        guard let resolvedKey = renderedDictionaryEntryKey(renderedText: renderedText) else {
-            return true
-        }
-
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedResolvedKey = resolvedKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRequested.caseInsensitiveCompare(trimmedResolvedKey) == .orderedSame {
-            return true
-        }
-
-        let requestedNumeric = normalizeNumericKey(trimmedRequested)
-        let resolvedNumeric = normalizeNumericKey(trimmedResolvedKey)
-        return !requestedNumeric.isEmpty && requestedNumeric == resolvedNumeric
-    }
-
-    /**
-     Compares dictionary keys after stripping prefixes and leading zeros.
-     */
-    static func keysMatchNormalized(requested: String, actual: String) -> Bool {
-        let trimmedRequested = requested.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedActual = actual.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if trimmedRequested.caseInsensitiveCompare(trimmedActual) == .orderedSame { return true }
-
-        let reqNumeric = normalizeNumericKey(trimmedRequested)
-        let actNumeric = normalizeNumericKey(trimmedActual)
-        if !reqNumeric.isEmpty && reqNumeric == actNumeric { return true }
-
-        return false
-    }
-
-    /**
-     Strips optional letter prefix and leading zeros from a numeric dictionary key.
-     */
-    static func normalizeNumericKey(_ key: String) -> String {
-        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let afterLetters = String(trimmedKey.drop(while: { $0.isLetter }))
-        let stripped = afterLetters.replacingOccurrences(of: "^0+", with: "", options: .regularExpression)
-        guard !stripped.isEmpty, stripped.allSatisfy({ $0.isNumber }) else { return "" }
-        return stripped
-    }
-
-    /**
-     Returns a user-facing short label for a SWORD module.
+     - Parameter module: Actual selected native book.
+     - Returns: `Abbreviation` after JSword `IniSection`'s Java-trim step, or initials when absent
+       or empty. Unicode whitespace above U+0020 remains verbatim.
+     - Side effects: Reads one SWORD config entry.
+     - Failure modes: Missing and zero-length values fall back deterministically to initials.
      */
     static func moduleDisplayLabel(_ module: SwordModule) -> String {
-        if let abbreviation = module.configEntry("Abbreviation")?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !abbreviation.isEmpty {
-            return abbreviation
-        }
-        return module.info.name
+        BibleReaderJSwordConfigValue.abbreviation(
+            module.configEntry("Abbreviation"),
+            initials: module.info.name
+        )
     }
 
     /**
@@ -805,13 +1155,25 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Finds all dictionary/glossary modules that can look up a given Strong's number.
+     Resolves the dictionary/glossary modules eligible for one Strong's number.
+
+     - Parameter strongsNumber: External Strong's value used to choose Greek or Hebrew preferences.
+     - Returns: Explicitly selected candidates when that preference is nonempty, including an empty
+       resolution, or automatically discovered compatible candidates when no selection exists.
+     - Side effects: Reads current preferences and installed SWORD/restored dictionary metadata.
+     - Failure modes: Missing explicit modules remain an authoritative empty explicit resolution;
+       absent automatic candidates return an empty automatic resolution that licenses a fallback.
      */
-    private func findAllLexiconModules(for strongsNumber: String) -> [LexiconModule] {
+    private func findAllLexiconModules(for strongsNumber: String) -> LexiconModuleResolution {
         let isHebrew = Self.isHebrewStrongsNumber(strongsNumber)
         let feature: ModuleFeatures = isHebrew ? .hebrewDef : .greekDef
 
         let candidates = lexiconCandidates(feature: feature, manager: swordManager)
+        let hasInstalledCompatibleBook = !candidates.isEmpty
+            || (installedBookMetadata?().contains { $0.features.contains(feature) } ?? false)
+            || (swordManager?.installedModules().contains {
+                $0.features.contains(feature)
+            } ?? false)
         strongsDocumentBuilderLogger.info("findAllLexiconModules: \(candidates.count) installed lexicon candidates, isHebrew=\(isHebrew)")
         var result: [LexiconModule] = []
         var seen = Set<String>()
@@ -820,36 +1182,58 @@ struct BibleReaderStrongsDocumentBuilder {
         let selectedNames = selectedPreferenceValues(selectionKey)
         if !selectedNames.isEmpty {
             for name in selectedNames where seen.insert(name).inserted {
-                if let mod = candidates.first(where: { $0.name == name }) {
+                if let mod = explicitlySelectedLexiconModule(named: name) {
                     result.append(mod)
                 }
             }
-            if !result.isEmpty {
-                return result
-            }
+            return .explicit(result)
         }
 
-        for mod in Self.sortLexiconModulesForAndroidTabs(candidates) {
+        for mod in candidates {
             if seen.insert(mod.name).inserted {
                 result.append(mod)
             }
         }
 
         if !result.isEmpty {
-            return result
+            return .automatic(result, hasInstalledCompatibleBook: true)
         }
 
-        let lexiconNames = isHebrew
-            ? ["StrongsHebrew", "OSHB", "BDB"]
-            : ["StrongsGreek", "StrongsRealGreek", "Thayer", "ISBE"]
-        guard let mgr = swordManager else { return result }
-        for name in lexiconNames {
-            if seen.insert(name).inserted, let mod = mgr.module(named: name) {
-                result.append(swordLexiconModule(mod))
-            }
+        return .automatic(
+            result,
+            hasInstalledCompatibleBook: hasInstalledCompatibleBook
+        )
+    }
+
+    /**
+     Resolves one explicit persisted book token with JSword's global identity precedence.
+
+     Explicit Android preferences are authoritative and are resolved without category or feature
+     filtering: exact initials, exact full name, then Java-style case-insensitive initials or full
+     name. Global ownership is preserved, so a locked or unreadable match fails closed instead of
+     falling through to a same-named backend.
+
+     - Parameter selectedName: Persisted initials or full module-name token.
+     - Returns: Globally owned readable dictionary/glossary facade, or `nil` when unresolved.
+     - Side effects: Reads current installed-module metadata and may construct a SWORD facade.
+     - Failure modes: Missing, locked, shadowed, and unsupported SQLite owners return `nil`;
+       automatic discovery is never substituted for an unresolved explicit token.
+     */
+    private func explicitlySelectedLexiconModule(named selectedName: String) -> LexiconModule? {
+        if let installedDictionarySourceNamed,
+           let source = installedDictionarySourceNamed(selectedName) {
+            return lexiconModule(source)
         }
 
-        return result
+        guard let manager = swordManager,
+              let info = BibleReaderInstalledModuleLookup.module(
+                named: selectedName,
+                in: manager.installedModules()
+              ),
+              let module = manager.readableModule(named: info.name) else {
+            return nil
+        }
+        return swordLexiconModule(module)
     }
 
     /**
@@ -867,9 +1251,7 @@ struct BibleReaderStrongsDocumentBuilder {
         if let installedDictionarySources {
             return installedDictionarySources().compactMap { source in
                 let info = source.info
-                guard (info.category == .dictionary || info.category == .glossary),
-                      StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name),
-                      info.features.contains(feature) else {
+                guard info.features.contains(feature) else {
                     return nil
                 }
                 return lexiconModule(source)
@@ -878,10 +1260,8 @@ struct BibleReaderStrongsDocumentBuilder {
 
         guard let manager else { return [] }
         let swordModules = manager.installedModules().compactMap { info -> LexiconModule? in
-            guard (info.category == .dictionary || info.category == .glossary),
-                  StrongsDictionaryPolicy.isSupportedDictionaryModuleName(info.name),
-                  info.features.contains(feature),
-                  let mod = manager.module(named: info.name) else {
+            guard info.features.contains(feature),
+                  let mod = manager.readableModule(named: info.name) else {
                 return nil
             }
             return swordLexiconModule(mod)
@@ -900,6 +1280,8 @@ struct BibleReaderStrongsDocumentBuilder {
             v11n: source.versificationName,
             language: source.info.language.isEmpty ? "en" : source.info.language,
             direction: source.info.isRightToLeft ? "rtl" : "ltr",
+            category: source.info.category,
+            features: source.info.features,
             lookup: { source.lookup(keyOptions: $0) }
         )
     }
@@ -915,9 +1297,11 @@ struct BibleReaderStrongsDocumentBuilder {
         LexiconModule(
             name: module.info.name,
             abbreviation: moduleDisplayLabel(module),
-            v11n: VersificationMapper.versificationName(for: module),
+            v11n: BibleReaderInstalledDictionarySource.sword(module).versificationName,
             language: module.info.language.isEmpty ? "en" : module.info.language,
             direction: module.info.isRightToLeft ? "rtl" : "ltr",
+            category: module.info.category,
+            features: module.info.features,
             lookup: { keyOptions in
                 Self.lookupInModule(module, keyOptions: keyOptions)
             }
@@ -963,7 +1347,6 @@ struct BibleReaderStrongsDocumentBuilder {
     ) -> LexiconModule? {
         guard let config = Self.parseSwordConfig(at: configURL),
               Self.firstConfigValue("moddrv", in: config.values)?.caseInsensitiveCompare("MyBibleDictionary") == .orderedSame,
-              StrongsDictionaryPolicy.isSupportedDictionaryModuleName(config.name),
               let dataPath = Self.firstConfigValue("datapath", in: config.values),
               let reader = MyBibleReader(filePath: Self.myBibleDatabaseURL(
                 dataPath: dataPath,
@@ -992,50 +1375,41 @@ struct BibleReaderStrongsDocumentBuilder {
             v11n: nil,
             language: language,
             direction: direction,
+            category: .dictionary,
+            features: features,
             lookup: { keyOptions in
-                Self.lookupInMyBibleDictionary(reader, keyOptions: keyOptions)
+                Self.lookupInMyBibleDictionary(
+                    reader,
+                    keyOptions: keyOptions,
+                    moduleInitials: config.name
+                )
             }
         )
     }
 
     /**
-     Sorts lexicon tabs by Android's visible module abbreviation order.
+     Resolves morphology dictionaries while preserving Android's explicit-selection authority.
 
-     Android's book lists are abbreviation/name ordered after repository import. Sorting the combined
-     SWORD/MyBible candidate list keeps restored dictionaries such as `BDBT` from being appended
-     after built-in Strong's modules simply because libsword cannot enumerate MyBible dictionaries.
+     - Returns: Explicitly selected candidates when the morphology preference is nonempty, including
+       an empty resolution, or automatically discovered `GreekParse` candidates otherwise.
+     - Side effects: Reads current preferences and installed dictionary metadata.
+     - Failure modes: Missing explicit modules remain an authoritative empty explicit resolution;
+       absent automatic candidates return an empty automatic resolution that licenses a fallback.
      */
-    private static func sortLexiconModulesForAndroidTabs(_ modules: [LexiconModule]) -> [LexiconModule] {
-        modules.sorted { lhs, rhs in
-            let lhsLabel = lhs.abbreviation.isEmpty ? lhs.name : lhs.abbreviation
-            let rhsLabel = rhs.abbreviation.isEmpty ? rhs.name : rhs.abbreviation
-            let comparison = lhsLabel.localizedStandardCompare(rhsLabel)
-            if comparison == .orderedSame {
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
-            return comparison == .orderedAscending
-        }
-    }
-
-    /**
-     Finds installed morphology dictionaries using Android's selected-first fallback order.
-     */
-    private func findMorphologyModules() -> [LexiconModule] {
+    private func findMorphologyModules() -> LexiconModuleResolution {
         let candidates: [LexiconModule]
         if let installedDictionarySources {
             candidates = installedDictionarySources().compactMap { source in
                 let info = source.info
-                guard (info.category == .dictionary || info.category == .glossary),
-                      info.features.contains(.greekParse) else {
+                guard info.features.contains(.greekParse) else {
                     return nil
                 }
                 return lexiconModule(source)
             }
         } else if let mgr = swordManager {
             candidates = mgr.installedModules().compactMap { info in
-                guard (info.category == .dictionary || info.category == .glossary),
-                      info.features.contains(.greekParse),
-                      let module = mgr.module(named: info.name) else {
+                guard info.features.contains(.greekParse),
+                      let module = mgr.readableModule(named: info.name) else {
                     return nil
                 }
                 return swordLexiconModule(module)
@@ -1043,6 +1417,13 @@ struct BibleReaderStrongsDocumentBuilder {
         } else {
             candidates = []
         }
+        let hasInstalledCompatibleBook = !candidates.isEmpty
+            || (installedBookMetadata?().contains {
+                $0.features.contains(.greekParse)
+            } ?? false)
+            || (swordManager?.installedModules().contains {
+                $0.features.contains(.greekParse)
+            } ?? false)
 
         var result: [LexiconModule] = []
         var seen = Set<String>()
@@ -1050,13 +1431,11 @@ struct BibleReaderStrongsDocumentBuilder {
         let selectedNames = selectedPreferenceValues(.robinsonGreekMorphology)
         if !selectedNames.isEmpty {
             for name in selectedNames where seen.insert(name).inserted {
-                if let mod = candidates.first(where: { $0.name == name }) {
+                if let mod = explicitlySelectedLexiconModule(named: name) {
                     result.append(mod)
                 }
             }
-            if !result.isEmpty {
-                return result
-            }
+            return .explicit(result)
         }
 
         for mod in candidates {
@@ -1066,16 +1445,13 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         if !result.isEmpty {
-            return result
+            return .automatic(result, hasInstalledCompatibleBook: true)
         }
 
-        for name in ["Robinson"] where seen.insert(name).inserted {
-            if let mod = candidates.first(where: { $0.name == name }) {
-                result.append(mod)
-            }
-        }
-
-        return result
+        return .automatic(
+            result,
+            hasInstalledCompatibleBook: hasInstalledCompatibleBook
+        )
     }
 
     /**
@@ -1267,12 +1643,15 @@ enum BibleReaderMultiFragmentDocumentBuilder {
         xml: String,
         key: String,
         keyName: String,
+        osisRef: String,
+        bookCategory: String,
         bookInitials: String,
         bookAbbreviation: String,
         v11n: String?,
         language: String,
         direction: String,
         features: OsisFeatures,
+        hasStrongs: Bool,
         isNativeHtml: Bool
     )
 
@@ -1291,13 +1670,13 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 key: frag.key,
                 keyName: frag.keyName,
                 v11n: frag.v11n,
-                bookCategory: DocumentCategory.dictionary.rawValue,
+                bookCategory: frag.bookCategory,
                 bookInitials: frag.bookInitials,
                 bookAbbreviation: frag.bookAbbreviation,
-                osisRef: frag.keyName,
+                osisRef: frag.osisRef,
                 isNewTestament: false,
                 features: frag.features,
-                hasStrongs: frag.features.type != nil,
+                hasStrongs: frag.hasStrongs,
                 ordinalRange: nil,
                 language: frag.language,
                 direction: frag.direction,

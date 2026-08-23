@@ -1531,3 +1531,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Topeltpuudutus täisekraani sulgemiseks";
+
+/* Android shared translations */
+"try_again_passphrase" = "Salasõna ei sobinud, proovi uuesti?";
+
+/* Android shared translations */
+"document_not_installed" = "Palun lae alla '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ ei leitud dokumendist %2$@.";

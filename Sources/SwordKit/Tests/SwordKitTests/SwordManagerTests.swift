@@ -1,9 +1,33 @@
 // SwordManagerTests.swift — Tests for SwordKit
 
 import XCTest
+import SQLite3
 @testable import SwordKit
 
 final class SwordManagerTests: XCTestCase {
+    /**
+     Verifies the public exact-string key follows Java UTF-16 identity rather than Swift equality.
+
+     - Setup: Constructs keys for canonically equivalent composed/decomposed spellings and one exact
+       copy, then places all three in a native Swift set.
+     - Expected result: Exact copies compare equal, NFC/NFD values remain distinct, exposed code
+       units retain their original form, and the set owns two identities.
+     - Side effects: Allocates bounded in-memory strings and a set only.
+     - Failure meaning: Dictionary/set clients can collapse Java-distinct persisted identities.
+     */
+    func testJavaExactStringIdentityPreservesRawUTF16Equality() {
+        let composed = "CAF\u{00C9}"
+        let decomposed = "CAFE\u{0301}"
+        let composedIdentity = SwordJavaExactStringIdentity(composed)
+        let decomposedIdentity = SwordJavaExactStringIdentity(decomposed)
+
+        XCTAssertEqual(composedIdentity, SwordJavaExactStringIdentity(composed))
+        XCTAssertNotEqual(composedIdentity, decomposedIdentity)
+        XCTAssertEqual(composedIdentity.utf16CodeUnits, Array(composed.utf16))
+        XCTAssertEqual(decomposedIdentity.utf16CodeUnits, Array(decomposed.utf16))
+        XCTAssertEqual(Set([composedIdentity, decomposedIdentity]).count, 2)
+    }
+
     /**
      Verifies manager-level unlock rejects invalid requests without manufacturing module state.
 
@@ -88,8 +112,9 @@ final class SwordManagerTests: XCTestCase {
 
      - Setup: Loads a native Sapphire II encrypted RawLD record through libsword with an empty
        `CipherKey`, then submits an ordinary wrong passphrase before the fixture's real key.
-     - Expected result: The wrong key leaves byte-identical config and locked inventory; the correct
-       retry decrypts content and persists the verified key.
+     - Expected result: The fresh manager access API stays locked after the wrong key, becomes
+       readable on the next inventory snapshot after the correct retry, decrypts content, and
+       persists the verified key even though the native module remains resolvable while locked.
      - Side effects: Writes a native RawLD index/record, encrypts the entry with SWORD's Sapphire II
        format, loads it through libsword, and rewrites only the temporary config after success.
      - Failure meaning: Wrong keys can mark encrypted modules unlocked, poison durable config, or
@@ -105,6 +130,9 @@ final class SwordManagerTests: XCTestCase {
         )
         XCTAssertTrue(initiallyLocked.isEncrypted)
         XCTAssertFalse(initiallyLocked.isUnlocked)
+        XCTAssertEqual(manager.moduleAccessState(named: "locked"), .locked)
+        XCTAssertNotNil(manager.module(named: "LOCKED"))
+        XCTAssertNil(manager.readableModule(named: "locked"))
 
         XCTAssertFalse(
             manager.unlockModule(named: "LOCKED", withCipherKey: "wrong-test-key")
@@ -113,6 +141,8 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertFalse(
             manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? true
         )
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKED"), .locked)
+        XCTAssertNil(manager.readableModule(named: "LOCKED"))
 
         XCTAssertTrue(manager.unlockModule(named: "LOCKED", withCipherKey: fixture.cipherKey))
         let persistedConfig = try String(contentsOf: fixture.configURL, encoding: .utf8)
@@ -120,9 +150,602 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertTrue(
             manager.installedModules().first { $0.name == "LOCKED" }?.isUnlocked ?? false
         )
-        let module = try XCTUnwrap(manager.module(named: "LOCKED"))
+        XCTAssertEqual(
+            manager.moduleAccessState(named: "LOCKED"),
+            .readable,
+            "Manager access must observe the live unlock through a fresh inventory snapshot."
+        )
+        let module = try XCTUnwrap(manager.readableModule(named: "locked"))
         module.begin()
         XCTAssertTrue(module.rawEntry().contains("Encrypted dictionary entry"))
+    }
+
+    /**
+     Verifies a verified encrypted Bible remains decryptable through a newly constructed manager.
+
+     - Setup: Creates a licensed-safe two-verse RawText Bible, Sapphire-encrypts each native record,
+       and opens it once with an empty `CipherKey` so libsword materializes its locked aggregate
+       config cache. The test rejects one wrong key before accepting the real key.
+     - Expected result: The wrong key changes neither config nor cache; the correct key decrypts a
+       live chapter range, removes the stale cache, and a fresh manager rebuilds that cache with the
+       persisted key and reconstructs both exact source verses.
+     - Side effects: Creates and removes one isolated SWORD root, rewrites its temporary module
+       config, and lets libsword rebuild `mods.d/modules-conf.cache`.
+     - Failure meaning: Picker unlock can appear successful in memory while startup or saved-position
+       restore after relaunch authorizes ciphertext as a readable Bible.
+     - Note: Every fixture byte is synthetic; no distributable Bible text or key is embedded.
+     */
+    func testEncryptedRawTextBibleUnlockSurvivesFreshManagerChapterRead() throws {
+        let fixture = try makeEncryptedRawTextBibleFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let cacheURL = fixture.root.appendingPathComponent("mods.d/modules-conf.cache")
+
+        do {
+            let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+            let originalConfig = try Data(contentsOf: fixture.configURL)
+            let originalCache = try Data(contentsOf: cacheURL)
+
+            XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .locked)
+            XCTAssertNil(manager.readableModule(named: "LOCKEDBIBLE"))
+            XCTAssertFalse(
+                manager.unlockModule(named: "LOCKEDBIBLE", withCipherKey: "wrongtestkey")
+            )
+            XCTAssertEqual(try Data(contentsOf: fixture.configURL), originalConfig)
+            XCTAssertEqual(try Data(contentsOf: cacheURL), originalCache)
+
+            XCTAssertTrue(
+                manager.unlockModule(named: "LOCKEDBIBLE", withCipherKey: fixture.cipherKey)
+            )
+            XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+            XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .readable)
+            let liveModule = try XCTUnwrap(manager.readableModule(named: "LOCKEDBIBLE"))
+            try assertSyntheticEncryptedChapterReadable(in: liveModule)
+        }
+
+        let freshManager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        XCTAssertEqual(freshManager.moduleAccessState(named: "LOCKEDBIBLE"), .readable)
+        let freshModule = try XCTUnwrap(freshManager.readableModule(named: "LOCKEDBIBLE"))
+        try assertSyntheticEncryptedChapterReadable(in: freshModule)
+        let rebuiltCache = try String(contentsOf: cacheURL, encoding: .utf8)
+        XCTAssertTrue(rebuiltCache.contains("CipherKey=\(fixture.cipherKey)"))
+    }
+
+    /**
+     Verifies access checks resolve the same installed initials that Java would resolve.
+
+     - Setup: Installs a real locked RawLD module whose initials are `ß`, then requests the
+       length-expanding Foundation case-fold alias `SS`.
+     - Expected result: The exact initials remain locked, while `SS` is unavailable because Java
+       `String.equalsIgnoreCase` never expands one UTF-16 code unit into two.
+     - Side effects: Creates and removes one temporary encrypted SWORD fixture.
+     - Failure meaning: A lookup can authorize or unlock a different installed row than Android.
+     */
+    func testModuleAccessStateDoesNotUseExpandingFoundationCaseFold() throws {
+        let fixture = try makeEncryptedRawLDFixture(moduleName: "ß")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(manager.moduleAccessState(named: "ß"), .locked)
+        XCTAssertEqual(manager.moduleAccessState(named: "SS"), .unavailable)
+        XCTAssertNil(manager.readableModule(named: "ß"))
+        XCTAssertNil(manager.readableModule(named: "SS"))
+    }
+
+    /**
+     Verifies Java-distinct NFC/NFD initials retain separate native handles and backend content.
+
+     - Setup: Installs two real RawLD configs whose initials are canonically equivalent to Swift but
+       have different UTF-16 sequences, with a unique native data file and entry for each spelling.
+     - Expected result: Inventory, exact lookup, access classification, and readable lookup retain
+       both handles, and each handle reads only its own backend entry.
+     - Side effects: Creates and removes one isolated two-module SWORD root and advances each test
+       module cursor to its first entry.
+     - Failure meaning: Swift normalization or a string-keyed cache has collapsed Java identities and
+       can return document content from the wrong native backend.
+     */
+    func testNativeRegistryKeepsCanonicallyEquivalentJavaInitialsAndBackendsDistinct() throws {
+        let composed = "CAF\u{00C9}"
+        let decomposed = "CAFE\u{0301}"
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: composed,
+                fullName: "Composed identity dictionary",
+                abbreviation: "Composed",
+                dataStem: "composed",
+                entryText: "NFC_UNIQUE_BACKEND"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: decomposed,
+                fullName: "Decomposed identity dictionary",
+                abbreviation: "Decomposed",
+                dataStem: "decomposed",
+                entryText: "NFD_UNIQUE_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertNotEqual(
+            SwordJavaExactStringIdentity(composed),
+            SwordJavaExactStringIdentity(decomposed)
+        )
+        let installedModules = manager.installedModules()
+        XCTAssertEqual(installedModules.count, 2)
+        XCTAssertEqual(
+            Set(installedModules.map { SwordJavaExactStringIdentity($0.name) }),
+            Set([
+                SwordJavaExactStringIdentity(composed),
+                SwordJavaExactStringIdentity(decomposed),
+            ])
+        )
+        XCTAssertEqual(manager.moduleAccessState(named: composed), .readable)
+        XCTAssertEqual(manager.moduleAccessState(named: decomposed), .readable)
+
+        let composedModule = try XCTUnwrap(manager.module(named: composed))
+        let decomposedModule = try XCTUnwrap(manager.module(named: decomposed))
+        XCTAssertNotEqual(ObjectIdentifier(composedModule), ObjectIdentifier(decomposedModule))
+        XCTAssertEqual(
+            SwordJavaExactStringIdentity(composedModule.info.name),
+            SwordJavaExactStringIdentity(composed)
+        )
+        XCTAssertEqual(
+            SwordJavaExactStringIdentity(decomposedModule.info.name),
+            SwordJavaExactStringIdentity(decomposed)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.readableModule(named: composed))),
+            ObjectIdentifier(composedModule)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.readableModule(named: decomposed))),
+            ObjectIdentifier(decomposedModule)
+        )
+
+        composedModule.begin()
+        let composedEntry = composedModule.rawEntry()
+        decomposedModule.begin()
+        let decomposedEntry = decomposedModule.rawEntry()
+        XCTAssertTrue(composedEntry.contains("NFC_UNIQUE_BACKEND"))
+        XCTAssertFalse(composedEntry.contains("NFD_UNIQUE_BACKEND"))
+        XCTAssertTrue(decomposedEntry.contains("NFD_UNIQUE_BACKEND"))
+        XCTAssertFalse(decomposedEntry.contains("NFC_UNIQUE_BACKEND"))
+    }
+
+    /**
+     Verifies exact case-distinct initials beat aliases and aliases use JSword TreeSet order.
+
+     - Setup: Installs real `foo` and `FOO` RawLD backends. Their abbreviations intentionally make
+       uppercase `FOO` sort first even when config enumeration could present lowercase first.
+     - Expected result: Exact initials and exact full names return their own handles, while mixed-case
+       `FoO` selects uppercase `FOO` through category/abbreviation/initials/name TreeSet ordering.
+     - Side effects: Creates and removes one isolated native SWORD root and reads both first entries.
+     - Failure meaning: Native lookup is list-first, cache-normalized, or bypassing JSword exact-map
+       precedence, allowing case aliases to cross-read another installed document.
+     */
+    func testNativeLookupUsesExactMapsBeforePinnedCaseAliasTreeSetWinner() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "foo",
+                fullName: "Lowercase full name",
+                abbreviation: "Zulu",
+                dataStem: "lowercase",
+                entryText: "LOWERCASE_BACKEND_ONLY"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "FOO",
+                fullName: "Uppercase full name",
+                abbreviation: "Alpha",
+                dataStem: "uppercase",
+                entryText: "UPPERCASE_BACKEND_ONLY"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(
+            manager.installedModules().map(\.name),
+            ["FOO", "foo"],
+            "Installed TreeSet order must use Alpha/Zulu abbreviations before exact initials."
+        )
+
+        let lowercase = try XCTUnwrap(manager.module(named: "foo"))
+        let uppercase = try XCTUnwrap(manager.module(named: "FOO"))
+        XCTAssertNotEqual(ObjectIdentifier(lowercase), ObjectIdentifier(uppercase))
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.module(named: "Lowercase full name"))),
+            ObjectIdentifier(lowercase)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.module(named: "Uppercase full name"))),
+            ObjectIdentifier(uppercase)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.module(named: "FoO"))),
+            ObjectIdentifier(uppercase)
+        )
+        XCTAssertEqual(manager.moduleAccessState(named: "foo"), .readable)
+        XCTAssertEqual(manager.moduleAccessState(named: "FOO"), .readable)
+        XCTAssertEqual(manager.moduleAccessState(named: "FoO"), .readable)
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.readableModule(named: "foo"))),
+            ObjectIdentifier(lowercase)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.readableModule(named: "FOO"))),
+            ObjectIdentifier(uppercase)
+        )
+        XCTAssertEqual(
+            ObjectIdentifier(try XCTUnwrap(manager.readableModule(named: "FoO"))),
+            ObjectIdentifier(uppercase)
+        )
+
+        lowercase.begin()
+        let lowercaseEntry = lowercase.rawEntry()
+        uppercase.begin()
+        let uppercaseEntry = uppercase.rawEntry()
+        XCTAssertTrue(lowercaseEntry.contains("LOWERCASE_BACKEND_ONLY"))
+        XCTAssertFalse(lowercaseEntry.contains("UPPERCASE_BACKEND_ONLY"))
+        XCTAssertTrue(uppercaseEntry.contains("UPPERCASE_BACKEND_ONLY"))
+        XCTAssertFalse(uppercaseEntry.contains("LOWERCASE_BACKEND_ONLY"))
+    }
+
+    /**
+     Verifies exact initials-map precedence beats an exact full-name collision.
+
+     - Setup: Installs one real RawLD module whose initials equal another module's full name.
+     - Expected result: Looking up the shared token returns the initials owner and its unique backend.
+     - Side effects: Creates/removes an isolated native fixture and reads one RawLD entry.
+     - Failure meaning: The full-name map can redirect an exact initials request to another document.
+     */
+    func testNativeLookupPrefersExactInitialsOverExactFullNameCollision() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "TOKEN",
+                fullName: "Initials owner",
+                abbreviation: "Zulu",
+                dataStem: "initials-owner",
+                entryText: "INITIALS_OWNER_BACKEND"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "OTHER",
+                fullName: "TOKEN",
+                abbreviation: "Alpha",
+                dataStem: "full-name-owner",
+                entryText: "FULL_NAME_OWNER_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        let selected = try XCTUnwrap(manager.module(named: "TOKEN"))
+        XCTAssertEqual(selected.info.name, "TOKEN")
+        selected.begin()
+        let entry = selected.rawEntry()
+        XCTAssertTrue(entry.contains("INITIALS_OWNER_BACKEND"))
+        XCTAssertFalse(entry.contains("FULL_NAME_OWNER_BACKEND"))
+    }
+
+    /**
+     Verifies an exact full-name collision with no initials owner fails closed without hiding books.
+
+     - Setup: Installs two real RawLD books with unique initials/backends and one identical full name.
+     - Expected result: Both exact initials remain independently readable, while the shared exact
+       full-name token resolves to no module or access state.
+     - Side effects: Creates/removes an isolated native fixture and reads both backend entries.
+     - Failure meaning: HashSet/toArray registration order can choose an unprovable Android-runtime
+       winner and cross-read another installed document through the exact full-name map.
+     */
+    func testNativeExactFullNameCollisionFailsClosedButInitialsRemainReadable() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "FULLNAMEONE",
+                fullName: "Shared exact full name",
+                abbreviation: "Alpha",
+                dataStem: "full-name-one",
+                entryText: "FULL_NAME_ONE_BACKEND"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "FULLNAMETWO",
+                fullName: "Shared exact full name",
+                abbreviation: "Zulu",
+                dataStem: "full-name-two",
+                entryText: "FULL_NAME_TWO_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(manager.installedModules().map(\.name), ["FULLNAMEONE", "FULLNAMETWO"])
+        let first = try XCTUnwrap(manager.readableModule(named: "FULLNAMEONE"))
+        let second = try XCTUnwrap(manager.readableModule(named: "FULLNAMETWO"))
+        first.begin()
+        second.begin()
+        XCTAssertTrue(first.rawEntry().contains("FULL_NAME_ONE_BACKEND"))
+        XCTAssertTrue(second.rawEntry().contains("FULL_NAME_TWO_BACKEND"))
+        XCTAssertNil(manager.module(named: "Shared exact full name"))
+        XCTAssertNil(manager.readableModule(named: "Shared exact full name"))
+        XCTAssertEqual(
+            manager.moduleAccessState(named: "Shared exact full name"),
+            .unavailable
+        )
+    }
+
+    /**
+     Verifies native pre-registration applies JSword metadata HashSet equality before BookSet order.
+
+     - Setup: Installs two real configs with exact-equal category, initials, and full name but distinct
+       abbreviations/backends.
+     - Expected result: Inventory exposes one deterministic metadata row, while raw duplicate
+       initials keep every content/access path unavailable and both configs unchanged.
+     - Side effects: Creates/removes an isolated fixture and reads the two config byte snapshots.
+     - Failure meaning: iOS exposes two books Android's `SwordBookDriver` coalesces, or invents unsafe
+       content ownership for Android's runtime-undefined HashSet winner.
+     */
+    func testNativeHashSetEqualBooksCoalesceMetadataAndFailContentOwnershipClosed() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "HASHEQUAL",
+                fullName: "Hash-equal name",
+                abbreviation: "Zulu",
+                dataStem: "hash-equal-zulu",
+                entryText: "HASH_EQUAL_ZULU"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "HASHEQUAL",
+                fullName: "Hash-equal name",
+                abbreviation: "Alpha",
+                dataStem: "hash-equal-alpha",
+                entryText: "HASH_EQUAL_ALPHA"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let configURLs = [0, 1].map {
+            fixture.root.appendingPathComponent("mods.d/identity-\($0).conf")
+        }
+        let originalConfigs = try configURLs.map { try Data(contentsOf: $0) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(
+            manager.installedModules().filter { $0.name == "HASHEQUAL" }.count,
+            1
+        )
+        XCTAssertNil(manager.module(named: "HASHEQUAL"))
+        XCTAssertNil(manager.module(named: "Hash-equal name"))
+        XCTAssertNil(manager.readableModule(named: "HASHEQUAL"))
+        XCTAssertEqual(manager.moduleAccessState(named: "HASHEQUAL"), .unavailable)
+        XCTAssertFalse(
+            manager.unlockModule(named: "HASHEQUAL", withCipherKey: "must-not-persist")
+        )
+        XCTAssertEqual(try configURLs.map { try Data(contentsOf: $0) }, originalConfigs)
+    }
+
+    /**
+     Verifies native HashSet equality retains metadata-equal books of different concrete classes.
+
+     Pinned `AbstractBook.equals` requires identical runtime classes before comparing metadata. A
+     RawLD `SwordDictionary` and RawGenBook `SwordGenBook` may therefore share category, initials,
+     and full name while distinct abbreviations keep both in the later TreeSet.
+
+     - Setup: Installs one real RawLD config and one registered RawGenBook config with identical
+       HashSet metadata but Alpha/Zulu abbreviations and distinguishable versions.
+     - Expected result: Both inventory rows survive in abbreviation order, while their duplicate
+       exact initials still fail content ownership closed.
+     - Side effects: Creates/removes one isolated SWORD fixture and opens one native manager.
+     - Failure meaning: iOS coalesces books JSword retains because concrete class was omitted from
+       `AbstractBook` equality, or reintroduces unsafe duplicate-initial backend ownership.
+     */
+    func testNativeHashSetRetainsCrossClassMetadataEqualBooks() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "CLASSDISTINCT",
+                fullName: "Shared cross-class name",
+                abbreviation: "Alpha",
+                dataStem: "class-dictionary",
+                entryText: "CLASS_DICTIONARY_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let genBookDirectory = fixture.root.appendingPathComponent(
+            "modules/genbook/rawgenbook/class-genbook",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: genBookDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: genBookDirectory.appendingPathComponent("class-genbook.bdt"))
+        try Data().write(to: genBookDirectory.appendingPathComponent("class-genbook.bdx"))
+        try """
+        [CLASSDISTINCT]
+        Description=Shared cross-class name
+        Abbreviation=Zulu
+        Category=Lexicons / Dictionaries
+        ModDrv=RawGenBook
+        DataPath=./modules/genbook/rawgenbook/class-genbook/class-genbook
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        Version=2.0
+        """.write(
+            to: fixture.root.appendingPathComponent("mods.d/identity-1.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        let rows = manager.installedModules().filter { $0.name == "CLASSDISTINCT" }
+        XCTAssertEqual(rows.map(\.description), [
+            "Shared cross-class name",
+            "Shared cross-class name",
+        ])
+        XCTAssertEqual(rows.map(\.version), ["1.0", "2.0"])
+        XCTAssertNil(manager.module(named: "CLASSDISTINCT"))
+        XCTAssertNil(manager.module(named: "Shared cross-class name"))
+        XCTAssertEqual(manager.moduleAccessState(named: "CLASSDISTINCT"), .unavailable)
+    }
+
+    /**
+     Verifies native lookup reuses one registry capture until explicit refresh invalidates it.
+
+     - Setup: Resolves one real RawLD module, then moves its temporary `mods.d` directory aside.
+     - Expected result: A second exact/full-name lookup returns the cached wrapper; after `refresh()`,
+       the same lookup is unavailable because the new config snapshot is empty.
+     - Side effects: Creates, renames, and removes one isolated native fixture directory.
+     - Failure meaning: Each lookup rebuilds the full registry/config projection, restoring O(N²)
+       inventory behavior under repeated module resolution.
+     */
+    func testNativeRegistrySnapshotIsReusedUntilExplicitRefresh() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "CACHED",
+                fullName: "Cached full name",
+                dataStem: "cached",
+                entryText: "CACHED_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let first = try XCTUnwrap(manager.module(named: "CACHED"))
+        let originalConfigDirectory = fixture.root.appendingPathComponent("mods.d")
+        let movedConfigDirectory = fixture.root.appendingPathComponent("mods.captured")
+        try FileManager.default.moveItem(at: originalConfigDirectory, to: movedConfigDirectory)
+
+        let cached = try XCTUnwrap(manager.module(named: "Cached full name"))
+        XCTAssertEqual(ObjectIdentifier(cached), ObjectIdentifier(first))
+        manager.refresh()
+        XCTAssertNil(manager.module(named: "CACHED"))
+    }
+
+    /**
+     Verifies installed TreeSet projection retains same-initials books with distinct comparator fields.
+
+     - Setup: Installs two real configs with identical initials/abbreviations but distinct full names,
+       plus modules that omit Description and Abbreviation.
+     - Expected result: Both duplicate-initials metadata rows survive in full-name order, but all
+       content and unlock paths reject the runtime-undefined collision without changing either
+       config; missing Description falls back to initials and missing abbreviations order by their
+       initials fallback.
+     - Side effects: Creates and removes one isolated native RawLD fixture.
+     - Failure meaning: Inventory still deduplicates by initials, diverges from JSword defaults, or
+       exposes one duplicate module through an unproven native-backend/config-owner pairing.
+     */
+    func testInstalledTreeSetRetainsDistinctSameInitialsAndUsesMetadataFallbacks() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "DUP",
+                fullName: "Bravo duplicate",
+                abbreviation: "Same",
+                dataStem: "duplicate-bravo",
+                entryText: "DUPLICATE_BRAVO"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "DUP",
+                fullName: "Alpha duplicate",
+                abbreviation: "Same",
+                dataStem: "duplicate-alpha",
+                entryText: "DUPLICATE_ALPHA"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "ZuluFallback",
+                dataStem: "zulu-fallback",
+                entryText: "ZULU_FALLBACK"
+            ),
+            SwordManagerPlainRawLDDefinition(
+                initials: "AlphaFallback",
+                dataStem: "alpha-fallback",
+                entryText: "ALPHA_FALLBACK"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let installed = manager.installedModules()
+        let duplicateConfigURLs = [0, 1].map {
+            fixture.root.appendingPathComponent("mods.d/identity-\($0).conf")
+        }
+        let duplicateConfigsBeforeUnlock = try duplicateConfigURLs.map { try Data(contentsOf: $0) }
+
+        let duplicates = installed.filter {
+            SwordJavaStringIdentity.equals($0.name, "DUP")
+        }
+        XCTAssertEqual(duplicates.map(\.description), ["Alpha duplicate", "Bravo duplicate"])
+        XCTAssertNil(manager.module(named: "DUP"))
+        XCTAssertNil(manager.module(named: "Alpha duplicate"))
+        XCTAssertNil(manager.readableModule(named: "DUP"))
+        XCTAssertEqual(manager.moduleAccessState(named: "DUP"), .unavailable)
+        XCTAssertFalse(manager.unlockModule(named: "DUP", withCipherKey: "must-not-persist"))
+        XCTAssertEqual(
+            try duplicateConfigURLs.map { try Data(contentsOf: $0) },
+            duplicateConfigsBeforeUnlock
+        )
+        XCTAssertEqual(
+            installed.filter { $0.name.hasSuffix("Fallback") }.map(\.name),
+            ["AlphaFallback", "ZuluFallback"]
+        )
+        XCTAssertEqual(
+            installed.first { SwordJavaStringIdentity.equals($0.name, "AlphaFallback") }?
+                .description,
+            "AlphaFallback"
+        )
+    }
+
+    /**
+     Verifies registration filters cannot erase evidence of a raw duplicate-initial collision.
+
+     - Setup: Installs one supported native RawLD module and one unknown-driver config with the same
+       exact initials. Libsword exposes the supported native handle while JSword support filtering
+       excludes the second metadata row.
+     - Expected result: Supported metadata remains installed, but initials/full-name content access
+       and unlock all fail closed and neither raw config changes.
+     - Side effects: Creates and removes one isolated native RawLD fixture and an extra config.
+     - Failure meaning: Ambiguity is counted after registration filters, allowing a cached native
+       wrapper to claim an exact config/backend owner that libsword cannot prove.
+     */
+    func testFilteredRawDuplicateInitialsStillFailNativeOwnershipClosed() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "FILTEREDDUP",
+                fullName: "Supported owner",
+                abbreviation: "Supported",
+                dataStem: "supported-filtered-duplicate",
+                entryText: "SUPPORTED_FILTERED_DUPLICATE"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let filteredConfigURL = fixture.root
+            .appendingPathComponent("mods.d/filtered-duplicate.conf")
+        try """
+        [FILTEREDDUP]
+        Description=Filtered duplicate
+        Category=Lexicons / Dictionaries
+        ModDrv=UnknownDuplicateDriver
+        DataPath=./modules/lexdict/rawld/filtered-duplicate/filtered-duplicate
+        Lang=en
+        Versification=KJV
+        """.write(to: filteredConfigURL, atomically: true, encoding: .utf8)
+        let configURLs = [
+            fixture.root.appendingPathComponent("mods.d/identity-0.conf"),
+            filteredConfigURL,
+        ]
+        let configsBeforeUnlock = try configURLs.map { try Data(contentsOf: $0) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+
+        XCTAssertEqual(
+            manager.installedModules().filter {
+                SwordJavaStringIdentity.equals($0.name, "FILTEREDDUP")
+            }.map(\.description),
+            ["Supported owner"]
+        )
+        XCTAssertNil(manager.module(named: "FILTEREDDUP"))
+        XCTAssertNil(manager.module(named: "Supported owner"))
+        XCTAssertNil(manager.readableModule(named: "FILTEREDDUP"))
+        XCTAssertEqual(manager.moduleAccessState(named: "FILTEREDDUP"), .unavailable)
+        XCTAssertFalse(
+            manager.unlockModule(named: "FILTEREDDUP", withCipherKey: "must-not-persist")
+        )
+        XCTAssertEqual(
+            try configURLs.map { try Data(contentsOf: $0) },
+            configsBeforeUnlock
+        )
     }
 
     /**
@@ -166,10 +789,15 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
-     Verifies a content-verified key is durably written to the exact module config section.
+     Verifies direct verified-key persistence invalidates libsword's aggregate config cache.
 
-     A read-back failure means a picker unlock could work only for the current manager session and
-     regress to locked after relaunch.
+     - Setup: Writes one locked config plus a stale `modules-conf.cache` snapshot without creating a
+       native manager.
+     - Expected result: The exact key survives config reload and the aggregate cache is absent so a
+       later manager must rebuild it from the updated module config.
+     - Side effects: Creates and removes one temporary config directory.
+     - Failure meaning: A picker unlock can persist only metadata while a relaunched native manager
+       continues reading the old blank `CipherKey` from cache.
      */
     func testPersistVerifiedCipherKeySurvivesConfigReload() throws {
         let moduleRoot = FileManager.default.temporaryDirectory
@@ -184,6 +812,8 @@ final class SwordManagerTests: XCTestCase {
         DataPath=./modules/texts/rawtext/locked/
         CipherKey=
         """.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = configDirectory.appendingPathComponent("modules-conf.cache")
+        try Data("[LOCKED]\nCipherKey=\n".utf8).write(to: cacheURL)
 
         XCTAssertTrue(
             SwordManager.persistVerifiedCipherKey(
@@ -195,6 +825,183 @@ final class SwordManagerTests: XCTestCase {
 
         let reloaded = try String(contentsOf: configURL, encoding: .utf8)
         XCTAssertTrue(reloaded.contains("CipherKey=secret-key"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    /**
+     Verifies config persistence owns one exact case-distinct section and rejects ambiguous aliases.
+
+     - Setup: Writes separate `FOO` and `foo` configs with independent initial cipher values.
+     - Expected result: Mixed-case `FoO` changes neither file; exact `FOO` updates only its owner.
+     - Side effects: Creates, stages, and removes an isolated pair of temporary configs.
+     - Failure meaning: Unlock persistence can overwrite a different case-distinct installed book.
+     */
+    func testPersistVerifiedCipherKeyUsesExactOwnerBeforeUniqueCaseAlias() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let uppercaseURL = configDirectory.appendingPathComponent("upper.conf")
+        let lowercaseURL = configDirectory.appendingPathComponent("lower.conf")
+        try """
+        [FOO]
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/upper/
+        CipherKey=upper-original
+        """.write(to: uppercaseURL, atomically: true, encoding: .utf8)
+        try """
+        [foo]
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/lower/
+        CipherKey=lower-original
+        """.write(to: lowercaseURL, atomically: true, encoding: .utf8)
+        let originalUppercase = try Data(contentsOf: uppercaseURL)
+        let originalLowercase = try Data(contentsOf: lowercaseURL)
+
+        XCTAssertFalse(
+            SwordManager.persistVerifiedCipherKey(
+                "ambiguous-key",
+                moduleName: "FoO",
+                modulePath: moduleRoot.path
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: uppercaseURL), originalUppercase)
+        XCTAssertEqual(try Data(contentsOf: lowercaseURL), originalLowercase)
+
+        XCTAssertTrue(
+            SwordManager.persistVerifiedCipherKey(
+                "upper-replacement",
+                moduleName: "FOO",
+                modulePath: moduleRoot.path
+            )
+        )
+        XCTAssertTrue(
+            try String(contentsOf: uppercaseURL, encoding: .utf8)
+                .contains("CipherKey=upper-replacement")
+        )
+        XCTAssertEqual(try Data(contentsOf: lowercaseURL), originalLowercase)
+    }
+
+    /**
+     Verifies duplicate exact initials require the selected registration's concrete config owner.
+
+     - Setup: Writes two configs with the same exact section but independent cipher values.
+     - Expected result: Name-only persistence fails closed; supplying the second registration owner
+       updates only that file and preserves the first byte-for-byte.
+     - Side effects: Stages, publishes, verifies, and removes temporary config files.
+     - Failure meaning: Unlock can persist a verified key into a different same-initials book config.
+     */
+    func testPersistVerifiedCipherKeyUsesResolvedDuplicateExactConfigOwner() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let firstURL = configDirectory.appendingPathComponent("first.conf")
+        let secondURL = configDirectory.appendingPathComponent("second.conf")
+        try """
+        [DUPLICATE]
+        Description=First owner
+        ModDrv=RawLD
+        CipherKey=first-original
+        """.write(to: firstURL, atomically: true, encoding: .utf8)
+        try """
+        [DUPLICATE]
+        Description=Second owner
+        ModDrv=RawLD
+        CipherKey=second-original
+        """.write(to: secondURL, atomically: true, encoding: .utf8)
+        let originalFirst = try Data(contentsOf: firstURL)
+        let originalSecond = try Data(contentsOf: secondURL)
+
+        XCTAssertFalse(
+            SwordManager.persistVerifiedCipherKey(
+                "ambiguous-key",
+                moduleName: "DUPLICATE",
+                modulePath: moduleRoot.path
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: firstURL), originalFirst)
+        XCTAssertEqual(try Data(contentsOf: secondURL), originalSecond)
+
+        XCTAssertTrue(
+            SwordManager.persistVerifiedCipherKey(
+                "selected-owner-key",
+                moduleName: "DUPLICATE",
+                modulePath: moduleRoot.path,
+                owningConfigURL: secondURL
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: firstURL), originalFirst)
+        XCTAssertTrue(
+            try String(contentsOf: secondURL, encoding: .utf8)
+                .contains("CipherKey=selected-owner-key")
+        )
+    }
+
+    /**
+     Verifies failed cipher-key read-back restores both sides of the persistence transaction.
+
+     - Setup: Writes a locked config and stale aggregate cache, then injects a publisher that first
+       observes cache removal and atomically replaces the real config with invalid bytes.
+     - Expected result: Staging succeeds, persistence fails real-config read-back, and config plus
+       cache bytes exactly match their pre-mutation snapshots.
+     - Side effects: Creates and removes one temporary config directory.
+     - Failure meaning: Cache invalidation can escape rollback after a config write fails
+       verification, leaving restart behavior different even though unlock reported failure.
+     */
+    func testPersistVerifiedCipherKeyRestoresConfigAndCacheAfterReadBackFailure() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let configURL = configDirectory.appendingPathComponent("locked.conf")
+        try """
+        [LOCKED]
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/locked/
+        CipherKey=original-key
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = configDirectory.appendingPathComponent("modules-conf.cache")
+        try Data("[LOCKED]\nCipherKey=original-key\n".utf8).write(to: cacheURL)
+        let originalConfig = try Data(contentsOf: configURL)
+        let originalCache = try Data(contentsOf: cacheURL)
+        var didPublishAfterCacheRemoval = false
+
+        XCTAssertFalse(
+            SwordManager.persistVerifiedCipherKey(
+                "replacement-key",
+                moduleName: "locked",
+                modulePath: moduleRoot.path,
+                publishVerifiedConfig: { verifiedData, destinationURL in
+                    didPublishAfterCacheRemoval = !FileManager.default.fileExists(
+                        atPath: cacheURL.path
+                    )
+                    XCTAssertTrue(
+                        String(decoding: verifiedData, as: UTF8.self)
+                            .contains("CipherKey=replacement-key")
+                    )
+                    try Data("invalid published config".utf8).write(
+                        to: destinationURL,
+                        options: .atomic
+                    )
+                }
+            )
+        )
+        XCTAssertTrue(didPublishAfterCacheRemoval)
+        XCTAssertEqual(try Data(contentsOf: configURL), originalConfig)
+        XCTAssertEqual(try Data(contentsOf: cacheURL), originalCache)
     }
 
     func testDefaultModulePath() {
@@ -288,6 +1095,275 @@ final class SwordManagerTests: XCTestCase {
         Version=2.3
         """))
         XCTAssertEqual(versioned.version, "2.3")
+    }
+
+    /**
+     Verifies config parsing follows pinned JSword BOM, trim, continuation, and name defaults.
+
+     - Setup: Parses BOM-prefixed metadata with a continued description, NBSP-surrounded value,
+       missing Description, and deliberately empty Description variants.
+     - Expected result: BOM is removed, Java `trim()` preserves NBSP, continuation inserts one
+       newline, absent Description falls back to initials, and present empty Description stays empty.
+     - Side effects: Parses bounded in-memory strings only.
+     - Failure meaning: Valid JSword configs can disappear or change BookSet identity/order on iOS.
+     */
+    func testSwordModuleConfigParseUsesPinnedJavaIniSemantics() throws {
+        let parsed = try XCTUnwrap(SwordModuleConfig.parse("""
+        \u{FEFF}[BOMBOOK]
+        Description=First line \\
+          Second line
+        Abbreviation=\u{00A0}NBSP\u{00A0}
+        ; Java treats semicolon as a comment.
+        ModDrv=RawLD
+        """))
+
+        XCTAssertEqual(parsed.name, "BOMBOOK")
+        XCTAssertEqual(parsed.description, "First line\nSecond line")
+        XCTAssertEqual(parsed.values["Abbreviation"]?.first, "\u{00A0}NBSP\u{00A0}")
+        XCTAssertNil(parsed.sourceURL)
+
+        let missingDescription = try XCTUnwrap(SwordModuleConfig.parse("""
+        [MISSING]
+        ModDrv=RawLD
+        """))
+        XCTAssertEqual(missingDescription.description, "MISSING")
+
+        let emptyDescription = try XCTUnwrap(SwordModuleConfig.parse("""
+        [EMPTY]
+        Description=
+        ModDrv=RawLD
+        """))
+        XCTAssertEqual(emptyDescription.description, "")
+    }
+
+    /**
+     Verifies config files follow JSword's exact-key encoding reload policy.
+
+     - Setup: Writes the same valid UTF-8 bytes with canonical UTF-8, missing, and wrong-case
+       `Encoding` keys, plus native Windows-1252, malformed-declared-UTF-8, and undefined-CP1252
+       physical byte fixtures.
+     - Expected result: Only exact `Encoding=UTF-8` preserves the UTF-8 description; missing and
+       wrong-case keys reinterpret original bytes as Windows-1252, while both Java decoders replace
+       malformed/undefined input with U+FFFD and continue parsing the config.
+     - Side effects: Creates, reads, and removes one isolated temporary `mods.d` directory.
+     - Failure meaning: iOS retains a UTF-8 parse JSword discards or normalizes case-sensitive keys.
+     */
+    func testSwordModuleConfigReadUsesExactEncodingKeyAndWindows1252Reload() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let canonicalURL = configDirectory.appendingPathComponent("canonical.conf")
+        let missingURL = configDirectory.appendingPathComponent("missing.conf")
+        let wrongCaseURL = configDirectory.appendingPathComponent("wrong-case.conf")
+        let windowsURL = configDirectory.appendingPathComponent("windows.conf")
+        let malformedUTF8URL = configDirectory.appendingPathComponent("malformed-utf8.conf")
+        let undefinedWindowsURL = configDirectory.appendingPathComponent("undefined-windows.conf")
+        try Data("[UTF8]\nDescription=Café\nModDrv=RawLD\nEncoding=UTF-8\n".utf8)
+            .write(to: canonicalURL)
+        try Data("[MISSINGENC]\nDescription=Café\nModDrv=RawLD\n".utf8)
+            .write(to: missingURL)
+        try Data("[WRONGCASE]\nDescription=Café\nModDrv=RawLD\nencoding=UTF-8\n".utf8)
+            .write(to: wrongCaseURL)
+        var windowsBytes = Data("[WINDOWS]\nDescription=Caf".utf8)
+        windowsBytes.append(0xE9)
+        windowsBytes.append(contentsOf: Data("\nModDrv=RawLD\nEncoding=Latin-1\n".utf8))
+        try windowsBytes.write(to: windowsURL)
+        var malformedUTF8Bytes = Data("[MALFORMEDUTF8]\nDescription=Bad".utf8)
+        malformedUTF8Bytes.append(contentsOf: [0xC3, 0x28])
+        malformedUTF8Bytes.append(
+            contentsOf: Data("\nModDrv=RawLD\nEncoding=UTF-8\n".utf8)
+        )
+        try malformedUTF8Bytes.write(to: malformedUTF8URL)
+        var undefinedWindowsBytes = Data("[UNDEFINEDWINDOWS]\nDescription=Bad".utf8)
+        undefinedWindowsBytes.append(0x81)
+        undefinedWindowsBytes.append(
+            contentsOf: Data("\nModDrv=RawLD\nEncoding=Latin-1\n".utf8)
+        )
+        try undefinedWindowsBytes.write(to: undefinedWindowsURL)
+
+        XCTAssertEqual(SwordModuleConfig.read(url: canonicalURL)?.description, "Café")
+        XCTAssertEqual(SwordModuleConfig.read(url: missingURL)?.description, "CafÃ©")
+        XCTAssertEqual(SwordModuleConfig.read(url: wrongCaseURL)?.description, "CafÃ©")
+        XCTAssertEqual(SwordModuleConfig.read(url: windowsURL)?.description, "Café")
+        XCTAssertEqual(SwordModuleConfig.read(url: malformedUTF8URL)?.description, "Bad\u{FFFD}(")
+        XCTAssertEqual(SwordModuleConfig.read(url: undefinedWindowsURL)?.description, "Bad\u{FFFD}")
+        XCTAssertNil(SwordModuleConfig.read(url: wrongCaseURL)?.values["Encoding"])
+        XCTAssertEqual(
+            SwordModuleConfig.read(url: wrongCaseURL)?.values["encoding"]?.first,
+            "UTF-8"
+        )
+    }
+
+    /**
+     Verifies JSword config properties remain exact-case keys instead of a lowercase dictionary.
+
+     - Setup: Parses wrong-case metadata beside the one canonical `ModDrv` required for admission.
+     - Expected result: Wrong-case Description/Category/Lang stay accessible only under their exact
+       spellings and do not change canonical metadata defaults.
+     - Side effects: Parses one bounded in-memory config string.
+     - Failure meaning: iOS accepts metadata JSword callers cannot retrieve from `IniSection`.
+     */
+    func testSwordModuleConfigPropertiesRemainCaseSensitive() throws {
+        let config = try XCTUnwrap(SwordModuleConfig.parse("""
+        [CASEKEYS]
+        description=Wrong-case description
+        category=Commentaries
+        lang=fr
+        ModDrv=RawLD
+        """))
+
+        XCTAssertEqual(config.description, "CASEKEYS")
+        XCTAssertEqual(config.category, .dictionary)
+        XCTAssertEqual(config.language, "en")
+        XCTAssertEqual(config.values["description"]?.first, "Wrong-case description")
+        XCTAssertNil(config.values["Description"])
+        XCTAssertNil(SwordModuleConfig.parse("[REJECTED]\nmoddrv=RawLD\n"))
+    }
+
+    /**
+     Verifies config discovery preserves JSword's unsorted platform directory enumeration.
+
+     - Setup: Writes valid case- and normalization-distinct configs plus malformed/non-config files,
+       then independently captures `FileManager`'s filtered parseable URL sequence.
+     - Expected result: `readAll` returns exact UTF-16 section identities in that captured sequence;
+       public manager ordering is tested separately through the pinned JSword TreeSet comparator.
+     - Side effects: Creates, enumerates, reads, and removes one temporary `mods.d` directory.
+     - Failure meaning: A host-locale or initials sort has changed JSword driver registration order.
+     */
+    func testSwordModuleConfigReadAllPreservesPlatformDirectoryEnumeration() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let eligibleFileNames = ["z-last.conf", "a-first.conf", ".hidden.conf"]
+        for fileName in eligibleFileNames {
+            try """
+            [PLACEHOLDER]
+            Description=\(fileName)
+            ModDrv=RawLD
+            """.write(
+                to: configDirectory.appendingPathComponent(fileName),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        try """
+        [UPPERCASE_SUFFIX]
+        Description=Uppercase suffix is not accepted by Java's filter
+        ModDrv=RawLD
+        """.write(
+            to: configDirectory.appendingPathComponent("middle.CONF"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "malformed".write(
+            to: configDirectory.appendingPathComponent("malformed.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [IGNORED_GLOBALS]
+        Description=JSword globals prefix is not a book
+        ModDrv=RawLD
+        """.write(
+            to: configDirectory.appendingPathComponent("globals.synthetic.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "ignored".write(
+            to: configDirectory.appendingPathComponent("ignored.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let enumeratedURLs = try FileManager.default.contentsOfDirectory(
+            at: configDirectory,
+            includingPropertiesForKeys: nil,
+            options: []
+        )
+        let parseableURLs = enumeratedURLs.filter {
+            $0.lastPathComponent.hasSuffix(".conf")
+                && !$0.lastPathComponent.hasPrefix("globals.")
+                && $0.lastPathComponent != "malformed.conf"
+        }
+        let reverseOrderedNames = parseableURLs.indices.map {
+            String(format: "ORDER%04d", parseableURLs.count - $0)
+        }
+        for (url, initials) in zip(parseableURLs, reverseOrderedNames) {
+            try """
+            [\(initials)]
+            Description=\(url.lastPathComponent)
+            ModDrv=RawLD
+            """.write(to: url, atomically: true, encoding: .utf8)
+        }
+        let configs = SwordModuleConfig.readAll(modulePath: moduleRoot.path)
+        let expectedIdentities = reverseOrderedNames.map(SwordJavaExactStringIdentity.init)
+        let actualIdentities = configs.map { SwordJavaExactStringIdentity($0.name) }
+
+        XCTAssertEqual(actualIdentities, expectedIdentities)
+        XCTAssertEqual(configs.compactMap(\.sourceURL), parseableURLs)
+        XCTAssertTrue(configs.contains { $0.sourceURL?.lastPathComponent == ".hidden.conf" })
+        XCTAssertFalse(configs.contains { $0.name == "UPPERCASE_SUFFIX" })
+        XCTAssertFalse(configs.contains { $0.name == "IGNORED_GLOBALS" })
+        XCTAssertNotEqual(reverseOrderedNames, reverseOrderedNames.sorted())
+    }
+
+    /**
+     Verifies config-by-name lookup uses exact section identity instead of a lowercased filename.
+
+     - Setup: Writes case-distinct `FOO` and `foo` sections under unrelated filenames.
+     - Expected result: Each exact name returns its own description; mixed-case `FoO` is ambiguous.
+     - Side effects: Creates, enumerates, reads, and removes one temporary config directory.
+     - Failure meaning: Module construction can attach another case-distinct book's metadata.
+     */
+    func testSwordModuleConfigReadUsesExactSectionBeforeCaseAlias() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        try """
+        [FOO]
+        Description=Upper exact metadata
+        ModDrv=RawLD
+        """.write(
+            to: configDirectory.appendingPathComponent("first-arbitrary.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [foo]
+        Description=Lower exact metadata
+        ModDrv=RawLD
+        """.write(
+            to: configDirectory.appendingPathComponent("second-arbitrary.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(
+            SwordModuleConfig.read(name: "FOO", modulePath: moduleRoot.path)?.description,
+            "Upper exact metadata"
+        )
+        XCTAssertEqual(
+            SwordModuleConfig.read(name: "foo", modulePath: moduleRoot.path)?.description,
+            "Lower exact metadata"
+        )
+        XCTAssertNil(SwordModuleConfig.read(name: "FoO", modulePath: moduleRoot.path))
     }
 
     func testRemoteModuleInfoDefaultsToInstallable() {
@@ -490,6 +1566,11 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(ModuleCategory(typeString: "Biblical Texts"), .bible)
         XCTAssertEqual(ModuleCategory(typeString: "Commentaries"), .commentary)
         XCTAssertEqual(ModuleCategory(typeString: "And Bible"), .addon)
+        XCTAssertEqual(
+            ModuleCategory(typeString: "Cults / Unorthodox / Questionable Material"),
+            .questionable
+        )
+        XCTAssertEqual(ModuleCategory(typeString: "Questionable"), .unknown)
         XCTAssertEqual(ModuleCategory(typeString: "Unknown Type"), .unknown)
         XCTAssertEqual(ModuleCategory(typeString: "", modDrv: "MyBibleBible"), .bible)
         XCTAssertEqual(ModuleCategory(typeString: "Unknown", modDrv: "MyBibleDictionary"), .dictionary)
@@ -704,6 +1785,8 @@ final class SwordManagerTests: XCTestCase {
         Lang=en
         ShortPromo=Plans supplied by an add-on module.
         Versification=NRSVA
+        AndBibleMinimumVersion=1112
+        AndBibleMinimumVersion=9999
         AndBibleReadingPlanDateBased=True
         AndBibleProvidesReadingPlan=addon_plan.properties
         AndBibleProvidesReadingPlan=missing.properties
@@ -714,7 +1797,10 @@ final class SwordManagerTests: XCTestCase {
             encoding: .utf8
         )
 
-        let providers = SwordManager.readingPlanProviders(modulePath: swordDir.path)
+        let providers = SwordManager.readingPlanProviders(
+            modulePath: swordDir.path,
+            applicationVersionNumber: 1112
+        )
 
         XCTAssertEqual(providers.map(\.planCode), ["addon_plan"])
         let provider = try XCTUnwrap(providers.first)
@@ -726,14 +1812,259 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
-     Verifies manifest-installed MyBible packages use the same inventory contract as SWORD modules.
+     Verifies add-on plan discovery applies Android category, support, and minimum-version admission.
+
+     - Setup: Writes readable providers for a missing-minimum add-on, future add-on, non-add-on,
+       malformed-minimum add-on, and unsupported-driver add-on.
+     - Expected result: At compatibility version 1112 only the supported `And Bible` config whose
+       missing minimum defaults to zero is admitted.
+     - Side effects: Creates and removes one isolated SWORD config/provider tree.
+     - Failure meaning: iOS exposes plans Android filters out or rejects Android-compatible add-ons.
+     */
+    func testReadingPlanProvidersApplyAndroidAddonAdmissionGate() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let definitions: [(String, String, String, String?)] = [
+            ("ADMITTED", "And Bible", "RawGenBook", nil),
+            ("FUTURE", "And Bible", "RawGenBook", "1113"),
+            ("WRONGCATEGORY", "Generic Books", "RawGenBook", nil),
+            ("MALFORMED", "And Bible", "RawGenBook", "not-a-number"),
+            ("UNSUPPORTED", "And Bible", "UnknownDriver", nil),
+        ]
+        for (index, definition) in definitions.enumerated() {
+            let (initials, category, driver, minimumVersion) = definition
+            let code = initials.lowercased()
+            let providerDirectory = moduleRoot.appendingPathComponent(
+                "modules/genbook/rawgenbook/\(code)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: providerDirectory,
+                withIntermediateDirectories: true
+            )
+            try "1=Matt.1\n".write(
+                to: providerDirectory.appendingPathComponent("\(code).properties"),
+                atomically: true,
+                encoding: .utf8
+            )
+            var lines = [
+                "[\(initials)]",
+                "Description=\(initials) provider",
+                "Category=\(category)",
+                "ModDrv=\(driver)",
+                "DataPath=./modules/genbook/rawgenbook/\(code)/",
+                "AndBibleProvidesReadingPlan=\(code).properties",
+            ]
+            if let minimumVersion {
+                lines.append("AndBibleMinimumVersion=\(minimumVersion)")
+            }
+            try (lines.joined(separator: "\n") + "\n").write(
+                to: configDirectory.appendingPathComponent("admission-\(index).conf"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let providers = SwordManager.readingPlanProviders(
+            modulePath: moduleRoot.path,
+            applicationVersionNumber: 1112
+        )
+
+        XCTAssertEqual(providers.map(\.planCode), ["admitted"])
+        XCTAssertEqual(providers.first?.name, "ADMITTED provider")
+    }
+
+    /**
+     Verifies duplicate reading-plan ownership follows installed BookSet order, not file order.
+
+     - Setup: Writes Zulu-abbreviation config first and Alpha-abbreviation config second under
+       oppositely named files; both provide `shared`, while Alpha also provides `alpha_only`.
+     - Expected result: Alpha is traversed first, preserving `alpha_only` then `shared` key order;
+       later TreeSet book Zulu overwrites only the shared provider value.
+     - Side effects: Creates and removes one isolated SWORD config/provider tree.
+     - Failure meaning: Directory enumeration changes which add-on owns a duplicate Android plan.
+     */
+    func testReadingPlanProviderDuplicateOwnerUsesInstalledTreeSetOrder() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let zuluDirectory = moduleRoot.appendingPathComponent("addons/zulu", isDirectory: true)
+        let alphaDirectory = moduleRoot.appendingPathComponent("addons/alpha", isDirectory: true)
+        try FileManager.default.createDirectory(at: zuluDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: alphaDirectory, withIntermediateDirectories: true)
+        try "1=Luke.1\n".write(
+            to: zuluDirectory.appendingPathComponent("shared.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "1=Acts.1\n".write(
+            to: alphaDirectory.appendingPathComponent("shared.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "1=John.1\n".write(
+            to: alphaDirectory.appendingPathComponent("alpha_only.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [ZULUOWNER]
+        Description=Zulu owner
+        Abbreviation=Zulu
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/zulu/
+        AndBibleProvidesReadingPlan=shared.properties
+        """.write(
+            to: configDirectory.appendingPathComponent("a-zulu.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [ALPHAOWNER]
+        Description=Alpha owner
+        Abbreviation=Alpha
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/alpha/
+        AndBibleProvidesReadingPlan=alpha_only.properties
+        AndBibleProvidesReadingPlan=shared.properties
+        """.write(
+            to: configDirectory.appendingPathComponent("z-alpha.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let providers = SwordManager.readingPlanProviders(
+            modulePath: moduleRoot.path,
+            applicationVersionNumber: 1115
+        )
+
+        XCTAssertEqual(providers.map(\.planCode), ["alpha_only", "shared"])
+        XCTAssertEqual(providers.last?.name, "Zulu owner")
+        XCTAssertEqual(
+            providers.last?.fileURL,
+            zuluDirectory.appendingPathComponent("shared.properties").standardizedFileURL
+        )
+    }
+
+    /**
+     Verifies add-on projection applies JSword's concrete-class discriminator before TreeSet order.
+
+     `SwordBookDriver` may produce a `SwordDictionary` and `SwordGenBook` with identical category,
+     initials, and full name. `AbstractBook.equals` retains both because their classes differ, and
+     distinct abbreviations then retain both reading-plan providers in `Books` TreeSet order.
+
+     - Setup: Writes metadata-equal RawLD and RawGenBook add-ons under deterministic opposite config
+       paths, with Alpha/Zulu abbreviations and one readable provider per class.
+     - Expected result: Both providers survive, ordered by abbreviation rather than config path.
+     - Side effects: Creates and removes one isolated SWORD config/provider tree.
+     - Failure meaning: Add-on discovery coalesces cross-class books Android retains in its native
+       driver HashSet, hiding a valid reading-plan provider.
+     */
+    func testReadingPlanProvidersRetainCrossClassMetadataEqualAddons() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let dictionaryDirectory = moduleRoot.appendingPathComponent(
+            "addons/dictionary",
+            isDirectory: true
+        )
+        let genBookDirectory = moduleRoot.appendingPathComponent(
+            "addons/genbook",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: dictionaryDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: genBookDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        try "1=Matt.1\n".write(
+            to: dictionaryDirectory.appendingPathComponent("dictionary_class.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "1=Luke.1\n".write(
+            to: genBookDirectory.appendingPathComponent("genbook_class.properties"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [CROSSCLASSPLAN]
+        Description=Shared cross-class provider
+        Abbreviation=Alpha
+        Category=And Bible
+        ModDrv=RawLD
+        DataPath=./addons/dictionary/module
+        Encoding=UTF-8
+        Versification=KJV
+        AndBibleProvidesReadingPlan=dictionary_class.properties
+        """.write(
+            to: configDirectory.appendingPathComponent("a-dictionary.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [CROSSCLASSPLAN]
+        Description=Shared cross-class provider
+        Abbreviation=Zulu
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/genbook/
+        Encoding=UTF-8
+        Versification=KJV
+        AndBibleProvidesReadingPlan=genbook_class.properties
+        """.write(
+            to: configDirectory.appendingPathComponent("z-genbook.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let providers = SwordManager.readingPlanProviders(
+            modulePath: moduleRoot.path,
+            applicationVersionNumber: 1115
+        )
+
+        XCTAssertEqual(providers.map(\.planCode), ["dictionary_class", "genbook_class"])
+        XCTAssertEqual(providers.map(\.name), [
+            "Shared cross-class provider",
+            "Shared cross-class provider",
+        ])
+    }
+
+    /**
+     Verifies installed MyBible packages derive Android book metadata from their actual databases.
 
      Android adds downloaded MyBible packages to `Books.installed().books`. iOS stores those packages
      in a sidecar directory, but `SwordManager.installedModules()` must still expose them so Downloads,
      settings, and reader pickers do not each maintain a different installed-module definition.
 
-     - Setup: Writes a sidecar `module.json` and readable `.SQLite3` payload under `sword/mybible`.
-     - Expected result: `installedModules()` includes the MyBible row and `moduleCount` agrees.
+     - Setup: Writes sidecars with deliberately stale manifest metadata beside real Bible and
+       dictionary SQLite schemas whose filenames and `info` rows own different metadata.
+     - Expected result: Direct and merged inventory derive initials, descriptions, language,
+       categories, and drivers from the databases, order Bible before dictionary, and align count.
      - Failure meaning: MyBible package installs are only visible to Downloads and Android parity has
        regressed.
      */
@@ -762,15 +2093,60 @@ final class SwordManagerTests: XCTestCase {
             to: moduleDir.appendingPathComponent("module.json"),
             options: .atomic
         )
-        try Data().write(to: moduleDir.appendingPathComponent("finrk.SQLite3"))
+        try makeInstalledMyBibleDatabase(
+            at: moduleDir.appendingPathComponent("finrk.SQLite3"),
+            description: "Finnish RK from database",
+            language: "fi",
+            category: .bible
+        )
+
+        let dictionaryDirectory = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent("dictionary-container", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: dictionaryDirectory,
+            withIntermediateDirectories: true
+        )
+        let dictionaryMetadata = InstalledMyBibleModule(
+            name: "AAA-dictionary",
+            description: "Alphabetical Dictionary",
+            category: ModuleCategory.dictionary.rawValue,
+            language: "en",
+            version: "1.0",
+            sourceName: "Example MyBible",
+            packageFileName: "dictionary.SQLite3.zip",
+            downloadURL: "https://example.test/dictionary.SQLite3.zip",
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        try JSONEncoder().encode(dictionaryMetadata).write(
+            to: dictionaryDirectory.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+        try makeInstalledMyBibleDatabase(
+            at: dictionaryDirectory.appendingPathComponent("dictionary.SQLite3"),
+            description: "Dictionary from database",
+            language: "de",
+            category: .dictionary
+        )
 
         let manager = try XCTUnwrap(SwordManager(modulePath: swordDir.path))
         let modules = manager.installedModules()
-        let finrk = try XCTUnwrap(modules.first { $0.name == "MyBible-finrk_SQLite3" })
+        let finrk = try XCTUnwrap(modules.first { $0.name == "MyBible-finrk" })
 
-        XCTAssertEqual(finrk.description, "Finnish RK")
+        XCTAssertEqual(
+            SwordManager.myBiblePackageInstalledModules(modulePath: swordDir.path).map(\.name),
+            ["MyBible-finrk", "MyBible-dictionary"]
+        )
+        XCTAssertEqual(modules.map(\.name), ["MyBible-finrk", "MyBible-dictionary"])
+        XCTAssertEqual(finrk.description, "Finnish RK from database")
         XCTAssertEqual(finrk.category, .bible)
         XCTAssertEqual(finrk.language, "fi")
+        XCTAssertEqual(finrk.moduleDriver, "MyBibleBible")
+        let dictionary = try XCTUnwrap(modules.first { $0.name == "MyBible-dictionary" })
+        XCTAssertEqual(dictionary.description, "Dictionary from database")
+        XCTAssertEqual(dictionary.category, .dictionary)
+        XCTAssertEqual(dictionary.language, "de")
+        XCTAssertEqual(dictionary.moduleDriver, "MyBibleDictionary")
         XCTAssertEqual(finrk.aboutMetadata.versification, "KJVA")
         XCTAssertTrue(finrk.isSupported)
         XCTAssertEqual(manager.moduleCount, modules.count)
@@ -818,6 +2194,111 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertFalse(manager.installedModules().contains { $0.name == "MyBible-finrk_SQLite3" })
     }
 
+    /**
+     Verifies MyBible TreeSet order uses the payload-derived unsanitized abbreviation.
+
+     - Setup: Writes two dictionary databases whose `a`/`A` abbreviations tie ignoring case while
+       their sanitized exact initials sort in the opposite order from their sidecar names.
+     - Expected result: The uppercase exact initials row sorts first after the abbreviation tie.
+     - Side effects: Creates, opens, and removes two isolated SQLite package fixtures.
+     - Failure meaning: Sidecar initials are still substituted for Android's database abbreviation.
+     */
+    func testMyBiblePackageOrderingUsesDatabaseFilenameAbbreviation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let myBibleRoot = root.appendingPathComponent("mybible", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let definitions = [
+            ("z-sidecar", "a.a.SQLite3", "Lower payload"),
+            ("a-sidecar", "A.z.SQLite3", "Upper payload"),
+        ]
+        for (directoryName, databaseName, description) in definitions {
+            let directory = myBibleRoot.appendingPathComponent(directoryName, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let sidecar = InstalledMyBibleModule(
+                name: directoryName,
+                description: "Manifest metadata must not order",
+                category: ModuleCategory.bible.rawValue,
+                language: "en",
+                version: "1.0",
+                sourceName: "Fixture",
+                packageFileName: "\(databaseName).zip",
+                downloadURL: "https://example.test/\(databaseName).zip",
+                installedAt: Date(timeIntervalSince1970: 0)
+            )
+            try JSONEncoder().encode(sidecar).write(
+                to: directory.appendingPathComponent("module.json"),
+                options: .atomic
+            )
+            try makeInstalledMyBibleDatabase(
+                at: directory.appendingPathComponent(databaseName),
+                description: description,
+                language: "en",
+                category: .dictionary
+            )
+        }
+
+        XCTAssertEqual(
+            SwordManager.myBiblePackageInstalledModules(modulePath: root.path).map(\.name),
+            ["MyBible-A_z", "MyBible-a_a"]
+        )
+    }
+
+    /**
+     Verifies Android's manual-MyBible pre-add lookup preserves an already registered native owner.
+
+     - Setup: Installs a real native RawLD book, then a package database whose derived initials match
+       the native book but whose description and backend are distinct.
+     - Expected result: Combined inventory exposes only the native row; the standalone package scan
+       still proves the database fixture was otherwise admissible.
+     - Side effects: Creates/removes one native fixture plus one read-only SQLite package fixture.
+     - Failure meaning: Manual MyBible admission later-replaces or duplicates a book Android skips.
+     */
+    func testMyBiblePackageAdmissionPreservesPriorNativeLookupOwner() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "MyBible-collision",
+                fullName: "Native collision owner",
+                dataStem: "mybible-collision",
+                entryText: "NATIVE_COLLISION_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let directory = fixture.root
+            .appendingPathComponent("mybible/package-container", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sidecar = InstalledMyBibleModule(
+            name: "Remote package name",
+            description: "Manifest collision",
+            category: ModuleCategory.bible.rawValue,
+            language: "en",
+            version: "1.0",
+            sourceName: "Fixture",
+            packageFileName: "collision.SQLite3.zip",
+            downloadURL: "https://example.test/collision.SQLite3.zip",
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        try JSONEncoder().encode(sidecar).write(
+            to: directory.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+        try makeInstalledMyBibleDatabase(
+            at: directory.appendingPathComponent("collision.SQLite3"),
+            description: "Database collision",
+            language: "en",
+            category: .dictionary
+        )
+
+        XCTAssertEqual(
+            SwordManager.myBiblePackageInstalledModules(modulePath: fixture.root.path).map(\.name),
+            ["MyBible-collision"]
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let collisions = manager.installedModules().filter { $0.name == "MyBible-collision" }
+        XCTAssertEqual(collisions.map(\.description), ["Native collision owner"])
+    }
+
     func testSearchOptionsDefaults() {
         let opts = SearchOptions(query: "love")
         XCTAssertEqual(opts.searchType, .multiWord)
@@ -831,6 +2312,278 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Builds real unencrypted RawLD modules in one isolated native manager root.
+
+     - Parameter modules: Exact config initials and unique metadata/data stems for each backend.
+     - Returns: Temporary SWORD root containing every requested config, `.idx`, and `.dat` file.
+     - Side effects: Creates directories and native RawLD fixture files under a random temporary URL.
+     - Failure modes: Propagates filesystem writes and rejects entries too large for RawLD's two-byte
+       record length. Callers own removal of the returned root.
+     */
+    private func makePlainRawLDFixture(
+        modules: [SwordManagerPlainRawLDDefinition]
+    ) throws -> SwordManagerPlainRawLDFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+
+        for (index, definition) in modules.enumerated() {
+            let relativeDataDirectory = "modules/lexdict/rawld/\(definition.dataStem)"
+            let dataDirectory = root.appendingPathComponent(
+                relativeDataDirectory,
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: dataDirectory,
+                withIntermediateDirectories: true
+            )
+
+            let dataPrefix = dataDirectory.appendingPathComponent(definition.dataStem)
+            let indexedRecord = Data(
+                "ENTRY\r\n<entryFree><p>\(definition.entryText)</p></entryFree>".utf8
+            )
+            guard indexedRecord.count <= Int(UInt16.max) else {
+                throw SwordManagerEncryptedFixtureError.entryTooLarge
+            }
+            try (indexedRecord + Data([0x0A])).write(
+                to: dataPrefix.appendingPathExtension("dat")
+            )
+            let recordSize = UInt16(indexedRecord.count)
+            try Data([
+                0x00, 0x00, 0x00, 0x00,
+                UInt8(recordSize & 0x00ff), UInt8(recordSize >> 8),
+            ]).write(to: dataPrefix.appendingPathExtension("idx"))
+
+            var configLines = ["[\(definition.initials)]"]
+            if let fullName = definition.fullName {
+                configLines.append("Description=\(fullName)")
+            }
+            if let abbreviation = definition.abbreviation {
+                configLines.append("Abbreviation=\(abbreviation)")
+            }
+            configLines.append(contentsOf: [
+                "Category=Lexicons / Dictionaries",
+                "ModDrv=RawLD",
+                "DataPath=./\(relativeDataDirectory)/\(definition.dataStem)",
+                "SourceType=OSIS",
+                "Encoding=UTF-8",
+                "Lang=en",
+                "Versification=KJV",
+            ])
+            try (configLines.joined(separator: "\n") + "\n").write(
+                to: configDirectory.appendingPathComponent("identity-\(index).conf"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        return SwordManagerPlainRawLDFixture(root: root)
+    }
+
+    /**
+     Writes the bounded SQLite metadata/schema needed by installed MyBible inventory fixtures.
+
+     - Parameters:
+       - databaseURL: Exact database file to create.
+       - description: Value stored under `info.description`.
+       - language: Value stored under `info.language`.
+       - category: Bible, commentary, or dictionary content table to materialize.
+     - Side effects: Creates and writes one SQLite database at `databaseURL`.
+     - Failure modes: Throws for unsupported categories or SQLite open/write failures.
+     */
+    private func makeInstalledMyBibleDatabase(
+        at databaseURL: URL,
+        description: String,
+        language: String,
+        category: ModuleCategory
+    ) throws {
+        let contentTable: String
+        switch category {
+        case .bible:
+            contentTable = "verses"
+        case .commentary:
+            contentTable = "commentaries"
+        case .dictionary:
+            contentTable = "dictionary"
+        default:
+            throw SwordManagerMyBibleFixtureError.unsupportedCategory
+        }
+
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            databaseURL.path,
+            &database,
+            SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE,
+            nil
+        ) == SQLITE_OK, let database else {
+            if let database { sqlite3_close(database) }
+            throw SwordManagerMyBibleFixtureError.openFailed
+        }
+        defer { sqlite3_close(database) }
+
+        let escapedDescription = description.replacingOccurrences(of: "'", with: "''")
+        let escapedLanguage = language.replacingOccurrences(of: "'", with: "''")
+        let sql = """
+        CREATE TABLE info (name TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO info (name, value) VALUES ('description', '\(escapedDescription)');
+        INSERT INTO info (name, value) VALUES ('language', '\(escapedLanguage)');
+        CREATE TABLE \(contentTable) (fixture_id INTEGER);
+        """
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SwordManagerMyBibleFixtureError.writeFailed
+        }
+    }
+
+    /**
+     Asserts that one decrypted fixture module can reconstruct its complete two-verse chapter range.
+
+     - Parameters:
+       - module: Readable RawText Bible handle from either the live unlock manager or a fresh one.
+       - file: XCTest source location forwarded to assertion failures.
+       - line: XCTest source line forwarded to assertion failures.
+     - Side effects: Temporarily moves and restores the native module cursor while resolving
+       ordinals and reading the bounded range.
+     - Failure modes: Throws when SWORD cannot inspect the exact range; XCTest failures identify
+       ciphertext leakage, missing verses, or loss of synthetic canonical text.
+     */
+    private func assertSyntheticEncryptedChapterReadable(
+        in module: SwordModule,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let startOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1),
+            file: file,
+            line: line
+        )
+        let endOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2),
+            file: file,
+            line: line
+        )
+        let chapter = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+
+        XCTAssertEqual(chapter.sourceOSISRange, "Gen.1.1-Gen.1.2", file: file, line: line)
+        XCTAssertEqual(
+            chapter.entries.map(\.reference.osisRef),
+            ["Gen.1.1", "Gen.1.2"],
+            file: file,
+            line: line
+        )
+        let sourceXML = chapter.entries.compactMap(\.osisFragment).joined()
+        XCTAssertTrue(sourceXML.contains("Synthetic encrypted first verse"), file: file, line: line)
+        XCTAssertTrue(
+            sourceXML.contains("Synthetic encrypted second verse"),
+            file: file,
+            line: line
+        )
+        let canonicalText = try XCTUnwrap(chapter.canonicalText, file: file, line: line)
+        XCTAssertTrue(
+            canonicalText.contains("Synthetic encrypted first verse"),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            canonicalText.contains("Synthetic encrypted second verse"),
+            file: file,
+            line: line
+        )
+    }
+
+    /**
+     Builds a genuine Sapphire-encrypted two-verse RawText Bible without licensed source material.
+
+     The sparse records use pinned KJV RawText indexes: rows zero through three are introduction
+     slots and Genesis 1:1/1:2 occupy rows four and five. Each independently encrypted record owns
+     an encrypted trailing NUL because libsword's RawText cipher filter decrypts one scratch byte
+     beyond the indexed payload before exposing a C string.
+
+     - Returns: Temporary SWORD root, locked Bible config, and its deterministic plaintext key.
+     - Side effects: Creates one config, OT/NT data files, and their complete KJV `.vss` indexes.
+     - Failure modes: Propagates filesystem errors or rejects a record too large for RawText's
+       two-byte length field.
+     - Note: All verse text and the fixture key are synthetic and safe to distribute with tests.
+     */
+    private func makeEncryptedRawTextBibleFixture() throws -> SwordManagerEncryptedFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent(
+            "modules/texts/rawtext/lockedbible",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: dataDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let cipherKey = "rawtextcipherkey"
+        let sourceEntries = [
+            #"<verse osisID="Gen.1.1"><w>Synthetic encrypted first verse.</w></verse>"#,
+            #"<verse osisID="Gen.1.2"><w>Synthetic encrypted second verse.</w></verse>"#,
+        ]
+        var oldTestamentData = Data()
+        var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
+        for (entryOffset, sourceXML) in sourceEntries.enumerated() {
+            var plaintext = Array(sourceXML.utf8)
+            plaintext.append(0)
+            guard plaintext.count <= Int(UInt16.max) else {
+                throw SwordManagerEncryptedFixtureError.entryTooLarge
+            }
+            var cipher = SwordManagerTestSapphire(key: Array(cipherKey.utf8))
+            let encrypted = plaintext.map { cipher.encrypt($0) }
+            let dataOffset = UInt32(oldTestamentData.count)
+            let entryLength = UInt16(encrypted.count)
+            let indexOffset = (4 + entryOffset) * 6
+            oldTestamentIndex[indexOffset] = UInt8(dataOffset & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 1] = UInt8((dataOffset >> 8) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 2] = UInt8((dataOffset >> 16) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 3] = UInt8((dataOffset >> 24) & 0x0000_00ff)
+            oldTestamentIndex[indexOffset + 4] = UInt8(entryLength & 0x00ff)
+            oldTestamentIndex[indexOffset + 5] = UInt8((entryLength >> 8) & 0x00ff)
+            oldTestamentData.append(contentsOf: encrypted)
+            oldTestamentData.append(0x0A)
+        }
+
+        try oldTestamentData.write(to: dataDirectory.appendingPathComponent("ot"))
+        try Data(oldTestamentIndex).write(to: dataDirectory.appendingPathComponent("ot.vss"))
+        try Data().write(to: dataDirectory.appendingPathComponent("nt"))
+        try Data(repeating: 0, count: 8_246 * 6).write(
+            to: dataDirectory.appendingPathComponent("nt.vss")
+        )
+
+        let configURL = configDirectory.appendingPathComponent("lockedbible.conf")
+        try """
+        [LOCKEDBIBLE]
+        Description=Synthetic Encrypted RawText Bible Fixture
+        Category=Biblical Texts
+        ModDrv=RawText
+        DataPath=./modules/texts/rawtext/lockedbible/
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        CipherKey=
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        return SwordManagerEncryptedFixture(
+            root: root,
+            configURL: configURL,
+            cipherKey: cipherKey
+        )
+    }
+
+    /**
      Builds a native encrypted RawLD fixture whose ciphertext contains no embedded NUL.
 
      - Returns: Temporary SWORD root, config location, and the correct key.
@@ -839,7 +2592,9 @@ final class SwordManagerTests: XCTestCase {
      - Failure Modes: Propagates filesystem errors, rejects oversized records, or fails if the
        bounded key search cannot produce C-string-safe fixture ciphertext.
      */
-    private func makeEncryptedRawLDFixture() throws -> SwordManagerEncryptedFixture {
+    private func makeEncryptedRawLDFixture(
+        moduleName: String = "LOCKED"
+    ) throws -> SwordManagerEncryptedFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let configDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
@@ -889,7 +2644,7 @@ final class SwordManagerTests: XCTestCase {
 
         let configURL = configDirectory.appendingPathComponent("locked.conf")
         try """
-        [LOCKED]
+        [\(moduleName)]
         Description=Encrypted RawLD Fixture
         Category=Lexicons / Dictionaries
         ModDrv=RawLD
@@ -913,13 +2668,69 @@ final class SwordManagerTests: XCTestCase {
 }
 
 /**
+ Defines one exact native RawLD module used by manager identity regression fixtures.
+
+ Values are immutable and perform no I/O. `dataStem` must be a unique ASCII-safe relative-path
+ component within one fixture; tests supply bounded entry text that fits RawLD's two-byte length.
+ */
+private struct SwordManagerPlainRawLDDefinition {
+    /// Exact Java UTF-16 module initials written to the config section.
+    let initials: String
+
+    /// Exact JSword full name used by the installed-book name map.
+    let fullName: String?
+
+    /// Parsed JSword abbreviation controlling TreeSet order after category.
+    let abbreviation: String?
+
+    /// Unique ASCII path and data-file stem for this native backend.
+    let dataStem: String
+
+    /// Unique marker written only into this module's real RawLD entry.
+    let entryText: String
+
+    /**
+     Creates one plain RawLD definition with optional JSword name/abbreviation metadata.
+
+     - Parameters describe exact initials, optional comparator fields, a unique data stem, and one
+       backend marker.
+     - Side effects: None.
+     - Failure modes: None; the fixture builder validates path/record constraints during materialization.
+     */
+    init(
+        initials: String,
+        fullName: String? = nil,
+        abbreviation: String? = nil,
+        dataStem: String,
+        entryText: String
+    ) {
+        self.initials = initials
+        self.fullName = fullName
+        self.abbreviation = abbreviation
+        self.dataStem = dataStem
+        self.entryText = entryText
+    }
+}
+
+/**
+ Owns the temporary root returned by the real plain-RawLD fixture builder.
+
+ The value performs no cleanup itself; each test removes `root` with `defer` after all native manager
+ handles are released. Construction is deterministic for the supplied URL and cannot fail.
+ */
+private struct SwordManagerPlainRawLDFixture {
+    /// Root containing `mods.d` and every definition's independent native data files.
+    let root: URL
+}
+
+/**
  Carries the temporary paths and verified key for one native encrypted-module unlock test.
 
  The value owns no resources itself; its test creates and removes `root`. Construction performs no
  I/O, cannot fail, and is deterministic for the supplied values.
  */
 private struct SwordManagerEncryptedFixture {
-    /// SWORD root containing the encrypted RawLD module.
+    /// SWORD root containing the encrypted native module.
     let root: URL
 
     /// Config whose `CipherKey` persistence is asserted.
@@ -931,13 +2742,13 @@ private struct SwordManagerEncryptedFixture {
 }
 
 /**
- Describes deterministic failures while constructing a native encrypted RawLD fixture.
+ Describes deterministic failures while constructing a native encrypted fixture.
 
  Cases identify fixture limitations rather than production unlock failures. The enum has no side
  effects and is used only to fail a test before libsword is invoked.
  */
 private enum SwordManagerEncryptedFixtureError: Error {
-    /// RawLD cannot represent the fixture entry in its two-byte length field.
+    /// The selected native record format cannot represent an entry in its two-byte length field.
     case entryTooLarge
 
     /// No bounded test key produced RawLD ciphertext without an embedded C-string terminator.
@@ -945,11 +2756,23 @@ private enum SwordManagerEncryptedFixtureError: Error {
 
 }
 
+/** Identifies deterministic setup failures in installed MyBible SQLite test fixtures. */
+private enum SwordManagerMyBibleFixtureError: Error {
+    /// SQLite could not create/open the isolated fixture file.
+    case openFailed
+
+    /// SQLite rejected the bounded schema/metadata statements.
+    case writeFailed
+
+    /// A caller requested a category Android MyBible databases cannot represent.
+    case unsupportedCategory
+}
+
 /**
  Test-only Sapphire II encryptor matching libsword's `Sapphire::encrypt` state transitions.
 
  Production decryption remains entirely inside libsword. This implementation only creates realistic
- ciphertext at runtime so unlock tests exercise a native RawLD SWORD backend.
+ ciphertext at runtime so unlock tests exercise native RawLD and RawText SWORD backends.
  */
 private struct SwordManagerTestSapphire {
     private var cards = [UInt8](repeating: 0, count: 256)

@@ -835,6 +835,7 @@
 "description" = "Description";
 "errorTitle" = "An error has occurred";
 "error_key_not_in_document" = "Not found in document";
+"error_key_not_in_document2" = "%1$@ was not found in document %2$@.";
 "error_executing_search" = "Invalid search query";
 "export_something" = "Export %@";
 "import_items" = "Import %@";
@@ -1669,3 +1670,9 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Double-tap screen to exit fullscreen";
+
+/* Android shared translations */
+"try_again_passphrase" = "Passphrase did not work, try again?";
+
+/* Android shared translations */
+"document_not_installed" = "Please download '%@'";

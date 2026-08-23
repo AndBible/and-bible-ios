@@ -1528,3 +1528,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Tam ekrandan çıkmak için ekrana iki kez dokunun";
+
+/* Android shared translations */
+"try_again_passphrase" = "Parola çalışmadı, tekrar dener misiniz?";
+
+/* Android shared translations */
+"document_not_installed" = "Lütfen ‘%@’ dosyasını indirin";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@, %2$@ belgesinde bulunamadı.";

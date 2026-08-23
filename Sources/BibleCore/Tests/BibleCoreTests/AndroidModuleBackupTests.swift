@@ -630,6 +630,217 @@ final class AndroidModuleBackupTests: XCTestCase {
     }
 
     /**
+     Replaces an existing native EPUB generation when Android backup publication commits.
+
+     - Setup: Publishes generation P, preflights a same-identity backup generation B, and restores it.
+     - Expected result: The stable pointer advances from P to B and B's indexed content is readable.
+     - Failure meaning: Moving rollback acquisition under the global lease accidentally prevents a
+       normal authoritative backup replacement from committing.
+     - Side effects: Creates and replaces isolated EPUB generations and an Android raw EPUB tree.
+     */
+    func testAndroidModuleBackupEpubReplacementCommitsNewGeneration() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let libraryRoot = moduleRoot.appendingPathComponent("_epub-library", isDirectory: true)
+        let displayName = "Atomic Book.epub"
+        let identifier = try installEpubFixture(
+            label: "Prior",
+            displayName: displayName,
+            moduleRoot: moduleRoot,
+            libraryRoot: libraryRoot
+        )
+        let priorGeneration = try currentEpubGeneration(
+            identifier: identifier,
+            libraryRoot: libraryRoot,
+            expectedLabel: "Prior"
+        )
+        let archiveData = try makeEpubBackupArchiveData(
+            label: "Backup",
+            displayName: displayName,
+            moduleRoot: moduleRoot
+        )
+        let service = AndroidModuleBackupService(
+            moduleDirectory: moduleRoot,
+            epubLibraryRootURL: libraryRoot
+        )
+        let inspection = try service.inspectArchive(from: archiveData)
+
+        _ = try service.restoreArchive(
+            from: archiveData,
+            overwritePolicy: .replaceExisting(inspection.overwriteAuthorization)
+        )
+
+        let committedGeneration = try currentEpubGeneration(
+            identifier: identifier,
+            libraryRoot: libraryRoot,
+            expectedLabel: "Backup"
+        )
+        XCTAssertNotEqual(committedGeneration, priorGeneration)
+    }
+
+    /**
+     Restores the transaction-owned prior EPUB generation after a post-publication failure.
+
+     - Setup: Publishes P, restores same-identity B, and injects a deterministic failure after B's
+       native pointer publication but before the surrounding module journal commits.
+     - Expected result: Restore throws, the pointer again owns P, and no raw backup tree remains.
+     - Failure meaning: The corrected snapshot timing lost the ordinary rollback baseline while
+       closing the concurrent stale-snapshot race.
+     - Side effects: Creates isolated generations and exercises live overlay rollback.
+     */
+    func testAndroidModuleBackupEpubFailureRestoresTransactionOwnedPriorGeneration() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let libraryRoot = moduleRoot.appendingPathComponent("_epub-library", isDirectory: true)
+        let displayName = "Atomic Book.epub"
+        let identifier = try installEpubFixture(
+            label: "Prior",
+            displayName: displayName,
+            moduleRoot: moduleRoot,
+            libraryRoot: libraryRoot
+        )
+        let priorGeneration = try currentEpubGeneration(
+            identifier: identifier,
+            libraryRoot: libraryRoot,
+            expectedLabel: "Prior"
+        )
+        let archiveData = try makeEpubBackupArchiveData(
+            label: "Backup",
+            displayName: displayName,
+            moduleRoot: moduleRoot
+        )
+        let fileManager = AndroidModuleBackupPostEpubFailureFileManager(
+            moduleRootURL: moduleRoot
+        )
+        let service = AndroidModuleBackupService(
+            fileManager: fileManager,
+            moduleDirectory: moduleRoot,
+            epubLibraryRootURL: libraryRoot
+        )
+        let inspection = try service.inspectArchive(from: archiveData)
+
+        XCTAssertThrowsError(try service.restoreArchive(
+            from: archiveData,
+            overwritePolicy: .replaceExisting(inspection.overwriteAuthorization)
+        ))
+
+        XCTAssertEqual(
+            try currentEpubGeneration(
+                identifier: identifier,
+                libraryRoot: libraryRoot,
+                expectedLabel: "Prior"
+            ),
+            priorGeneration
+        )
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: moduleRoot.appendingPathComponent("epub/\(displayName)").path
+        ))
+    }
+
+    /**
+     Prevents stale backup rollback from erasing a newer coordinator-serialized EPUB generation.
+
+     - Setup: Preflights backup B while P is current, blocks B at the coordinator's waiting event,
+       commits normal EPUB Q, then lets B publish and fail after native pointer publication.
+     - Expected result: B captures Q only after acquiring the lease, so rollback restores Q rather
+       than the stale preflight-era P generation and leaves no partial raw backup tree.
+     - Failure meaning: An interleaved normal install can succeed and later be silently erased by a
+       failed Android backup restore using stale rollback ownership.
+     - Side effects: Runs two deterministic coordinator writers against isolated module/EPUB roots.
+     */
+    func testAndroidModuleBackupEpubRollbackRetainsInterleavedNormalCommit() async throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let libraryRoot = moduleRoot.appendingPathComponent("_epub-library", isDirectory: true)
+        let displayName = "Atomic Book.epub"
+        let identifier = try installEpubFixture(
+            label: "Prior",
+            displayName: displayName,
+            moduleRoot: moduleRoot,
+            libraryRoot: libraryRoot
+        )
+        _ = try currentEpubGeneration(
+            identifier: identifier,
+            libraryRoot: libraryRoot,
+            expectedLabel: "Prior"
+        )
+        let archiveData = try makeEpubBackupArchiveData(
+            label: "Backup",
+            displayName: displayName,
+            moduleRoot: moduleRoot
+        )
+        let fileManager = AndroidModuleBackupPostEpubFailureFileManager(
+            moduleRootURL: moduleRoot
+        )
+        let service = AndroidModuleBackupServiceSendableBox(AndroidModuleBackupService(
+            fileManager: fileManager,
+            moduleDirectory: moduleRoot,
+            epubLibraryRootURL: libraryRoot
+        ))
+        let inspection = try service.value.inspectArchive(from: archiveData)
+        let gate = AndroidModuleBackupWaitingGate()
+        let observation = ModuleStoreMutationCoordinator.observeTransactions(
+            forModuleRoot: moduleRoot,
+            observer: { event in gate.observe(event) }
+        )
+        defer { observation.cancel() }
+
+        let restoreTask = Task.detached {
+            try service.value.restoreArchive(
+                from: archiveData,
+                overwritePolicy: .replaceExisting(inspection.overwriteAuthorization)
+            )
+        }
+        try gate.waitUntilBackupPrecedesCoordinatorAcquisition()
+        let qSource = moduleRoot.appendingPathComponent(
+            "_normal-q-\(UUID().uuidString)/\(displayName)",
+            isDirectory: true
+        )
+        try EpubAndroidModuleBackupTestFixture.writeRawTree(at: qSource, label: "Normal Q")
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: moduleRoot)
+        let qIdentifier: String
+        do {
+            qIdentifier = try coordinator.withExclusiveTransaction(
+                kind: .epub,
+                prepare: { () },
+                commit: { _ in
+                    try EpubReader.installAndroidModuleBackup(
+                        epubDirectoryURL: qSource,
+                        libraryRootURL: libraryRoot
+                    )
+                }
+            )
+        } catch {
+            gate.releaseBackup()
+            _ = try? await restoreTask.value
+            throw error
+        }
+        XCTAssertEqual(qIdentifier, identifier)
+        let qGeneration = try currentEpubGeneration(
+            identifier: identifier,
+            libraryRoot: libraryRoot,
+            expectedLabel: "Normal Q"
+        )
+        gate.releaseBackup()
+
+        do {
+            _ = try await restoreTask.value
+            XCTFail("Expected injected post-EPUB publication failure")
+        } catch {
+            // The injected cache invalidation failure is the transaction rollback trigger.
+        }
+
+        XCTAssertEqual(
+            try currentEpubGeneration(
+                identifier: identifier,
+                libraryRoot: libraryRoot,
+                expectedLabel: "Normal Q"
+            ),
+            qGeneration
+        )
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: moduleRoot.appendingPathComponent("epub/\(displayName)").path
+        ))
+    }
+
+    /**
      Verifies Android module backups normalize Windows path separators before safety validation.
 
      Android's shared installer replaces backslashes with slashes. This fixture must restore to the
@@ -1602,6 +1813,88 @@ final class AndroidModuleBackupTests: XCTestCase {
     }
 
     /**
+     Publishes one labeled raw EPUB fixture through the native immutable-generation installer.
+
+     - Parameters:
+       - label: Fixture title/body marker used to distinguish transaction generations.
+       - displayName: Stable Android source directory name that determines the EPUB identifier.
+       - moduleRoot: Test-owned root that receives only the inert fixture source tree.
+       - libraryRoot: Isolated native EPUB library that receives the published generation.
+     - Returns: Stable EPUB identifier shared by every same-display-name generation.
+     - Side effects: Writes a raw EPUB tree and atomically publishes one native generation.
+     - Throws: Fixture, index, or filesystem publication failures.
+     */
+    private func installEpubFixture(
+        label: String,
+        displayName: String,
+        moduleRoot: URL,
+        libraryRoot: URL
+    ) throws -> String {
+        let source = moduleRoot.appendingPathComponent(
+            "_native-source-\(UUID().uuidString)/\(displayName)",
+            isDirectory: true
+        )
+        try EpubAndroidModuleBackupTestFixture.writeRawTree(at: source, label: label)
+        return try EpubReader.installAndroidModuleBackup(
+            epubDirectoryURL: source,
+            libraryRootURL: libraryRoot
+        )
+    }
+
+    /**
+     Builds one Android backup containing a labeled raw EPUB beneath `epub/<displayName>`.
+
+     - Parameters:
+       - label: Fixture title/body marker used to identify the backup generation.
+       - displayName: Android raw EPUB directory name retained in archive paths.
+       - moduleRoot: Test-owned root that receives the inert archive source tree.
+     - Returns: Complete in-memory `.abmd.zip` bytes.
+     - Side effects: Writes and reads a temporary raw EPUB fixture.
+     - Throws: Fixture, enumeration, read, or ZIP serialization failures.
+     */
+    private func makeEpubBackupArchiveData(
+        label: String,
+        displayName: String,
+        moduleRoot: URL
+    ) throws -> Data {
+        let source = moduleRoot.appendingPathComponent(
+            "_backup-source-\(UUID().uuidString)/\(displayName)",
+            isDirectory: true
+        )
+        try EpubAndroidModuleBackupTestFixture.writeRawTree(at: source, label: label)
+        return try makeAndroidModuleBackupArchiveData(entries: try archiveEntries(
+            beneath: source,
+            archiveRootPath: "epub/\(displayName)"
+        ))
+    }
+
+    /**
+     Reads one current EPUB generation and verifies its indexed body marker.
+
+     - Parameters:
+       - identifier: Stable EPUB identity whose current pointer is inspected.
+       - libraryRoot: Isolated native EPUB library.
+       - expectedLabel: Fixture marker expected in chapter-one transformed HTML.
+     - Returns: Opaque current-generation identifier for before/after ownership assertions.
+     - Side effects: Acquires and releases one reader generation lease.
+     - Throws: XCTest unwrap or indexed-content read failures.
+     */
+    private func currentEpubGeneration(
+        identifier: String,
+        libraryRoot: URL,
+        expectedLabel: String
+    ) throws -> String {
+        let reader = try XCTUnwrap(EpubReader(
+            identifier: identifier,
+            libraryRootURL: libraryRoot
+        ))
+        XCTAssertTrue(try XCTUnwrap(reader.content(forKey: "chapter-1")).html.contains(
+            "\(expectedLabel) raw opening."
+        ))
+        return reader.generationIdentifier
+    }
+
+    /**
      Reads every regular file under a fixture directory into deterministic archive paths.
 
      - Parameters:
@@ -1799,6 +2092,9 @@ final class AndroidModuleBackupTests: XCTestCase {
             moduleRoot: moduleRoot
         )
 
+        let orderedEpubInitials = EpubReader.readOnlyInstalledEpubs(
+            libraryRootURL: epubLibraryRoot
+        ).map(\.initials)
         return AndroidModuleBackupExportFixture(
             fileDataByArchivePath: fileDataByArchivePath,
             archivePathsByModuleName: archivePathsByModuleName,
@@ -1807,8 +2103,7 @@ final class AndroidModuleBackupTests: XCTestCase {
                 "MyBible-My_Bible",
                 "MySword-Sample_bbl",
                 "ESword-Sample_Name_",
-                "Epub-Native_Book_epub",
-                "Epub-Raw_Book_epub",
+            ] + orderedEpubInitials + [
                 "TTF_Reader Font",
                 "BGIMG_Blue_Sky",
             ],
@@ -2008,6 +2303,91 @@ private final class AndroidModuleBackupServiceSendableBox: @unchecked Sendable {
     init(_ value: AndroidModuleBackupService) {
         self.value = value
     }
+}
+
+/**
+ Injects one failure at the cache invalidation immediately after EPUB availability publication.
+
+ The exact-overlay flow probes the cache before external-state validation, after validation, and
+ during rollback. Reporting the cache absent, present, then absent makes only the second removal
+ throw, so tests deterministically exercise EPUB rollback after a new pointer is live.
+ */
+private final class AndroidModuleBackupPostEpubFailureFileManager: FileManager, @unchecked Sendable {
+    private let lock = NSLock()
+    private let cachePath: String
+    private var cacheProbeCount = 0
+
+    /**
+     Creates a fault injector scoped to one canonical module cache path.
+
+     - Parameter moduleRootURL: Module root whose second cache invalidation must fail.
+     - Side effects: None; no cache file is created.
+     - Failure modes: None during construction.
+     */
+    init(moduleRootURL: URL) {
+        cachePath = moduleRootURL.standardizedFileURL
+            .appendingPathComponent("mods.d/modules-conf.cache")
+            .path
+        super.init()
+    }
+
+    /** Reports only the second exact cache probe as present. */
+    override func fileExists(atPath path: String) -> Bool {
+        guard URL(fileURLWithPath: path).standardizedFileURL.path == cachePath else {
+            return super.fileExists(atPath: path)
+        }
+        lock.lock()
+        cacheProbeCount += 1
+        let exists = cacheProbeCount == 2
+        lock.unlock()
+        return exists
+    }
+
+    /** Throws for the synthetic cache removal and delegates every real path. */
+    override func removeItem(at URL: URL) throws {
+        guard URL.standardizedFileURL.path == cachePath else {
+            try super.removeItem(at: URL)
+            return
+        }
+        throw AndroidModuleBackupInjectedFailure.postEpubCacheInvalidation
+    }
+}
+
+/** Blocks an Android backup before it can enqueue for the canonical module-store lease. */
+private final class AndroidModuleBackupWaitingGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let waitingSemaphore = DispatchSemaphore(value: 0)
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var didBlock = false
+
+    /** Records coordinator events and blocks the first backup writer at its `.waiting` callback. */
+    func observe(_ event: ModuleStoreMutationEvent) {
+        guard event.kind == .androidModuleBackup, event.stage == .waiting else { return }
+        lock.lock()
+        let shouldBlock = !didBlock
+        if shouldBlock { didBlock = true }
+        lock.unlock()
+        guard shouldBlock else { return }
+        waitingSemaphore.signal()
+        releaseSemaphore.wait()
+    }
+
+    /** Waits until backup preflight is complete but coordinator acquisition has not begun. */
+    func waitUntilBackupPrecedesCoordinatorAcquisition() throws {
+        guard waitingSemaphore.wait(timeout: .now() + 5) == .success else {
+            throw AndroidModuleBackupBarrierError.missingCheckpoint("backup waiting boundary")
+        }
+    }
+
+    /** Allows the backup to enqueue after the interleaved normal EPUB commits. */
+    func releaseBackup() {
+        releaseSemaphore.signal()
+    }
+}
+
+/** Deterministic transaction failure emitted only by the post-EPUB test file manager. */
+private enum AndroidModuleBackupInjectedFailure: Error {
+    case postEpubCacheInvalidation
 }
 
 /**

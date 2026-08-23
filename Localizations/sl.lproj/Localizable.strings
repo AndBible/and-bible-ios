@@ -1527,3 +1527,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvakrat tapnite za izhod iz celozaslonskega načina";
+
+/* Android shared translations */
+"try_again_passphrase" = "Geslo ni bilo pravo, boste znova poskusiii?";
+
+/* Android shared translations */
+"document_not_installed" = "Prosim prenesite '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ ni mogoče najti v dokumentu %2$@.";

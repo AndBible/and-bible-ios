@@ -1668,3 +1668,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "画面をダブルタップして全画面表示を終了";
+
+/* Android shared translations */
+"try_again_passphrase" = "パスフレーズが正しくありませんでした。もう一度試しますか？";
+
+/* Android shared translations */
+"document_not_installed" = "'%@' をダウンロードしてください";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ は文書 %2$@ 内に見つかりませんでした。";

@@ -1249,15 +1249,28 @@ struct BibleWindowPane: View {
       searchIndexService: searchIndexService,
       bookmarkService: bookmarkService,
       labelConfigurationService: WorkspaceLabelConfigurationService(modelContext: modelContext),
-      myDocumentLibraryStore: MyDocumentLibraryStore(modelContext: modelContext),
+      myDocumentLibraryStore: MyDocumentLibraryStore(
+        modelContext: modelContext,
+        moduleStoreRootURL: URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
+      ),
       myDocumentStore: myDocumentStore,
       windowManager: windowManager,
       documentAccessPolicy: documentAccessPolicy,
-      windowDocumentRouter: windowRouter
+      windowDocumentRouter: windowRouter,
+      strictMyDocumentInitialsUnavailable: {
+        [modelContainer = modelContext.container, modulePath = swordManager.modulePath] initials in
+        try BibleReaderInstalledDocumentRegistrySnapshot.capture(
+          modelContainer: modelContainer,
+          modulePath: modulePath
+        ).ownsDocument(named: initials)
+      }
     )
     let textBacking = BibleUIAITextTargetBacking(
       bookmarkService: bookmarkService,
-      myDocumentStore: myDocumentStore
+      myDocumentStore: myDocumentStore,
+      isMyDocumentPageAuthorized: { [weak ctrl] id in
+        ctrl?.isAuthorizedMyDocumentPage(id: id) == true
+      }
     )
     let coordinator = AIReaderRunCoordinator(
       modelContext: modelContext,
@@ -1274,11 +1287,11 @@ struct BibleWindowPane: View {
           aiSettingsStore: aiSettingsStore
         )
       },
-      isInstalledBible: { initials in
-        if let module = swordManager.module(named: initials) {
-          return module.info.category == .bible
-        }
-        return sqliteLibrary.module(named: initials)?.info.category == .bible
+      isReadableBible: { initials in
+        BibleReaderInstalledModuleResolver(
+          swordManager: swordManager,
+          sqliteLibrary: sqliteLibrary
+        ).scripture(named: initials) != nil
       },
       openMyDocument: { [weak ctrl] initials, pageKey in
         _ = ctrl?.loadMyDocumentPage(bookInitials: initials, pageKey: pageKey)
@@ -1452,8 +1465,7 @@ struct BibleWindowPane: View {
       guard bookmarkService.studyPadEntry(id: id) != nil else { return }
       target = .studyPadText(id)
     case .myDocumentPage:
-      guard let myDocumentStore = ctrl.myDocumentStore else { return }
-      guard myDocumentStore.page(pageId: id) != nil else { return }
+      guard ctrl.isAuthorizedMyDocumentPage(id: id) else { return }
       target = .myDocumentPage(id)
     }
 
@@ -1548,7 +1560,9 @@ struct BibleWindowPane: View {
         let name =
           candidateController.flatMap {
             $0.installedModules(for: $0.currentCategory)
-              .first(where: { $0.name == initials })?.description
+              .first(where: {
+                SwordJavaStringIdentity.equals($0.name, initials)
+              })?.description
           } ?? "unknown"
         summary += "- \(initials) (\(name))"
         if let key = BibleWindowPaneMenuSnapshotFactory.referenceName(

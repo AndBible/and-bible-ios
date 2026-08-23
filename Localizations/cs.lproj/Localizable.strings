@@ -1522,3 +1522,12 @@
 
 /* Android shared translations */
 "exit_fullscreen" = "Dvojklik ukončí režim celé obrazovky";
+
+/* Android shared translations */
+"try_again_passphrase" = "Heslo je nefunkční, zkustt znovu?";
+
+/* Android shared translations */
+"document_not_installed" = "Prosím stáhněte '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ se v dokumentu %2$@ nenachází.";

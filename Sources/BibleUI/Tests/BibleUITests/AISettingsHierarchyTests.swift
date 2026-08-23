@@ -112,23 +112,20 @@ final class AISettingsHierarchyTests: XCTestCase {
     }
 
     /**
-     Verifies AI document access mirrors Android's unified installed-book registry.
+     Verifies AI document access preserves the shared admitted-owner order and visibility contract.
 
-     The fixture combines native SWORD and SQLite-backed documents, including duplicate initials
-     and an unsupported map. SWORD registration must win duplicate initials, SQLite documents must
-     remain visible, and categories absent from Android's filter screen must be excluded. The test
-     performs no module discovery or filesystem I/O.
+     - Setup: Supplies already-admitted native, SQLite-like, local EPUB, locked, missing, and
+       unsupported map owner rows in JSword order.
+     - Expected: Every Android-visible metadata row remains in order, including locked/local rows;
+       missing and unsupported categories are omitted.
+     - Failure meaning: The filter UI reintroduces a backend-specific merge that can advertise a
+       suppressed book or omit the global owner selected by reader/agent lookup.
+     - Side effects: None; the fixture contains metadata values only.
      */
-    func testDocumentAccessInventoryMergesAllAndroidVisibleBackends() {
+    func testDocumentAccessInventoryProjectsAllAndroidVisibleOwnersInGlobalOrder() {
         let swordBible = ModuleInfo(
             name: "KJV",
             description: "SWORD King James Version",
-            category: .bible,
-            language: "en"
-        )
-        let sqliteDuplicate = ModuleInfo(
-            name: "KJV",
-            description: "SQLite duplicate",
             category: .bible,
             language: "en"
         )
@@ -144,13 +141,33 @@ final class AISettingsHierarchyTests: XCTestCase {
             category: .map,
             language: "en"
         )
-
-        let merged = AIDocumentAccessInventory.merge(
-            swordModules: [swordBible],
-            sqliteModules: [sqliteDuplicate, sqliteCommentary, unsupportedMap]
+        let epub = ModuleInfo(
+            name: "Epub-Study_epub",
+            description: "Study EPUB",
+            category: .generalBook,
+            language: "en",
+            moduleDriver: "EpubBook"
+        )
+        let lockedDictionary = ModuleInfo(
+            name: "LockedDict",
+            description: "Locked dictionary",
+            category: .dictionary,
+            language: "en",
+            isEncrypted: true
         )
 
-        XCTAssertEqual(merged.map(\.name), ["KJV", "MYCOM"])
-        XCTAssertEqual(merged.first?.description, "SWORD King James Version")
+        let visible = AIDocumentAccessInventory.visibleModules(
+            from: [
+                .installed(info: swordBible, readableSource: nil),
+                .installed(info: sqliteCommentary, readableSource: nil),
+                .local(epub),
+                .installed(info: lockedDictionary, readableSource: nil),
+                .missing,
+                .local(unsupportedMap),
+            ]
+        )
+
+        XCTAssertEqual(visible.map(\.name), ["KJV", "MYCOM", "Epub-Study_epub", "LockedDict"])
+        XCTAssertEqual(visible.first?.description, "SWORD King James Version")
     }
 }

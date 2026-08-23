@@ -93,6 +93,87 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies progress mutations use Android-37 Java identity instead of Foundation normalization.
+
+     - Setup: Activates a readable Bible whose initials contain precomposed `é`, navigates Genesis
+       1, and dispatches memorization plus chapter-progress messages first with the canonically
+       equivalent decomposed spelling and then with a Java-compatible uppercase spelling.
+     - Expected result: The decomposed identity mutates neither store, while the uppercase spelling
+       is accepted by Java `equalsIgnoreCase` and proves the bridge setup is live.
+     - Failure meaning: A stale or colliding Unicode source can write memorization/progress data for
+       the active Bible even though Android treats the two document identities as distinct.
+     - Side effects: Writes one inherited temporary SWORD alias and mutates in-memory settings only
+       for the final valid control messages.
+     - Failure modes: Fixture discovery, versification lookup, and in-memory store setup can throw.
+     */
+    @MainActor
+    func testProgressAndMemorizationRejectJavaDistinctCanonicalEquivalentInitials() throws {
+        let composedInitials = "Caf\u{00E9}"
+        let decomposedInitials = "Cafe\u{0301}"
+        XCTAssertEqual(composedInitials.caseInsensitiveCompare(decomposedInitials), .orderedSame)
+        XCTAssertFalse(
+            SwordJavaStringIdentity.equalsIgnoreCase(composedInitials, decomposedInitials)
+        )
+
+        let bridge = BibleBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: composedInitials,
+            description: "Java identity progress fixture",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.readableModule(named: composedInitials))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        XCTAssertEqual(controller.switchBibleDocument(to: composedInitials), .switched)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        let ordinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1)
+        )
+        let memorizationStore = try XCTUnwrap(controller.memorizationProgressStore)
+        let readingProgressStore = try XCTUnwrap(controller.readingProgressStore)
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: [decomposedInitials, ordinal, ordinal]
+            ),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "recordChapterRead",
+                args: [decomposedInitials, ordinal, 1, "AUTO_SCROLL"]
+            ),
+            .handled
+        )
+        XCTAssertTrue(memorizationStore.snapshot().targetRows.isEmpty)
+        XCTAssertTrue(readingProgressStore.snapshot().history.isEmpty)
+
+        let javaCompatibleCaseVariant = composedInitials.uppercased()
+        XCTAssertTrue(
+            SwordJavaStringIdentity.equalsIgnoreCase(composedInitials, javaCompatibleCaseVariant)
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: [javaCompatibleCaseVariant, ordinal, ordinal]
+            ),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "recordChapterRead",
+                args: [javaCompatibleCaseVariant, ordinal, 1, "AUTO_SCROLL"]
+            ),
+            .handled
+        )
+        XCTAssertFalse(memorizationStore.snapshot().targetRows.isEmpty)
+        XCTAssertEqual(readingProgressStore.snapshot().history.count, 1)
+    }
+
+    /**
      Verifies memorization deltas convert from KJVA back into a divergent active module.
 
      The fixture reuses deterministic KJV bytes under a Vulgate canon descriptor, selects Vulgate
