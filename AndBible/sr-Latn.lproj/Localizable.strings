@@ -1548,3 +1548,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Lozinka nije urodila plodom, pokušajte ponovo?";
+
+/* Android shared translations */
+"document_not_installed" = "Molim preuzmite '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ nije pronađen u dokumentu %2$@.";

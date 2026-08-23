@@ -7890,13 +7890,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private func strongsDocumentBuilder() -> BibleReaderStrongsDocumentBuilder {
         BibleReaderStrongsDocumentBuilder(
             installedDictionarySources: { [weak self] in
-                self?.installedDictionarySources() ?? []
+                self?.installedDictionaryKeySources() ?? []
+            },
+            installedBookMetadata: { [weak self] in
+                self?.installedModuleResolver().registeredBookMetadata() ?? []
+            },
+            installedDictionarySourceNamed: { [weak self] name in
+                self?.installedModuleResolver().module(named: name)?.explicitDictionaryKeySource
             },
             selectedPreferenceValues: { [weak self] key in
                 self?.settingsStore?.getStringSet(key) ?? []
-            },
-            localizedString: { key, defaultValue in
-                Bundle.main.localizedString(forKey: key, value: defaultValue, table: nil)
             }
         )
     }
@@ -7979,7 +7982,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         ).buildDocumentJSON(refs: refs)
     }
 
-    /** Captures Android's exact global installed-book registry for one reader operation. */
+    /**
+     Captures Android's global installed-book registry for one reader operation.
+
+     - Returns: A resolver that replays native/custom-driver admission, exact identity maps, locked
+       ownership, and JSword TreeSet ordering over the current runtime snapshot.
+     - Side effects: Enumerates current SWORD metadata and unshadowed SQLite registrations; it does
+       not open content or mutate the registry.
+     - Failure modes: A missing manager produces a SQLite-only resolver. Locked native books retain
+       ownership metadata but expose no readable handle, so callers fail closed on content access.
+     */
     private func installedModuleResolver() -> BibleReaderInstalledModuleResolver {
         BibleReaderInstalledModuleResolver(
             swordManager: swordManager,
@@ -7992,11 +8004,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         installedModuleResolver().scripture(named: activeModuleName)
     }
 
-    /** Returns Android's globally registered dictionary/glossary inventory in backend order. */
+    /**
+     Returns Android's selected-word dictionary inventory in installed-book TreeSet order.
+
+     - Returns: Readable plain-dictionary candidates before Strong/morphology and preference
+       filtering by `BibleReaderWordLookupDocumentBuilder`.
+     - Side effects: Captures one fresh global resolver snapshot and projects its immutable
+       category/abbreviation/initials/name order.
+     - Failure modes: Locked, shadowed, wrong-category, and unreadable registrations are omitted.
+     */
     private func installedDictionarySources() -> [BibleReaderInstalledDictionarySource] {
-        installedModuleResolver()
-            .modules(categories: [.dictionary, .glossary])
-            .compactMap(\.dictionary)
+        installedModuleResolver().wordLookupDictionarySources()
+    }
+
+    /**
+     Captures every readable installed book capable of Android's exact dictionary-key API.
+
+     - Returns: Native books and faithful SQLite dictionary backends in JSword TreeSet order for
+       automatic Strong's/morphology feature filtering.
+     - Side effects: Captures one fresh combined native/custom registry snapshot, including custom
+       admission replay and locked ownership metadata; no content entry is read.
+     - Failure modes: Locked, unreadable, shadowed, and non-key-capable registrations are omitted
+       without substituting a colliding backend.
+     */
+    private func installedDictionaryKeySources() -> [BibleReaderInstalledDictionarySource] {
+        installedModuleResolver().dictionaryKeySources()
     }
 
     /**
@@ -9086,7 +9118,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     applyNightModeBackground()
     }
 
-  /** Maps bookmark-owning SWORD categories onto reader document categories. */
+  /**
+   Maps bookmark-owning JSword categories onto reader document categories.
+
+   - Parameter moduleCategory: Actual installed-book category attached to a generic bookmark.
+   - Returns: Reader persistence category, or nil for Bible/add-on/unknown sources handled by other
+     bookmark paths.
+   - Side effects: None.
+   - Failure modes: None; every pinned JSword category has an explicit disposition.
+   */
   private static func bookmarkDocumentCategory(
     for moduleCategory: ModuleCategory
   ) -> DocumentCategory? {
@@ -9095,7 +9135,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
       return .commentary
     case .dictionary, .glossary:
       return .dictionary
-    case .generalBook, .dailyDevotion:
+    case .generalBook, .dailyDevotion, .questionable, .essays, .images:
       return .generalBook
     case .map:
       return .map

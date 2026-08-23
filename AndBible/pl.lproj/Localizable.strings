@@ -1544,3 +1544,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Błędne hasło, czy spróbować ponownie?";
+
+/* Android shared translations */
+"document_not_installed" = "Proszę pobrać „%@”";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "Nie znaleziono „%1$@” w dokumencie: %2$@.";

@@ -1686,3 +1686,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Adgangskoden virkede ikke, prøv igen?";
+
+/* Android shared translations */
+"document_not_installed" = "Hent venligst '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ blev ikke fundet i dokumentet %2$@.";

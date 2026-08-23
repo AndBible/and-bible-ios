@@ -710,3 +710,6 @@
 
 /* Android shared translations */
 "delete_module_index_title" = "Qidiruv indeksini o'chir";
+
+/* Android shared translations */
+"document_not_installed" = "Iltimos, '%@' yuklab oling";

@@ -52,14 +52,50 @@ public enum SwordOSISFragmentProcessor {
         category: ModuleCategory,
         moduleInitials: String? = nil
     ) throws -> SwordProcessedOSISFragment {
+        try process(
+            sourceXML: sourceXML,
+            category: category,
+            moduleInitials: moduleInitials,
+            addsAnchors: true,
+            requiresDirectCommentaryVerse: false
+        )
+    }
+
+    /**
+     Processes one source fragment with explicit Android category-branch behavior.
+
+     - Parameters:
+       - sourceXML: Canonical source nodes before the outer `BookData` div.
+       - category: Actual selected-book category controlling commentary unwrapping.
+       - moduleInitials: Exact initials used by source-specific structural repair.
+       - addsAnchors: Whether Android's category branch invokes `addAnchors`.
+       - requiresDirectCommentaryVerse: Whether a commentary category without a direct `verse`
+         must fail instead of preserving unrelated source nodes.
+     - Returns: Immutable original and payload-ready XML plus derived bookmark metadata.
+     - Side effects: None outside temporary in-memory XML nodes.
+     - Failure modes: Throws for malformed XML or a required missing commentary verse.
+     */
+    private static func process(
+        sourceXML: String,
+        category: ModuleCategory,
+        moduleInitials: String?,
+        addsAnchors: Bool,
+        requiresDirectCommentaryVerse: Bool
+    ) throws -> SwordProcessedOSISFragment {
         let repairedSource = androidSourceRepair(sourceXML, moduleInitials: moduleInitials)
-        let fragmentRoot = try androidFragmentRoot(sourceXML: repairedSource, category: category)
+        let fragmentRoot = try androidFragmentRoot(
+            sourceXML: repairedSource,
+            category: category,
+            requiresDirectCommentaryVerse: requiresDirectCommentaryVerse
+        )
         let originalXML = fragmentRoot.serializedXML()
         let annotateRef = directAnnotateRef(in: fragmentRoot)
         let hasRenderableContent = containsRenderableSourceContent(fragmentRoot)
 
         var anchorTexts: [Int: String] = [:]
-        addAnchors(to: fragmentRoot, anchorTexts: &anchorTexts)
+        if addsAnchors {
+            addAnchors(to: fragmentRoot, anchorTexts: &anchorTexts)
+        }
         let contentRange: ClosedRange<Int>
         if let minimum = anchorTexts.keys.min(), let maximum = anchorTexts.keys.max() {
             contentRange = minimum...maximum
@@ -79,6 +115,83 @@ public enum SwordOSISFragmentProcessor {
             anchorTexts: anchorTexts,
             comparablePlainText: plainText.isEmpty ? nil : plainText,
             hasRenderableContent: hasRenderableContent
+        )
+    }
+
+    /**
+     Processes one backend-owned `SwordDictionary` entry with JSword's generated key title.
+
+     `SwordDictionary.getOsisIterator` inserts a hidden `title[type=x-gen]` before every definition,
+     including an exact empty body. Android then applies one `addAnchors` pass to that combined OSIS
+     tree, so the generated title owns the first BVA ordinal and body ordinals continue after it.
+     Keeping this boundary backend-neutral lets native RawLD and Android-compatible SQLite drivers
+     share the same payload contract without routing structured source through rendered HTML.
+
+     - Parameters:
+       - sourceXML: Canonical source-filtered dictionary body, which may be empty.
+       - keyName: Exact resolved `Key.name` inserted into JSword's generated title.
+       - moduleInitials: Exact installed initials used by source-specific compatibility repair.
+       - category: Actual selected-book category controlling Android's Bible/commentary branches.
+     - Returns: Preserved title/body XML plus one Android-compatible anchored projection.
+     - Side effects: None outside temporary in-memory XML nodes.
+     - Failure modes: Throws when the source body is malformed XML; arbitrary key text is escaped by
+       the XML tree serializer and cannot change the generated title structure.
+     */
+    public static func processDictionarySource(
+        sourceXML: String,
+        keyName: String,
+        moduleInitials: String? = nil,
+        category: ModuleCategory = .dictionary
+    ) throws -> SwordProcessedOSISFragment {
+        let repairedBody = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+            sourceXML,
+            moduleInitials: moduleInitials
+        )
+        let title = SwordXMLNode.element(
+            name: "title",
+            attributes: ["type": "x-gen"]
+        )
+        title.children = [.text(keyName)]
+        return try process(
+            sourceXML: title.serializedXML() + repairedBody,
+            category: category,
+            moduleInitials: moduleInitials,
+            addsAnchors: category != .bible,
+            requiresDirectCommentaryVerse: category == .commentary
+        )
+    }
+
+    /**
+     Processes one backend-owned `SwordGenBook` TreeKey through its actual configured category.
+
+     JSword chooses `SwordGenBook` from the driver, independently from an explicit category. Key
+     resolution therefore remains TreeKey-based even when metadata says Bible or Commentary;
+     category affects only post-BookData projection. Bible skips anchors. Commentary requires and
+     unwraps one direct verse only for a leaf TreeKey; parent TreeKeys retain their complete body.
+     Every remaining non-Bible result receives the usual one BVA pass.
+
+     - Parameters:
+       - sourceXML: Canonical source-filtered TreeKey body, possibly containing multiple roots.
+       - moduleInitials: Exact installed initials used by source-specific compatibility repair.
+       - category: Actual selected-book category controlling Android's post-read branch.
+       - treeKeyCardinality: Selected TreeKey plus descendants; Android's direct-verse rule applies
+         only when this value is exactly one.
+     - Returns: Canonical original and payload-ready XML under the actual category contract.
+     - Side effects: None outside temporary in-memory XML nodes.
+     - Failure modes: Throws for malformed XML or a Commentary leaf entry without a direct verse.
+     */
+    public static func processGenBookSource(
+        sourceXML: String,
+        moduleInitials: String? = nil,
+        category: ModuleCategory,
+        treeKeyCardinality: Int = 1
+    ) throws -> SwordProcessedOSISFragment {
+        try process(
+            sourceXML: sourceXML,
+            category: category,
+            moduleInitials: moduleInitials,
+            addsAnchors: category != .bible,
+            requiresDirectCommentaryVerse: category == .commentary && treeKeyCardinality == 1
         )
     }
 
@@ -150,21 +263,28 @@ public enum SwordOSISFragmentProcessor {
      - Parameters:
        - sourceXML: Canonical source nodes, possibly empty or multi-root.
        - category: Module category.
-     - Returns: Mutable `<div>` containing source nodes.
+       - requiresDirectCommentaryVerse: Whether a missing direct commentary `verse` must throw.
+     - Returns: Mutable `<div>` containing source nodes, or the direct commentary verse children.
      - Side effects: None.
      - Failure modes: Throws when source XML cannot be parsed safely.
      */
     private static func androidFragmentRoot(
         sourceXML: String,
-        category: ModuleCategory
+        category: ModuleCategory,
+        requiresDirectCommentaryVerse: Bool
     ) throws -> SwordXMLNode {
         let wrapped = "<\(parserRootName)>\(withoutXMLDeclaration(sourceXML))</\(parserRootName)>"
         let parserRoot = try SwordXMLTreeParser.parse(xml: wrapped)
         let fragment = SwordXMLNode.element(name: "div", attributes: [:])
         fragment.children = parserRoot.children
 
-        if category == .commentary,
-           let verse = directChildElements(named: "verse", in: fragment).first {
+        if category == .commentary {
+            guard let verse = directChildElements(named: "verse", in: fragment).first else {
+                if requiresDirectCommentaryVerse {
+                    throw SwordOSISProcessorError.missingCommentaryVerse
+                }
+                return fragment
+            }
             fragment.children = verse.children
         }
         return fragment

@@ -52,12 +52,138 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         XCTAssertTrue(fragment.xml.contains("<BVA"))
         XCTAssertTrue(fragment.xml.contains("id=\"definition\""))
 
+        let dictionaryFragment = try module.rawDictionaryOSISFragment(forKey: "G0001")
+        XCTAssertTrue(
+            dictionaryFragment.originalXML.hasPrefix(
+                #"<div><title type="x-gen">G0001</title><entryFree"#
+            )
+        )
+        XCTAssertTrue(
+            dictionaryFragment.xml.contains(
+                #"<title type="x-gen"><BVA ordinal="0" xmlns="http://www.w3.org/1999/xhtml">G0001</BVA></title>"#
+            )
+        )
+        XCTAssertEqual(dictionaryFragment.anchorTexts[0], "G0001")
+        XCTAssertTrue(dictionaryFragment.anchorTexts.values.contains("First "))
+
         XCTAssertThrowsError(try module.rawOSISFragment(forKey: "G0001X")) { error in
             guard case SwordRawOSISFragmentError.keyNotFound(let requested, _) = error else {
                 return XCTFail("Expected exact-key rejection, received \(error)")
             }
             XCTAssertEqual(requested, "G0001X")
         }
+    }
+
+    /**
+     Protects the backend-neutral SwordDictionary title/anchor boundary for empty and nonempty rows.
+
+     - Setup: Processes structured OSIS with an escaped key name, then an exact empty body.
+     - Expected result: The hidden x-gen title is first in original XML, owns BVA ordinal zero, and
+       body text continues at the next ordinal; empty definitions remain valid title-only fragments.
+     - Failure meaning: A reader wrapper double-processes the body, loses structured links, exposes a
+       visible title, or treats an exact empty dictionary row as missing.
+     - Side effects: None.
+     */
+    func testDictionarySourceProcessorPrependsHiddenTitleBeforeOneAnchorPass() throws {
+        let processed = try SwordOSISFragmentProcessor.processDictionarySource(
+            sourceXML: #"<entryFree><reference osisRef="John.1.1">Definition.</reference></entryFree>"#,
+            keyName: "G&243",
+            moduleInitials: "Fixture"
+        )
+
+        XCTAssertTrue(
+            processed.originalXML.hasPrefix(
+                #"<div><title type="x-gen">G&amp;243</title><entryFree>"#
+            )
+        )
+        XCTAssertEqual(processed.anchorTexts[0], "G&243")
+        XCTAssertEqual(processed.anchorTexts[1], "Definition.")
+        XCTAssertTrue(processed.xml.contains(#"osisRef="John.1.1""#))
+
+        let empty = try SwordOSISFragmentProcessor.processDictionarySource(
+            sourceXML: "",
+            keyName: "G243"
+        )
+        XCTAssertEqual(
+            empty.originalXML,
+            #"<div><title type="x-gen">G243</title></div>"#
+        )
+        XCTAssertEqual(empty.anchorTexts, [0: "G243"])
+        XCTAssertEqual(
+            empty.xml,
+            #"<div><title type="x-gen"><BVA ordinal="0" xmlns="http://www.w3.org/1999/xhtml">G243</BVA></title></div>"#
+        )
+    }
+
+    /**
+     Protects Android's commentary branch for a dictionary driver with contradictory category.
+
+     - Setup: Processes a generated dictionary title, ordinary siblings, and one direct verse under
+       an actual commentary category, then separately processes an entry with no direct verse.
+     - Expected result: The direct verse alone is unwrapped and anchored; the generated title and
+       siblings are dropped, while the missing-verse entry throws a typed semantic error.
+     - Failure meaning: iOS treats configured category as decoration, renders dictionary siblings
+       as commentary, or loses the error distinction BibleUI needs for Android's `OsisError`.
+     - Side effects: None; both XML trees exist only in memory.
+     */
+    func testDictionarySourceProcessorAppliesCommentaryDirectVerseContract() throws {
+        let processed = try SwordOSISFragmentProcessor.processDictionarySource(
+            sourceXML: "<p>Drop before.</p><verse><p>Keep verse.</p></verse><p>Drop after.</p>",
+            keyName: "G243",
+            moduleInitials: "FixtureCommentary",
+            category: .commentary
+        )
+
+        XCTAssertFalse(processed.originalXML.contains("title"))
+        XCTAssertFalse(processed.originalXML.contains("<verse"))
+        XCTAssertFalse(processed.originalXML.contains("Drop"))
+        XCTAssertTrue(processed.originalXML.contains("<p>Keep verse.</p>"))
+        XCTAssertEqual(processed.anchorTexts, [0: "Keep verse."])
+        XCTAssertTrue(processed.xml.contains("<BVA"))
+
+        XCTAssertThrowsError(try SwordOSISFragmentProcessor.processDictionarySource(
+            sourceXML: "<entryFree>Not a direct verse.</entryFree>",
+            keyName: "G243",
+            category: .commentary
+        )) { error in
+            guard case SwordOSISProcessorError.missingCommentaryVerse = error else {
+                return XCTFail("Expected typed missing-commentary-verse error, received \(error)")
+            }
+        }
+    }
+
+    /**
+     Protects Android's TreeKey-cardinality exception for Commentary-configured RawGenBooks.
+
+     - Setup: Processes one Commentary TreeKey body twice: once as a leaf and once as a parent with
+       a descendant, using source-derived cardinalities one and two.
+     - Expected result: The leaf requires a direct verse and throws when it has none; the parent
+       preserves its complete body and receives Android's ordinary non-Bible BVA processing.
+     - Failure meaning: iOS applies the leaf-only commentary verse rule to parent TreeKeys or skips
+       the standard anchor pass Android uses for a multi-node TreeKey.
+     - Side effects: None; both source trees exist only in memory.
+     */
+    func testGenBookCommentaryProcessingUsesSelectedTreeKeyCardinality() throws {
+        XCTAssertThrowsError(try SwordOSISFragmentProcessor.processGenBookSource(
+            sourceXML: "<p>Leaf without verse.</p>",
+            category: .commentary,
+            treeKeyCardinality: 1
+        )) { error in
+            guard case SwordOSISProcessorError.missingCommentaryVerse = error else {
+                return XCTFail("Expected typed missing-commentary-verse error, received \(error)")
+            }
+        }
+
+        let parent = try SwordOSISFragmentProcessor.processGenBookSource(
+            sourceXML: "<p>Parent content.</p>",
+            category: .commentary,
+            treeKeyCardinality: 2
+        )
+
+        XCTAssertEqual(parent.originalXML, "<div><p>Parent content.</p></div>")
+        XCTAssertEqual(parent.anchorTexts, [0: "Parent content."])
+        XCTAssertTrue(parent.xml.contains("<BVA"))
+        XCTAssertTrue(parent.xml.contains("Parent content."))
     }
 
     /**
@@ -88,6 +214,97 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         XCTAssertFalse(try module.containsExactKey("É"))
         XCTAssertFalse(try module.containsExactKey("G0001X"))
         XCTAssertFalse(try module.containsExactKey(""))
+    }
+
+    /**
+     Protects the physical dictionary-index boundary shared by RawLD, RawLD4, and zLD.
+
+     - Setup: Writes RawLD and zLD indices containing a logical CR key, a zero-size placeholder,
+       another valid key, and trailing bytes shorter than one complete driver-specific index record;
+       a third fixture contains only an incomplete suffix.
+     - Expected result: Both drivers retain exact DataEntry keys and zero slots in physical order,
+       use their two-/four-byte size fields, and ignore only the incomplete trailing index suffix;
+       a file with no complete slot fails closed.
+     - Failure meaning: iOS strips a logical CR, collapses a zero slot, requires a byte-perfect file
+       multiple unlike JSword cardinality, or routes zLD through libsword-normalized key enumeration.
+     - Side effects: Creates and removes two isolated SWORD module roots.
+     */
+    func testRawDictionaryIndexSlotsPreserveDataEntryKeysZeroSlotsAndTrailingPartialBytes() throws {
+        for driver in ["RawLD", "zLD"] {
+            let fixture = try makeRawLDFixture(
+                entries: [
+                    ("A\r", "First body."),
+                    ("placeholder", "unused"),
+                    ("B", "Second body."),
+                ],
+                driver: driver,
+                zeroSizeSlotIndices: [1],
+                trailingIndexBytes: Data([0xDE, 0xAD, 0xBE])
+            )
+            defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+            let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+            let module = try XCTUnwrap(manager.module(named: "RAWDICT"))
+            let slots = try XCTUnwrap(module.loadRawDictionaryIndexSlots())
+
+            XCTAssertEqual(slots.map(\.index), [0, 1, 2], driver)
+            XCTAssertEqual(slots.map(\.key), ["A\r", nil, "B"], driver)
+            XCTAssertEqual(slots.map { $0.size == 0 }, [false, true, false], driver)
+        }
+
+        let incompleteFixture = try makeRawLDFixture(
+            entries: [],
+            trailingIndexBytes: Data([0x01, 0x02, 0x03])
+        )
+        defer { try? FileManager.default.removeItem(at: incompleteFixture.root) }
+        let incompleteManager = try XCTUnwrap(SwordManager(modulePath: incompleteFixture.root.path))
+        let incompleteModule = try XCTUnwrap(incompleteManager.module(named: "RAWDICT"))
+        XCTAssertThrowsError(try incompleteModule.loadRawDictionaryIndexSlots()) { error in
+            guard case SwordModuleKeyAccessError.rawDictionaryIndexReadFailed = error else {
+                return XCTFail("Expected typed incomplete-index failure, received \(error)")
+            }
+        }
+    }
+
+    /**
+     Protects RawLD key decoding through JSword's byte cleanup and replacement-decoder contract.
+
+     - Setup: Writes one module with omitted Encoding and Windows-1252/control bytes, plus one
+       UTF-8 module whose stored key contains standalone malformed `0x81` and valid C0 `0x01`.
+     - Expected result: Missing Encoding defaults to Windows-1252, undefined/control bytes become
+       spaces only on that path; malformed UTF-8 becomes U+FFFD while its valid control is retained.
+     - Failure meaning: iOS uses strict Foundation decoding, cleans UTF-8 as Windows-1252, preserves
+       bytes JSword sanitizes on the Latin-1 path, or maps Latin-1 to ISO-8859-1.
+     - Side effects: Creates and removes two isolated SWORD module roots.
+     */
+    func testRawDictionaryIndexKeysUseJSwordClean1252AndReplacementDecoding() throws {
+        let latinFixture = try makeRawLDFixture(
+            entries: [("unused", "Latin body")],
+            encodingLine: nil,
+            rawKeyBytes: [0: Data([0x41, 0x80, 0x81, 0x42, 0x01, 0x43])]
+        )
+        defer { try? FileManager.default.removeItem(at: latinFixture.root) }
+        let latinManager = try XCTUnwrap(SwordManager(modulePath: latinFixture.root.path))
+        let latinModule = try XCTUnwrap(latinManager.module(named: "RAWDICT"))
+
+        XCTAssertEqual(
+            try latinModule.loadRawDictionaryIndexSlots()?.map(\.key),
+            ["A€ B C"]
+        )
+
+        let utf8Fixture = try makeRawLDFixture(
+            entries: [("unused", "UTF-8 body")],
+            encodingLine: "Encoding=UTF-8",
+            rawKeyBytes: [0: Data([0x55, 0x81, 0x01, 0x56])]
+        )
+        defer { try? FileManager.default.removeItem(at: utf8Fixture.root) }
+        let utf8Manager = try XCTUnwrap(SwordManager(modulePath: utf8Fixture.root.path))
+        let utf8Module = try XCTUnwrap(utf8Manager.module(named: "RAWDICT"))
+
+        XCTAssertEqual(
+            try utf8Module.loadRawDictionaryIndexSlots()?.map(\.key),
+            ["U�\u{1}V"]
+        )
     }
 
     /**
@@ -459,15 +676,31 @@ final class GenericSwordDocumentParityTests: XCTestCase {
     /**
      Writes one real RawLD dictionary fixture using SWORD's six-byte little-endian index entries.
 
-     - Parameter entries: Exact key and raw OSIS pairs, already in lexical key order.
+     - Parameters:
+       - entries: Exact key and raw OSIS pairs, already in lexical key order.
+       - sourceTypeLine: Optional source-type config line; `nil` exercises JSword plaintext.
+       - driver: Raw dictionary driver; this fixture supports `RawLD` and metadata-only `zLD`.
+       - zeroSizeSlotIndices: Physical placeholder slots written with size zero and no record bytes.
+       - trailingIndexBytes: Incomplete index suffix ignored by JSword's floor cardinality.
+       - encodingLine: Optional exact descriptor line; `nil` exercises JSword's `Latin-1` default.
+       - rawKeyBytes: Optional physical key-byte overrides keyed by entry index.
      - Returns: Temporary SWORD root and module data prefix.
      - Side effects: Creates config, data, and index files in a unique temporary directory.
-     - Failure modes: Propagates filesystem errors and rejects oversized test records.
+     - Failure modes: Propagates filesystem errors, rejects unsupported drivers, and rejects
+       oversized test records.
      */
     private func makeRawLDFixture(
         entries: [(String, String)],
-        sourceTypeLine: String? = "SourceType=OSIS"
+        sourceTypeLine: String? = "SourceType=OSIS",
+        driver: String = "RawLD",
+        zeroSizeSlotIndices: Set<Int> = [],
+        trailingIndexBytes: Data = Data(),
+        encodingLine: String? = "Encoding=UTF-8",
+        rawKeyBytes: [Int: Data] = [:]
     ) throws -> RawLDFixture {
+        guard driver == "RawLD" || driver == "zLD" else {
+            throw RawLDFixtureError.unsupportedDriver
+        }
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let modsDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
@@ -480,30 +713,55 @@ final class GenericSwordDocumentParityTests: XCTestCase {
 
         var data = Data()
         var index = Data()
-        for (key, xml) in entries {
-            let record = Data("\(key)\r\n\(xml)".utf8)
-            guard record.count <= Int(UInt16.max), data.count <= Int(UInt32.max) else {
+        for (indexPosition, entry) in entries.enumerated() {
+            if zeroSizeSlotIndices.contains(indexPosition) {
+                index.appendLittleEndian(UInt32(data.count))
+                if driver == "zLD" {
+                    index.appendLittleEndian(UInt32(0))
+                } else {
+                    index.appendLittleEndian(UInt16(0))
+                }
+                continue
+            }
+            let keyBytes = rawKeyBytes[indexPosition] ?? Data(entry.0.utf8)
+            let record = driver == "zLD"
+                ? keyBytes + Data("\r\n".utf8) + Data(repeating: 0, count: 8)
+                : keyBytes + Data("\r\n\(entry.1)".utf8)
+            guard data.count <= Int(UInt32.max),
+                  driver == "zLD" || record.count <= Int(UInt16.max) else {
                 throw RawLDFixtureError.recordTooLarge
             }
             index.appendLittleEndian(UInt32(data.count))
-            index.appendLittleEndian(UInt16(record.count))
+            if driver == "zLD" {
+                index.appendLittleEndian(UInt32(record.count))
+            } else {
+                index.appendLittleEndian(UInt16(record.count))
+            }
             data.append(record)
             data.append(0x0A)
         }
+        index.append(trailingIndexBytes)
 
         let prefix = dataDirectory.appendingPathComponent("rawdict", isDirectory: false)
         try data.write(to: prefix.appendingPathExtension("dat"))
         try index.write(to: prefix.appendingPathExtension("idx"))
+        if driver == "zLD" {
+            try Data().write(to: prefix.appendingPathExtension("zdx"))
+            try Data().write(to: prefix.appendingPathExtension("zdt"))
+        }
         let sourceTypeConfiguration = sourceTypeLine.map { "\($0)\n" } ?? ""
+        let encodingConfiguration = encodingLine.map { "\($0)\n" } ?? ""
+        let compressionConfiguration = driver == "zLD"
+            ? "CompressType=ZIP\nBlockType=BOOK\n"
+            : ""
         try """
         [RAWDICT]
         Description=Raw Dictionary Fixture
         Abbreviation=RDF
         Category=Lexicons / Dictionaries
         DataPath=./modules/lexdict/rawld/rawdict/rawdict
-        ModDrv=RawLD
-        \(sourceTypeConfiguration)Encoding=UTF-8
-        Lang=grc
+        ModDrv=\(driver)
+        \(compressionConfiguration)\(sourceTypeConfiguration)\(encodingConfiguration)Lang=grc
         Feature=GreekDef
         """.write(
             to: modsDirectory.appendingPathComponent("rawdict.conf", isDirectory: false),
@@ -523,6 +781,7 @@ private struct RawLDFixture {
 /** Deterministic fixture-construction failures. */
 private enum RawLDFixtureError: Error {
     case recordTooLarge
+    case unsupportedDriver
 }
 
 private extension Data {

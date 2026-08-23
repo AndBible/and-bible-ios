@@ -926,3 +926,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "သော့ဖွင့်ခြင်း မအောင်မြင်ပါ၊ ထပ်လုပ်မှာလား။";
+
+/* Android shared translations */
+"document_not_installed" = "ကျေးဇူးပြုပြီး ဒေါင်းလုပ်ဆွဲပါ '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ မှတ်တမ်းတွင် ရှာမတွေ့ပါ %2$@.";

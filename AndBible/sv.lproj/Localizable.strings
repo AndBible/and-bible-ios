@@ -1538,3 +1538,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Lösenordsfras fungerade inte, försök igen?";
+
+/* Android shared translations */
+"document_not_installed" = "Vänligen ladda ner '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ hittades inte i dokument %2$@.";

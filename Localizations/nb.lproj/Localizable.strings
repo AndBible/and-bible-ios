@@ -1529,3 +1529,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Passord fungerte ikke, prøve igjen?";
+
+/* Android shared translations */
+"document_not_installed" = "Vennligst last ned '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ ble ikke funnet i dokumentet %2$@.";

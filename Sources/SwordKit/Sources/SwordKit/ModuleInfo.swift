@@ -2,7 +2,17 @@
 
 import Foundation
 
-/// Category of a SWORD module.
+/**
+ Category of a SWORD/JSword installed book.
+
+ Raw values are the config strings parsed by `SwordBookMetaData`; cases include every pinned
+ `BookCategory` that can own a feature-bearing dictionary/general-book backend. Consumers must use
+ the actual explicit category for payload metadata and installed-book ordering rather than infer a
+ category from `ModDrv` when a recognized `Category=` value exists.
+
+ - Side effects: Category parsing loads the pinned Android Java case-fold table.
+ - Failure modes: Unrecognized category/driver combinations resolve to `.unknown`.
+ */
 public enum ModuleCategory: String, Sendable, Codable {
     case bible = "Biblical Texts"
     case commentary = "Commentaries"
@@ -11,6 +21,9 @@ public enum ModuleCategory: String, Sendable, Codable {
     case map = "Maps"
     case dailyDevotion = "Daily Devotional"
     case glossary = "Glossaries"
+    case questionable = "Questionable"
+    case essays = "Essays"
+    case images = "Images"
     /// Android/JSword add-on modules that provide fonts, features, styles, prompts, or similar app data.
     case addon = "And Bible"
     case unknown = "Unknown"
@@ -27,7 +40,7 @@ public enum ModuleCategory: String, Sendable, Codable {
        - typeString: Raw SWORD/JSword category string, for example `Lexicons / Dictionaries`.
        - modDrv: Raw `ModDrv` value from the module config when available.
      - Returns: Android/JSword-compatible module category.
-     - Side effects: none.
+     - Side effects: Loads the pinned Android Java case-fold table for explicit category matching.
      - Failure modes: Unknown category and driver combinations return `.unknown`.
      */
     public init(typeString: String, modDrv: String = "") {
@@ -41,7 +54,7 @@ public enum ModuleCategory: String, Sendable, Codable {
        - typeString: Raw `Category`/type value.
        - modDrv: Raw module driver.
      - Returns: The category Android would expose for the same installed book metadata.
-     - Side effects: none.
+     - Side effects: Loads the pinned Android Java case-fold table for explicit category matching.
      - Failure modes: Unsupported drivers with missing category metadata resolve to `.unknown`.
      */
     public static func resolved(typeString: String, modDrv: String = "") -> ModuleCategory {
@@ -49,8 +62,22 @@ public enum ModuleCategory: String, Sendable, Codable {
             return driverCategory
         }
 
-        if let explicitCategory = ModuleCategory(rawValue: typeString),
-           explicitCategory != .unknown {
+        let explicitCategories: [ModuleCategory] = [
+            .bible,
+            .commentary,
+            .dictionary,
+            .generalBook,
+            .map,
+            .dailyDevotion,
+            .glossary,
+            .questionable,
+            .essays,
+            .images,
+            .addon,
+        ]
+        if let explicitCategory = explicitCategories.first(where: {
+            SwordJavaStringIdentity.equalsIgnoreCase($0.rawValue, typeString)
+        }) {
             return explicitCategory
         }
 
@@ -377,6 +404,12 @@ public struct ModuleInfo: Sendable, Identifiable {
         "epubbook", "eswordbible",
     ]
 
+    /// Drivers whose pinned JSword `BookType` constructs a concrete `SwordBook`.
+    private static let jswordSwordBookDrivers: Set<String> = [
+        "rawtext", "ztext", "ztext4",
+        "rawcom", "rawcom4", "zcom", "zcom4", "hrefcom", "rawfiles",
+    ]
+
     /// Module abbreviation (e.g., "KJV", "ESV").
     public let name: String
 
@@ -412,6 +445,23 @@ public struct ModuleInfo: Sendable, Identifiable {
 
     /// Unique identifier (uses module name).
     public var id: String { name }
+
+    /**
+     Reports whether pinned JSword represents this driver as `SwordBook` rather than dictionary or
+     generic-book subclasses.
+
+     Android `OsisFragment` emits versification only when `book is SwordBook`, so reader payloads
+     must use the concrete `BookType` driver map rather than infer from configured category.
+
+     - Returns: `true` for the exact case-insensitive pinned SwordBook driver set.
+     - Side effects: None.
+     - Failure modes: Missing, custom, dictionary, and generic-book drivers return `false`.
+     */
+    public var isJSwordSwordBook: Bool {
+        Self.jswordSwordBookDrivers.contains(
+            moduleDriver.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        )
+    }
 
     /**
      Whether the reader can use this module, mirroring JSword `SwordBookMetaData.isSupported()`.

@@ -51,8 +51,11 @@ public final class SQLiteDocumentModule {
        - reader: Open read-only format reader.
        - origin: Discovery source used by export and diagnostics.
        - identity: Optional package metadata that owns repository initials and provenance only.
-     - Side effects: None; built-in readers validate the file without retaining a shared handle.
-     - Failure modes: None; database readers own Android's generated metadata projection.
+     - Side effects: Reads immutable reader metadata; built-in readers validate the file without
+       retaining a shared handle.
+     - Failure modes: None during construction. Android's generated config projection Java-trims
+       only `Description`, `Lang`, and `Abbreviation`: empty description remains empty, empty language
+       becomes `und`, and empty abbreviation later falls back to initials; U+00A0 is not trimmed.
      */
     fileprivate init(
         reader: any SQLiteDocumentReading,
@@ -62,6 +65,9 @@ public final class SQLiteDocumentModule {
         self.reader = reader
         self.origin = origin
         let metadata = reader.metadata
+        let initials = identity?.initials ?? metadata.initials
+        let trimmedDescription = SwordJavaStringIdentity.trim(metadata.description)
+        let trimmedLanguage = SwordJavaStringIdentity.trim(metadata.language)
         var features: ModuleFeatures = []
         if metadata.hasStrongs {
             features.insert(.strongsNumbers)
@@ -73,17 +79,17 @@ public final class SQLiteDocumentModule {
             features.insert(.redLetterWords)
         }
         self.info = ModuleInfo(
-            name: identity?.initials ?? metadata.initials,
-            description: metadata.description,
+            name: initials,
+            description: trimmedDescription,
             category: Self.moduleCategory(format: metadata.format, category: metadata.category),
-            language: metadata.language,
+            language: trimmedLanguage.isEmpty ? "und" : trimmedLanguage,
             moduleDriver: Self.moduleDriver(format: metadata.format, category: metadata.category),
             version: metadata.version,
             features: features,
             isRightToLeft: metadata.direction == .rtl,
             aboutMetadata: ModuleAboutMetadata(
                 versification: JSwordKJVAVersification.name,
-                osisId: identity?.initials ?? metadata.initials,
+                osisId: initials,
                 repository: identity?.repository ?? ""
             )
         )
@@ -127,7 +133,7 @@ public final class SQLiteDocumentModule {
     }
 
     /**
-     Reads every present verse in one Bible chapter without inventing gaps.
+     Reads every present verse in one Bible or commentary chapter without inventing gaps.
 
      - Returns: Source rows ordered by verse number.
      - Side effects: Executes one read-only chapter query on an operation-owned connection.
@@ -135,7 +141,7 @@ public final class SQLiteDocumentModule {
      */
     public func chapterContent(osisId: String, chapter: Int) throws
         -> [(verse: Int, text: String)] {
-        guard info.category == .bible,
+        guard info.category == .bible || info.category == .commentary,
               let book = sourceBookNumber(forOsisId: osisId) else { return [] }
         return try reader.chapterContent(book: book, chapter: chapter)
     }
@@ -248,6 +254,20 @@ public struct SQLiteDocumentModuleLibrary {
     /// Readable modules after JSword initials/full-name duplicate registration.
     public let modules: [SQLiteDocumentModule]
 
+    /**
+     Every readable SQLite candidate in Android driver-discovery order, before book registration.
+
+     Android's custom drivers ask the one combined native-plus-custom `Books` registry whether each
+     proposed initials token is already owned. Keeping the raw sequence lets the reader resolver
+     replay that admission after native books have registered, including cascades where a candidate
+     rejected by native ownership must not suppress a later SQLite candidate.
+
+     - Returns: Validated MyBible, MySword, and e-Sword candidates in discovery order.
+     - Side effects: None; this immutable snapshot reuses readers already opened by discovery.
+     - Failure modes: Malformed payloads remain diagnostics and never enter this collection.
+     */
+    public let registrationCandidates: [SQLiteDocumentModule]
+
     /// Rejected payloads retained for diagnostics without hiding valid siblings.
     public let diagnostics: [SQLiteDocumentModuleDiagnostic]
 
@@ -299,6 +319,7 @@ public struct SQLiteDocumentModuleLibrary {
             Self.load(url: url, reader: ESwordReader.init(fileURL:), into: &discovered, rejected: &rejected)
         }
 
+        self.registrationCandidates = discovered
         let registration = Self.register(discovered)
         self.modules = registration.modules
         self.diagnostics = rejected + registration.diagnostics
@@ -315,6 +336,7 @@ public struct SQLiteDocumentModuleLibrary {
      - Failure modes: Duplicate candidate initials become diagnostics instead of throwing.
      */
     init(discoveredModules: [SQLiteDocumentModule]) {
+        self.registrationCandidates = discoveredModules
         let registration = Self.register(discoveredModules)
         self.modules = registration.modules
         self.diagnostics = registration.diagnostics

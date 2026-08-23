@@ -190,12 +190,21 @@ final class SwordXMLNode {
         }
     }
 
-    /** Escapes XML text while preserving Unicode scalars. */
+    /**
+     Escapes one XML text node with JDOM2-compatible carriage-return preservation.
+
+     - Parameter value: Unserialized text-node content.
+     - Returns: XML-safe text where markup characters are escaped and U+000D is emitted as
+       `&#xD;`, preventing XML newline normalization and later bridge CR cleanup from deleting it.
+     - Side effects: None.
+     - Failure modes: None; tabs and line feeds remain literal like JDOM's text serializer.
+     */
     private static func escapeText(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\r", with: "&#xD;")
     }
 
     /** Escapes XML attribute text while preserving Unicode scalars. */
@@ -310,6 +319,7 @@ final class SwordXMLTreeParser: NSObject, XMLParserDelegate {
 enum SwordOSISProcessorError: Error, LocalizedError {
     case missingRoot
     case invalidRootCount(Int)
+    case missingCommentaryVerse
 
     /// Human-readable malformed-fragment reason.
     var errorDescription: String? {
@@ -318,6 +328,8 @@ enum SwordOSISProcessorError: Error, LocalizedError {
             return "The OSIS fragment has no XML root element."
         case .invalidRootCount(let count):
             return "The OSIS fragment must contain one root element; found \(count)."
+        case .missingCommentaryVerse:
+            return "The commentary fragment has no direct verse element."
         }
     }
 }

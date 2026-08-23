@@ -901,7 +901,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return .commentary
         case .dictionary:
             return .dictionary
-        case .generalBook:
+        case .generalBook, .questionable, .essays, .images:
             return .generalBook
         case .map:
             return .map

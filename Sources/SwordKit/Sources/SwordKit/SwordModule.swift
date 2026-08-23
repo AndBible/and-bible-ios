@@ -319,6 +319,9 @@ public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendabl
     /// Exact-key validation stopped because SWORD reported a non-terminal backend error.
     case exactKeyReadFailed(moduleName: String, key: String, errorCode: Int)
 
+    /// RawLD's fixed-width source index or referenced data record could not be decoded safely.
+    case rawDictionaryIndexReadFailed(moduleName: String)
+
     /**
      Produces actionable diagnostic text for Android-equivalent key chooser error presentation.
 
@@ -333,7 +336,69 @@ public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendabl
             return "Could not read entries from \(moduleName) (SWORD error \(errorCode))."
         case .exactKeyReadFailed(let moduleName, let key, let errorCode):
             return "Could not verify entry \(key) in \(moduleName) (SWORD error \(errorCode))."
+        case .rawDictionaryIndexReadFailed(let moduleName):
+            return "Could not read the stored dictionary index for \(moduleName)."
         }
+    }
+}
+
+/**
+ One physical RawLD-family index slot before libsword normalizes its stored key spelling.
+
+ JSword's binary search observes both valid record keys and zero-size placeholder slots. Keeping the
+ index position and size separate from the optional key lets the iOS resolver reproduce midpoint
+ skipping without turning a valid empty-body entry into a missing record.
+ */
+public struct SwordRawDictionaryIndexSlot: Equatable, Sendable {
+    /// Zero-based physical index position used to read the selected record without another search.
+    public let index: Int
+
+    /// Exact decoded DataEntry key, or `nil` only for a zero-size placeholder slot.
+    public let key: String?
+
+    /// Raw index size; a valid empty-body entry remains positive because its key header is present.
+    public let size: Int
+
+    /// Contained `.dat` byte offset used only by `SwordModule` for a selected RawLD/RawLD4 read.
+    let dataOffset: Int?
+
+    /**
+     Creates a physical source-index slot for backend-independent JSword search resolution.
+
+     This public initializer intentionally omits payload bytes: consumers may reproduce JSword's
+     search over slot metadata, while only `SwordModule` can bind a winning slot back to contained
+     RawLD source data.
+
+     - Parameters:
+       - index: Zero-based physical index position.
+       - key: Exact decoded DataEntry key, or `nil` for a zero-size placeholder.
+       - size: Raw index size; zero identifies a placeholder, while positive values include valid
+         records whose definition body is empty.
+     - Side effects: None.
+     - Failure modes: None; callers constructing synthetic slots are responsible for preserving
+       source order and coherent key/size pairs.
+     */
+    public init(index: Int, key: String?, size: Int) {
+        self.init(index: index, key: key, size: size, dataOffset: nil)
+    }
+
+    /**
+     Creates a source-index slot with optional module-owned payload bytes.
+
+     - Parameters:
+       - index: Zero-based physical source position.
+       - key: Exact decoded key, or `nil` for a zero-size placeholder.
+       - size: Raw index size.
+       - dataOffset: Contained RawLD/RawLD4 `.dat` offset retained for one exact read; zLD and
+         synthetic consumers keep this `nil` because their backends own payload access.
+     - Side effects: None.
+     - Failure modes: None; only the validated module loader calls this initializer in production.
+     */
+    init(index: Int, key: String?, size: Int, dataOffset: Int?) {
+        self.index = index
+        self.key = key
+        self.size = size
+        self.dataOffset = dataOffset
     }
 }
 
@@ -350,6 +415,9 @@ public enum SwordModuleKeyAccessError: Error, Equatable, LocalizedError, Sendabl
 public final class SwordModule: @unchecked Sendable {
     let handle: UnsafeMutableRawPointer
 
+    /// Installed SWORD root used for config-backed source-index inspection.
+    private let moduleRootPath: String?
+
     /// Module metadata.
     public let info: ModuleInfo
 
@@ -362,8 +430,15 @@ public final class SwordModule: @unchecked Sendable {
      */
     private var cachedAllKeys: [String]?
 
+    /// Physical RawLD-family slots cached independently from libsword's normalized cursor keys.
+    private var cachedRawDictionaryIndexSlots: [SwordRawDictionaryIndexSlot]?
+
+    /// Validated contained `.dat` URL used to read only the selected RawLD/RawLD4 record body.
+    private var cachedRawDictionaryEntryURL: URL?
+
     init(handle: UnsafeMutableRawPointer, modulePath: String? = nil) {
         self.handle = handle
+        self.moduleRootPath = modulePath
 
         self.info = SwordRuntime.sync {
             // Extract metadata once at init
@@ -1303,6 +1378,272 @@ public final class SwordModule: @unchecked Sendable {
             cachedAllKeys = keys
             return keys
         }
+    }
+
+    /**
+     Loads physical RawLD-family source-index slots without libsword normalization.
+
+     JSword's `RawLDBackend.search` derives Strong's padding from the first binary-search index
+     entry it probes. libsword's generic cursor can case-fold, pad, or collapse those stored key
+     spellings before `loadAllKeys()` observes them, which changes that first-probe pattern for
+     mixed-width dictionaries. This boundary reads the valid fixed-width index records directly and
+     extracts each record's key header in physical source order.
+
+     - Returns: Physical slots in index order, including duplicates and zero-size placeholders, for
+       `RawLD`, `RawLD4`, and `zLD`; `nil` for other drivers.
+     - Side effects: Reads the installed module's `.conf`, `.idx`, and `.dat` files once and caches a
+       successful immutable snapshot under `SwordRuntime` serialization.
+     - Throws: `SwordModuleKeyAccessError.rawDictionaryIndexReadFailed` when the module path,
+       descriptor, contained source paths, fixed-width index, referenced record bounds, or key text
+       encoding is invalid. Zero-size slots remain explicit `nil` keys for the JSword search layer.
+     */
+    public func loadRawDictionaryIndexSlots() throws -> [SwordRawDictionaryIndexSlot]? {
+        try SwordRuntime.sync {
+            if let cachedRawDictionaryIndexSlots {
+                return cachedRawDictionaryIndexSlots
+            }
+            guard let moduleRootPath,
+                  let config = SwordModuleConfig.read(name: info.name, modulePath: moduleRootPath) else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+
+            let driver = config.modDrv.lowercased()
+            let indexRecordSize: Int
+            let lengthByteCount: Int
+            switch driver {
+            case "rawld":
+                indexRecordSize = 6
+                lengthByteCount = 2
+            case "rawld4", "zld":
+                indexRecordSize = 8
+                lengthByteCount = 4
+            default:
+                return nil
+            }
+            guard !config.dataPath.isEmpty else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+
+            let moduleRootURL = URL(fileURLWithPath: moduleRootPath, isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            let dataPrefix = moduleRootURL
+                .appendingPathComponent(config.dataPath, isDirectory: false)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            let containedPrefix = moduleRootURL.path.hasSuffix("/")
+                ? moduleRootURL.path
+                : moduleRootURL.path + "/"
+            let indexURL = dataPrefix.appendingPathExtension("idx")
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            let entryURL = dataPrefix.appendingPathExtension("dat")
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+            guard dataPrefix.path.hasPrefix(containedPrefix),
+                  indexURL.path.hasPrefix(containedPrefix),
+                  entryURL.path.hasPrefix(containedPrefix) else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+            guard let indexData = try? Data(contentsOf: indexURL),
+                  let entryData = try? Data(contentsOf: entryURL) else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+
+            let keyEncoding = try Self.rawDictionaryKeyEncoding(
+                config: config,
+                moduleName: info.name
+            )
+            let slotCount = indexData.count / indexRecordSize
+            guard slotCount > 0 else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+            var slots: [SwordRawDictionaryIndexSlot] = []
+            slots.reserveCapacity(slotCount)
+            for physicalIndex in 0..<slotCount {
+                let recordStart = physicalIndex * indexRecordSize
+                let offset = Self.littleEndianInteger(
+                    in: indexData,
+                    range: recordStart..<(recordStart + 4)
+                )
+                let length = Self.littleEndianInteger(
+                    in: indexData,
+                    range: (recordStart + 4)..<(recordStart + 4 + lengthByteCount)
+                )
+                if length == 0 {
+                    slots.append(SwordRawDictionaryIndexSlot(
+                        index: physicalIndex,
+                        key: nil,
+                        size: 0,
+                        dataOffset: nil
+                    ))
+                    continue
+                }
+                guard offset <= entryData.count,
+                      length <= entryData.count - offset else {
+                    throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+                }
+
+                let recordRange = offset..<(offset + length)
+                var keyEnd = entryData[recordRange].firstIndex(of: 0x0A) ?? offset
+                if keyEnd > offset, entryData[keyEnd - 1] == 0x0D {
+                    keyEnd -= 1
+                }
+                if keyEnd > offset, entryData[keyEnd - 1] == 0x5C {
+                    keyEnd -= 1
+                }
+                let key = try Self.decodeRawDictionaryKey(
+                    entryData.subdata(in: offset..<keyEnd),
+                    encoding: keyEncoding,
+                    moduleName: info.name
+                )
+                slots.append(SwordRawDictionaryIndexSlot(
+                    index: physicalIndex,
+                    key: key,
+                    size: length,
+                    dataOffset: driver == "zld" ? nil : offset
+                ))
+            }
+            cachedRawDictionaryEntryURL = entryURL
+            cachedRawDictionaryIndexSlots = slots
+            return slots
+        }
+    }
+
+    /**
+     Reads the exact selected RawLD/RawLD4 record without retaining every dictionary body in memory.
+
+     - Parameter slot: Validated positive-size physical slot returned by this module's cached index
+       snapshot.
+     - Returns: Exact record bytes, including the DataEntry key header and delimiter.
+     - Side effects: Memory-maps the already contained `.dat` file and copies only the selected
+       record under `SwordRuntime` serialization.
+     - Throws: `rawDictionaryIndexReadFailed` when the slot is synthetic/zLD/zero-size, the cached
+       file is unavailable, or its bounds changed after index capture.
+     */
+    func rawDictionaryRecord(for slot: SwordRawDictionaryIndexSlot) throws -> Data {
+        try SwordRuntime.sync {
+            guard slot.size > 0,
+                  let offset = slot.dataOffset,
+                  let entryURL = cachedRawDictionaryEntryURL,
+                  let entryData = try? Data(contentsOf: entryURL, options: .mappedIfSafe),
+                  offset <= entryData.count,
+                  slot.size <= entryData.count - offset else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: info.name)
+            }
+            return entryData.subdata(in: offset..<(offset + slot.size))
+        }
+    }
+
+    /**
+     Identifies JSword's configured dictionary-key charset.
+
+     - Parameters:
+       - config: Parsed module config containing the optional `Encoding` entry.
+       - moduleName: Initials included in typed read failures.
+     - Returns: UTF-8 for the exact `UTF-8` config spelling, or Windows-1252 for a missing or exact
+       `Latin-1` value.
+     - Side effects: None.
+     - Throws: `rawDictionaryIndexReadFailed` for any encoding outside JSword's pinned two-value
+       map.
+     */
+    private static func rawDictionaryKeyEncoding(
+        config: SwordModuleConfig,
+        moduleName: String
+    ) throws -> RawDictionaryKeyEncoding {
+        let configured = config.values["encoding"]?.first ?? "Latin-1"
+        switch configured {
+        case "UTF-8":
+            return .utf8
+        case "Latin-1":
+            return .windowsCP1252
+        default:
+            throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(moduleName: moduleName)
+        }
+    }
+
+    /**
+     Decodes one RawLD DataEntry key through pinned JSword `SwordUtil.decode` semantics.
+
+     JSword cleans disallowed C0 controls and undefined bytes only for its Windows-1252 mapping.
+     UTF-8 bypasses that cleanup and uses Java's replacement decoder directly, preserving valid
+     controls while replacing malformed byte sequences. Both paths keep a bad byte from turning
+     into a whole-module read failure.
+
+     - Parameters:
+       - data: Exact key bytes before DataEntry's LF delimiter and optional CR/backslash removal.
+       - encoding: Pinned JSword charset selected from module configuration.
+       - moduleName: Initials included in the typed failure if Windows-1252 cannot be materialized.
+     - Returns: JSword-compatible key text, including U+FFFD for malformed UTF-8 sequences.
+     - Side effects: Copies the bounded key bytes and sanitizes only Windows-1252 input.
+     - Throws: `rawDictionaryIndexReadFailed` only if Foundation cannot decode the sanitized,
+       fully-defined Windows-1252 byte sequence; malformed UTF-8 is replacement-decoded.
+     */
+    private static func decodeRawDictionaryKey(
+        _ data: Data,
+        encoding: RawDictionaryKeyEncoding,
+        moduleName: String
+    ) throws -> String {
+        switch encoding {
+        case .utf8:
+            return String(decoding: data, as: UTF8.self)
+        case .windowsCP1252:
+            let undefinedWindows1252Bytes: Set<UInt8> = [0x81, 0x8D, 0x8F, 0x90, 0x9D]
+            let cleaned = data.map { byte -> UInt8 in
+                let isDisallowedControl = byte < 0x20
+                    && byte != 0x09
+                    && byte != 0x0A
+                    && byte != 0x0D
+                return isDisallowedControl || undefinedWindows1252Bytes.contains(byte)
+                    ? 0x20
+                    : byte
+            }
+            guard let decoded = String(
+                data: Data(cleaned),
+                encoding: .windowsCP1252
+            ) else {
+                throw SwordModuleKeyAccessError.rawDictionaryIndexReadFailed(
+                    moduleName: moduleName
+                )
+            }
+            return decoded
+        }
+    }
+
+    /**
+     Pinned JSword dictionary-key charset after exact configuration lookup.
+
+     Values are produced only by `rawDictionaryKeyEncoding`, which applies JSword's exact config
+     spelling and missing-value default before physical index bytes are decoded.
+
+     - Side effects: None.
+     - Failure modes: Unsupported config values never create an instance; the selector throws a
+       typed module read failure instead.
+     */
+    private enum RawDictionaryKeyEncoding {
+        /// Java UTF-8 decoder, including replacement of malformed byte sequences.
+        case utf8
+
+        /// JSword's `Latin-1` alias, which intentionally maps to Windows-1252.
+        case windowsCP1252
+    }
+
+    /**
+     Decodes one unsigned little-endian integer from a validated data slice.
+
+     - Parameters:
+       - data: Fixed-width RawLD index bytes.
+       - range: Two- or four-byte bounds contained by `data`.
+     - Returns: Host-width nonnegative integer assembled without alignment assumptions.
+     - Side effects: None.
+     - Failure modes: Callers validate the range and supported width before invoking this helper.
+     */
+    private static func littleEndianInteger(in data: Data, range: Range<Int>) -> Int {
+        var value: UInt64 = 0
+        for (shift, index) in range.enumerated() {
+            value |= UInt64(data[index]) << UInt64(shift * 8)
+        }
+        return Int(value)
     }
 
     /**

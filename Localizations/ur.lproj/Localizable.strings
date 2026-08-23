@@ -1670,3 +1670,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "پاس فریز کام نہیں کیا، دوبارہ کوشش کریں؟";
+
+/* Android shared translations */
+"document_not_installed" = "براہ کرم '%@' ڈاؤنلوڈ کریں";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ دستاویز %2$@ میں نہیں ملا۔";

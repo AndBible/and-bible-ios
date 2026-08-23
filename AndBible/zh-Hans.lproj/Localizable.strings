@@ -1550,3 +1550,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "密码无效，再试一次吗？";
+
+/* Android shared translations */
+"document_not_installed" = "请下载 \"%@\"";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@并没有在文件%2$@中找到。";

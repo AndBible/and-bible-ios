@@ -1551,3 +1551,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "הסיסמה לא עבדה, לנסות שוב?";
+
+/* Android shared translations */
+"document_not_installed" = "אנא הורד '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ לא נמצא במסמך %2$@.";

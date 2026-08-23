@@ -1513,3 +1513,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Wachtwoordzin werkte niet, nog eens proberen?";
+
+/* Android shared translations */
+"document_not_installed" = "Download '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ is niet gevonden in document %2$@.";

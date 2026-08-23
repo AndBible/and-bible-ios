@@ -1521,3 +1521,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Kata sandi tidak berhasil, coba lagi?";
+
+/* Android shared translations */
+"document_not_installed" = "Silahkan unduh '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ tidak ditemukan dalam dokumen %2$@.";

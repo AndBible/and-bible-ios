@@ -1546,3 +1546,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "A senha não foi reconhecida, tentar novamente?";
+
+/* Android shared translations */
+"document_not_installed" = "Por favor baixe: '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ não foi encontrado no documento %2$@";

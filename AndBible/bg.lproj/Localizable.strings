@@ -1552,3 +1552,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Паролата не работи, опитайте отново?";
+
+/* Android shared translations */
+"document_not_installed" = "Моля, изтеглете '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ не е намерен в ресурса %2$@.";

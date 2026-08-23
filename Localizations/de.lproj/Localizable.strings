@@ -1521,3 +1521,9 @@ Wenn Google Drive verwendet wird, hat %@ nur Zugriff auf Dateien der Anwendung, 
 
 /* Android shared translations */
 "try_again_passphrase" = "Passwort fehlerhaft, neu probieren?";
+
+/* Android shared translations */
+"document_not_installed" = "Bitte '%@' herunterladen";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ wurde nicht in Dokument %2$@ gefunden.";

@@ -1546,3 +1546,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "비밀번호가 맞지 않습니다. 재시도해 보시겠어요?";
+
+/* Android shared translations */
+"document_not_installed" = "‘%@’을(를) 다운로드하세요";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ 이 항목은 %2$@ 문서에서 발견되지 않습니다.";

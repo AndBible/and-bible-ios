@@ -1554,3 +1554,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "كلمة المرور لم تعمل، جرب مجدداً؟";
+
+/* Android shared translations */
+"document_not_installed" = "برجاء تحميل '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ غير موجود في المستند %2$@.";

@@ -1068,29 +1068,6 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         )
     }
 
-    func testCanonicalStrongsKeyNameUsesResolvedEntryMetadataWhenCurrentKeyIsBlank() {
-        let rawEntry = """
-        <entryFree n="H6440"><title>H6440</title> <foreign xml:lang="he">פָּנֶה</foreign>, pl. <foreign xml:lang="he">פָּנִים</foreign> <hi rend="italic">face</hi>, also <hi rend="italic">faces</hi></entryFree>
-        """
-
-        let keyName = BibleReaderStrongsDocumentBuilder.canonicalStrongsKeyName(
-            requested: "H06440",
-            actualKey: "",
-            rawEntry: rawEntry
-        )
-
-        XCTAssertEqual(keyName, "06440")
-    }
-
-    func testDictionaryEntryKeyExtractsEntryFreeAttributeWithFlexibleWhitespace() {
-        let rawEntry = #"<entryFree type="x" n = "430"><orth>אֱלֹהִים</orth></entryFree>"#
-
-        XCTAssertEqual(
-            BibleReaderStrongsDocumentBuilder.dictionaryEntryKey(actualKey: "", rawEntry: rawEntry),
-            "430"
-        )
-    }
-
     func testLinkifyRawDictionaryXMLLinksStructuredAndPlainStrongsReferences() {
         let rawEntry = """
         <entryFree n="6440"><def>From 6437; see HEBREW for 05774 and <ref target="StrongsHebrew/02421">2421</ref>.</def></entryFree>
@@ -1104,10 +1081,60 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(linkified.contains("<a href=\"ab-w://?strong=H02421\">2421</a>"))
     }
 
-    func testStrongsLookupKeyOptionsIncludeIntermediateZeroTrimVariants() {
+    /**
+     Protects Android fragment metadata from being inferred from the requested route.
+
+     - Setup: Projects a source advertising both definition families and sanitizes a decorated
+       accepted key containing a hyphen and carriage return.
+     - Expected result: Features serialize as `hebrew-and-greek` with the exact key name, while
+       only the DOM-safe fragment identity replaces non-letter/non-digit characters.
+     - Failure meaning: iOS loses accepted-key identity or labels an explicit source using the
+       caller's requested Hebrew/Greek route instead of the source's actual feature metadata.
+     - Side effects: None.
+     */
+    func testAndroidDictionaryFragmentMetadataUsesActualFeaturesAndSanitizedExactKey() {
+        let features = AndroidDictionaryFragmentMetadata.features(
+            from: [.hebrewDef, .greekDef],
+            keyName: "G-243\r"
+        )
+
+        XCTAssertEqual(features.type, "hebrew-and-greek")
+        XCTAssertEqual(features.keyName, "G-243\r")
+        XCTAssertEqual(
+            AndroidDictionaryFragmentMetadata.fragmentKey(
+                bookInitials: "Combined",
+                keyOsisID: "G-243\r"
+            ),
+            "Combined--G_243_"
+        )
+        XCTAssertEqual(
+            AndroidDictionaryFragmentMetadata.fragmentKey(
+                bookInitials: "Combined",
+                keyOsisID: "A١B"
+            ),
+            "Combined--A_B",
+            "Android's default regex keeps Unicode letters but treats only ASCII 0...9 as digits"
+        )
+        XCTAssertTrue(
+            AndroidDictionaryFragmentMetadata.usesStrongsContentType([.greekParse])
+        )
+        XCTAssertFalse(
+            AndroidDictionaryFragmentMetadata.usesStrongsContentType([.strongsNumbers])
+        )
+    }
+
+    /**
+     Protects Android's exact typed family values for an already padded Strong's key.
+
+     - Setup: Builds candidates for `H00430`, whose raw and numeric forms have five digits.
+     - Expected result: Only Android's raw, padded, padded-plus-CR, and category families appear.
+     - Failure meaning: iOS added a libsword-only alias that can turn an Android miss into content.
+     - Side effects: None.
+     */
+    func testStrongsLookupKeyOptionsUseOnlyAndroidFamiliesForPaddedNumber() {
         XCTAssertEqual(
             BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "H00430"),
-            ["H00430", "00430", "00430\r", "0430", "0430\r", "H0430", "430", "430\r", "H430"]
+            ["H00430", "00430", "00430\r", "H430"]
         )
     }
 
@@ -1115,8 +1142,8 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      Protects Android's canonical five-digit lookup family for an unpadded Strong's link.
 
      - Setup: Builds lookup candidates for the issue-388 request `G243`.
-     - Expected result: The original and unpadded candidates remain first, followed by Android's
-       `00243` and carriage-return `00243\r` variants.
+     - Expected result: Android's four typed families remain in enum order, including the duplicate
+       `G243` values whose distinct families participate in preferred-family caching.
      - Failure meaning: A dictionary that stores canonical padded keys cannot resolve an unpadded
        link even though Android resolves the same request.
      - Side effects: None.
@@ -1124,101 +1151,357 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
     func testStrongsLookupKeyOptionsPadUnpaddedGreekNumberLikeAndroid() {
         XCTAssertEqual(
             BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "G243"),
-            ["G243", "243", "243\r", "00243", "00243\r"]
+            ["G243", "00243", "00243\r", "G243"]
         )
     }
 
-    func testDictionaryLookupCandidateRejectsNearestEntryLeakForIntermediateZeroTrimKey() {
-        let rawEntry = """
-        <entryFree n="430"><orth>אֱלֹהִים</orth></entryFree>
-        """
-        let renderedText = """
-        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
-        """
+    /**
+     Protects Android's decorated-key parsing and typed duplicate retention.
+
+     - Setup: Builds candidates for decorated Strong's key `G00243a`.
+     - Expected result: The raw decoration remains only on the raw family; numeric families use
+       significant digits `243`, with five-digit and category normalization matching Android.
+     - Failure meaning: Decorations are rejected, included in numeric aliases, or normalized using
+       an iOS-only family that Android never queries.
+     - Side effects: None.
+     */
+    func testStrongsLookupKeyOptionsNormalizeDecoratedKeyLikeAndroid() {
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "G00243a"),
+            ["G00243a", "00243", "00243\r", "G243"]
+        )
+    }
+
+    /**
+     Protects Android's greedy all-zero Strong's grammar and raw-prefix category choice.
+
+     - Setup: Builds typed candidates for prefixed `G000` and prefixless `000`.
+     - Expected result: Both retain one significant zero; only the raw uppercase-G input receives a
+       Greek category key, while prefixless input receives Android's Hebrew `H0` category key.
+     - Failure meaning: iOS drops all zeroes, rejects the request, or infers Greek from normalized
+       numeric content instead of the raw URI prefix.
+     - Side effects: None.
+     */
+    func testStrongsLookupKeyOptionsPreserveAllZeroGrammarAndRawCategory() {
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "G000"),
+            ["G000", "00000", "00000\r", "G0"]
+        )
+        XCTAssertEqual(
+            BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: "000"),
+            ["000", "00000", "00000\r", "H0"]
+        )
+    }
+
+    /**
+     Protects Android's per-module preferred-family history without global test state.
+
+     - Setup: Records the padded family for one isolated cache and orders `G243` candidates.
+     - Expected result: The padded family moves first; every other typed family, including the
+       duplicate raw/category value, keeps Android enum order.
+     - Failure meaning: Reader-route builder recreation loses observable Android lookup history or
+       string deduplication erases a behaviorally distinct family.
+     - Side effects: Mutates only an isolated in-memory cache.
+     */
+    func testStrongsLookupPreferenceCacheReordersTypedFamilyPerModule() {
+        let candidates = AndroidStrongsKeyResolution.candidates(
+            for: "G243",
+            categoryPrefix: "G"
+        )
+        let cache = AndroidStrongsKeyPreferenceCache()
+        cache.record(.zeroPaddedKey, moduleInitials: "MixedGreek")
 
         XCTAssertEqual(
-            BibleReaderStrongsDocumentBuilder.dictionaryLookupCandidateRejectionReason(
-                requested: "H00430",
-                actualKey: "0430",
-                rawEntry: rawEntry,
-                renderedText: renderedText
+            cache.orderedCandidates(candidates, moduleInitials: "MixedGreek"),
+            [
+                .init(family: .zeroPaddedKey, value: "00243"),
+                .init(family: .key, value: "G243"),
+                .init(family: .zeroPaddedKeyWithCarriageReturn, value: "00243\r"),
+                .init(family: .category, value: "G243"),
+            ]
+        )
+        XCTAssertEqual(
+            cache.orderedCandidates(candidates, moduleInitials: "OtherGreek"),
+            candidates,
+            "Preferred-family history must remain scoped to canonical module initials"
+        )
+    }
+
+    /**
+     Protects JSword's directional zero-size midpoint selection and iOS's bounded corrupt-index
+     safety guard.
+
+     - Setup: Resolves synthetic physical RawLD slots whose first midpoint is zero-size for odd and
+       even cardinalities, then exercises Android's known two-slot no-progress shape.
+     - Expected result: Five slots move right, four tied slots move left, and the corrupt two-slot
+       search returns a miss instead of repeating unchanged bounds forever.
+     - Failure meaning: iOS selects a different stored key than Android for recoverable zero slots,
+       or a malformed installed dictionary can hang the reader route.
+     - Side effects: None; all slot metadata is immutable and in memory.
+     */
+    func testRawLDResolutionMatchesDirectionalZeroSlotSelectionAndFailsClosedOnNoProgress() {
+        let configuration = AndroidJSwordRawLDKeyResolution.Configuration(
+            moduleInitials: "Fixture",
+            category: .dictionary,
+            features: [],
+            caseSensitiveKeys: false,
+            strongsPadding: false
+        )
+        let oddSlots = [
+            SwordRawDictionaryIndexSlot(index: 0, key: "A", size: 2),
+            SwordRawDictionaryIndexSlot(index: 1, key: "B", size: 2),
+            SwordRawDictionaryIndexSlot(index: 2, key: nil, size: 0),
+            SwordRawDictionaryIndexSlot(index: 3, key: "D", size: 2),
+            SwordRawDictionaryIndexSlot(index: 4, key: "E", size: 2),
+        ]
+        let evenSlots = [
+            SwordRawDictionaryIndexSlot(index: 0, key: "A", size: 2),
+            SwordRawDictionaryIndexSlot(index: 1, key: "B", size: 2),
+            SwordRawDictionaryIndexSlot(index: 2, key: nil, size: 0),
+            SwordRawDictionaryIndexSlot(index: 3, key: "D", size: 2),
+        ]
+        let noProgressSlots = [
+            SwordRawDictionaryIndexSlot(index: 0, key: "A", size: 2),
+            SwordRawDictionaryIndexSlot(index: 1, key: nil, size: 0),
+        ]
+
+        XCTAssertEqual(
+            AndroidJSwordRawLDKeyResolution.resolve(
+                requestedKey: "D",
+                storedSlots: oddSlots,
+                configuration: configuration
             ),
-            .renderedEntryMismatch
+            .init(index: 3, storedKey: "D")
         )
-        XCTAssertNil(
-            BibleReaderStrongsDocumentBuilder.dictionaryLookupCandidateRejectionReason(
-                requested: "H00430",
-                actualKey: "0430",
-                rawEntry: rawEntry,
-                renderedText: "<div><p>430 'elohiym gods in the ordinary sense.</p></div>"
-            )
+        XCTAssertEqual(
+            AndroidJSwordRawLDKeyResolution.resolve(
+                requestedKey: "B",
+                storedSlots: evenSlots,
+                configuration: configuration
+            ),
+            .init(index: 1, storedKey: "B")
         )
+        XCTAssertNil(AndroidJSwordRawLDKeyResolution.resolve(
+            requestedKey: "Z",
+            storedSlots: noProgressSlots,
+            configuration: configuration
+        ))
     }
 
-    func testRawDictionaryEntryMatchesRequestedKeyRejectsMisboundRawEntries() {
-        let mismatchedRawEntry = """
-        <entryFree n="8674"><orth>תּתּני</orth></entryFree>
-        """
-        let matchingRawEntry = """
-        <entryFree n="5775"><orth>עוף</orth></entryFree>
-        """
+    /**
+     Protects RawLD's case-sensitive fallback from aborting at an empty physical slot.
 
-        XCTAssertFalse(
-            BibleReaderStrongsDocumentBuilder.rawDictionaryEntryMatchesRequestedKey(
-                requested: "H05775",
-                rawEntry: mismatchedRawEntry
-            )
+     - Setup: Supplies an intentionally non-sorted corrupt index where binary search misses `Z`,
+       index zero is zero-size, and the later exact record remains readable by JSword's raw scan.
+     - Expected result: The fallback treats the zero-size slot as an empty key, continues, and
+       returns the later exact physical record.
+     - Failure meaning: One placeholder hides all later exact records from case-sensitive modules.
+     - Side effects: None; resolution reads only synthetic slot metadata.
+     */
+    func testRawLDCaseSensitiveFallbackContinuesPastZeroSizeSlot() {
+        let slots = [
+            SwordRawDictionaryIndexSlot(index: 0, key: nil, size: 0),
+            SwordRawDictionaryIndexSlot(index: 1, key: "Z", size: 2),
+            SwordRawDictionaryIndexSlot(index: 2, key: "A", size: 2),
+            SwordRawDictionaryIndexSlot(index: 3, key: "B", size: 2),
+        ]
+        let configuration = AndroidJSwordRawLDKeyResolution.Configuration(
+            moduleInitials: "CaseSensitive",
+            category: .dictionary,
+            features: [],
+            caseSensitiveKeys: true,
+            strongsPadding: false
         )
-        XCTAssertTrue(
-            BibleReaderStrongsDocumentBuilder.rawDictionaryEntryMatchesRequestedKey(
-                requested: "05775\r",
-                rawEntry: matchingRawEntry
-            )
-        )
-    }
-
-    func testRenderedDictionaryEntryKeyExtractsLeadingNumericHeadword() {
-        let rendered = """
-        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
-        """
 
         XCTAssertEqual(
-            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryKey(renderedText: rendered),
-            "8674"
+            AndroidJSwordRawLDKeyResolution.resolve(
+                requestedKey: "Z",
+                storedSlots: slots,
+                configuration: configuration
+            ),
+            .init(index: 1, storedKey: "Z")
         )
     }
 
-    func testRenderedDictionaryEntryMatchesRequestedKeyRejectsMismatchedRenderedHeadword() {
-        let rendered = """
-        <div><p>8674 Tatnay tat-ten-ah'-ee of foreign derivation; Tattenai.</p></div>
-        """
+    /**
+     Protects the deterministic lookup tiers shared with pinned `SwordGenBook.getKey`.
 
-        XCTAssertFalse(
-            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
-                requested: "H00430",
-                renderedText: rendered
+     - Setup: Supplies separate unique-winner TreeKey sets for exact, case-insensitive, prefix, and
+       substring resolution, including libsword's leading root slash.
+     - Expected result: Exact source paths remain readable while leaf key names, full OSIS paths,
+       and selected-node subtree cardinality stay distinct for every tier.
+     - Failure meaning: General-book definitions flatten TreeKey identity, case-fold prefix tiers,
+       or depend on one JVM's undefined ambiguous HashMap order.
+     - Side effects: None.
+     */
+    func testGenBookKeyResolutionPreservesFourTiersAndTreeIdentities() {
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: "G243",
+                sourceKeys: ["/", "/G243"]
+            ),
+            .init(
+                sourceKey: "/G243",
+                keyName: "G243",
+                osisRef: "G243",
+                subtreeCardinality: 1
             )
         )
-        XCTAssertTrue(
-            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
-                requested: "H00430",
-                renderedText: "<div><p>430 'elohiym gods in the ordinary sense.</p></div>"
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: "Root/G243",
+                sourceKeys: ["/", "/Root/g243"]
+            ),
+            .init(
+                sourceKey: "/Root/g243",
+                keyName: "g243",
+                osisRef: "Root/g243",
+                subtreeCardinality: 1
             )
+        )
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: "G243",
+                sourceKeys: ["/", "/G243Child"]
+            ),
+            .init(
+                sourceKey: "/G243Child",
+                keyName: "G243Child",
+                osisRef: "G243Child",
+                subtreeCardinality: 1
+            )
+        )
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: "G243",
+                sourceKeys: ["/", "/Root/G243"]
+            ),
+            .init(
+                sourceKey: "/Root/G243",
+                keyName: "G243",
+                osisRef: "Root/G243",
+                subtreeCardinality: 1
+            )
+        )
+        XCTAssertEqual(
+            AndroidJSwordGenBookKeyResolution.resolve(
+                candidate: "G243",
+                sourceKeys: ["/", "/G243", "/G243/Child", "/Sibling"]
+            ),
+            .init(
+                sourceKey: "/G243",
+                keyName: "G243",
+                osisRef: "G243",
+                subtreeCardinality: 2
+            ),
+            "A selected parent includes itself and descendants but excludes siblings"
         )
     }
 
-    func testRenderedDictionaryEntryMatchesRequestedKeyIgnoresCrossReferenceOnlyNumbers() {
-        let rendered = """
-        <div><p>From 6437; see HEBREW for 05774 and 02421.</p></div>
-        """
+    /**
+     Protects Android's generated dictionary title for an exact empty restored MyBible row.
 
-        XCTAssertTrue(
-            BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryMatchesRequestedKey(
-                requested: "H05774",
-                renderedText: rendered
+     - Setup: Creates one exact MyBible dictionary topic with an empty definition and resolves it
+       through the restored Strong's facade.
+     - Expected result: Row presence succeeds and payload-ready OSIS contains Android's hidden
+       generated key title with no fabricated definition body.
+     - Failure meaning: iOS treats an empty definition as row absence and emits a download fallback
+       even though Android opens the valid title-only `SwordDictionary` fragment.
+     - Side effects: Creates and removes one temporary SQLite fixture.
+     */
+    func testMyBibleEmptyDictionaryRowProducesGeneratedTitleOnly() throws {
+        let fixtureDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mybible-empty-dictionary-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: fixtureDirectory) }
+        try FileManager.default.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+        let databaseURL = fixtureDirectory.appendingPathComponent("module.SQLite3")
+        try writeMyBibleStrongDictionaryDatabase(
+            at: databaseURL,
+            topic: "G243",
+            definition: ""
+        )
+        let reader = try XCTUnwrap(MyBibleReader(filePath: databaseURL.path))
+
+        let lookup = try XCTUnwrap(
+            BibleReaderStrongsDocumentBuilder.lookupInMyBibleDictionary(
+                reader,
+                keyOptions: ["G243"]
             )
         )
-        XCTAssertNil(BibleReaderStrongsDocumentBuilder.renderedDictionaryEntryKey(renderedText: rendered))
+        XCTAssertEqual(lookup.actualKey, "G243")
+        XCTAssertFalse(lookup.isNativeHtml)
+        XCTAssertEqual(
+            lookup.rawEntry,
+            #"<div><title type="x-gen">G243</title></div>"#
+        )
+        XCTAssertEqual(
+            lookup.payloadReadyXML,
+            #"<div><title type="x-gen"><BVA ordinal="0" xmlns="http://www.w3.org/1999/xhtml">G243</BVA></title></div>"#
+        )
+    }
+
+    /**
+     Protects Android's carriage-return Strong key family through an exact installed backend.
+
+     - Setup: Installs a MyBible Strong dictionary whose sole exact topic is `00243\r`, then asks
+       for external key `G243` with an isolated preferred-family cache.
+     - Expected result: The third Android family resolves end to end; key metadata retains the
+       carriage return, only the fragment identity sanitizes it, and the accepted family becomes
+       first for the same module's next lookup.
+     - Failure meaning: iOS drops the carriage-return family, flattens actual key identity, or fails
+       to persist Android's materially observable per-book family preference.
+     - Side effects: Creates and removes one temporary restored MyBible fixture.
+     */
+    func testMyBibleCarriageReturnStrongKeyPreservesIdentityAndCachesFamily() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installMyBibleStrongDictionaryFixture(
+            named: "CRDICT",
+            modulePath: URL(fileURLWithPath: modulePath, isDirectory: true),
+            topic: "00243\r",
+            definition: "Carriage return definition"
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let builder = BibleReaderStrongsDocumentBuilder(
+            swordManager: manager,
+            selectedPreferenceValues: { _ in [] },
+            moduleDisplayLabel: { $0.info.name },
+            localizedString: { _, defaultValue in defaultValue },
+            strongsLookupKeyPreferenceCache: cache
+        )
+
+        let json = try XCTUnwrap(
+            builder.buildStrongsMultiDocumentJSON(strongs: ["G243"], robinson: [])
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(
+            (payload["osisFragments"] as? [[String: Any]])?.first {
+                $0["bookInitials"] as? String == "CRDICT"
+            }
+        )
+        let features = try XCTUnwrap(fragment["features"] as? [String: Any])
+
+        XCTAssertEqual(fragment["key"] as? String, "CRDICT--00243_")
+        XCTAssertEqual(fragment["keyName"] as? String, "00243\r")
+        XCTAssertEqual(fragment["osisRef"] as? String, "00243\r")
+        XCTAssertEqual(features["keyName"] as? String, "00243\r")
+        XCTAssertTrue(
+            (fragment["xml"] as? String)?.contains("Carriage return definition") == true,
+            fragment["xml"] as? String ?? "Missing XML"
+        )
+        XCTAssertTrue(
+            (fragment["xml"] as? String)?.contains("00243&#xD;") == true,
+            "JDOM preserves the generated-title CR as an entity through Multi JSON cleanup"
+        )
+
+        let reordered = cache.orderedCandidates(
+            AndroidStrongsKeyResolution.candidates(for: "G243", categoryPrefix: "G"),
+            moduleInitials: "CRDICT"
+        )
+        XCTAssertEqual(reordered.first?.family, .zeroPaddedKeyWithCarriageReturn)
+        XCTAssertEqual(reordered.first?.value, "00243\r")
     }
 
     func testIsSupportedStrongsDictionaryModuleNameMatchesAndroidCuratedPolicy() {
@@ -1275,8 +1558,8 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      beside normal SWORD modules because libsword does not enumerate MyBibleDictionary modules.
 
      - Setup: Adds a BDBT-style `.conf` and `module.SQLite3` to the temporary SWORD fixture path.
-     - Expected result: A Hebrew Strong's lookup produces a BDBT dictionary fragment using Android's
-       `H430` topic variant while preserving Vue's canonical `00430` Strong's key name.
+     - Expected result: A Hebrew Strong's lookup produces a BDBT dictionary fragment preserving
+       Android's actual resolved `H430` key name and OSIS identity.
      - Failure meaning: Android backups can restore the files successfully while the dictionary still
        remains invisible in the iOS Multi window.
      - Side effects: Creates temporary module files under the test SWORD path.
@@ -1288,7 +1571,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             modulePath: URL(fileURLWithPath: modulePath, isDirectory: true),
             topic: "H430",
             definition: """
-            Original: <b><he>אלהים</he></b> <p />Transliteration: <b>'ĕlôhı̂ym</b> <p />Phonetic: <b>el-o-heem'</b> <p class="bdb_def"><b>BDB Definition</b>:</p><ol><li>(plural)<ol type='a'><li>rulers, judges</li><li>divine ones</li></ol><li>(plural intensive - singular meaning)<ol type='a'><li>god, goddess</li><li>God</li></ol></li></ol> <p />Origin: plural of <a href='S:H433'>H433</a>
+            Original: <b><he>אלהים</he></b><p/>Transliteration: <b>'ĕlôhı̂ym</b><p/>Phonetic: <b>el-o-heem'</b><p class="bdb_def"><b>BDB Definition</b>:</p><ol><li>(plural)<ol type="a"><li>rulers, judges</li><li>divine ones</li></ol></li><li>(plural intensive - singular meaning)<ol type="a"><li>god, goddess</li><li>God</li></ol></li></ol><p/>Origin: plural of <a href="S:H433">H433</a>
             """
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -1307,13 +1590,20 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         let xml = try XCTUnwrap(bdbt["xml"] as? String)
 
         XCTAssertEqual(bdbt["bookAbbreviation"] as? String, "BDBT")
-        XCTAssertEqual(bdbt["keyName"] as? String, "00430")
-        XCTAssertEqual(bdbt["isNativeHtml"] as? Bool, true)
-        XCTAssertEqual(features["type"] as? String, "hebrew")
-        XCTAssertEqual(features["keyName"] as? String, "00430")
-        XCTAssertTrue(xml.contains("<b><he>אלהים</he></b>"))
-        XCTAssertTrue(xml.contains("<ol><li>(plural)<ol type='a'><li>rulers, judges</li>"))
-        XCTAssertTrue(xml.contains(#"<a href="ab-w://?strong=H433">H433</a>"#))
+        XCTAssertEqual(bdbt["key"] as? String, "BDBT--H430")
+        XCTAssertEqual(bdbt["keyName"] as? String, "H430")
+        XCTAssertEqual(bdbt["osisRef"] as? String, "H430")
+        XCTAssertEqual(bdbt["bookCategory"] as? String, DocumentCategory.dictionary.rawValue)
+        XCTAssertTrue(bdbt["v11n"] is NSNull)
+        XCTAssertFalse(bdbt["hasStrongs"] as? Bool ?? true)
+        XCTAssertEqual(bdbt["isNativeHtml"] as? Bool, false)
+        XCTAssertEqual(features["type"] as? String, "hebrew-and-greek")
+        XCTAssertEqual(features["keyName"] as? String, "H430")
+        XCTAssertTrue(xml.contains(#"<title type="x-gen"><BVA"#))
+        XCTAssertTrue(xml.contains("<b><he><BVA"), xml)
+        XCTAssertTrue(xml.contains("אלהים</BVA></he></b>"), xml)
+        XCTAssertTrue(xml.contains("<ol><li><BVA"), xml)
+        XCTAssertTrue(xml.contains(#"<a href="S:H433"><BVA"#), xml)
         XCTAssertFalse(xml.contains("type=\"paragraph\""))
         XCTAssertFalse(xml.contains("No dictionary module installed"))
     }
@@ -1332,12 +1622,15 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
                 xml: "<div><p>BDB entry</p></div>",
                 key: "BDBT--00430",
                 keyName: "00430",
+                osisRef: "00430",
+                bookCategory: DocumentCategory.dictionary.rawValue,
                 bookInitials: "BDBT",
                 bookAbbreviation: "BDBT",
                 v11n: "KJV",
                 language: "en",
                 direction: "ltr",
                 features: OsisFeatures(type: "hebrew", keyName: "00430"),
+                hasStrongs: false,
                 isNativeHtml: false
             )],
             contentType: "strongs"
@@ -1366,10 +1659,14 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
                 BibleReaderWordLookupDocumentBuilder.DictionaryModule(
                     name: "Websters",
                     abbreviation: "Websters",
+                    category: .glossary,
+                    features: [.strongsNumbers],
                     lookup: { keyOptions in
-                        XCTAssertEqual(keyOptions, ["Grace", "grace", "Grace"])
+                        XCTAssertEqual(keyOptions, ["Grace"])
                         return BibleReaderStrongsDocumentBuilder.DictionaryLookupResult(
-                            actualKey: "Grace",
+                            actualKey: "GRACE",
+                            osisID: "Root/GRACE",
+                            osisRef: "Root/GRACE",
                             rawEntry: "raw dictionary bytes",
                             renderedText: "<p>Grace rendered from SWORD</p>"
                         )
@@ -1385,8 +1682,13 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         let xml = try XCTUnwrap(fragment["xml"] as? String)
 
         XCTAssertEqual(payload["type"] as? String, "multi")
-        XCTAssertEqual(fragment["key"] as? String, "Websters--Grace")
+        XCTAssertEqual(fragment["key"] as? String, "Websters--Root_GRACE")
+        XCTAssertEqual(fragment["keyName"] as? String, "GRACE")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Root/GRACE")
+        XCTAssertEqual(fragment["bookCategory"] as? String, "GLOSSARY")
         XCTAssertEqual(fragment["bookInitials"] as? String, "Websters")
+        XCTAssertEqual(fragment["hasStrongs"] as? Bool, true)
+        XCTAssertTrue((fragment["features"] as? [String: Any])?.isEmpty == true)
         XCTAssertTrue(xml.contains("Grace rendered from SWORD"))
         XCTAssertFalse(xml.contains("DictionaryLookupResult"))
     }

@@ -1671,3 +1671,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "รหัสผ่านไม่ถูกต้อง ลองอีกครั้งหรือไม่?";
+
+/* Android shared translations */
+"document_not_installed" = "กรุณาดาวน์โหลด '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "ไม่พบ %1$@ ในเอกสาร %2$@";

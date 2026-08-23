@@ -1519,3 +1519,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "पासफ़्रेज़ काम नहीं किया, पुन: प्रयास करें?";
+
+/* Android shared translations */
+"document_not_installed" = "कृपया डाउनलोड करें '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@, %2$@ दस्तावेज़ में नहीं मिली";

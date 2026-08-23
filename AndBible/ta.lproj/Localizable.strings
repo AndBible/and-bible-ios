@@ -1549,3 +1549,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "கடவுச்சொல் வேலை செய்யவில்லை, மீண்டும் முயலவா?";
+
+/* Android shared translations */
+"document_not_installed" = "தயவுசெய்து '%@'ஐ தரவிறக்கவும்";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@, ஆவணம் %2$@ இல் இல்லை.";

@@ -1535,3 +1535,9 @@ Google ড্রাইভ ব্যবহার করার সময়, %@শ
 
 /* Android shared translations */
 "try_again_passphrase" = "পাসফ্রেজ কাজ করেনি, আবার চেষ্টা করুন?";
+
+/* Android shared translations */
+"document_not_installed" = "দয়াকরে ডাউনলোড করুন %@";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ নথিতে পাওয়া যায়নি %2$@";

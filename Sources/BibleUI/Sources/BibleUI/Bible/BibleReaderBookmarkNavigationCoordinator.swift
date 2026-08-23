@@ -1311,7 +1311,11 @@ struct BibleReaderBookmarkNavigationCoordinator {
             switch failure {
             case .invalidKey, .keyNotFound:
                 return .genericKeyUnavailable(moduleInitials: moduleInitials, key: key)
-            case .unsupportedCategory, .malformedOSIS:
+            case .unsupportedCategory,
+                 .unsupportedDictionaryDriver,
+                 .unsupportedGenBookDriver,
+                 .malformedOSIS,
+                 .missingCommentaryVerse:
                 return .genericKeyLookupFailed(moduleInitials: moduleInitials, key: key)
             }
         }

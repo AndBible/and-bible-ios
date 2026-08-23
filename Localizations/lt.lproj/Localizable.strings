@@ -1537,3 +1537,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Slaptafrazė nesuveikė, bandyti dar kartą?";
+
+/* Android shared translations */
+"document_not_installed" = "Atsisiųskite „%@“";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ buvo nerastas dokumente %2$@.";

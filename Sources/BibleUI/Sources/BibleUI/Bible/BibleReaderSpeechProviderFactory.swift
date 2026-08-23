@@ -508,14 +508,22 @@ enum BibleReaderSpeechProviderFactory {
         return operation()
     }
 
-    /** Maps a SWORD module category to the only generic provider category it may enter. */
+    /**
+     Maps one actual SWORD/JSword category into Android's speech-provider category domain.
+
+     - Parameter moduleCategory: Installed-book category retained from JSword metadata.
+     - Returns: Commentary, dictionary, or general-book speech identity; Bible/add-on/unknown books
+       remain owned by their separate providers and return nil.
+     - Side effects: None.
+     - Failure modes: None; all pinned JSword categories have an explicit mapping.
+     */
     static func category(for moduleCategory: ModuleCategory) -> SpeakDocumentCategory? {
         switch moduleCategory {
         case .commentary:
             .commentary
         case .dictionary, .glossary:
             .dictionary
-        case .generalBook, .map, .dailyDevotion:
+        case .generalBook, .map, .dailyDevotion, .questionable, .essays, .images:
             .generalBook
         case .bible, .addon, .unknown:
             nil

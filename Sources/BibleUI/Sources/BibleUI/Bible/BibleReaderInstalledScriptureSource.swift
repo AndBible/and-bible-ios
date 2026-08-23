@@ -4,6 +4,36 @@ import BibleCore
 import Foundation
 import SwordKit
 
+/**
+ Normalizes generated SWORD config values at Android's `IniSection` parsing boundary.
+
+ SQLite Description, Lang, and Abbreviation metadata are interpolated into custom-driver config and
+ parsed by Java before the book enters `Books`. This namespace keeps the abbreviation fallback
+ shared across TreeSet ordering and fragment display while preserving nonbreaking spaces.
+
+ - Side effects: None.
+ - Failure modes: Missing or Java-trimmed-empty abbreviations deterministically fall back to the
+   installed initials; no Foundation Unicode whitespace rules are applied.
+ */
+enum BibleReaderJSwordConfigValue {
+    /**
+     Resolves a parsed JSword abbreviation with the installed initials fallback.
+
+     - Parameters:
+       - rawValue: Value interpolated into or read from a SWORD `IniSection`.
+       - initials: Installed book initials used when the parsed value is empty.
+     - Returns: The value after removing only leading/trailing UTF-16 units `<= U+0020`, or
+       `initials` when absent/empty. Nonbreaking spaces and other Unicode whitespace remain intact.
+     - Side effects: None.
+     - Failure modes: None; Swift strings are decoded losslessly from their valid UTF-16 units.
+     */
+    static func abbreviation(_ rawValue: String?, initials: String) -> String {
+        guard let rawValue else { return initials }
+        let trimmed = SwordJavaStringIdentity.trim(rawValue)
+        return trimmed.isEmpty ? initials : trimmed
+    }
+}
+
 /** One addressable verse captured from an installed Bible's own source domain. */
 struct BibleReaderInstalledScriptureVerse: Equatable, Sendable {
     /// Exact source-versification identity and ordinal.
@@ -88,10 +118,10 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         case .sword(let module):
             return BibleReaderStrongsDocumentBuilder.moduleDisplayLabel(module)
         case .sqlite(let module):
-            let value = module.metadata.abbreviation.trimmingCharacters(
-                in: .whitespacesAndNewlines
+            return BibleReaderJSwordConfigValue.abbreviation(
+                module.metadata.abbreviation,
+                initials: module.info.name
             )
-            return value.isEmpty ? module.info.name : value
         }
     }
 
@@ -457,11 +487,23 @@ enum BibleReaderInstalledDictionarySource: @unchecked Sendable {
         }
     }
 
-    /// Source versification for SWORD books; Android SQLite dictionaries have no passage domain.
+    /**
+     Returns versification only for native backends Android serializes as `SwordBook`.
+
+     Android's `OsisFragment` checks the concrete JSword class, so `SwordDictionary`, general-book,
+     map, and SQLite key sources serialize a null `v11n` even when their config declares KJVA.
+     Native verse-text and commentary drivers retain their mapped versification when an explicit
+     global selection routes them through the key facade.
+     */
     var versificationName: String? {
         switch self {
-        case .sword(let module): return VersificationMapper.versificationName(for: module)
-        case .sqlite: return nil
+        case .sword(let module):
+            if module.info.isJSwordSwordBook {
+                return VersificationMapper.versificationName(for: module)
+            }
+            return nil
+        case .sqlite:
+            return nil
         }
     }
 
@@ -471,10 +513,10 @@ enum BibleReaderInstalledDictionarySource: @unchecked Sendable {
         case .sword(let module):
             return BibleReaderStrongsDocumentBuilder.moduleDisplayLabel(module)
         case .sqlite(let module):
-            let value = module.metadata.abbreviation.trimmingCharacters(
-                in: .whitespacesAndNewlines
+            return BibleReaderJSwordConfigValue.abbreviation(
+                module.metadata.abbreviation,
+                initials: module.info.name
             )
-            return value.isEmpty ? module.info.name : value
         }
     }
 
@@ -499,15 +541,18 @@ enum BibleReaderInstalledDictionarySource: @unchecked Sendable {
         case .sqlite(let module):
             for key in keyOptions {
                 guard let content = try? module.dictionaryContent(for: key),
-                      !content.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                      let processed = try? SwordOSISFragmentProcessor.processDictionarySource(
+                        sourceXML: content.text,
+                        keyName: key,
+                        moduleInitials: module.info.name
+                      ) else {
                     continue
                 }
-                let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 return BibleReaderStrongsDocumentBuilder.DictionaryLookupResult(
                     actualKey: key,
-                    rawEntry: text,
-                    renderedText: text,
-                    isNativeHtml: module.metadata.format == .myBible
+                    rawEntry: processed.originalXML,
+                    renderedText: processed.originalXML,
+                    payloadReadyXML: processed.xml
                 )
             }
             return nil
@@ -555,6 +600,33 @@ enum BibleReaderInstalledModuleSource: @unchecked Sendable {
         }
     }
 
+    /**
+     Projects the concrete JSword `SwordBook` contract used by restored Multi children.
+
+     Android restore dispatches on the concrete book class rather than configured category. Native
+     verse-text/commentary drivers are `SwordBook` even under contradictory category metadata;
+     MyBible/MySword commentary and Bible drivers expose the same verse-key contract through their
+     custom book classes.
+
+     - Returns: A verse-key source for native pinned SwordBook drivers and SQLite Bible/commentary
+       drivers, otherwise `nil`.
+     - Side effects: None; the globally selected readable handle is only reprojected.
+     - Failure modes: Dictionary, general-book, locked, and unsupported custom drivers fail closed
+       without being reinterpreted from category alone.
+     */
+    var verseKeySource: BibleReaderInstalledScriptureSource? {
+        switch self {
+        case .sword(let module):
+            guard module.info.isJSwordSwordBook else { return nil }
+            return .sword(module)
+        case .sqlite(let module):
+            guard module.info.category == .bible || module.info.category == .commentary else {
+                return nil
+            }
+            return .sqlite(module)
+        }
+    }
+
     /// Projects a dictionary/glossary only after global lookup has selected this exact module.
     var dictionary: BibleReaderInstalledDictionarySource? {
         guard info.category == .dictionary || info.category == .glossary else { return nil }
@@ -563,15 +635,45 @@ enum BibleReaderInstalledModuleSource: @unchecked Sendable {
         case .sqlite(let module): return .sqlite(module)
         }
     }
+
+    /**
+     Projects a globally selected book into Android's explicit dictionary-key lookup contract.
+
+     Android resolves configured Strong's and morphology selections through global `Books.getBook`
+     identity without applying a second category or feature filter. Native SWORD books all expose
+     the required key API, while SQLite scripture backends do not faithfully expose dictionary keys
+     and therefore remain limited to dictionary/glossary formats.
+
+     - Returns: A readable exact-key source for the globally selected book, or `nil` when an SQLite
+       backend cannot implement Android's dictionary-key contract.
+     - Side effects: None; global ownership and authorization were resolved before projection.
+     - Failure modes: Unsupported SQLite categories fail closed without falling through to a
+       colliding backend.
+     */
+    var explicitDictionaryKeySource: BibleReaderInstalledDictionarySource? {
+        switch self {
+        case .sword(let module):
+            return .sword(module)
+        case .sqlite(let module):
+            guard info.category == .dictionary || info.category == .glossary else { return nil }
+            return .sqlite(module)
+        }
+    }
 }
 
 /**
- Resolves Android's global installed-book registry with genuine SWORD precedence over SQLite.
+ Resolves Android's single global installed-book registry across native and SQLite backends.
 
- JSword resolves exact initials, exact full name, then the first registration-order
- case-insensitive initials/full-name match. iOS applies that sequence to all genuine SWORD modules
- first, then to unshadowed SQLite modules. Category projection happens only after global resolution,
- so an exact wrong-category book fails closed instead of falling through to a namesake.
+ Each custom SQLite driver first asks the current registry for its proposed initials and skips
+ registration when any existing initials/full-name/case-insensitive tier matches. JSword then
+ resolves exact initials and exact full name through last-added maps, then scans its installed-book
+ TreeSet for the first case-insensitive initials/full-name match. Category projection happens only
+ after global resolution, so exact wrong-category and locked owners fail closed.
+
+ - Side effects: Initializers snapshot native access state and SQLite registration candidates;
+   projections replay immutable Android admission and TreeSet ordering without reading content.
+ - Failure modes: Missing, unsupported, shadowed, or locked registrations remain absent from
+   readable projections, and a selected locked owner never falls through to another backend.
  */
 struct BibleReaderInstalledModuleResolver {
     /** One inclusive native owner plus its independently authorized content handle. */
@@ -581,6 +683,48 @@ struct BibleReaderInstalledModuleResolver {
 
         /// Native content handle exposed only after the manager reports `.readable`.
         let readableModule: SwordModule?
+
+        /// JSword abbreviation used by installed-book TreeSet ordering.
+        let abbreviation: String
+    }
+
+    /** One globally ordered registration before readability and backend projection. */
+    private enum GlobalRegistration {
+        /// Inclusive native owner, which may be locked and therefore unreadable.
+        case native(NativeRegistration)
+
+        /// Readable SQLite registration admitted by Android's complete current-registry lookup.
+        case sqlite(BibleReaderSQLiteModuleHandle)
+
+        /// Installed metadata used by the shared JSword identity tiers.
+        var info: ModuleInfo {
+            switch self {
+            case .native(let registration): return registration.info
+            case .sqlite(let module): return module.info
+            }
+        }
+
+        /// JSword abbreviation used after category in global case-insensitive lookup order.
+        var abbreviation: String {
+            switch self {
+            case .native(let registration): return registration.abbreviation
+            case .sqlite(let module):
+                return BibleReaderJSwordConfigValue.abbreviation(
+                    module.metadata.abbreviation,
+                    initials: module.info.name
+                )
+            }
+        }
+
+        /// Authorized content source, or `nil` for a selected locked native registration.
+        var readableSource: BibleReaderInstalledModuleSource? {
+            switch self {
+            case .native(let registration):
+                return registration.readableModule.map(BibleReaderInstalledModuleSource.sword)
+            case .sqlite(let module):
+                return .sqlite(module)
+            }
+        }
     }
 
     /// Inclusive native registrations in manager order, including locked ownership rows.
@@ -588,6 +732,37 @@ struct BibleReaderInstalledModuleResolver {
 
     /// Unshadowed readable SQLite modules in Android registration order.
     private let sqliteModules: [BibleReaderSQLiteModuleHandle]
+
+    /**
+     Replays Android custom-driver admission after native registration.
+
+     MyBible, MySword, and e-Sword drivers call `Books.getBook(candidate.initials)` before adding
+     each book. That complete lookup can reject a candidate whose initials equal an existing full
+     name or case-insensitive alias, while distinct initials with a duplicate full name remain
+     admissible and become the later exact-name owner.
+     */
+    private var admittedRegistrations: [GlobalRegistration] {
+        var registrations = nativeRegistrations.map(GlobalRegistration.native)
+        for module in sqliteModules {
+            guard Self.lookup(module.info.name, in: registrations) == nil else { continue }
+            registrations.append(.sqlite(module))
+        }
+        return registrations
+    }
+
+    /**
+     Projects admitted books into the TreeSet order exposed by `Books.installed().books`.
+
+     - Returns: Comparator-distinct registrations sorted by pinned JSword category, abbreviation,
+       initials, and full-name rules.
+     - Side effects: Replays immutable custom admission and comparator-equal replacement on access.
+     - Failure modes: An empty registry returns an empty projection; unreadable registrations remain
+       present as metadata without exposing content handles.
+     */
+    private var jswordSortedRegistrations: [GlobalRegistration] {
+        Self.treeSetProjection(admittedRegistrations)
+            .sorted(by: Self.precedesInJSwordBookSet)
+    }
 
     /**
      Captures the current installed registry from one configured reader runtime.
@@ -608,10 +783,19 @@ struct BibleReaderInstalledModuleResolver {
         let installedSnapshot = swordManager?.installedModules() ?? []
         self.nativeRegistrations = installedSnapshot.compactMap { info in
             guard !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) else { return nil }
-            let readableModule = !info.isEncrypted || info.isUnlocked
-                ? swordManager?.module(named: info.name)
+            let installedModule = swordManager?.module(named: info.name)
+            let readableModule = swordManager?.moduleAccessState(named: info.name) == .readable
+                ? installedModule
                 : nil
-            return NativeRegistration(info: info, readableModule: readableModule)
+            let configuredAbbreviation = installedModule?.configEntry("Abbreviation")
+            return NativeRegistration(
+                info: info,
+                readableModule: readableModule,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    configuredAbbreviation,
+                    initials: info.name
+                )
+            )
         }
         self.sqliteModules = sqliteModules
     }
@@ -621,11 +805,13 @@ struct BibleReaderInstalledModuleResolver {
 
      - Parameters:
        - swordManager: Manager supplying inclusive native ownership and fresh access state.
-       - sqliteLibrary: Android-compatible SQLite discovery snapshot registered after native rows.
+       - sqliteLibrary: Android-compatible SQLite discovery snapshot whose raw candidates are
+         replayed after native rows through the combined global registry.
      - Side effects: Enumerates native inventory once and wraps already-discovered SQLite modules;
        no SQLite content query occurs.
      - Failure modes: Locked native owners retain precedence without a readable handle or SQLite
-       fallthrough. Missing native managers produce a SQLite-only registry.
+       fallthrough. Candidates rejected by native identity never suppress a later SQLite candidate;
+       missing native managers produce a SQLite-only registry.
      */
     init(
         swordManager: SwordManager?,
@@ -633,7 +819,9 @@ struct BibleReaderInstalledModuleResolver {
     ) {
         self.init(
             swordManager: swordManager,
-            sqliteModules: sqliteLibrary.modules.map(BibleReaderSQLiteModuleHandle.init(module:))
+            sqliteModules: sqliteLibrary.registrationCandidates.map(
+                BibleReaderSQLiteModuleHandle.init(module:)
+            )
         )
     }
 
@@ -655,7 +843,11 @@ struct BibleReaderInstalledModuleResolver {
         self.nativeRegistrations = swordModules.map { module in
             NativeRegistration(
                 info: module.info,
-                readableModule: module.info.isEncrypted && !module.info.isUnlocked ? nil : module
+                readableModule: module.info.isEncrypted && !module.info.isUnlocked ? nil : module,
+                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
+                    module.configEntry("Abbreviation"),
+                    initials: module.info.name
+                )
             )
         }
         self.sqliteModules = sqliteModules
@@ -665,25 +857,14 @@ struct BibleReaderInstalledModuleResolver {
      Resolves one global installed-book token using JSword precedence.
 
      - Parameter name: Initials or full book name; exact UTF-16 identity is preserved.
-     - Returns: The readable native owner, then an unshadowed SQLite owner, or nil when no readable
-       globally owned book matches.
+     - Returns: Readable content for the globally selected registration, or nil when it is absent
+       or the selected native owner is locked.
      - Side effects: None after resolver construction.
      - Failure modes: Empty, absent, locked-native, and shadowed identities return nil. A locked
        native match never falls through to a colliding readable SQLite module.
      */
     func module(named name: String) -> BibleReaderInstalledModuleSource? {
-        if let registration = Self.lookup(
-            name,
-            in: nativeRegistrations,
-            info: { $0.info }
-        ) {
-            return registration.readableModule.map(BibleReaderInstalledModuleSource.sword)
-        }
-        if let module = Self.lookup(name, in: sqliteModules, info: { $0.info }),
-           !isOwnedByNativeRegistration(module.info.name) {
-            return .sqlite(module)
-        }
-        return nil
+        selectedRegistration(named: name)?.readableSource
     }
 
     /**
@@ -696,7 +877,9 @@ struct BibleReaderInstalledModuleResolver {
        ownership, so callers can prevent SQLite, My Documents, or EPUB collision fallthrough.
      */
     func hasNativeRegistration(named name: String) -> Bool {
-        isOwnedByNativeRegistration(name)
+        guard let registration = selectedRegistration(named: name) else { return false }
+        if case .native = registration { return true }
+        return false
     }
 
     /** Returns an exact Bible projection after global resolution and category validation. */
@@ -739,54 +922,255 @@ struct BibleReaderInstalledModuleResolver {
         }
     }
 
-    /** Returns globally registered modules for the requested categories in backend order. */
+    /**
+     Projects readable registered books in Android add order for category-based legacy consumers.
+
+     - Parameter categories: Accepted actual categories after global custom-driver admission.
+     - Returns: Native-then-custom readable sources in registration order; this intentionally does
+       not replace APIs whose Android contract consumes `Books.installed().books` TreeSet order.
+     - Side effects: Replays immutable SQLite admission against the captured native registry.
+     - Failure modes: Locked native owners, unreadable sources, rejected custom registrations, and
+       sources outside `categories` are omitted without collision fallthrough.
+     */
     func modules(categories: Set<ModuleCategory>) -> [BibleReaderInstalledModuleSource] {
-        let sword = nativeRegistrations.compactMap { registration -> BibleReaderInstalledModuleSource? in
-            guard let module = registration.readableModule else { return nil }
-            guard categories.contains(module.info.category) else { return nil }
-            return .sword(module)
-        }
-        let sqlite = sqliteModules.compactMap { module -> BibleReaderInstalledModuleSource? in
-            guard !isOwnedByNativeRegistration(module.info.name),
-                  categories.contains(module.info.category) else {
+        admittedRegistrations.compactMap { registration in
+            guard let source = registration.readableSource,
+                  categories.contains(source.info.category) else {
                 return nil
             }
-            return .sqlite(module)
+            return source
         }
-        return sword + sqlite
     }
 
     /**
-     Reports whether inclusive native registration owns one token before SQLite registration.
+     Returns every readable installed book that can implement Android's dictionary-key API.
 
-     - Parameter name: SQLite initials or another global lookup token.
-     - Returns: `true` when JSword's exact/full-name/case precedence selects any native row,
-       regardless of that row's current authorization state.
-     - Side effects: None.
-     - Failure modes: Empty and unmatched values return `false`.
+     Android automatic Strong's and morphology discovery feature-filters the global `Books`
+     inventory without first restricting book category. Every readable native SWORD book exposes
+     `getKey`; SQLite sources participate only when their dictionary backend can faithfully perform
+     exact key reads. Global native ownership still shadows a colliding SQLite registration.
+
+     - Returns: Readable key sources in JSword's installed-book TreeSet order.
+     - Side effects: None after resolver construction.
+     - Failure modes: Locked native owners and SQLite scripture/commentary backends are omitted;
+       neither can be replaced by a colliding secondary source.
      */
-    private func isOwnedByNativeRegistration(_ name: String) -> Bool {
-        Self.lookup(name, in: nativeRegistrations, info: { $0.info }) != nil
+    func dictionaryKeySources() -> [BibleReaderInstalledDictionarySource] {
+        jswordSortedRegistrations.compactMap { registration in
+            registration.readableSource?.explicitDictionaryKeySource
+        }
     }
 
-    /** Applies JSword exact-initials, exact-full-name, then case-insensitive lookup precedence. */
-    private static func lookup<Value>(
+    /**
+     Returns Android's enabled-word-lookup source inventory before preference filtering.
+
+     `SwordDocumentFacade.wordLookupDictionaries` filters `Books.installed().books`, whose source is
+     JSword's category/abbreviation/initials/name TreeSet. Keeping this projection distinct from
+     registration-order category inventories preserves Android's dictionary tab/result order when
+     module initials and configured abbreviations sort differently.
+
+     - Returns: Readable dictionary-category key sources in JSword TreeSet order. Glossaries remain
+       excluded because Android selected-word lookup accepts `BookCategory.DICTIONARY` only.
+     - Side effects: Replays immutable custom-driver admission and TreeSet projection on access.
+     - Failure modes: Locked, unreadable, wrong-category, and non-key-capable registrations are
+       omitted without falling through to shadowed sources.
+     */
+    func wordLookupDictionarySources() -> [BibleReaderInstalledDictionarySource] {
+        jswordSortedRegistrations.compactMap { registration in
+            guard registration.info.category == .dictionary else { return nil }
+            return registration.readableSource?.dictionary
+        }
+    }
+
+    /**
+     Returns inclusive admitted-book metadata without exposing locked content handles.
+
+     Android automatic dictionary discovery feature-filters `Books.installed()` before attempting
+     content access, so a locked compatible book still proves the document is installed and
+     suppresses the synthetic download book.
+
+     - Returns: Admitted native and SQLite metadata in JSword's installed-book TreeSet order.
+     - Side effects: Replays deterministic custom-driver admission over captured metadata.
+     - Failure modes: Driver candidates rejected during Android admission are omitted; locked native
+       books remain present only as immutable metadata.
+     */
+    func registeredBookMetadata() -> [ModuleInfo] {
+        jswordSortedRegistrations.map(\.info)
+    }
+
+    /**
+     Applies each JSword identity tier across the one combined global registration sequence.
+
+     - Parameter name: Persisted or routed installed-book initials/full-name token.
+     - Returns: Selected inclusive registration before readability projection.
+     - Side effects: None.
+     - Failure modes: Empty and unmatched identities return `nil`; SQLite rows with native-owned
+       initials are omitted before tier evaluation, preserving locked native collision ownership.
+     */
+    private func selectedRegistration(named name: String) -> GlobalRegistration? {
+        Self.lookup(name, in: admittedRegistrations)
+    }
+
+    /**
+     Applies pinned `Books.getBook` identity tiers over one admitted global registry.
+
+     - Parameters:
+       - name: Requested initials or full-name identity.
+       - registrations: Books in Android add order, before TreeSet projection.
+     - Returns: Last-added exact-initials owner, last-added exact-name owner, then the first
+       case-insensitive initials/name match in JSword TreeSet order; otherwise `nil`.
+     - Side effects: Loads the pinned Java case-fold table for the final tier.
+     - Failure modes: Empty or unmatched input returns `nil`; comparator-equal earlier books are
+       removed before the case-insensitive scan, matching `Books.addBook` replacement.
+     */
+    private static func lookup(
         _ name: String,
-        in values: [Value],
-        info: (Value) -> ModuleInfo
-    ) -> Value? {
-        values.first { javaStringEquals(info($0).name, name) }
-            ?? values.last { javaStringEquals(info($0).description, name) }
+        in registrations: [GlobalRegistration]
+    ) -> GlobalRegistration? {
+        registrations.last { Self.javaStringEquals($0.info.name, name) }
+            ?? registrations.last { Self.javaStringEquals($0.info.description, name) }
             ?? {
                 let identity = SQLiteDocumentIdentity(name)
-                return values.first {
-                    SQLiteDocumentIdentity(info($0).name) == identity
-                        || SQLiteDocumentIdentity(info($0).description) == identity
+                return Self.treeSetProjection(registrations)
+                    .sorted(by: Self.precedesInJSwordBookSet)
+                    .first {
+                    SQLiteDocumentIdentity($0.info.name) == identity
+                        || SQLiteDocumentIdentity($0.info.description) == identity
                 }
             }()
     }
 
-    /** Compares Java `String.equals` values by exact UTF-16 code units. */
+    /**
+     Orders registrations like `AbstractBookMetaData.compareTo` inside JSword's installed TreeSet.
+
+     - Parameters:
+       - lhs: First globally admitted installed book.
+       - rhs: Second globally admitted installed book.
+     - Returns: `true` when `lhs` sorts before `rhs` by category ordinal, abbreviation
+       compare-ignore-case, exact initials, then exact full name.
+     - Side effects: Loads SwordKit's pinned Android Java string table for abbreviation comparison.
+     - Failure modes: Comparator-equal values return `false`; `treeSetProjection` removes the earlier
+       equal row before production sorting, matching JSword replacement.
+     */
+    private static func precedesInJSwordBookSet(
+        _ lhs: GlobalRegistration,
+        _ rhs: GlobalRegistration
+    ) -> Bool {
+        jswordBookSetComparison(lhs, rhs) < 0
+    }
+
+    /**
+     Returns the pinned JSword installed-book comparator result for two registrations.
+
+     - Parameters:
+       - lhs: First admitted installed book.
+       - rhs: Second admitted installed book.
+     - Returns: A negative value when `lhs` precedes `rhs`, zero for TreeSet identity, or a positive
+       value when `rhs` precedes `lhs`.
+     - Side effects: Loads the pinned Android case-fold table for abbreviation comparison.
+     - Failure modes: None; every supported and unknown iOS category has a deterministic ordinal.
+     */
+    private static func jswordBookSetComparison(
+        _ lhs: GlobalRegistration,
+        _ rhs: GlobalRegistration
+    ) -> Int {
+        let leftCategory = jswordCategoryOrdinal(lhs.info.category)
+        let rightCategory = jswordCategoryOrdinal(rhs.info.category)
+        if leftCategory != rightCategory { return leftCategory - rightCategory }
+
+        let abbreviationOrder = SwordJavaStringIdentity.compareIgnoreCase(
+            lhs.abbreviation,
+            rhs.abbreviation
+        )
+        if abbreviationOrder != 0 { return abbreviationOrder }
+
+        let initialsOrder = javaStringCompare(lhs.info.name, rhs.info.name)
+        if initialsOrder != 0 { return initialsOrder }
+        return javaStringCompare(lhs.info.description, rhs.info.description)
+    }
+
+    /**
+     Replays TreeSet comparator-equality replacement in admitted add order.
+
+     JSword removes a comparator-equal installed book and its maps before adding the later row.
+     Keeping only the last such registration prevents automatic inventories and casefold scans from
+     exposing both rows or depending on Swift's unspecified equal-sort order.
+
+     - Parameter registrations: Books in Android registration/add order.
+     - Returns: Comparator-distinct books, retaining the last registration for every equal key.
+     - Side effects: None.
+     - Failure modes: None; an empty registry produces an empty projection.
+     */
+    private static func treeSetProjection(
+        _ registrations: [GlobalRegistration]
+    ) -> [GlobalRegistration] {
+        var treeValues: [GlobalRegistration] = []
+        for registration in registrations {
+            if let existing = treeValues.firstIndex(where: {
+                jswordBookSetComparison($0, registration) == 0
+            }) {
+                treeValues[existing] = registration
+            } else {
+                treeValues.append(registration)
+            }
+        }
+        return treeValues
+    }
+
+    /**
+     Maps one installed category to pinned JSword `BookCategory.ordinal()`.
+
+     - Parameter category: Actual selected-book category, including questionable/essay/image cases.
+     - Returns: Stable Android enum ordinal used as the first TreeSet comparison field.
+     - Side effects: None.
+     - Failure modes: None; every `ModuleCategory` has an explicit pinned ordinal.
+     */
+    private static func jswordCategoryOrdinal(_ category: ModuleCategory) -> Int {
+        switch category {
+        case .bible: return 0
+        case .dictionary: return 1
+        case .commentary: return 2
+        case .dailyDevotion: return 3
+        case .glossary: return 4
+        case .questionable: return 5
+        case .essays: return 6
+        case .images: return 7
+        case .map: return 8
+        case .generalBook: return 9
+        case .unknown: return 10
+        case .addon: return 11
+        }
+    }
+
+    /**
+     Compares two strings with Java `String.compareTo` unsigned UTF-16 semantics.
+
+     - Parameters:
+       - lhs: Left comparison operand.
+       - rhs: Right comparison operand.
+     - Returns: Negative, zero, or positive according to the first differing code unit or length.
+     - Side effects: None.
+     - Failure modes: None; malformed Unicode cannot occur in Swift `String` input.
+     */
+    private static func javaStringCompare(_ lhs: String, _ rhs: String) -> Int {
+        let left = Array(lhs.utf16)
+        let right = Array(rhs.utf16)
+        for (leftUnit, rightUnit) in zip(left, right) where leftUnit != rightUnit {
+            return Int(leftUnit) - Int(rightUnit)
+        }
+        return left.count - right.count
+    }
+
+    /**
+     Tests Java `String.equals` identity without Swift canonical-equivalence folding.
+
+     - Parameters:
+       - lhs: Left identity string.
+       - rhs: Right identity string.
+     - Returns: `true` only when both unsigned UTF-16 sequences are identical.
+     - Side effects: None.
+     - Failure modes: None.
+     */
     private static func javaStringEquals(_ lhs: String, _ rhs: String) -> Bool {
         lhs.utf16.elementsEqual(rhs.utf16)
     }

@@ -715,3 +715,6 @@
 
 /* Android shared translations */
 "delete_module_index_title" = "Axtarış indeksini sil";
+
+/* Android shared translations */
+"document_not_installed" = "Zəhmət olmazsa '%@' sənədini yükləyin";

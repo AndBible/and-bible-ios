@@ -736,12 +736,22 @@ extension BibleUIAgentDomainAdapter {
         return nil
     }
 
+    /**
+     Maps installed JSword categories into the agent document-category vocabulary.
+
+     - Parameter category: Actual installed-book category.
+     - Returns: Agent-facing category, or nil for add-on/unknown sources the document tool cannot
+       read. Questionable, Essays, and Images retain Android's generic-book navigation surface.
+     - Side effects: None.
+     - Failure modes: None; every known module category is handled explicitly.
+     */
     private func moduleCategory(_ category: ModuleCategory) -> BibleUIAgentDocumentCategory? {
         switch category {
         case .bible: return .bible
         case .commentary: return .commentary
         case .dictionary, .glossary: return .dictionary
-        case .generalBook, .dailyDevotion: return .generalBook
+        case .generalBook, .dailyDevotion, .questionable, .essays, .images:
+            return .generalBook
         case .map: return .maps
         case .addon, .unknown: return nil
         }

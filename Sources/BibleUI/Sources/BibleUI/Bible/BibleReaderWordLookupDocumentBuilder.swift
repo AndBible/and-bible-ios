@@ -10,6 +10,11 @@ import SwordKit
  selected-word lookup rules that Android implements in `LinkControl.lookupInDictionaries` and
  `SwordDocumentFacade.wordLookupDictionaries`: trim the selected text, remove trailing punctuation,
  search enabled plain dictionaries, and render successful matches as one transient multi-document.
+
+ - Side effects: Reads the deferred installed/preference inventory, performs one backend key lookup
+   per enabled source, and serializes actual source/key metadata into transient JSON.
+ - Failure modes: Empty normalized input, no enabled exact match, unreadable sources, and JSON/XML
+   projection failures return `nil` so the controller presents Android's not-found feedback.
  */
 struct BibleReaderWordLookupDocumentBuilder {
     /// Supplies currently enabled dictionary modules for selected-word lookup.
@@ -32,6 +37,12 @@ struct BibleReaderWordLookupDocumentBuilder {
         /// Source reading direction.
         let direction: String
 
+        /// Actual globally selected JSword book category.
+        let category: ModuleCategory
+
+        /// Actual selected-book features serialized into the fragment payload.
+        let features: ModuleFeatures
+
         /// Resolves the first matching dictionary key variant for this module.
         let lookup: ([String]) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult?
 
@@ -41,6 +52,11 @@ struct BibleReaderWordLookupDocumentBuilder {
          - Parameters:
            - name: SWORD module initials used for fragment identity.
            - abbreviation: User-facing short module label for tabs.
+           - v11n: Concrete SwordBook versification, or nil for dictionary backends.
+           - language: Actual source language with Android's English fallback already applied.
+           - direction: Actual source reading direction.
+           - category: Actual selected-book category.
+           - features: Actual selected-book features.
            - lookup: Closure that returns the exact dictionary entry for ordered key options.
          - Side effects: None during construction; the lookup closure may move a module cursor when
            invoked by `buildWordLookupMultiDocumentJSON(query:)`.
@@ -52,6 +68,8 @@ struct BibleReaderWordLookupDocumentBuilder {
             v11n: String? = nil,
             language: String = "en",
             direction: String = "ltr",
+            category: ModuleCategory = .dictionary,
+            features: ModuleFeatures = [],
             lookup: @escaping ([String]) -> BibleReaderStrongsDocumentBuilder.DictionaryLookupResult?
         ) {
             self.name = name
@@ -59,6 +77,8 @@ struct BibleReaderWordLookupDocumentBuilder {
             self.v11n = v11n
             self.language = language
             self.direction = direction
+            self.category = category
+            self.features = features
             self.lookup = lookup
         }
     }
@@ -149,9 +169,9 @@ struct BibleReaderWordLookupDocumentBuilder {
     /**
      Normalizes selected text before dictionary lookup using Android's `normalizeSearchText` rules.
 
-     Android trims whitespace and strips trailing punctuation before calling JSword `Book.getKey`.
-     iOS applies the same text transform, then compensates for libsword case handling through ordered
-     key variants during lookup.
+     Android trims whitespace and strips trailing punctuation before one JSword `Book.getKey` call.
+     iOS applies the same text transform and sends that single value to each backend; RawLD and
+     GenBook adapters own their respective JSword normalization instead of host-generated aliases.
 
      - Parameter text: Raw selected text from the web client.
      - Returns: Sanitized lookup key used against plain dictionary modules.
@@ -179,24 +199,40 @@ struct BibleReaderWordLookupDocumentBuilder {
         guard !enabledModules.isEmpty else { return nil }
 
         let keyOptions = wordLookupKeyOptions(for: query)
-        let escapedTitle = Self.escapeXML(query)
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
 
         for module in enabledModules {
             guard let lookup = module.lookup(keyOptions) else { continue }
-            let xml = lookup.isNativeHtml
-                ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(renderedText: lookup.renderedText)
-                : "<div><title type=\"x-gen\">\(escapedTitle)</title><div type=\"paragraph\">\(lookup.renderedText)</div></div>"
+            let xml = lookup.payloadReadyXML ?? (lookup.isNativeHtml
+                ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
+                    renderedText: lookup.renderedText
+                )
+                : BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
+                    rawEntry: lookup.rawEntry,
+                    renderedText: lookup.renderedText
+                ))
+            let fragmentFeatures = AndroidDictionaryFragmentMetadata.features(
+                from: module.features,
+                keyName: lookup.actualKey
+            )
             fragments.append((
                 xml: xml,
-                key: "\(module.name)--\(query)",
-                keyName: query,
+                key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                    bookInitials: module.name,
+                    keyOsisID: lookup.osisID
+                ),
+                keyName: lookup.actualKey,
+                osisRef: lookup.osisRef,
+                bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
+                    for: module.category
+                ),
                 bookInitials: module.name,
                 bookAbbreviation: module.abbreviation,
                 v11n: module.v11n,
                 language: module.language,
                 direction: module.direction,
-                features: OsisFeatures(),
+                features: fragmentFeatures,
+                hasStrongs: module.features.contains(.strongsNumbers),
                 isNativeHtml: lookup.isNativeHtml
             ))
         }
@@ -231,13 +267,16 @@ struct BibleReaderWordLookupDocumentBuilder {
                 !info.features.contains(.greekParse) &&
                 !disabledDictionaryNames.contains(info.name) {
             guard let module = swordManager.module(named: info.name) else { continue }
+            let source = BibleReaderInstalledDictionarySource.sword(module)
             result.append(
                 DictionaryModule(
                     name: module.info.name,
-                    abbreviation: String(module.info.name.prefix(10)),
-                    v11n: VersificationMapper.versificationName(for: module),
+                    abbreviation: source.abbreviation,
+                    v11n: source.versificationName,
                     language: module.info.language.isEmpty ? "en" : module.info.language,
                     direction: module.info.isRightToLeft ? "rtl" : "ltr",
+                    category: module.info.category,
+                    features: module.info.features,
                     lookup: { keyOptions in
                         BibleReaderStrongsDocumentBuilder.lookupInModule(
                             module,
@@ -260,38 +299,26 @@ struct BibleReaderWordLookupDocumentBuilder {
             v11n: source.versificationName,
             language: source.info.language.isEmpty ? "en" : source.info.language,
             direction: source.info.isRightToLeft ? "rtl" : "ltr",
+            category: source.info.category,
+            features: source.info.features,
             lookup: { source.lookup(keyOptions: $0) }
         )
     }
 
     /**
-     Produces lookup key variants that compensate for libsword case sensitivity.
+     Produces the one key Android passes to the selected dictionary's own `getKey` implementation.
 
-     Android delegates case normalization to JSword `Book.getKey`. SWORD on iOS can be stricter, so
-     the builder tries the selected spelling, lowercase, and title-case forms while still requiring
-     the shared dictionary lookup validator to confirm the resolved key.
+     RawLD case folding, `CaseSensitiveKeys`, Strong padding, and GenBook tiers belong to the backend
+     resolver. Adding host-generated lowercase/title-case aliases here could turn an Android miss
+     into content or select a distinct logical record.
 
      - Parameter query: Normalized selected-word lookup key.
-     - Returns: Ordered key variants to try against each dictionary module.
+     - Returns: The normalized selected-word query as one backend candidate.
      - Side effects: None.
      - Failure modes: Empty query returns empty variants.
      */
     private func wordLookupKeyOptions(for query: String) -> [String] {
-        [query, query.lowercased(), query.capitalized]
+        query.isEmpty ? [] : [query]
     }
 
-    /**
-     Escapes XML-sensitive characters in generated title text.
-
-     - Parameter text: Raw title text.
-     - Returns: XML-safe text for insertion into generated OSIS fragment XML.
-     - Side effects: None.
-     - Failure modes: None; all input strings produce deterministic escaped output.
-     */
-    private static func escapeXML(_ text: String) -> String {
-        text.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-    }
 }

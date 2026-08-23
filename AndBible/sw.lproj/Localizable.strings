@@ -1700,3 +1700,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Neno la siri halikufanya kazi, jaribu tena?";
+
+/* Android shared translations */
+"document_not_installed" = "Tafadhali pakua '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ haikupatikana katika hati %2$@.";

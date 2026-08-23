@@ -578,6 +578,12 @@ struct BibleReaderAnnotationPayloadFactory {
             return DocumentCategory.generalBook.rawValue
         case .map:
             return "MAPS"
+        case .questionable:
+            return "QUESTIONABLE"
+        case .essays:
+            return "ESSAYS"
+        case .images:
+            return "IMAGES"
         }
     }
 

@@ -1526,3 +1526,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "La phrase de passe n’a pas fonctionné, essayez à nouveau ?";
+
+/* Android shared translations */
+"document_not_installed" = "Merci de télécharger '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ n’a pas été trouvé dans le document %2$@.";

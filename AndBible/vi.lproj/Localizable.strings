@@ -1696,3 +1696,9 @@
 
 /* Android shared translations */
 "try_again_passphrase" = "Mật khẩu không đúng, thử lại?";
+
+/* Android shared translations */
+"document_not_installed" = "Vui lòng tải xuống '%@'";
+
+/* Android shared translations */
+"error_key_not_in_document2" = "%1$@ không được tìm thấy trong tài liệu %2$@.";

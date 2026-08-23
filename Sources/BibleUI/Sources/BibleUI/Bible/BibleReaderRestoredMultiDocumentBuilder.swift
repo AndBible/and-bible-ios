@@ -56,6 +56,9 @@ struct BibleReaderRestoredMultiDocumentBuilder {
     /// Active Bible identity used for Android `null:` current-Bible children.
     private let activeModuleName: String?
 
+    /// Android-owned localization lookup shared with Strong's live-document error projection.
+    private let localizedString: BibleReaderStrongsDocumentBuilder.LocalizedString
+
     /**
      Creates a restored-document builder for one reader pane.
 
@@ -67,22 +70,38 @@ struct BibleReaderRestoredMultiDocumentBuilder {
      */
     init(
         swordManager: SwordManager?,
-        activeModule: SwordModule?
+        activeModule: SwordModule?,
+        localizedString: @escaping BibleReaderStrongsDocumentBuilder.LocalizedString = bibleReaderAndroidDocumentLocalizedString
     ) {
         self.moduleResolver = BibleReaderInstalledModuleResolver(
             swordManager: swordManager,
             sqliteModules: []
         )
         self.activeModuleName = activeModule?.info.name
+        self.localizedString = localizedString
     }
 
-    /** Creates a restored-document builder from the pane's shared global module resolver. */
+    /**
+     Creates a restored-document builder from the pane's shared global module resolver.
+
+     - Parameters:
+       - moduleResolver: Captured Android-compatible installed-book registry used for concrete-class
+         dispatch and exact global identity lookup.
+       - activeModuleName: Current Bible initials used by persisted `null:` child references.
+       - localizedString: Android resource lookup used when an actual commentary-backed key source
+         returns the typed key-not-in-document failure.
+     - Side effects: None during construction; content reads and localization occur in `build`.
+     - Failure modes: Missing active or installed sources are represented by dropped children during
+       `build`; the initializer itself does not fail or substitute a different source.
+     */
     init(
         moduleResolver: BibleReaderInstalledModuleResolver,
-        activeModuleName: String?
+        activeModuleName: String?,
+        localizedString: @escaping BibleReaderStrongsDocumentBuilder.LocalizedString = bibleReaderAndroidDocumentLocalizedString
     ) {
         self.moduleResolver = moduleResolver
         self.activeModuleName = activeModuleName
+        self.localizedString = localizedString
     }
 
     /**
@@ -155,14 +174,21 @@ struct BibleReaderRestoredMultiDocumentBuilder {
             installedSource = activeModuleName.flatMap(moduleResolver.module(named:))
         }
 
-        if let scripture = installedSource?.scripture {
-            return restoredBibleFragment(
-                for: reference.key,
-                source: scripture
-            ).map { ($0, false) }
+        guard let installedSource else { return nil }
+        if let verseKeySource = installedSource.verseKeySource,
+           let fragment = restoredBibleFragment(
+               for: reference.key,
+               source: verseKeySource
+           ) {
+            return (
+                fragment,
+                AndroidDictionaryFragmentMetadata.usesStrongsContentType(
+                    installedSource.info.features
+                )
+            )
         }
 
-        guard let dictionary = installedSource?.dictionary else { return nil }
+        guard let dictionary = installedSource.explicitDictionaryKeySource else { return nil }
         return restoredDictionaryFragment(
             for: reference.key,
             source: dictionary
@@ -174,9 +200,10 @@ struct BibleReaderRestoredMultiDocumentBuilder {
 
      - Parameters:
        - persistedKey: Source passage saved in the Android `BookAndKey` child.
-       - sourceModule: SWORD Bible module that owns the child key.
-     - Returns: A Vue OSIS fragment preserving every source-canon verse and range in order, or
-       `nil` if the source Bible cannot resolve the complete passage.
+       - source: Globally selected native or SQLite verse-key book that owns the child key.
+     - Returns: A Vue OSIS fragment preserving every source-canon verse/range plus the actual
+       installed book's category and feature metadata, or `nil` when the source cannot resolve the
+       complete passage.
      - Side effects: Parses and reads the source passage while restoring the module cursor after
        exact-entry inspection.
      - Failure modes: Empty/malformed passages and partial source content return `nil` atomically.
@@ -199,12 +226,23 @@ struct BibleReaderRestoredMultiDocumentBuilder {
             parsedKeys: parsedKeys,
             source: source
         ) else { return nil }
-        return BibleReaderInstalledScriptureFragmentBuilder.build(
+        guard var fragment = BibleReaderInstalledScriptureFragmentBuilder.build(
             source: source,
             references: references,
             persistedOsisRef: persistedKey,
             requiresCompleteContent: true
+        ) else {
+            return nil
+        }
+        fragment.bookCategory = AndroidDictionaryFragmentMetadata.bookCategoryName(
+            for: source.info.category
         )
+        fragment.features = AndroidDictionaryFragmentMetadata.features(
+            from: source.info.features,
+            keyName: fragment.keyName
+        )
+        fragment.hasStrongs = source.info.features.contains(.strongsNumbers)
+        return fragment
     }
 
     /**
@@ -212,113 +250,73 @@ struct BibleReaderRestoredMultiDocumentBuilder {
 
      - Parameters:
        - key: Persisted child key for the source dictionary or glossary module.
-       - sourceModule: Installed source module that owns the key.
+       - source: Globally selected installed key source that owns the key.
      - Returns: A Vue fragment plus whether the aggregate document should use Strong's mode.
      - Side effects: Reads the source module and restores its cursor through
        `BibleReaderStrongsDocumentBuilder.lookupInModule`.
-     - Failure modes: Returns `nil` when the source module cannot resolve the key exactly enough to
-       satisfy the dictionary lookup contract.
+     - Failure modes: Returns `nil` when the source module's own `getKey` contract cannot resolve the
+       single persisted key; LinkControl Strong-family aliases are never synthesized during restore.
      */
     private func restoredDictionaryFragment(
         for key: String,
         source: BibleReaderInstalledDictionarySource
     ) -> (fragment: OsisFragment, usesStrongsContentType: Bool)? {
-        let keyOptions = restoredDictionaryLookupKeys(for: key, source: source)
-        guard let lookup = source.lookup(keyOptions: keyOptions) else {
+        guard let lookup = source.lookup(keyOptions: [key]) else {
             return nil
         }
-        let isStrongsDefinition = source.info.features.contains(.hebrewDef)
-            || source.info.features.contains(.greekDef)
-        let isMorphologyDefinition = source.info.features.contains(.hebrewParse)
-            || source.info.features.contains(.greekParse)
-        let keyName = isStrongsDefinition
-            ? BibleReaderStrongsDocumentBuilder.canonicalStrongsKeyName(
-                requested: key,
-                actualKey: lookup.actualKey,
-                rawEntry: lookup.rawEntry
-            )
-            : lookup.actualKey
-        let features = restoredDictionaryFeatures(for: source, keyName: keyName)
+        let keyName = lookup.actualKey
+        let features = AndroidDictionaryFragmentMetadata.features(
+            from: source.info.features,
+            keyName: keyName
+        )
         let strongsLinkPrefix = BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(forModuleName: source.info.name)
             ?? BibleReaderStrongsDocumentBuilder.strongsLinkPrefix(for: key)
-        let xml = lookup.isNativeHtml
-            ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
+        let xml: String
+        if lookup.payloadFailure == .keyNotInDocument {
+            xml = BibleReaderStrongsDocumentBuilder.keyNotInDocumentXML(
+                keyName: keyName,
+                moduleInitials: source.info.name,
+                localizedString: localizedString
+            )
+        } else if let payloadReadyXML = lookup.payloadReadyXML {
+            xml = payloadReadyXML
+        } else if lookup.isNativeHtml {
+            xml = BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
                 renderedText: lookup.renderedText,
                 strongsLinkPrefix: strongsLinkPrefix
             )
-            : BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
+        } else {
+            xml = BibleReaderStrongsDocumentBuilder.buildDictionaryEntryXML(
                 rawEntry: lookup.rawEntry,
                 renderedText: lookup.renderedText,
-                fallbackTitle: keyName,
                 strongsLinkPrefix: strongsLinkPrefix
             )
+        }
         let fragment = OsisFragment(
             xml: xml,
-            key: "\(source.info.name)--\(keyName)",
+            key: AndroidDictionaryFragmentMetadata.fragmentKey(
+                bookInitials: source.info.name,
+                keyOsisID: lookup.osisID
+            ),
             keyName: keyName,
             v11n: source.versificationName,
-            bookCategory: DocumentCategory.dictionary.rawValue,
+            bookCategory: AndroidDictionaryFragmentMetadata.bookCategoryName(
+                for: source.info.category
+            ),
             bookInitials: source.info.name,
             bookAbbreviation: source.abbreviation,
-            osisRef: keyName,
+            osisRef: lookup.osisRef,
             isNewTestament: false,
             features: features,
-            hasStrongs: features.type != nil,
+            hasStrongs: source.info.features.contains(.strongsNumbers),
             ordinalRange: nil,
             language: source.info.language.isEmpty ? "en" : source.info.language,
             direction: source.info.isRightToLeft ? "rtl" : "ltr",
             isNativeHtml: lookup.isNativeHtml
         )
-        return (fragment, isStrongsDefinition || isMorphologyDefinition)
-    }
-
-    /**
-     Chooses lookup keys for a restored dictionary child.
-
-     Strong's modules need the same key-family expansion used by live Strong's links because
-     persisted Android keys may be numeric while local modules expect prefixed or zero-stripped
-     variants. Plain dictionaries use the persisted key directly, matching Android's
-     `book.getKey(savedKey)` restore.
-
-     - Parameters:
-       - key: Persisted child key from Android's `BookAndKeyList.osisRef`.
-       - sourceModule: Dictionary or glossary module that owns the key.
-     - Returns: Ordered lookup candidates to try against `sourceModule`.
-     - Side effects: None.
-     - Failure modes: None; lookup failure is handled by the caller.
-     */
-    private func restoredDictionaryLookupKeys(
-        for key: String,
-        source: BibleReaderInstalledDictionarySource
-    ) -> [String] {
-        if source.info.features.contains(.hebrewDef)
-            || source.info.features.contains(.greekDef) {
-            return BibleReaderStrongsDocumentBuilder.strongsLookupKeyOptions(for: key)
-        }
-        return [key]
-    }
-
-    /**
-     Maps restored dictionary module features into Vue `OsisFeatures`.
-
-     - Parameters:
-       - sourceModule: Dictionary/glossary module that produced the fragment.
-       - keyName: Canonical key name resolved from the source module.
-     - Returns: Feature metadata for Strong's dictionaries, or an empty feature set for plain
-       dictionaries and morphology modules.
-     - Side effects: None.
-     - Failure modes: None.
-     */
-    private func restoredDictionaryFeatures(
-        for source: BibleReaderInstalledDictionarySource,
-        keyName: String
-    ) -> OsisFeatures {
-        if source.info.features.contains(.hebrewDef) {
-            return OsisFeatures(type: "hebrew", keyName: keyName)
-        }
-        if source.info.features.contains(.greekDef) {
-            return OsisFeatures(type: "greek", keyName: keyName)
-        }
-        return OsisFeatures()
+        return (
+            fragment,
+            AndroidDictionaryFragmentMetadata.usesStrongsContentType(source.info.features)
+        )
     }
 }

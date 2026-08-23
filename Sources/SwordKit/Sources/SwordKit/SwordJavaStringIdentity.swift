@@ -40,4 +40,42 @@ public struct SwordJavaStringIdentity: Hashable, Sendable {
     public static func equalsIgnoreCase(_ lhs: String, _ rhs: String) -> Bool {
         SwordJavaStringIdentity(lhs) == SwordJavaStringIdentity(rhs)
     }
+
+    /**
+     Compares two strings with Java's non-locale `String.compareToIgnoreCase` ordering.
+
+     - Parameters:
+       - lhs: First Java UTF-16 string.
+       - rhs: Second Java UTF-16 string.
+     - Returns: Negative, zero, or positive according to the first differing Android-folded Java
+       `char`, then UTF-16 length.
+     - Side effects: Loads the bundled Android compatibility table on first use.
+     - Failure modes: Traps for a missing/corrupt generated resource through identity creation.
+     */
+    public static func compareIgnoreCase(_ lhs: String, _ rhs: String) -> Int {
+        let left = SwordJavaStringIdentity(lhs).foldedUTF16
+        let right = SwordJavaStringIdentity(rhs).foldedUTF16
+        for (leftUnit, rightUnit) in zip(left, right) where leftUnit != rightUnit {
+            return Int(leftUnit) - Int(rightUnit)
+        }
+        return left.count - right.count
+    }
+
+    /**
+     Removes edge characters with Java `String.trim()` UTF-16 semantics.
+
+     - Parameter value: Exact generated-config or Java boundary string.
+     - Returns: The substring after removing leading/trailing code units `<= U+0020`; NBSP and all
+       higher Unicode whitespace remain unchanged.
+     - Side effects: None.
+     - Failure modes: None; valid Swift strings round-trip through their UTF-16 representation.
+     */
+    public static func trim(_ value: String) -> String {
+        let units = Array(value.utf16)
+        var start = 0
+        var end = units.count
+        while start < end, units[start] <= 0x20 { start += 1 }
+        while end > start, units[end - 1] <= 0x20 { end -= 1 }
+        return String(decoding: units[start..<end], as: UTF16.self)
+    }
 }
