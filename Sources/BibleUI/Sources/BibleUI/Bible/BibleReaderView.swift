@@ -1174,7 +1174,19 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Main reader layout before transient overlays and presentation modifiers are attached.
+    /**
+     Builds the persistent reader chrome and split-pane hierarchy before transient presentations.
+
+     On iOS the hierarchy ignores keyboard safe-area contraction so presenting a focused Vue editor
+     cannot resize the split container or reconstruct pane hosts. Each child `BibleWebViewController`
+     still follows `UIKeyboardLayoutGuide`, which alone resizes the interactive web surface above the
+     docked keyboard, matching Android's IME-inset behavior.
+
+     - Returns: Reader header, split content, speech controls, and window strip in one stable stack.
+     - Side Effects: None during construction; child views retain their documented lifecycle effects.
+     - Failure Modes: Floating keyboards intentionally do not contract the web surface; UIKit/WebKit
+       retain their standard cursor-scrolling behavior.
+     */
     @ViewBuilder
     private var readerScreenContent: some View {
         let surfacePalette = readerThemeSurfacePalette
@@ -1208,6 +1220,9 @@ public struct BibleReaderView: View {
                 )
             }
         }
+        #if os(iOS)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        #endif
         .foregroundStyle(surfacePalette.foregroundColor)
         .background(surfacePalette.backgroundColor.ignoresSafeArea())
         .androidAnchoredPopupMenu(
@@ -4159,9 +4174,10 @@ public struct BibleReaderView: View {
     /**
      Lays out the visible reading panes and separators for the active workspace.
 
-     The layout orientation follows the current geometry and the workspace reverse-split setting.
-     Pane sizes are derived from persisted `layoutWeight` values so resizing survives navigation
-     and relayout.
+     On iOS the layout orientation follows the owning window bounds and the workspace reverse-split
+     setting, while current child geometry controls only pane extents. This mirrors Android
+     configuration orientation so keyboard insets cannot change the axis. Pane sizes are derived from
+     persisted `layoutWeight` values so resizing survives navigation and relayout.
      */
     private var splitContent: some View {
         BibleReaderSplitContent(

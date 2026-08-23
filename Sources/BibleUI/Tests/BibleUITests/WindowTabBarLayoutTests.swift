@@ -255,6 +255,55 @@ final class WindowTabBarLayoutTests: XCTestCase {
     }
 
     /**
+     Protects Android's configuration-orientation split contract while the software keyboard is open.
+
+     Android chooses `SplitBibleArea` orientation from `Configuration.orientation`; IME insets resize
+     content but cannot turn portrait into landscape. The iOS pure resolver receives stable owning-
+     window bounds, while the keyboard-adjusted local extent remains relevant only to pane sizing.
+
+     - Setup: Uses the reported iPhone portrait window (402x874) and its keyboard-reduced reader height
+       (297 points), plus a true landscape window and reverse-split preference.
+     - Expected Result: Portrait remains vertical across the reduced extent, real landscape resolves
+       horizontal, reverse mode deterministically inverts both, and local extent sizing still works.
+     - Failure Meaning: Focusing a note can reconstruct the pane hierarchy and detach its WebView.
+     - Side Effects: None; this test executes only pure geometry functions.
+     */
+    func testBibleReaderSplitAxisUsesStableWindowGeometryAcrossKeyboardResize() {
+        let portraitWindow = CGSize(width: 402, height: 874)
+        let landscapeWindow = CGSize(width: 874, height: 402)
+        let keyboardReducedPaneExtent = BibleReaderSplitLayout.availablePaneExtent(
+            totalExtent: 297,
+            paneCount: 2
+        )
+
+        XCTAssertFalse(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: portraitWindow,
+                reverseSplitMode: false
+            )
+        )
+        XCTAssertTrue(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: portraitWindow,
+                reverseSplitMode: true
+            )
+        )
+        XCTAssertTrue(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: landscapeWindow,
+                reverseSplitMode: false
+            )
+        )
+        XCTAssertFalse(
+            BibleReaderSplitLayout.isHorizontal(
+                stableWindowSize: landscapeWindow,
+                reverseSplitMode: true
+            )
+        )
+        XCTAssertEqual(keyboardReducedPaneExtent, 293, accuracy: 0.001)
+    }
+
+    /**
      Guards pane-menu projections against bypassing Android's effective pin semantics.
 
      A failure means auto-pin can render or group pane-menu entries using stale raw pin values even

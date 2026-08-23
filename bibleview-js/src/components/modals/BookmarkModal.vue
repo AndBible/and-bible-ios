@@ -50,6 +50,7 @@
         :text="bookmarkNotes || ''"
         :content-type="bookmark.notesContentType"
         :note-editor-context="{ entityType: 'BOOKMARK_NOTE', entityId: bookmark.id }"
+        :editor-accessibility-label="bookmarkNoteEditorAccessibilityLabel"
         @save="changeNote"
         show-placeholder
         :edit-directly="editDirectly"
@@ -107,7 +108,8 @@
  *
  * @remarks The shared `bookmark_clicked` event also carries AI document markers. Those records are
  * navigation-only and bypass modal state through the exact native document/key bridge command.
- * Normal bookmark note edits retain the existing save-on-close behavior.
+ * Normal bookmark note edits retain the existing save-on-close behavior, and the active editor
+ * receives a localized reference-specific accessible name for VoiceOver and keyboard automation.
  */
 import ModalDialog from "@/components/modals/ModalDialog.vue";
 import {setupEventBusListener} from "@/eventbus";
@@ -195,6 +197,34 @@ function closeBookmark() {
 }
 
 const {adjustedColor, strings, sprintf, formatTimestamp} = useCommon();
+
+/**
+ * Builds the localized accessible name for the selected bookmark's note editor.
+ *
+ * @returns A reference-specific editor label, or undefined while no normal bookmark is selected.
+ * @remarks Bible bookmarks use their full verse range. Generic bookmarks use their source key name
+ * and fall back to module metadata. The computed value has no side effects and updates whenever the
+ * shared bookmark map publishes a replacement record.
+ */
+const bookmarkNoteEditorAccessibilityLabel = computed(() => {
+    const selectedBookmark = bookmark.value;
+    if (!selectedBookmark) return undefined;
+
+    let reference: string;
+    if (isBibleBookmark(selectedBookmark)) {
+        reference = selectedBookmark.verseRange ||
+            selectedBookmark.verseRangeOnlyNumber ||
+            selectedBookmark.verseRangeAbbreviated;
+    } else if (isGenericBookmark(selectedBookmark)) {
+        reference = selectedBookmark.keyName ||
+            selectedBookmark.bookName ||
+            selectedBookmark.bookInitials;
+    } else {
+        return undefined;
+    }
+
+    return sprintf(strings.myNotesEditorAccessibilityLabel, reference);
+});
 
 function myNotesHref(bookmark: BaseBookmark): string {
     if (!isBibleBookmark(bookmark)) return "my-notes://";

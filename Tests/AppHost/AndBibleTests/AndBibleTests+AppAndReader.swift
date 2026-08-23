@@ -70,7 +70,13 @@ extension AndBibleTests {
     func testReaderWebViewOwnsOpaqueResolvedBackgroundAcrossAllNativeSurfaces() {
         let bridge = BibleBridge()
         let webView = WKWebView()
-        let controller = BibleWebViewController(webView: webView, bridge: bridge)
+        let session = BibleWebViewSession(bridge: bridge)
+        _ = session.webView { webView }
+        let controller = BibleWebViewController(
+            webView: webView,
+            bridge: bridge,
+            session: session
+        )
         let backgroundColorInt = Int(Int32(bitPattern: 0xFFDDE7FA))
         let expectedColor = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
         controller.backgroundColorInt = backgroundColorInt

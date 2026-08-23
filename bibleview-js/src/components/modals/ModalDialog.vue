@@ -17,7 +17,7 @@
 
 <template>
   <teleport to="#modals">
-    <div v-if="blocking" @click.stop="$emit('close')" class="modal-backdrop"/>
+    <div v-if="blocking" @click.stop="closeModal" class="modal-backdrop"/>
     <div :class="{blocking}">
       <div
           ref="modal"
@@ -34,7 +34,14 @@
           <div class="modal-toolbar">
             <slot name="buttons">
               <slot name="extra-buttons"/>
-              <button class="modal-action-button right" @touchstart.stop @click.stop="$emit('close')">
+              <button
+                  class="modal-action-button right"
+                  :aria-label="strings.cancel"
+                  :title="strings.cancel"
+                  @touchstart.stop
+                  @mousedown.stop.prevent
+                  @click.stop="closeModal"
+              >
                 <FontAwesomeIcon icon="times"/>
               </button>
             </slot>
@@ -53,6 +60,28 @@
   </teleport>
 </template>
 <script setup lang="ts">
+/**
+ * Presents the shared draggable reader modal and owns its standard dismissal control.
+ *
+ * @param blocking Whether the modal owns a backdrop and blocks interaction with reader content.
+ * @param wide Whether the modal uses the wider reader-dialog geometry.
+ * @param edit Whether body padding is removed for an embedded editor.
+ * @param locateTop Whether the modal anchors above its normal bottom position.
+ * @param limit Whether the modal body uses the bounded compact height.
+ * @slot title-div Complete custom header content.
+ * @slot title Default title text when no custom header is supplied.
+ * @slot extra-buttons Controls rendered before the standard localized dismissal button.
+ * @slot buttons Complete replacement for the standard toolbar controls.
+ * @slot default Modal body content.
+ * @slot footer Optional footer content.
+ * @fires close When the backdrop, Escape key, registered modal-stack callback, or localized
+ * standard dismissal control closes the modal. Modal-owned focus is blurred first, and dismissal
+ * waits one browser frame when necessary so editor updates and keyboard resignation can settle.
+ * @remarks Registration mutates the shared modal stack, resize observation keeps the card within
+ * the live reader viewport, and listeners, observers, and pending close frames are disposed during
+ * unmount. Missing host geometry leaves placement at its existing CSS fallback without changing
+ * dismissal behavior.
+ */
 import {inject, nextTick, onMounted, onUnmounted, ref, shallowRef, watch} from "vue";
 import {useCommon} from "@/composables";
 import {draggableElement, setupDocumentEventListener, setupWindowEventListener,} from "@/utils";
@@ -81,6 +110,56 @@ const modal = shallowRef<HTMLElement | null>(null);
 const header = ref(null);
 const ready = ref(false);
 
+/**
+ * Owns the single deferred close callback while WebKit commits modal focus resignation.
+ *
+ * `null` means no close is pending. A live handle coalesces repeated requests and is cancelled on
+ * unmount so an obsolete modal cannot emit `close` into replacement parent state.
+ */
+let closeFrame: number | null = null;
+
+/**
+ * Resigns the currently focused modal descendant without disturbing reader focus behind it.
+ *
+ * @returns `true` when modal-owned focus was blurred; otherwise `false`.
+ * @remarks The toolbar prevents mouse-down focus transfer so click-time focus remains on the
+ * editor. A missing modal reference, a non-HTML active element, or focus outside this modal is
+ * intentionally ignored.
+ */
+function blurModalOwnedFocus(): boolean {
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement && modal.value?.contains(activeElement)) {
+        activeElement.blur();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Resigns modal-owned focus before notifying the parent that dismissal was requested.
+ *
+ * @returns Nothing.
+ * @remarks `HTMLElement.blur()` dispatches the editor's existing save-on-blur work before the
+ * close event can unmount modal content, and it asks WebKit to resign the software keyboard. When
+ * focus was resigned, one animation frame lets WebKit commit that first-responder transition
+ * before Vue removes the editor. Repeated close requests during that boundary emit only once.
+ */
+function closeModal() {
+    if (closeFrame !== null) return;
+
+    if (!blurModalOwnedFocus()) {
+        emit("close");
+        return;
+    }
+
+    const frameHandle = requestAnimationFrame(() => {
+        if (closeFrame !== frameHandle) return;
+        emit("close");
+        closeFrame = null;
+    });
+    closeFrame = frameHandle;
+}
+
 async function resetPosition(horizontal = false) {
     const m = modal.value!;
     if (horizontal) {
@@ -101,12 +180,12 @@ async function resetPosition(horizontal = false) {
 }
 
 const {register} = inject(modalKey)!;
-register({blocking: props.blocking, close: () => emit("close")});
+register({blocking: props.blocking, close: closeModal});
 
 setupWindowEventListener("resize", () => resetPosition(true));
 setupDocumentEventListener("keyup", (event: KeyboardEvent) => {
     if (event.key === "Escape") {
-        emit("close");
+        closeModal();
     }
 });
 
@@ -128,10 +207,14 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    if (closeFrame !== null) {
+        cancelAnimationFrame(closeFrame);
+        closeFrame = null;
+    }
     observer.disconnect();
 });
 
-const {appSettings} = useCommon()
+const {appSettings, strings} = useCommon()
 
 watch(() => [appSettings.bottomOffset, appSettings.topOffset], () => resetPosition());
 
