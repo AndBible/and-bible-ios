@@ -378,6 +378,64 @@ describe("reader modal accessibility", () => {
     });
 
     /**
+     * Protects Android dialog reachability when the software keyboard shrinks the WebView.
+     *
+     * The mounted production modal receives the same top and bottom offsets as BibleView. Its
+     * layout probes emulate WebKit returning a negative bottom-anchored top after an IME resize.
+     * Dispatching the real resize listener must clamp the card to the usable top edge and clear the
+     * temporary bottom anchor. Failure means the visible card and localized Cancel control can move
+     * completely offscreen while stale accessibility nodes leave the reader blocked.
+     */
+    it("keeps the modal header inside the resized IME viewport", async () => {
+        vi.stubGlobal("ResizeObserver", class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        });
+        vi.spyOn(window, "innerHeight", "get").mockReturnValue(583);
+        const register = vi.fn();
+        const appSettings = {
+            bottomOffset: 100,
+            errorBox: false,
+            monochromeMode: false,
+            nightMode: false,
+            notesContentType: "MARKDOWN",
+            topOffset: 50,
+        };
+        const wrapper = mount(ModalDialog, {
+            attachTo: document.body,
+            props: {wide: true},
+            slots: {default: '<input data-test="modal-editor">'},
+            global: {
+                provide: {
+                    ...commonProviders({}),
+                    [appSettingsKey]: appSettings,
+                    [modalKey]: {
+                        register,
+                        closeModals: vi.fn(),
+                        modalOpen: ref(false),
+                    },
+                },
+                stubs: {
+                    FontAwesomeIcon: FontAwesomeIconStub,
+                    teleport: true,
+                },
+            },
+        });
+        await flushPromises();
+
+        const modal = wrapper.get(".modal-content").element as HTMLElement;
+        vi.spyOn(modal, "offsetTop", "get").mockReturnValue(-180);
+        vi.spyOn(modal, "offsetHeight", "get").mockReturnValue(500);
+        window.dispatchEvent(new Event("resize"));
+        await flushPromises();
+
+        expect(modal.style.top).toBe("50px");
+        expect(modal.style.bottom).toBe("");
+        wrapper.unmount();
+    });
+
+    /**
      * Protects focus resignation and save ordering for every ModalDialog-owned close path.
      *
      * Each case focuses a real input inside the mounted modal, then activates the toolbar,

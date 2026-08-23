@@ -160,6 +160,18 @@ function closeModal() {
     closeFrame = frameHandle;
 }
 
+/**
+ * Repositions the modal inside the live WebView viewport after geometry or toolbar changes.
+ *
+ * @param horizontal Whether to restore the centered horizontal anchor before measuring.
+ * @returns A promise that settles after Vue and WebKit have applied the final absolute position.
+ * @remarks The Android reader keeps dialog chrome reachable when the IME resizes its WebView. The
+ * preferred top or bottom anchor is preserved while it fits. If the resized viewport would place
+ * the card outside its usable top/bottom offsets, the top is clamped so the complete card remains
+ * visible when possible and its header remains reachable when the card is taller than the viewport.
+ * This mutates only the modal element's inline geometry and the exposed measured height. Missing or
+ * non-finite native offsets fail closed to the physical WebView edges; the function does not throw.
+ */
 async function resetPosition(horizontal = false) {
     const m = modal.value!;
     if (horizontal) {
@@ -167,14 +179,28 @@ async function resetPosition(horizontal = false) {
     }
 
     if (props.locateTop) {
+        m.style.bottom = "";
         m.style.top = `calc(var(--top-offset) + var(--modal-top))`;
     } else {
         m.style.top = "";
         m.style.bottom = `calc(var(--bottom-offset) + var(--modal-top))`;
-        await nextTick();
-        m.style.top = `${m.offsetTop}px`;
-        m.style.bottom = "";
     }
+
+    await nextTick();
+    const topOffset = Number.isFinite(appSettings.topOffset)
+        ? Math.max(0, appSettings.topOffset)
+        : 0;
+    const bottomOffset = Number.isFinite(appSettings.bottomOffset)
+        ? Math.max(0, appSettings.bottomOffset)
+        : 0;
+    const viewportHeight = Number.isFinite(window.innerHeight)
+        ? Math.max(0, window.innerHeight)
+        : 0;
+    const viewportBottom = Math.max(topOffset, viewportHeight - bottomOffset);
+    const maximumTop = Math.max(topOffset, viewportBottom - m.offsetHeight);
+    const clampedTop = Math.min(Math.max(m.offsetTop, topOffset), maximumTop);
+    m.style.top = `${clampedTop}px`;
+    m.style.bottom = "";
     await nextTick();
     height.value = m.clientHeight;
 }
