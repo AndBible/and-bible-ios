@@ -15,6 +15,98 @@ import SwordKit
  */
 enum SearchTranslationSelectionPolicy {
     /**
+     Sorts and de-duplicates Search translation modules using Android's initials-backed row order.
+
+     Android builds the translation multiselect in abbreviation order. At this boundary
+     `ModuleInfo.name` is the installed initials fallback retained by the Search inventory. Exact
+     duplicate initials are emitted once because persisted selection is initials-keyed, while
+     NFC/NFD and case variants remain independent.
+
+     - Parameter modules: Installed Bible modules available to Search.
+     - Returns: Deterministic row order with one module per exact UTF-16 initials identity.
+     - Side effects: None.
+     - Failure modes: None; empty input returns an empty array.
+     */
+    static func androidSortedModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
+        var seen = SwordJavaExactStringSet()
+        return modules.enumerated().sorted { lhs, rhs in
+            let lhsUnits = SwordJavaExactStringIdentity(lhs.element.name).utf16CodeUnits
+            let rhsUnits = SwordJavaExactStringIdentity(rhs.element.name).utf16CodeUnits
+            if lhsUnits != rhsUnits {
+                return lhsUnits.lexicographicallyPrecedes(rhsUnits)
+            }
+            return lhs.offset < rhs.offset
+        }.compactMap { entry in
+            seen.insert(entry.element.name) ? entry.element : nil
+        }
+    }
+
+    /**
+     Resolves selected Search module names in Android commit/search order.
+
+     Android collects selected rows from its ordered dialog and moves the current document to the
+     front with `ensurePrimaryDocumentFirst()`. Unknown persisted names remain after installed rows
+     in deterministic Java UTF-16 order so schema-preserved selections do not depend on set order.
+
+     - Parameters:
+       - selectedModuleNames: Committed exact module initials selected for Search.
+       - primaryModuleName: Current reader/search initials, preferred first when selected.
+       - installedModules: Installed Bible modules used to derive dialog order.
+     - Returns: Selected initials with the primary first and each exact identity emitted once.
+     - Side effects: None.
+     - Failure modes: Empty selection and a missing primary return an empty array.
+     */
+    static func orderedSelection(
+        selectedModuleNames: SwordJavaExactStringSet,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo]
+    ) -> [String] {
+        var effectiveSelection = selectedModuleNames
+        if effectiveSelection.isEmpty, let primaryModuleName {
+            effectiveSelection.insert(primaryModuleName)
+        }
+
+        var orderedNames = androidSortedModules(installedModules)
+            .map(\.name)
+            .filter { effectiveSelection.contains($0) }
+        orderedNames.append(contentsOf: effectiveSelection.subtracting(orderedNames).values)
+
+        if let primaryModuleName,
+           let primaryIndex = orderedNames.firstIndex(where: {
+               SwordJavaStringIdentity.equals($0, primaryModuleName)
+           }) {
+            orderedNames.remove(at: primaryIndex)
+            orderedNames.insert(primaryModuleName, at: 0)
+        }
+        return orderedNames
+    }
+
+    /**
+     Applies Android's non-empty Search translation dialog commit rule.
+
+     - Parameters:
+       - previousModuleNames: Selection committed before the dialog opened.
+       - draftModuleNames: Exact checked identities in the current dialog draft.
+       - primaryModuleName: Current reader/search initials, preferred first.
+       - installedModules: Installed Bible modules used to derive dialog order.
+     - Returns: Ordered draft selection, or the previous selection when the draft is empty.
+     - Side effects: None.
+     - Failure modes: If previous and draft selections and the primary are absent, returns empty.
+     */
+    static func committedSelection(
+        previousModuleNames: SwordJavaExactStringSet,
+        draftModuleNames: SwordJavaExactStringSet,
+        primaryModuleName: String?,
+        installedModules: [ModuleInfo]
+    ) -> [String] {
+        orderedSelection(
+            selectedModuleNames: draftModuleNames.isEmpty ? previousModuleNames : draftModuleNames,
+            primaryModuleName: primaryModuleName,
+            installedModules: installedModules
+        )
+    }
+
+    /**
      Filters the installed Bible inventory for one Search presentation.
 
      - Parameters:
@@ -55,7 +147,9 @@ enum SearchTranslationSelectionPolicy {
         isIndexed: (String) -> Bool
     ) -> String? {
         if let currentModuleName,
-           candidateModules.contains(where: { $0.name == currentModuleName }) {
+           candidateModules.contains(where: {
+               SwordJavaStringIdentity.equals($0.name, currentModuleName)
+           }) {
             return currentModuleName
         }
         guard isStrongsFindAll else { return nil }
@@ -81,23 +175,22 @@ enum SearchTranslationSelectionPolicy {
        effective selection returns an empty array for the caller to surface explicitly.
      */
     static func strongsOrderedSelection(
-        selectedModuleNames: Set<String>,
+        selectedModuleNames: SwordJavaExactStringSet,
         rememberedOrder: [String],
         candidateModules: [ModuleInfo]
     ) -> [String] {
-        let eligibleNames = Set(candidateModules.map(\.name))
-        var seen = Set<String>()
+        let eligibleNames = SwordJavaExactStringSet(candidateModules.map(\.name))
+        var seen = SwordJavaExactStringSet()
         var ordered = rememberedOrder.filter {
             selectedModuleNames.contains($0)
                 && eligibleNames.contains($0)
-                && seen.insert($0).inserted
+                && seen.insert($0)
         }
-        ordered.append(contentsOf: candidateModules
-            .sorted { $0.name < $1.name }
+        ordered.append(contentsOf: androidSortedModules(candidateModules)
             .map(\.name)
             .filter {
                 selectedModuleNames.contains($0)
-                    && seen.insert($0).inserted
+                    && seen.insert($0)
             })
         return ordered
     }

@@ -16,7 +16,7 @@ struct SearchTranslationPickerDraftState: Equatable {
     var isPresented: Bool
 
     /// Temporary selected module abbreviations while the picker is presented.
-    var pendingSelection: Set<String>
+    var pendingSelection: SwordJavaExactStringSet
 
     /**
      Creates a draft state value.
@@ -28,7 +28,7 @@ struct SearchTranslationPickerDraftState: Equatable {
      - Side effects: None.
      - Failure modes: None.
      */
-    init(isPresented: Bool = false, pendingSelection: Set<String> = []) {
+    init(isPresented: Bool = false, pendingSelection: SwordJavaExactStringSet = []) {
         self.isPresented = isPresented
         self.pendingSelection = pendingSelection
     }
@@ -46,13 +46,13 @@ struct SearchTranslationPickerDraftState: Equatable {
        committed selection through `committedSelection(...)`.
      */
     static func opened(
-        selectedModuleNames: Set<String>,
+        selectedModuleNames: SwordJavaExactStringSet,
         primaryModuleName: String?,
         installedModules: [ModuleInfo]
     ) -> SearchTranslationPickerDraftState {
         SearchTranslationPickerDraftState(
             isPresented: true,
-            pendingSelection: Set(SearchView.androidOrderedSelectedSearchModuleNames(
+            pendingSelection: SwordJavaExactStringSet(SearchTranslationSelectionPolicy.orderedSelection(
                 selectedModuleNames: selectedModuleNames,
                 primaryModuleName: primaryModuleName,
                 installedModules: installedModules
@@ -103,8 +103,10 @@ struct SearchTranslationPickerDraftState: Equatable {
      - Failure modes: Empty module lists leave the draft empty.
      */
     func toggledAll(moduleNames: [String]) -> SearchTranslationPickerDraftState {
-        let allModuleNames = Set(moduleNames)
-        let nextSelection = pendingSelection.count == allModuleNames.count ? [] : allModuleNames
+        let allModuleNames = SwordJavaExactStringSet(moduleNames)
+        let hasEveryVisibleModule = !allModuleNames.isEmpty
+            && allModuleNames.values.allSatisfy(pendingSelection.contains)
+        let nextSelection: SwordJavaExactStringSet = hasEveryVisibleModule ? [] : allModuleNames
         return SearchTranslationPickerDraftState(
             isPresented: isPresented,
             pendingSelection: nextSelection
@@ -124,11 +126,11 @@ struct SearchTranslationPickerDraftState: Equatable {
      - Failure modes: None.
      */
     func committedSelection(
-        previousModuleNames: Set<String>,
+        previousModuleNames: SwordJavaExactStringSet,
         primaryModuleName: String?,
         installedModules: [ModuleInfo]
     ) -> (orderedModuleNames: [String], draftState: SearchTranslationPickerDraftState) {
-        let orderedSelection = SearchView.androidCommittedTranslationSelection(
+        let orderedSelection = SearchTranslationSelectionPolicy.committedSelection(
             previousModuleNames: previousModuleNames,
             draftModuleNames: pendingSelection,
             primaryModuleName: primaryModuleName,

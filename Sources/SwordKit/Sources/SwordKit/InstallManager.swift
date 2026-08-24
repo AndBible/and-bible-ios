@@ -8,8 +8,14 @@ public struct RemoteSource: Sendable, Identifiable {
     /// The source name (e.g., "CrossWire").
     public let name: String
 
-    /// Unique identifier (uses source name).
-    public var id: String { name }
+    /**
+     Java-exact repository identifier used by SwiftUI source rows.
+
+     - Returns: Raw UTF-16 identity for `name`, without normalization or case folding.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: SwordJavaExactStringIdentity { SwordJavaExactStringIdentity(name) }
 
     public init(name: String) {
         self.name = name
@@ -54,8 +60,14 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
     /// Remote catalog install size in bytes, when the source reports it.
     public let installSizeBytes: Int64?
 
-    /// Unique identifier.
-    public var id: String { "\(sourceName):\(name)" }
+    /**
+     Java-exact repository/module identity used by SwiftUI rows and install state.
+
+     - Returns: The exact repository-scoped identity also used by install queues.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: RemoteModuleIdentity { installIdentity }
 
     /// Convenience flag for install controls.
     public var isInstallable: Bool { availability == .installable }
@@ -280,7 +292,7 @@ public final class InstallManager: @unchecked Sendable {
      - none
      */
     public static func isDefaultSourceName(_ name: String) -> Bool {
-        defaultSourceLines.compactMap(Self.sourceName).contains(name)
+        SwordJavaExactStringSet(defaultSourceLines.compactMap(Self.sourceName)).contains(name)
     }
 
     /**
@@ -294,7 +306,7 @@ public final class InstallManager: @unchecked Sendable {
      */
     public static func defaultPackageDirectory(for source: SourceConfig) -> String? {
         androidDefaultSources.first {
-            $0.name == source.name &&
+            SwordJavaStringIdentity.equals($0.name, source.name) &&
                 $0.host == source.host &&
                 $0.catalogDirectory == source.catalogPath
         }?.packageDirectory
@@ -377,8 +389,10 @@ public final class InstallManager: @unchecked Sendable {
         return updated
     }
 
-    private static func sourceNames(in content: String) -> Set<String> {
-        Set(content.components(separatedBy: .newlines).compactMap { Self.sourceName(in: $0) })
+    private static func sourceNames(in content: String) -> SwordJavaExactStringSet {
+        SwordJavaExactStringSet(
+            content.components(separatedBy: .newlines).compactMap { Self.sourceName(in: $0) }
+        )
     }
 
     private static func sourceName(in line: String) -> String? {

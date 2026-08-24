@@ -233,13 +233,13 @@ public struct SearchView: View {
     @State private var resumesSearchAfterIndex = false
 
     /// Installed module names selected for indexed multi-translation search.
-    @State private var selectedModules: Set<String> = []
+    @State private var selectedModules: SwordJavaExactStringSet = []
 
     /// Persisted module order retained separately from picker membership.
     @State private var selectedModuleOrder: [String] = []
 
     /// Draft module names edited inside the Android-style translation picker before OK commits.
-    @State private var pendingTranslationSelection: Set<String> = []
+    @State private var pendingTranslationSelection: SwordJavaExactStringSet = []
 
     /// Whether the system search field currently owns focus.
     @FocusState private var isSearchFieldFocused: Bool
@@ -660,7 +660,7 @@ public struct SearchView: View {
                 candidateModules: candidateSearchModules
             )
         }
-        return Self.androidOrderedSelectedSearchModuleNames(
+        return SearchTranslationSelectionPolicy.orderedSelection(
             selectedModuleNames: selectedModules,
             primaryModuleName: swordModule?.info.name,
             installedModules: candidateSearchModules
@@ -703,7 +703,7 @@ public struct SearchView: View {
 
     /// Stable selected-translation token exported for UI automation.
     private var searchAccessibilitySelectionToken: String {
-        "selectedModules=\(selectedModules.sorted().joined(separator: ","));selectedModuleOrder=\(orderedSelectedModuleNames.joined(separator: ","))"
+        "selectedModules=\(selectedModules.values.joined(separator: ","));selectedModuleOrder=\(orderedSelectedModuleNames.joined(separator: ","))"
     }
 
     /**
@@ -745,12 +745,12 @@ public struct SearchView: View {
        fallback instead of a malformed empty label.
      */
     nonisolated static func androidSelectedTranslationSummaryLabel(
-        selectedModuleNames: Set<String>,
+        selectedModuleNames: SwordJavaExactStringSet,
         primaryModuleName: String?,
         installedModules: [ModuleInfo],
         fallbackLabel: String
     ) -> String {
-        let orderedModules = androidOrderedSelectedSearchModuleNames(
+        let orderedModules = SearchTranslationSelectionPolicy.orderedSelection(
             selectedModuleNames: selectedModuleNames,
             primaryModuleName: primaryModuleName,
             installedModules: installedModules
@@ -852,7 +852,9 @@ public struct SearchView: View {
 
             AndroidActivityCommitBar(
                 dismissTitle: String(localized: "cancel"),
-                commitTitle: forcedRebuildModuleName == moduleName
+                commitTitle: forcedRebuildModuleName.map {
+                    SwordJavaStringIdentity.equals($0, moduleName)
+                } == true
                     ? String(localized: "rebuild_index_button", defaultValue: "Rebuild")
                     : String(localized: "index_create", defaultValue: "Create"),
                 backgroundColor: surfacePalette.backgroundColor,
@@ -868,7 +870,9 @@ public struct SearchView: View {
 
     /** Resolves Android's create/rebuild prompt with a locale-safe `%@` substitution. */
     private func indexPromptMessage(moduleName: String, moduleDescription: String) -> String {
-        let format = forcedRebuildModuleName == moduleName
+        let format = forcedRebuildModuleName.map {
+            SwordJavaStringIdentity.equals($0, moduleName)
+        } == true
             ? String(localized: "rebuild_index_for", defaultValue: "Rebuild index for %@?")
             : String(localized: "create_index_for", defaultValue: "Create index for %@?")
         return String(format: format, locale: .current, moduleDescription)
@@ -1545,13 +1549,15 @@ public struct SearchView: View {
             AndroidMultiselectDialogContent(
                 title: String(localized: "choose_translations", defaultValue: "Choose translations"),
                 rows: searchTranslationPickerRows,
-                selectedIDs: $pendingTranslationSelection,
+                selectedIDs: pendingTranslationSelectionIDs,
                 isBusy: false,
                 accessibilityIdentifier: "searchTranslationPickerDialog",
                 accessibilityPrefix: "searchTranslationPicker",
                 onCancel: cancelTranslationPicker,
-                onConfirm: { orderedModuleNames in
-                    pendingTranslationSelection = Set(orderedModuleNames)
+                onConfirm: { orderedModuleIdentities in
+                    pendingTranslationSelection = SwordJavaExactStringSet(
+                        orderedModuleIdentities.map(Self.stringValue)
+                    )
                     commitTranslationPickerSelection()
                 }
             )
@@ -1566,10 +1572,10 @@ public struct SearchView: View {
      - Failure modes: Missing readiness is represented as not indexed, matching Search's fail-closed
        index gate.
      */
-    private var searchTranslationPickerRows: [AndroidMultiselectDialogRow<String>] {
-        Self.androidSortedTranslationModules(candidateSearchModules).map { module in
+    private var searchTranslationPickerRows: [AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>] {
+        SearchTranslationSelectionPolicy.androidSortedModules(candidateSearchModules).map { module in
             AndroidMultiselectDialogRow(
-                id: module.name,
+                id: SwordJavaExactStringIdentity(module.name),
                 title: Self.androidTranslationPickerLabel(
                     for: module,
                     isIndexed: isTranslationModuleIndexed(module.name),
@@ -1578,9 +1584,31 @@ public struct SearchView: View {
                         defaultValue: "Search index not created"
                     )
                 ),
-                accessibilityIdentifier: "searchTranslationRow::\(sanitizedAccessibilitySegment(module.name))"
+                accessibilityIdentifier: "searchTranslationRow::\(Self.javaExactAccessibilitySegment(module.name))"
             )
         }
+    }
+
+    /**
+     Adapts Java-exact Search selection strings to the shared dialog's hashable row identities.
+
+     - Returns: Binding whose reads preserve every exact UTF-16 selection and whose writes restore
+       the original raw strings from dialog row identities.
+     - Side effects: Dialog mutations update `pendingTranslationSelection` only.
+     - Failure modes: None; every identity was constructed from a valid Swift string and decodes
+       from the same UTF-16 code units.
+     */
+    private var pendingTranslationSelectionIDs: Binding<Set<SwordJavaExactStringIdentity>> {
+        Binding(
+            get: {
+                Set(pendingTranslationSelection.map(SwordJavaExactStringIdentity.init))
+            },
+            set: { identities in
+                pendingTranslationSelection = SwordJavaExactStringSet(
+                    identities.map(Self.stringValue)
+                )
+            }
+        )
     }
 
     /**
@@ -1653,7 +1681,7 @@ public struct SearchView: View {
         )
         let orderedSelection = result.orderedModuleNames
         if shouldCommitSelection, !orderedSelection.isEmpty {
-            selectedModules = Set(orderedSelection)
+            selectedModules = SwordJavaExactStringSet(orderedSelection)
             selectedModuleOrder = orderedSelection
             selectionPreferences?.saveSelection(orderedSelection, context: selectionContext)
         }
@@ -1665,7 +1693,8 @@ public struct SearchView: View {
      Restores Android's persisted Search translation selection for the installed module set.
 
      The persisted order is retained by `SearchSelectionPreferences`; this view stores membership in
-     a `Set` and reuses `androidOrderedSelectedSearchModuleNames` whenever request order matters.
+     a set and reuses `SearchTranslationSelectionPolicy.orderedSelection` whenever request order
+     matters.
 
      - Side effects: Reads the shared settings store and updates `selectedModules`.
      - Failure modes: Missing persistence or a stale selection falls back to the installed primary
@@ -1679,7 +1708,7 @@ public struct SearchView: View {
             primaryModuleName: primaryName,
             context: selectionContext
         ) ?? primaryName.map { [$0] } ?? []
-        selectedModules = Set(restored)
+        selectedModules = SwordJavaExactStringSet(restored)
         selectedModuleOrder = restored
     }
 
@@ -2547,98 +2576,31 @@ public struct SearchView: View {
     }
 
     /**
-     Sorts Search translation picker modules using Android's abbreviation ordering.
+     Reconstructs the raw Swift string represented by an exact Java UTF-16 identity.
 
-     Android builds the Search translation multiselect with
-     `SwordDocumentFacade.bibles.sortedBy { it.abbreviation }`. The iOS picker and commit helpers
-     use this shared function so row order, select-all order, and result grouping do not depend on
-     installer order or `Set` iteration.
-
-     - Parameter modules: Installed Bible modules available to Search.
-     - Returns: Modules sorted by their SWORD abbreviation (`ModuleInfo.name`).
-     - Side effects: none.
-     - Failure modes: Duplicate module names retain Swift's sort stability expectations only for
-       equal keys; installed SWORD modules should have unique abbreviations.
+     - Parameter identity: Exact identity created from a Search module name.
+     - Returns: Raw string containing the same UTF-16 code units.
+     - Side effects: None.
+     - Failure modes: None; Swift strings supply valid UTF-16 and decoding is deterministic.
      */
-    nonisolated static func androidSortedTranslationModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
-        modules.sorted { lhs, rhs in
-            lhs.name < rhs.name
-        }
+    nonisolated private static func stringValue(
+        _ identity: SwordJavaExactStringIdentity
+    ) -> String {
+        String(decoding: identity.utf16CodeUnits, as: UTF16.self)
     }
 
     /**
-     Resolves selected Search module names in Android commit/search order.
+     Encodes one exact module name into a collision-resistant accessibility identifier segment.
 
-     Android collects selected rows from the abbreviation-sorted dialog and then moves the current
-     document to the front with `ensurePrimaryDocumentFirst()`. This function provides the same
-     deterministic order for Search requests, grouped-result summaries, and UI-test state exports.
-
-     - Parameters:
-       - selectedModuleNames: Committed module abbreviations selected for Search.
-       - primaryModuleName: Current reader/search module abbreviation, preferred first when present.
-       - installedModules: Installed Bible modules used to derive Android dialog order.
-     - Returns: Selected module abbreviations with the primary module first, followed by remaining
-       selected modules in Android abbreviation order and unknown selections alphabetically.
-     - Side effects: none.
-     - Failure modes: If `selectedModuleNames` is empty and no primary exists, returns an empty
-       array so callers can preserve their existing no-selection fallback.
+     - Parameter value: Raw module name whose NFC/NFD or case variants must remain distinct.
+     - Returns: Hyphen-delimited hexadecimal Java UTF-16 code units.
+     - Side effects: None.
+     - Failure modes: None; an empty value returns the literal `empty` segment.
      */
-    nonisolated static func androidOrderedSelectedSearchModuleNames(
-        selectedModuleNames: Set<String>,
-        primaryModuleName: String?,
-        installedModules: [ModuleInfo]
-    ) -> [String] {
-        var effectiveSelection = selectedModuleNames
-        if effectiveSelection.isEmpty, let primaryModuleName {
-            effectiveSelection.insert(primaryModuleName)
-        }
-
-        var orderedNames = androidSortedTranslationModules(installedModules)
-            .map(\.name)
-            .filter { effectiveSelection.contains($0) }
-
-        let unknownNames = effectiveSelection.subtracting(orderedNames).sorted()
-        orderedNames.append(contentsOf: unknownNames)
-
-        if let primaryModuleName,
-           let primaryIndex = orderedNames.firstIndex(of: primaryModuleName) {
-            orderedNames.remove(at: primaryIndex)
-            orderedNames.insert(primaryModuleName, at: 0)
-        }
-
-        return orderedNames
-    }
-
-    /**
-     Applies Android's Search translation dialog commit rule to a picker draft.
-
-     Android's positive button returns checked rows, but `Search.showTranslationSelector` only
-     commits when that result is non-empty. This helper keeps iOS OK-with-no-selection equivalent
-     to Android's ignored empty result while still returning a deterministic module order for
-     non-empty commits.
-
-     - Parameters:
-       - previousModuleNames: Currently committed Search selection.
-       - draftModuleNames: Draft checked rows from the open picker dialog.
-       - primaryModuleName: Current reader/search module abbreviation, preferred first.
-       - installedModules: Installed Bible modules used to derive Android dialog order.
-     - Returns: Ordered effective selection: draft when non-empty, otherwise previous selection.
-     - Side effects: none.
-     - Failure modes: If both previous and draft selections are empty and no primary exists, returns
-       an empty array.
-     */
-    nonisolated static func androidCommittedTranslationSelection(
-        previousModuleNames: Set<String>,
-        draftModuleNames: Set<String>,
-        primaryModuleName: String?,
-        installedModules: [ModuleInfo]
-    ) -> [String] {
-        let effectiveSelection = draftModuleNames.isEmpty ? previousModuleNames : draftModuleNames
-        return androidOrderedSelectedSearchModuleNames(
-            selectedModuleNames: effectiveSelection,
-            primaryModuleName: primaryModuleName,
-            installedModules: installedModules
-        )
+    nonisolated private static func javaExactAccessibilitySegment(_ value: String) -> String {
+        let units = SwordJavaExactStringIdentity(value).utf16CodeUnits
+        guard !units.isEmpty else { return "empty" }
+        return units.map { String(format: "%04X", $0) }.joined(separator: "-")
     }
 
     /**

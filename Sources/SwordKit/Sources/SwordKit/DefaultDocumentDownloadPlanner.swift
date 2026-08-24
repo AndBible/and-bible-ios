@@ -102,15 +102,15 @@ public struct DefaultDocumentDownloadPlanner: Sendable {
         installedModules: [ModuleInfo],
         language: String = "en"
     ) -> [RemoteModuleInfo] {
-        let installedNames = Set(installedModules.map(\.name))
-        var selectedNames = Set<String>()
+        let installedNames = SwordJavaExactStringSet(installedModules.map(\.name))
+        var selectedNames = SwordJavaExactStringSet()
         var selected: [RemoteModuleInfo] = []
 
         for request in requests(from: configuration, language: language) {
             guard !installedNames.contains(request.initials),
                   let module = firstAvailableModule(matching: request, in: availableModules),
                   module.isInstallable,
-                  selectedNames.insert(module.name).inserted else {
+                  selectedNames.insert(module.name) else {
                 continue
             }
             selected.append(module)
@@ -134,14 +134,14 @@ public struct DefaultDocumentDownloadPlanner: Sendable {
         in modules: [RemoteModuleInfo]
     ) -> RemoteModuleInfo? {
         modules.first { module in
-            guard module.name == request.initials,
+            guard SwordJavaStringIdentity.equals(module.name, request.initials),
                   module.category == request.category else {
                 return false
             }
             guard let sourceName = request.sourceName else {
                 return true
             }
-            return module.sourceName == sourceName
+            return SwordJavaStringIdentity.equals(module.sourceName, sourceName)
         }
     }
 

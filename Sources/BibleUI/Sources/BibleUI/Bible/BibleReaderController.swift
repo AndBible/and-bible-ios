@@ -8334,7 +8334,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                 self?.installedDictionarySources() ?? []
             },
             disabledDictionaryNames: { [weak self] in
-                Set(self?.settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? [])
+                SwordJavaExactStringSet(
+                    self?.settingsStore?.getStringSet(.disabledWordLookupDictionaries) ?? []
+                )
             }
         )
     }

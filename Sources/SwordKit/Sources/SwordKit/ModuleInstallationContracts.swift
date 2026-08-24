@@ -22,10 +22,22 @@ public struct RemoteModuleIdentity: Hashable, Sendable, Codable, CustomStringCon
     /// SWORD or custom-driver module initials.
     public let initials: String
 
-    /// Android-compatible queue/job identifier.
+    /**
+     Android-compatible diagnostic spelling of the repository-scoped identity.
+
+     - Returns: `repository--initials` without normalization; typed equality remains authoritative.
+     - Side effects: None.
+     - Failure modes: None.
+     */
     public var rawValue: String { "\(repository)--\(initials)" }
 
-    /// Human-readable representation used by diagnostics and stable UI identifiers.
+    /**
+     Human-readable representation used by diagnostics and accessibility identifiers.
+
+     - Returns: The raw diagnostic spelling from `rawValue`.
+     - Side effects: None.
+     - Failure modes: None.
+     */
     public var description: String { rawValue }
 
     /**
@@ -41,16 +53,49 @@ public struct RemoteModuleIdentity: Hashable, Sendable, Codable, CustomStringCon
         self.repository = repository
         self.initials = initials
     }
+
+    /**
+     Compares repository and module names with Java exact UTF-16 identity.
+
+     - Parameters:
+       - lhs: First repository-scoped module identity.
+       - rhs: Second repository-scoped module identity.
+     - Returns: `true` only when both repository and initials code units match exactly.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public static func == (lhs: RemoteModuleIdentity, rhs: RemoteModuleIdentity) -> Bool {
+        SwordJavaExactStringIdentity(lhs.repository) == SwordJavaExactStringIdentity(rhs.repository)
+            && SwordJavaExactStringIdentity(lhs.initials) == SwordJavaExactStringIdentity(rhs.initials)
+    }
+
+    /**
+     Hashes the same Java-exact fields used by equality.
+
+     - Parameter hasher: Swift process-local hasher receiving exact repository and initials keys.
+     - Side effects: Mutates only the supplied hasher.
+     - Failure modes: None.
+     */
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(SwordJavaExactStringIdentity(repository))
+        hasher.combine(SwordJavaExactStringIdentity(initials))
+    }
 }
 
 /**
  Adds Android's repository-scoped queue identity to the common remote module model.
 
- The existing `Identifiable` value remains source compatible for list rendering; mutable install
- state must use this typed identity instead of `name` or the display-oriented `id` string.
+ List rendering and mutable install state use this typed Java-exact identity instead of raw Swift
+ strings, so repository/module NFC-NFD variants cannot share a row or task.
  */
 public extension RemoteModuleInfo {
-    /// Repository-scoped identity used by download, progress, cancellation, and retry state.
+    /**
+     Repository-scoped identity used by download, progress, cancellation, and retry state.
+
+     - Returns: Java-exact source-name and module-initials identity for this catalog row.
+     - Side effects: None.
+     - Failure modes: None.
+     */
     var installIdentity: RemoteModuleIdentity {
         RemoteModuleIdentity(repository: sourceName, initials: name)
     }

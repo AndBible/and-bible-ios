@@ -937,6 +937,163 @@ def find_unshared_addon_feature_discovery(
     return sorted(matches)
 
 
+def find_nonexact_module_identity_collections(
+    text: str,
+    relative_path: str = "",
+) -> list[int]:
+    """Return module-selection boundaries that regress to Swift canonical string identity.
+
+    The check is path-specific and masks comments and literals. It requires the shared raw-UTF16
+    collection/identity types at the Android module settings, Search, Downloads, and reader lookup
+    boundaries, and rejects the former raw `Set<String>`, `[String: ModuleInfo]`, synthesized string
+    hash, and SwiftUI string-ID shapes. The helper performs no filesystem access or mutation;
+    missing required production markers fail closed at line one.
+    """
+    raw_name_set_patterns = (
+        re.compile(
+            r"\bSet\s*\(\s*[A-Za-z_][A-Za-z0-9_\.]*\s*\.\s*map\s*\(\s*"
+            r"\\\s*\.\s*name\s*\)\s*\)"
+        ),
+        re.compile(
+            r"\bSet\s*\(\s*[A-Za-z_][A-Za-z0-9_\.]*\s*\.\s*map\s*\{\s*"
+            r"\$0\s*\.\s*name\b"
+        ),
+    )
+    contracts: dict[str, tuple[tuple[str, ...], tuple[re.Pattern[str], ...]]] = {
+        "Sources/SwordKit/Sources/SwordKit/SwordJavaStringIdentity.swift": (
+            ("public struct SwordJavaExactStringSet",),
+            (),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/ModuleInfo.swift": (
+            ("public struct ModuleInfo: Sendable",),
+            (re.compile(r"\bModuleInfo\s*:[^{\n]*\bIdentifiable\b"),),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/InstallManager.swift": (
+            (
+                "public var id: SwordJavaExactStringIdentity",
+                "public var id: RemoteModuleIdentity",
+            ),
+            (re.compile(r"public\s+var\s+id\s*:\s*String\s*\{\s*name\s*\}"),),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/ModuleRepository.swift": (
+            (
+                "public var id: SwordJavaExactStringIdentity",
+                "public var id: RemoteModuleIdentity",
+                "SwordJavaStringIdentity.equals($0.name, moduleName)",
+                "SwordJavaStringIdentity.equals($0.name, sourceName)",
+            ),
+            (
+                re.compile(r"public\s+var\s+id\s*:\s*String\s*\{[^}]*sourceName[^}]*name"),
+                re.compile(r"\$0\s*\.\s*name\s*==\s*(?:moduleName|sourceName)\b"),
+            ),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/ModuleInstallationContracts.swift": (
+            (
+                "SwordJavaExactStringIdentity(lhs.repository)",
+                "SwordJavaExactStringIdentity(lhs.initials)",
+                "hasher.combine(SwordJavaExactStringIdentity(repository))",
+                "hasher.combine(SwordJavaExactStringIdentity(initials))",
+            ),
+            (),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/DefaultDocumentDownloadPlanner.swift": (
+            ("SwordJavaExactStringSet", "SwordJavaStringIdentity.equals"),
+            (re.compile(r"\bSet\s*<\s*String\s*>"), *raw_name_set_patterns),
+        ),
+        "Sources/BibleCore/Sources/BibleCore/Services/SearchSelectionPreferences.swift": (
+            ("SwordJavaExactStringSet", "SwordJavaStringIdentity.equals"),
+            (re.compile(r"\bSet\s*<\s*String\s*>|\bSet\s*\(\s*installedModuleNames"),),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Search/SearchTranslationSelectionPolicy.swift": (
+            ("SwordJavaExactStringSet", "SwordJavaStringIdentity.equals"),
+            (re.compile(r"\bSet\s*<\s*String\s*>"), *raw_name_set_patterns),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Search/SearchTranslationPickerDraftState.swift": (
+            ("SwordJavaExactStringSet",),
+            (re.compile(r"\bSet\s*<\s*String\s*>"),),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift": (
+            (
+                "private var pendingTranslationSelectionIDs: Binding<Set<SwordJavaExactStringIdentity>>",
+                "SwordJavaExactStringSet = []",
+                "SwordJavaExactStringIdentity(module.name)",
+            ),
+            (
+                re.compile(r"\b(?:selectedModules|pendingTranslationSelection)\s*:\s*Set\s*<\s*String\s*>"),
+                re.compile(r"AndroidMultiselectDialogRow\s*<\s*String\s*>"),
+                re.compile(r"\bid\s*:\s*module\.name\b"),
+                *raw_name_set_patterns,
+            ),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift": (
+            (
+                "typealias InstalledModuleLookup = [SwordJavaExactStringIdentity: ModuleInfo]",
+                "Set<RemoteModuleIdentity>",
+                "SwordJavaExactStringSet",
+            ),
+            (
+                re.compile(r"\[\s*String\s*:\s*ModuleInfo\s*\]"),
+                re.compile(r"failedSourceNames\s*:\s*Set\s*<\s*String\s*>"),
+                re.compile(
+                    r"\bDictionary\s*\(\s*uniqueKeysWithValues\s*:\s*"
+                    r"[A-Za-z_][A-Za-z0-9_\.]*\s*\.\s*map\s*\{\s*\(\s*"
+                    r"\$0\s*\.\s*name\s*,"
+                ),
+                *raw_name_set_patterns,
+            ),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift": (
+            (
+                "case remote(RemoteModuleIdentity)",
+                "case installed(SwordJavaExactStringIdentity)",
+                "let module: SwordJavaExactStringIdentity",
+            ),
+            (
+                re.compile(r"var\s+id\s*:\s*String\s*\{[^}]*moduleName"),
+                re.compile(r"let\s+id\s*:\s*String\b"),
+            ),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift": (
+            (
+                "SwordJavaExactStringSet = []",
+                "Set<SwordJavaExactStringIdentity> = []",
+                "AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>",
+            ),
+            (
+                re.compile(
+                    r"\b(?:selectedStrongsGreekDictionaryNames|selectedStrongsHebrewDictionaryNames|"
+                    r"selectedRobinsonMorphologyDictionaryNames|disabledWordLookupDictionaryNames)"
+                    r"\s*:\s*Set\s*<\s*String\s*>"
+                ),
+                re.compile(r"AndroidMultiselectDialogRow\s*<\s*String\s*>[\s\S]{0,200}?dictionary"),
+                *raw_name_set_patterns,
+            ),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderWordLookupDocumentBuilder.swift": (
+            ("SwordJavaExactStringSet",),
+            (re.compile(r"disabledDictionaryNames\s*:\s*Set\s*<\s*String\s*>"),),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderStrongsDocumentBuilder.swift": (
+            ("SwordJavaExactStringSet",),
+            (re.compile(r"\bvar\s+seen\s*=\s*Set\s*<\s*String\s*>"),),
+        ),
+    }
+    contract = contracts.get(relative_path)
+    if contract is None:
+        return []
+
+    required_markers, forbidden_patterns = contract
+    masked_source = _mask_swift_comments_and_strings(text)
+    matches = {
+        text.count("\n", 0, match.start()) + 1
+        for pattern in forbidden_patterns
+        for match in pattern.finditer(masked_source)
+    }
+    if any(marker not in masked_source for marker in required_markers):
+        matches.add(1)
+    return sorted(matches)
+
+
 def find_ios_bundle_version_reads(
     text: str,
     relative_path: str = "",
@@ -967,13 +1124,13 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
 
     The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle,
     prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
-    bypass Android-compatible global ownership admission, and keep prompt/font/WebView/picker
-    add-on discovery on SwordKit's shared installed BookSet projection. Missing fixed-path files
-    fail closed, and the publisher/add-on scans follow every non-test Swift file under `Sources`
-    and `AndBible` across moves while narrowing infrastructure exceptions to audited functions. iOS
-    marketing/build
-    metadata access remains confined to its display-only owner so Android manifests and admission
-    cannot reuse unrelated bundle version values.
+    bypass Android-compatible global ownership admission, keep prompt/font/WebView/picker add-on
+    discovery on SwordKit's shared installed BookSet projection, and preserve Java-exact module
+    identity through settings, Search, Downloads, reader collections, and row IDs. Missing
+    fixed-path files fail closed, and the publisher/add-on scans follow every non-test Swift file
+    under `Sources` and `AndBible` across moves while narrowing infrastructure exceptions to audited
+    functions. iOS marketing/build metadata access remains confined to its display-only owner so
+    Android manifests and admission cannot reuse unrelated bundle version values.
     """
     content_view_path = repo_root / "AndBible/ContentView.swift"
     relative_path = "AndBible/ContentView.swift"
@@ -1035,6 +1192,17 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
                     ),
                 )
                 for line in find_unshared_addon_feature_discovery(source, str(relative))
+            )
+            issues.extend(
+                SourceGuardIssue(
+                    path=str(relative),
+                    line=line,
+                    message=(
+                        "Android module identity regressed to Swift canonical String collection, "
+                        "lookup, comparison, or SwiftUI row-ID semantics."
+                    ),
+                )
+                for line in find_nonexact_module_identity_collections(source, str(relative))
             )
             issues.extend(
                 SourceGuardIssue(

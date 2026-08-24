@@ -63,6 +63,38 @@ final class SearchSelectionPreferencesTests: XCTestCase {
         preferences.saveSelection([])
         XCTAssertEqual(settingsStore.getString(.searchSelectedTranslations), "WEB,KJV")
     }
+
+    /**
+     Verifies Search persistence round-trips Java-distinct NFC/NFD and case-variant module names.
+
+     The fixture also repeats one exact value. Failure means Swift set semantics can erase an
+     Android-visible translation or primary-first restore can move its canonical sibling instead.
+     */
+    func testSelectionRoundTripsJavaExactModuleIdentities() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let preferences = SearchSelectionPreferences(settingsStore: settingsStore)
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+
+        preferences.saveSelection([composed, decomposed, "FOO", "foo", composed])
+
+        let persisted = AppPreferenceRegistry.decodeCSVSet(
+            settingsStore.getString(.searchSelectedTranslations)
+        )
+        XCTAssertEqual(persisted.count, 4)
+        XCTAssertEqual(Set(persisted.map(SwordJavaExactStringIdentity.init)).count, 4)
+
+        let restored = preferences.loadSelection(
+            installedModuleNames: [composed, decomposed, "FOO", "foo"],
+            primaryModuleName: decomposed
+        )
+        XCTAssertEqual(restored.count, 4)
+        XCTAssertEqual(
+            restored.map(SwordJavaExactStringIdentity.init).first,
+            SwordJavaExactStringIdentity(decomposed)
+        )
+        XCTAssertEqual(Set(restored.map(SwordJavaExactStringIdentity.init)).count, 4)
+    }
 }
 
 /** Contract tests for Android's separately persisted EPUB Search mode. */

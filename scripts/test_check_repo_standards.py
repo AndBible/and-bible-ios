@@ -16,6 +16,7 @@ from check_repo_standards import (
     find_legacy_root_sidebar_shell,
     find_multiline_slash_docblocks,
     find_ios_bundle_version_reads,
+    find_nonexact_module_identity_collections,
     find_unshared_addon_feature_discovery,
     find_unsafe_direct_document_publishers,
     validate_commit_message,
@@ -676,6 +677,115 @@ class RepoStandardsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(find_unshared_addon_feature_discovery(text, path), [2, 5])
+
+    def test_java_exact_module_identity_guard_rejects_raw_collection_boundaries(self) -> None:
+        """Named module settings, Search, Downloads, and row seams reject Swift string identity."""
+        fixtures = [
+            (
+                "Sources/SwordKit/Sources/SwordKit/DefaultDocumentDownloadPlanner.swift",
+                "\n".join(
+                    [
+                        "let exact = SwordJavaExactStringSet()",
+                        "let same = SwordJavaStringIdentity.equals(lhs, rhs)",
+                        "var selected = Set<String>()",
+                    ]
+                ),
+                [3],
+            ),
+            (
+                "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift",
+                "\n".join(
+                    [
+                        "private var pendingTranslationSelectionIDs: Binding<Set<SwordJavaExactStringIdentity>>",
+                        "var exact: SwordJavaExactStringSet = []",
+                        "let id = SwordJavaExactStringIdentity(module.name)",
+                        "var selectedModules: Set<String> = []",
+                        "let aliases = Set(installedBibleModules.map(\\.name))",
+                    ]
+                ),
+                [4, 5],
+            ),
+            (
+                "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift",
+                "\n".join(
+                    [
+                        "typealias InstalledModuleLookup = [SwordJavaExactStringIdentity: ModuleInfo]",
+                        "var identities: Set<RemoteModuleIdentity> = []",
+                        "var failures = SwordJavaExactStringSet()",
+                        "let lookup: [String: ModuleInfo] = [:]",
+                        "let aliases = Dictionary(uniqueKeysWithValues: installed.map { ($0.name, $0) })",
+                    ]
+                ),
+                [4, 5],
+            ),
+            (
+                "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift",
+                "\n".join(
+                    [
+                        "var selected: SwordJavaExactStringSet = []",
+                        "var rows: Set<SwordJavaExactStringIdentity> = []",
+                        "let row = AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>.self",
+                        "var disabledWordLookupDictionaryNames: Set<String> = []",
+                        "let hidden = Set(dictionaries.map(\\.name))",
+                    ]
+                ),
+                [4, 5],
+            ),
+            (
+                "Sources/SwordKit/Sources/SwordKit/ModuleRepository.swift",
+                "\n".join(
+                    [
+                        "public var id: SwordJavaExactStringIdentity { exactSource }",
+                        "public var id: RemoteModuleIdentity { exactModule }",
+                        "let module = SwordJavaStringIdentity.equals($0.name, moduleName)",
+                        "let source = SwordJavaStringIdentity.equals($0.name, sourceName)",
+                        "let wrong = entries.first { $0.name == moduleName }",
+                    ]
+                ),
+                [5],
+            ),
+        ]
+        for path, text, expected in fixtures:
+            with self.subTest(path=path):
+                self.assertEqual(find_nonexact_module_identity_collections(text, path), expected)
+
+    def test_java_exact_module_identity_guard_rejects_raw_identifiable_models(self) -> None:
+        """Public installed/remote models cannot recover synthesized Swift string row identity."""
+        module_info_path = "Sources/SwordKit/Sources/SwordKit/ModuleInfo.swift"
+        self.assertEqual(
+            find_nonexact_module_identity_collections(
+                "public struct ModuleInfo: Sendable, Identifiable {}",
+                module_info_path,
+            ),
+            [1],
+        )
+        install_manager_path = "Sources/SwordKit/Sources/SwordKit/InstallManager.swift"
+        manager_source = "\n".join(
+            [
+                "public var id: SwordJavaExactStringIdentity { exact }",
+                "public var id: RemoteModuleIdentity { exactRemote }",
+                "public var id: String { name }",
+            ]
+        )
+        self.assertEqual(
+            find_nonexact_module_identity_collections(manager_source, install_manager_path),
+            [3],
+        )
+
+    def test_java_exact_module_identity_guard_requires_shared_projection_markers(self) -> None:
+        """Deleting a required exact type or lookup marker fails its fixed owner closed."""
+        path = "Sources/BibleCore/Sources/BibleCore/Services/SearchSelectionPreferences.swift"
+        self.assertEqual(
+            find_nonexact_module_identity_collections("let selected = [String]()", path),
+            [1],
+        )
+        self.assertEqual(
+            find_nonexact_module_identity_collections(
+                "// Set<String> and missing exact identity are comments only",
+                "Sources/Unrelated.swift",
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

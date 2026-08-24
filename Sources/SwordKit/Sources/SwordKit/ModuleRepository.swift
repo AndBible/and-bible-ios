@@ -341,7 +341,14 @@ public struct SourceConfig: Sendable, Identifiable {
     /// Optional resolved source URL used for display and diagnostics.
     public let sourceURL: URL?
 
-    public var id: String { name }
+    /**
+     Java-exact repository identity used by source lists and repository-scoped module rows.
+
+     - Returns: Raw UTF-16 identity for `name`, without normalization or case folding.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: SwordJavaExactStringIdentity { SwordJavaExactStringIdentity(name) }
 
     /// HTTPS base URL for SWORD catalog refresh, when the host/path tuple is usable.
     public var baseURL: URL? {
@@ -445,7 +452,16 @@ public struct CatalogModule: Sendable, Identifiable {
     /// Original package filename from the repository manifest.
     public let packageFileName: String?
 
-    public var id: String { "\(sourceName):\(name)" }
+    /**
+     Java-exact repository/module identity used by catalog rows.
+
+     - Returns: Exact source-name and module-initials identity for this row.
+     - Side effects: None.
+     - Failure modes: None.
+     */
+    public var id: RemoteModuleIdentity {
+        RemoteModuleIdentity(repository: sourceName, initials: name)
+    }
 
     /**
      Creates a catalog entry from either a SWORD `.conf` row or an Android-compatible custom
@@ -1289,7 +1305,9 @@ public final class ModuleRepository: @unchecked Sendable {
     ) async throws {
         progressState?(ModuleInstallProgress(phase: .queued))
         guard let entries = cachedCatalogEntries(for: source.name),
-              let entry = entries.first(where: { $0.name == moduleName }) else {
+              let entry = entries.first(where: {
+                  SwordJavaStringIdentity.equals($0.name, moduleName)
+              }) else {
             throw ModuleRepositoryError.moduleNotFound(moduleName)
         }
 
@@ -3150,8 +3168,12 @@ public final class ModuleRepository: @unchecked Sendable {
     public func source(for moduleName: String) -> SourceConfig? {
         let sources = loadSources()
         for (sourceName, entries) in catalogCacheSnapshot() {
-            if entries.contains(where: { $0.name == moduleName }) {
-                return sources.first(where: { $0.name == sourceName })
+            if entries.contains(where: {
+                SwordJavaStringIdentity.equals($0.name, moduleName)
+            }) {
+                return sources.first(where: {
+                    SwordJavaStringIdentity.equals($0.name, sourceName)
+                })
             }
         }
         return nil

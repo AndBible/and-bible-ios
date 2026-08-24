@@ -141,6 +141,22 @@ struct ModuleBrowserDownloadSortSnapshot {
  */
 private struct ModuleBrowserDownloadConfirmation: Identifiable {
     /**
+     Java-exact identity for one pending Downloads confirmation.
+
+     - Inputs: Android confirmation kind and the remote repository/module owner.
+     - Returns: A hashable value that preserves raw UTF-16 repository and initials identity.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    struct ID: Hashable {
+        /// Android confirmation branch represented by the alert.
+        let kind: Kind
+
+        /// Java-exact remote repository/module owner represented by the alert.
+        let module: RemoteModuleIdentity
+    }
+
+    /**
      Android confirmation variant for the staged document action.
 
      Cases mirror `DownloadActivity.manageDownload`: normal rows use the download prefix message,
@@ -161,7 +177,7 @@ private struct ModuleBrowserDownloadConfirmation: Identifiable {
     let kind: Kind
 
     /// Stable SwiftUI identity for the pending alert.
-    var id: String { "\(kind.rawValue)::\(module.id)" }
+    var id: ID { ID(kind: kind, module: module.id) }
 
     /// Android alert title for the selected confirmation branch.
     var title: String {
@@ -322,6 +338,15 @@ public enum ModuleBrowserDefaultDownloadMode: Sendable, Equatable {
    `SwordManager`, and refreshes the installed state shown in the download rows
  */
 public struct ModuleBrowserView: View {
+    /**
+     Installed modules keyed by Java-exact UTF-16 initials for Downloads row ownership.
+
+     Values are in-memory snapshots; constructing or reading the lookup performs no I/O and cannot
+     fail. Exact duplicate initials retain the first installed row, while NFC/NFD and case variants
+     remain independent keys.
+     */
+    typealias InstalledModuleLookup = [SwordJavaExactStringIdentity: ModuleInfo]
+
     /// Shared popup anchor used by the Downloads activity overflow action.
     private enum PopupAnchor {
         static let overflow = "moduleBrowserOverflowAnchor"
@@ -489,7 +514,9 @@ public struct ModuleBrowserView: View {
     /// Installed metadata paired with the selected contextual catalog row, when present.
     private var contextualInstalledModule: ModuleInfo? {
         guard let contextualModule else { return nil }
-        return Self.installedModuleLookup(from: installedModules)[contextualModule.name]
+        return Self.installedModuleLookup(from: installedModules)[
+            SwordJavaExactStringIdentity(contextualModule.name)
+        ]
     }
 
     /// Android-ordered contextual actions for the selected Downloads row.
@@ -867,7 +894,7 @@ public struct ModuleBrowserView: View {
     @ViewBuilder
     private func moduleBrowserStateExport(
         visibleModules: [RemoteModuleInfo],
-        installedModulesByName: [String: ModuleInfo]
+        installedModulesByName: InstalledModuleLookup
     ) -> some View {
         if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
             let value = moduleBrowserAccessibilityValue(
@@ -896,7 +923,7 @@ public struct ModuleBrowserView: View {
      */
     private func moduleBrowserAccessibilityValue(
         visibleModules: [RemoteModuleInfo],
-        installedModulesByName: [String: ModuleInfo]
+        installedModulesByName: InstalledModuleLookup
     ) -> String {
         let rowLimit = UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
         let limitedModules = visibleModules.prefix(rowLimit)
@@ -1117,7 +1144,7 @@ public struct ModuleBrowserView: View {
     @ViewBuilder
     private func androidDownloadsContent(
         visibleModules: [RemoteModuleInfo],
-        installedModulesByName: [String: ModuleInfo]
+        installedModulesByName: InstalledModuleLookup
     ) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -1854,17 +1881,20 @@ public struct ModuleBrowserView: View {
        - module: Remote module metadata to render.
        - installedModulesByName: Installed modules keyed by initials for O(1) row state lookup.
      - Returns: A row showing remote source metadata and an install affordance when applicable.
+     - Side effects: Row actions may start/cancel a download or present details/confirmation state.
+     - Failure modes: Missing installed metadata is represented as an installable remote row; live
+       repository errors are shown through the retained download activity.
      */
     private func remoteModuleRow(
         _ module: RemoteModuleInfo,
-        installedModulesByName: [String: ModuleInfo]
+        installedModulesByName: InstalledModuleLookup
     ) -> some View {
         let status = Self.displayStatus(
             for: module,
             installedModulesByName: installedModulesByName,
             downloadActivities: downloadActivities
         )
-        let installedModule = installedModulesByName[module.name]
+        let installedModule = installedModulesByName[SwordJavaExactStringIdentity(module.name)]
         let rowActions = Self.rowActions(
             installedModule: installedModule,
             isBeingInstalled: status.isBeingInstalled,
@@ -2375,7 +2405,7 @@ public struct ModuleBrowserView: View {
     static func modulesByAddingCachedCatalogsForFailedSources(
         refreshedModules: [RemoteModuleInfo],
         cachedModules: [RemoteModuleInfo],
-        failedSourceNames: Set<String>
+        failedSourceNames: SwordJavaExactStringSet
     ) -> [RemoteModuleInfo] {
         guard !failedSourceNames.isEmpty else { return refreshedModules }
 
@@ -2667,7 +2697,7 @@ public struct ModuleBrowserView: View {
      */
     private static func displayStatus(
         for module: RemoteModuleInfo,
-        installedModulesByName: [String: ModuleInfo],
+        installedModulesByName: InstalledModuleLookup,
         downloadActivities: [RemoteModuleIdentity: ModuleBrowserDownloadActivity]
     ) -> ModuleBrowserDownloadStatus {
         if let activity = downloadActivities[module.installIdentity] {
@@ -2683,7 +2713,9 @@ public struct ModuleBrowserView: View {
         guard module.isInstallable else {
             return .unavailable
         }
-        guard let installedModule = installedModulesByName[module.name] else {
+        guard let installedModule = installedModulesByName[
+            SwordJavaExactStringIdentity(module.name)
+        ] else {
             return .installable
         }
         let installedRepository = installedModule.aboutMetadata.repository
@@ -2746,13 +2778,16 @@ public struct ModuleBrowserView: View {
      Builds an initials-keyed installed-module lookup for row rendering and sorting.
 
      - Parameter installedModules: Installed module snapshots from the current SWORD manager.
-     - Returns: Dictionary keyed by module initials, preserving the first module when duplicate
-       initials appear.
+     - Returns: Dictionary keyed by exact UTF-16 module initials, preserving the first module only
+       for an exact duplicate while retaining Java-distinct canonical and case variants.
      - Side effects: none.
      - Failure modes: none.
      */
-    static func installedModuleLookup(from installedModules: [ModuleInfo]) -> [String: ModuleInfo] {
-        Dictionary(installedModules.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    static func installedModuleLookup(from installedModules: [ModuleInfo]) -> InstalledModuleLookup {
+        Dictionary(
+            installedModules.map { (SwordJavaExactStringIdentity($0.name), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /**
@@ -3411,7 +3446,7 @@ public struct ModuleBrowserView: View {
 
             var allModules: [RemoteModuleInfo] = []
             var errors: [String] = []
-            var failedSourceNames: Set<String> = []
+            var failedSourceNames = SwordJavaExactStringSet()
             let total = sourcesToRefresh.count
 
             for (index, source) in sourcesToRefresh.enumerated() {
@@ -3563,7 +3598,9 @@ public struct ModuleBrowserView: View {
             return
         }
 
-        guard let source = sources.first(where: { $0.name == module.sourceName }) else {
+        guard let source = sources.first(where: {
+            SwordJavaStringIdentity.equals($0.name, module.sourceName)
+        }) else {
             let message = Self.moduleSourceNotFoundMessage(moduleName: module.name)
             errorMessage = message
             recordDownloadError(message)
@@ -3716,7 +3753,7 @@ public struct ModuleBrowserView: View {
      */
     private func uninstallModuleAfterCancellingInstall(_ name: String) {
         let cancelledInstallTasks = installTasks.keys
-            .filter { $0.initials == name }
+            .filter { SwordJavaStringIdentity.equals($0.initials, name) }
             .compactMap(cancelInstall)
         let repository = repository
         let searchIndexService = searchIndexService

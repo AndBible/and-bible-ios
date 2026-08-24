@@ -112,7 +112,7 @@ struct BibleReaderWordLookupDocumentBuilder {
      */
     init(
         swordManager: SwordManager?,
-        disabledDictionaryNames: @escaping () -> Set<String>
+        disabledDictionaryNames: @escaping () -> SwordJavaExactStringSet
     ) {
         self.modules = {
             guard let manager = swordManager else { return [] }
@@ -137,17 +137,16 @@ struct BibleReaderWordLookupDocumentBuilder {
      */
     init(
         installedDictionarySources: @escaping () -> [BibleReaderInstalledDictionarySource],
-        disabledDictionaryNames: @escaping () -> Set<String>
+        disabledDictionaryNames: @escaping () -> SwordJavaExactStringSet
     ) {
         self.modules = {
             let disabled = disabledDictionaryNames()
             return installedDictionarySources().compactMap { source in
                 let info = source.info
-                guard info.category == .dictionary,
-                      !info.features.contains(.greekDef),
-                      !info.features.contains(.hebrewDef),
-                      !info.features.contains(.greekParse),
-                      !disabled.contains(info.name) else {
+                guard Self.isEligibleWordLookupDictionary(
+                    info,
+                    disabledDictionaryNames: disabled
+                ) else {
                     return nil
                 }
                 return Self.dictionaryModule(source)
@@ -257,15 +256,13 @@ struct BibleReaderWordLookupDocumentBuilder {
      */
     private static func wordLookupDictionaryModules(
         swordManager: SwordManager,
-        disabledDictionaryNames: Set<String>
+        disabledDictionaryNames: SwordJavaExactStringSet
     ) -> [DictionaryModule] {
         var result: [DictionaryModule] = []
-        for info in swordManager.installedModules() where
-            info.category == .dictionary &&
-                !info.features.contains(.greekDef) &&
-                !info.features.contains(.hebrewDef) &&
-                !info.features.contains(.greekParse) &&
-                !disabledDictionaryNames.contains(info.name) {
+        for info in swordManager.installedModules() where Self.isEligibleWordLookupDictionary(
+            info,
+            disabledDictionaryNames: disabledDictionaryNames
+        ) {
             guard let module = swordManager.module(named: info.name) else { continue }
             let source = BibleReaderInstalledDictionarySource.sword(module)
             result.append(
@@ -287,6 +284,28 @@ struct BibleReaderWordLookupDocumentBuilder {
             )
         }
         return result
+    }
+
+    /**
+     Applies Android's selected-word dictionary category, feature, and inverse-selection policy.
+
+     - Parameters:
+       - info: Installed book metadata to classify.
+       - disabledDictionaryNames: Exact Java module initials disabled by the user.
+     - Returns: `true` only for an enabled plain dictionary book.
+     - Side effects: None.
+     - Failure modes: Wrong-category, Strong's, morphology, and exactly disabled books return false;
+       Java-distinct NFC/NFD or case siblings do not disable each other.
+     */
+    static func isEligibleWordLookupDictionary(
+        _ info: ModuleInfo,
+        disabledDictionaryNames: SwordJavaExactStringSet
+    ) -> Bool {
+        info.category == .dictionary
+            && !info.features.contains(.greekDef)
+            && !info.features.contains(.hebrewDef)
+            && !info.features.contains(.greekParse)
+            && !disabledDictionaryNames.contains(info.name)
     }
 
     /** Projects one globally resolved SWORD/SQLite dictionary into the lookup facade. */
