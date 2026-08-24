@@ -2,6 +2,7 @@
 
 import XCTest
 import BibleCore
+import SwordKit
 @testable import BibleUI
 
 /**
@@ -29,7 +30,7 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
         XCTAssertTrue(initial.isEmpty)
         let dialogRows = AndroidModuleBackupExportSheet.multiselectRows(for: rows)
 
-        let selectedAll = AndroidMultiselectDialogContent<SQLiteDocumentIdentity>.toggledAllSelection(
+        let selectedAll = AndroidMultiselectDialogContent<SwordJavaExactStringIdentity>.toggledAllSelection(
             in: dialogRows,
             selectedIDs: initial
         )
@@ -41,7 +42,7 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
             ["KJV", "WEB"]
         )
 
-        let selectedNone = AndroidMultiselectDialogContent<SQLiteDocumentIdentity>.toggledAllSelection(
+        let selectedNone = AndroidMultiselectDialogContent<SwordJavaExactStringIdentity>.toggledAllSelection(
             in: dialogRows,
             selectedIDs: selectedAll
         )
@@ -84,6 +85,8 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
         let rows = [
             installedContent(composed, family: .swordConfiguration),
             installedContent(decomposed, family: .myBible),
+            installedContent("CASE", family: .swordConfiguration),
+            installedContent("case", family: .swordConfiguration),
             installedContent("MYSWORD", family: .mySword),
             installedContent("ESWORD", family: .eSword),
             installedContent("EPUB", family: .epub),
@@ -92,19 +95,28 @@ final class AndroidModuleBackupSettingsWorkflowTests: XCTestCase {
             installedContent("PROMPT_prompt", family: .prompts),
         ]
         let selected = Set([
-            SQLiteDocumentIdentity(decomposed),
-            SQLiteDocumentIdentity("ESWORD"),
-            SQLiteDocumentIdentity("FONT"),
-            SQLiteDocumentIdentity("PROMPT_prompt"),
+            SwordJavaExactStringIdentity(decomposed),
+            SwordJavaExactStringIdentity("CASE"),
+            SwordJavaExactStringIdentity("case"),
+            SwordJavaExactStringIdentity("ESWORD"),
+            SwordJavaExactStringIdentity("FONT"),
+            SwordJavaExactStringIdentity("PROMPT_prompt"),
         ])
 
-        XCTAssertNotEqual(SQLiteDocumentIdentity(composed), SQLiteDocumentIdentity(decomposed))
+        XCTAssertNotEqual(
+            SwordJavaExactStringIdentity(composed),
+            SwordJavaExactStringIdentity(decomposed)
+        )
+        XCTAssertNotEqual(
+            SwordJavaExactStringIdentity("CASE"),
+            SwordJavaExactStringIdentity("case")
+        )
         XCTAssertEqual(
             AndroidModuleBackupExportSheet.selectedModuleNames(
                 inDisplayOrder: rows,
                 selectedIdentities: selected
             ),
-            [decomposed, "ESWORD", "FONT", "PROMPT_prompt"]
+            [decomposed, "CASE", "case", "ESWORD", "FONT", "PROMPT_prompt"]
         )
     }
 

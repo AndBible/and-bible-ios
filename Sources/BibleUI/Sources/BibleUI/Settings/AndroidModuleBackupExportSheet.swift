@@ -38,7 +38,7 @@ struct AndroidModuleBackupExportSheet: View {
     let onExport: ([String]) -> Void
 
     /// Draft checked identities, intentionally empty when the Android multiselect first appears.
-    @State private var selectedModuleIdentities: Set<SQLiteDocumentIdentity>
+    @State private var selectedModuleIdentities: Set<SwordJavaExactStringIdentity>
 
     /**
      Creates one export-selection sheet.
@@ -142,7 +142,7 @@ struct AndroidModuleBackupExportSheet: View {
      - Failure modes: Export-in-progress actions are ignored; identities absent from the canonical
        catalog are ignored by `selectedModuleNames`.
      */
-    private func confirmIfIdle(_ selectedIdentities: [SQLiteDocumentIdentity]) {
+    private func confirmIfIdle(_ selectedIdentities: [SwordJavaExactStringIdentity]) {
         guard !isExporting else { return }
         let selectedModuleNames = Self.selectedModuleNames(
             inDisplayOrder: modules,
@@ -163,7 +163,7 @@ struct AndroidModuleBackupExportSheet: View {
      - Side effects: none.
      - Failure modes: none.
      */
-    static var initialSelectedModuleIdentities: Set<SQLiteDocumentIdentity> { [] }
+    static var initialSelectedModuleIdentities: Set<SwordJavaExactStringIdentity> { [] }
 
     /**
      Resolves exact Android identities through the canonical picker order.
@@ -177,7 +177,7 @@ struct AndroidModuleBackupExportSheet: View {
      */
     static func selectedModuleNames(
         inDisplayOrder modules: [AndroidModuleBackupInstalledContent],
-        selectedIdentities: Set<SQLiteDocumentIdentity>
+        selectedIdentities: Set<SwordJavaExactStringIdentity>
     ) -> [String] {
         modules.filter { selectedIdentities.contains($0.id) }.map(\.initials)
     }
@@ -192,7 +192,7 @@ struct AndroidModuleBackupExportSheet: View {
      */
     static func multiselectRows(
         for modules: [AndroidModuleBackupInstalledContent]
-    ) -> [AndroidMultiselectDialogRow<SQLiteDocumentIdentity>] {
+    ) -> [AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>] {
         modules.map { module in
             AndroidMultiselectDialogRow(
                 id: module.id,
