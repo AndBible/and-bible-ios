@@ -147,8 +147,6 @@ public final class AndroidStudyPadArchiveService {
     private let temporaryDirectory: URL
     private let databaseBackupService: AndroidDatabaseBackupService
     private let bookmarkRestoreService: RemoteSyncBookmarkRestoreService
-    private let producerVersion: Int
-
     /**
      Creates a Study Pad archive service from the shared backup/restore collaborators.
 
@@ -157,7 +155,6 @@ public final class AndroidStudyPadArchiveService {
        - temporaryDirectory: Optional scratch root.
        - databaseBackupService: Existing archive loader/apply engine.
        - bookmarkRestoreService: Existing Room snapshot reader used for pre-import counts.
-       - producerVersion: Optional integer producer build; defaults to the current app bundle build.
      - Side effects: none.
      - Failure modes: none.
      */
@@ -165,8 +162,7 @@ public final class AndroidStudyPadArchiveService {
         fileManager: FileManager = .default,
         temporaryDirectory: URL? = nil,
         databaseBackupService: AndroidDatabaseBackupService? = nil,
-        bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService(),
-        producerVersion: Int? = nil
+        bookmarkRestoreService: RemoteSyncBookmarkRestoreService = RemoteSyncBookmarkRestoreService()
     ) {
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory ?? fileManager.temporaryDirectory
@@ -175,7 +171,6 @@ public final class AndroidStudyPadArchiveService {
             temporaryDirectory: temporaryDirectory
         )
         self.bookmarkRestoreService = bookmarkRestoreService
-        self.producerVersion = producerVersion ?? AndroidBackupManifestCodec.producerVersion()
     }
 
     /**
@@ -214,10 +209,9 @@ public final class AndroidStudyPadArchiveService {
 
         try projectSelectedStudyPads(in: databaseURL, labelIDs: selectedIDSet)
 
-        let manifestData = try AndroidBackupManifestCodec.encode(
+        let manifestData = try AndroidBackupManifestCodec.encodeProducedBackup(
             backupType: Self.backupType,
-            contains: [AndroidDatabaseBackupCategory.bookmarks.rawValue],
-            andBibleVersion: producerVersion
+            contains: [AndroidDatabaseBackupCategory.bookmarks.rawValue]
         )
         let archiveURL = temporaryURL(prefix: "android-study-pad-export-", suffix: ".abdb.zip")
         do {

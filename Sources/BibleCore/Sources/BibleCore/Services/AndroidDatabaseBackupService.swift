@@ -754,10 +754,9 @@ public final class AndroidDatabaseBackupService {
         settingsStore: SettingsStore
     ) throws -> AndroidDatabaseBackupFileExport {
         let exportCategories = exportableDatabaseCategories()
-        let manifestData = try AndroidBackupManifestCodec.encode(
+        let manifestData = try AndroidBackupManifestCodec.encodeProducedBackup(
             backupType: "DB_BACKUP",
-            contains: exportCategories.map(\.rawValue),
-            andBibleVersion: AndroidBackupManifestCodec.producerVersion()
+            contains: exportCategories.map(\.rawValue)
         )
         var entries: [ZipArchiveWriterFileEntry] = [
             ZipArchiveWriterFileEntry(name: Self.manifestFileName, data: manifestData),

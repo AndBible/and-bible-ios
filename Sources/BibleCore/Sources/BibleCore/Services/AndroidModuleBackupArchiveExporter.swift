@@ -14,9 +14,6 @@ internal final class AndroidModuleBackupArchiveExporter {
     /// Android's required literal first ZIP member for module backups.
     private static let manifestFileName = AndroidBackupManifestCodec.fileName
 
-    /// Producer build number emitted in Android's complete four-field manifest contract.
-    private let producerVersion: Int
-
     /// File manager used for archive writes, compatibility reads, and cleanup.
     private let fileManager: FileManager
 
@@ -34,7 +31,6 @@ internal final class AndroidModuleBackupArchiveExporter {
        - moduleDirectory: Canonical local module root mirrored by Android backup paths.
        - temporaryDirectory: Scratch directory that owns generated archives.
        - epubLibraryRootURL: Optional native EPUB library override for isolated hosts and tests.
-       - producerVersion: Integer app build written as Android's `andBibleVersion` field.
      - Side effects: none; directories and archives are created only during export.
      - Failure modes: This initializer cannot fail.
      */
@@ -42,12 +38,10 @@ internal final class AndroidModuleBackupArchiveExporter {
         fileManager: FileManager,
         moduleDirectory: URL,
         temporaryDirectory: URL,
-        epubLibraryRootURL: URL?,
-        producerVersion: Int
+        epubLibraryRootURL: URL?
     ) {
         self.fileManager = fileManager
         self.temporaryDirectory = temporaryDirectory
-        self.producerVersion = producerVersion
         self.inventoryBuilder = AndroidModuleBackupExportInventoryBuilder(
             fileManager: fileManager,
             moduleDirectory: moduleDirectory,
@@ -106,13 +100,18 @@ internal final class AndroidModuleBackupArchiveExporter {
         try inventoryBuilder.installedContentCatalog()
     }
 
-    /// Full Android kotlinx-serialization field set in declaration order, including nullable data.
+    /**
+     Encodes the complete Android module-backup manifest with the shared compatibility authority.
+
+     - Returns: Kotlin-order JSON containing all four fields and a literal null category set.
+     - Side effects: None; the value reads neither bundle metadata nor the filesystem.
+     - Failure modes: Propagates JSON encoding failures from the shared manifest codec.
+     */
     private var manifestData: Data {
         get throws {
-            try AndroidBackupManifestCodec.encode(
+            try AndroidBackupManifestCodec.encodeProducedBackup(
                 backupType: "MODULE_BACKUP",
-                contains: nil,
-                andBibleVersion: producerVersion
+                contains: nil
             )
         }
     }

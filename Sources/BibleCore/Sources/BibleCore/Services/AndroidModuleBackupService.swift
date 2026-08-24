@@ -324,7 +324,6 @@ public final class AndroidModuleBackupService {
        - epubLibraryRootURL: Optional explicit EPUB library used by isolated hosts and tests. The
          app default remains the Documents EPUB library when omitted.
        - storagePreflight: Shared Android-compatible capacity policy applied before staging.
-       - producerVersion: Optional integer producer build; defaults to the current app bundle build.
      - Side effects: none. Live module directories are created only inside a mutation transaction.
      - Failure modes: none.
      */
@@ -333,8 +332,7 @@ public final class AndroidModuleBackupService {
         moduleDirectory: URL? = nil,
         temporaryDirectory: URL? = nil,
         epubLibraryRootURL: URL? = nil,
-        storagePreflight: ModuleStoragePreflight = ModuleStoragePreflight(),
-        producerVersion: Int? = nil
+        storagePreflight: ModuleStoragePreflight = ModuleStoragePreflight()
     ) {
         let resolvedModuleDirectory = moduleDirectory
             ?? URL(fileURLWithPath: SwordManager.defaultModulePath(), isDirectory: true)
@@ -352,8 +350,7 @@ public final class AndroidModuleBackupService {
             fileManager: fileManager,
             moduleDirectory: resolvedModuleDirectory,
             temporaryDirectory: temporaryDirectory ?? fileManager.temporaryDirectory,
-            epubLibraryRootURL: epubLibraryRootURL,
-            producerVersion: producerVersion ?? AndroidBackupManifestCodec.producerVersion()
+            epubLibraryRootURL: epubLibraryRootURL
         )
     }
 

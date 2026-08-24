@@ -595,6 +595,23 @@ public struct BibleReaderView: View {
     }
 
     /**
+     Canonical installed-module root for the active pane-scoped Android add-on surfaces.
+
+     - Returns: The presented pane manager's root, or the app's canonical SWORD root while that
+       controller is still registering.
+     - Side effects: Reads controller registration state only.
+     - Failure modes: A missing controller resolves to the canonical app root rather than an empty
+       or omission-tolerant font inventory.
+     */
+    private var paneModuleStoreRootURL: URL {
+        URL(
+            fileURLWithPath: panePresentationController?.swordManager?.modulePath
+                ?? SwordManager.defaultModulePath(),
+            isDirectory: true
+        )
+    }
+
+    /**
      Whether the modal's target pane exists but is still waiting for controller registration.
 
      - Returns: `true` for a visible target window that has not registered its controller yet.
@@ -1037,6 +1054,13 @@ public struct BibleReaderView: View {
                     editor: editor,
                     settings: $windowTextSettingEditorSettings,
                     scope: .window,
+                    providedFontNames: TextDisplaySettingsView.admittedFontNames(
+                        moduleStoreRootURL: URL(
+                            fileURLWithPath: controller(for: request.windowID)?.swordManager?.modulePath
+                                ?? SwordManager.defaultModulePath(),
+                            isDirectory: true
+                        )
+                    ),
                     surfacePalette: readerThemeSurfacePalette,
                     onCommit: {
                         finishWindowTextSettingEditor(request, recordsRecentType: true)
@@ -1835,6 +1859,7 @@ public struct BibleReaderView: View {
         case .workspaces:
             WorkspaceSelectorView(
                 speakService: speakService,
+                moduleStoreRootURL: paneModuleStoreRootURL,
                 surfacePalette: readerThemeSurfacePalette,
                 onDismiss: { activeReaderDestination = nil }
             )
@@ -2214,6 +2239,7 @@ public struct BibleReaderView: View {
         case .globalTextOptions:
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
+                moduleStoreRootURL: paneModuleStoreRootURL,
                 workspaceColor: workspaceColorBinding,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
@@ -2234,6 +2260,7 @@ public struct BibleReaderView: View {
         case .workspaceTextOptions:
             TextDisplaySettingsView(
                 settings: $workspaceDisplaySettings,
+                moduleStoreRootURL: paneModuleStoreRootURL,
                 workspaceColor: workspaceColorBinding,
                 navigationTitle: textOptionsWorkspaceTitle,
                 scope: .workspace,
@@ -2257,6 +2284,7 @@ public struct BibleReaderView: View {
         case .windowTextOptions:
             TextDisplaySettingsView(
                 settings: $windowDisplaySettings,
+                moduleStoreRootURL: paneModuleStoreRootURL,
                 navigationTitle: textOptionsWindowTitle,
                 scope: .window,
                 workspaceName: panePresentationTargetWindow?.workspace?.name ?? windowManager.activeWorkspace?.name,

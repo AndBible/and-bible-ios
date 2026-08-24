@@ -3,13 +3,13 @@
 import SwiftUI
 import BibleCore
 import SwiftData
+import SwordKit
 
 /**
  One Android `FontDefinition` row exposed by the text-display font-family dialog.
 
- Android builds this list from add-on fonts followed by fixed platform family names in
- `FontSizeWidget.kt`. iOS currently has no Android add-on font provider, so the built-in rows are
- the durable parity contract. `androidIndex` is part of the identity because Android's source list
+ Android builds this list from the shared admitted add-on font map followed by fixed platform family
+ names in `FontSizeWidget.kt`. `androidIndex` is part of the identity because Android's source list
  intentionally contains a duplicated `sans-serif-condensed` value and Spinner selection resolves the
  first matching value after updates.
 
@@ -204,6 +204,7 @@ struct TextDisplayPreferenceEditorDraft: Equatable, Sendable {
    row from the nested color editor while keeping that metadata separate from inherited text-display
    settings; window callers omit it
  - `scope` determines which Android parent-scope links are visible
+ - `moduleStoreRootURL` resolves the same admitted add-on font projection used by the reader WebView
  - SwiftData labels back the Android `BOOKMARKS_HIDELABELS` picker
  - `onChange` lets the parent push updated settings into the reader after each mutation
 
@@ -250,6 +251,9 @@ public struct TextDisplaySettingsView: View {
     /// Explicit Android Up action supplied by the reader destination owner.
     private let onBack: (() -> Void)?
 
+    /// Canonical installed-module root used by Android's shared add-on font projection.
+    private let moduleStoreRootURL: URL
+
     /// User-visible and system labels available for the hidden-bookmark-label picker.
     @Query private var allLabels: [BibleCore.Label]
 
@@ -261,6 +265,9 @@ public struct TextDisplaySettingsView: View {
 
     /// Active non-switch preference editor dialog, if one is open.
     @State private var activePreferenceEditor: TextDisplayPreferenceEditorKind?
+
+    /// Android-admitted font names in installed TreeSet/map order.
+    @State private var providedFontNames: [String]
 
     /// Current full app-owned child activity, replacing native navigation presentation.
     @State private var activityDestination: ActivityDestination?
@@ -294,6 +301,7 @@ public struct TextDisplaySettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value to mutate from the form.
+       - moduleStoreRootURL: Canonical installed-module root used for admitted add-on fonts.
        - workspaceColor: Optional workspace accent color edited from Android's color settings
          screen. Global/workspace routes supply this binding; window routes omit it because Android
          hides `workspace_color` only for window-specific color settings.
@@ -307,6 +315,7 @@ public struct TextDisplaySettingsView: View {
      */
     public init(
         settings: Binding<TextDisplaySettings>,
+        moduleStoreRootURL: URL,
         workspaceColor: Binding<Int?>? = nil,
         navigationTitle: String? = nil,
         scope: TextDisplaySettingsScope = .global,
@@ -316,6 +325,10 @@ public struct TextDisplaySettingsView: View {
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
+        self.moduleStoreRootURL = moduleStoreRootURL
+        _providedFontNames = State(
+            initialValue: Self.admittedFontNames(moduleStoreRootURL: moduleStoreRootURL)
+        )
         self.workspaceColor = workspaceColor
         self.navigationTitleText = navigationTitle ?? String(
             localized: "global_text_display_settings_title",
@@ -335,7 +348,7 @@ public struct TextDisplaySettingsView: View {
 
      The reader route uses this initializer so the action bar, rows, nested Colors/Hide Labels
      activities, and controls all resolve from the same workspace/window palette. The public
-     initializer remains source-compatible for standalone hosts and uses the standard palette.
+     standalone initializer uses the standard palette and the same required module-root contract.
 
      - Parameters: Existing public editor inputs plus the owner palette and explicit Back action.
      - Side effects: none until a user changes a setting or invokes Back.
@@ -343,6 +356,7 @@ public struct TextDisplaySettingsView: View {
      */
     init(
         settings: Binding<TextDisplaySettings>,
+        moduleStoreRootURL: URL,
         workspaceColor: Binding<Int?>? = nil,
         navigationTitle: String? = nil,
         scope: TextDisplaySettingsScope = .global,
@@ -354,6 +368,10 @@ public struct TextDisplaySettingsView: View {
         onChange: (() -> Void)? = nil
     ) {
         self._settings = settings
+        self.moduleStoreRootURL = moduleStoreRootURL
+        _providedFontNames = State(
+            initialValue: Self.admittedFontNames(moduleStoreRootURL: moduleStoreRootURL)
+        )
         self.workspaceColor = workspaceColor
         navigationTitleText = navigationTitle ?? String(
             localized: "global_text_display_settings_title",
@@ -910,6 +928,15 @@ public struct TextDisplaySettingsView: View {
             textDisplayResetOverlay
             textDisplayHelpOverlay
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: SwordModuleStore.modulesDidChangeNotification
+            )
+        ) { _ in
+            providedFontNames = Self.admittedFontNames(
+                moduleStoreRootURL: moduleStoreRootURL
+            )
+        }
     }
 
     /**
@@ -1275,6 +1302,7 @@ public struct TextDisplaySettingsView: View {
                 editor: editor,
                 settings: $settings,
                 scope: scope,
+                providedFontNames: providedFontNames,
                 surfacePalette: surfacePalette,
                 onCommit: {
                     activePreferenceEditor = nil
@@ -1331,14 +1359,12 @@ public struct TextDisplaySettingsView: View {
     /**
      Builds Android's font-family option list for the text-display dialog.
 
-     - Parameter providedFonts: Optional Android add-on font names that would precede the standard
-       list on Android. iOS currently passes no add-on fonts because those files are not installed
-       through the iOS document pipeline.
+     - Parameter providedFonts: Android-admitted add-on font names that precede the standard list.
      - Returns: Font option rows in Android widget order.
      - Side effects: none.
      - Failure modes: none; empty input still returns the Android standard family list.
      */
-    static func androidFontFamilyOptions(providedFonts: [String] = []) -> [TextDisplayFontFamilyOption] {
+    static func androidFontFamilyOptions(providedFonts: [String]) -> [TextDisplayFontFamilyOption] {
         (providedFonts + androidStandardFontFamilies)
             .enumerated()
             .map { index, value in
@@ -1374,17 +1400,36 @@ public struct TextDisplaySettingsView: View {
      Android's spinner calls `availableFonts.find { it.realFontFamily == fontFamilyVal }`, so the
      duplicated `sans-serif-condensed` row resolves to the first duplicate after updates.
 
-     - Parameter value: Stored font-family value, or `nil` to use the Android default.
+     - Parameters:
+       - value: Stored font-family value, or `nil` to use the Android default.
+       - providedFonts: Android-admitted font names preceding built-in families.
      - Returns: First matching Android option index, falling back to the default `sans-serif` row.
      - Side effects: none.
      - Failure modes: Unknown values fall back to index `0` when even the default is unavailable.
      */
-    static func androidFontFamilySelectedIndex(for value: String?) -> Int {
+    static func androidFontFamilySelectedIndex(
+        for value: String?,
+        providedFonts: [String]
+    ) -> Int {
         let resolvedValue = value ?? TextDisplaySettings.appDefaults.fontFamily ?? "sans-serif"
-        let options = androidFontFamilyOptions()
-        if let exactIndex = options.firstIndex(where: { $0.value == resolvedValue }) {
+        let options = androidFontFamilyOptions(providedFonts: providedFonts)
+        if let exactIndex = options.firstIndex(where: {
+            SwordJavaStringIdentity.equals($0.value, resolvedValue)
+        }) {
             return exactIndex
         }
         return options.firstIndex(where: { $0.value == "sans-serif" }) ?? 0
+    }
+
+    /**
+     Captures Android's shared admitted font-map names for one installed-module root.
+
+     - Parameter moduleStoreRootURL: Canonical SWORD root containing installed add-ons.
+     - Returns: Exact font names in Android linked-map value order.
+     - Side effects: Opens a fresh SWORD manager and reads installed metadata/filesystem state.
+     - Failure modes: Manager or registry failures return an empty fail-closed inventory.
+     */
+    static func admittedFontNames(moduleStoreRootURL: URL) -> [String] {
+        SwordManager(modulePath: moduleStoreRootURL.path)?.admittedFonts().map(\.name) ?? []
     }
 }

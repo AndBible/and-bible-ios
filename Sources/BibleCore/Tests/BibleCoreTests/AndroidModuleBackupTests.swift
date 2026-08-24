@@ -1137,10 +1137,7 @@ final class AndroidModuleBackupTests: XCTestCase {
             moduleName: "KJV",
             data: Data("exported".utf8)
         )
-        let service = AndroidModuleBackupService(
-            moduleDirectory: moduleRoot,
-            producerVersion: 777
-        )
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
 
         let export = try service.exportArchiveFile(orderedModuleNames: ["KJV"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
@@ -1152,7 +1149,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         let entriesByName = Dictionary(uniqueKeysWithValues: entries.map { ($0.name, $0.data) })
         XCTAssertEqual(
             String(data: try XCTUnwrap(entriesByName["AndBibleBackupManifest.json"]), encoding: .utf8),
-            #"{"backupType":"MODULE_BACKUP","contains":null,"manifestVersion":1,"andBibleVersion":777}"#
+            #"{"backupType":"MODULE_BACKUP","contains":null,"manifestVersion":1,"andBibleVersion":\#(AndBibleAndroidCompatibility.currentVersionCode)}"#
         )
         XCTAssertEqual(
             String(data: try XCTUnwrap(entriesByName["mods.d/kjv.conf"]), encoding: .utf8),

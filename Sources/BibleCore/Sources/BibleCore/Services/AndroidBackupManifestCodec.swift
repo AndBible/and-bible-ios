@@ -1,6 +1,7 @@
 // AndroidBackupManifestCodec.swift -- Shared Android backup-manifest contract
 
 import Foundation
+import SwordKit
 
 /** Normalized fields carried by Android's `AndBibleBackupManifest.json`. */
 struct AndroidBackupManifestPayload: Sendable, Equatable {
@@ -13,7 +14,7 @@ struct AndroidBackupManifestPayload: Sendable, Equatable {
     /// Manifest schema version when explicitly encoded.
     let manifestVersion: Int?
 
-    /// Producing application build when explicitly encoded.
+    /// Producing Android application version code when explicitly encoded.
     let andBibleVersion: Int?
 }
 
@@ -63,18 +64,25 @@ enum AndroidBackupManifestCodec {
     }
 
     /**
-     Returns the integer application build Android records as `andBibleVersion`.
+     Encodes a manifest produced by iOS with the one pinned Android compatibility version.
 
-     - Parameter bundle: Bundle owning `CFBundleVersion`; command-line test hosts may omit it.
-     - Returns: Parsed numeric build, or Android-compatible sentinel `0` when unavailable.
-     - Side effects: Reads bundle metadata only.
-     - Failure modes: None; nonnumeric values resolve to zero.
+     - Parameters:
+       - backupType: Android `BackupType` enum name.
+       - contains: Ordered Android `DbType` names, or nil for a literal JSON `null`.
+     - Returns: UTF-8 JSON bytes accepted by Android's kotlinx serializer.
+     - Side effects: None; iOS bundle metadata is never read.
+     - Failure modes: Rethrows JSON string/array encoding failures.
      */
-    static func producerVersion(bundle: Bundle = .main) -> Int {
-        let value = bundle.object(forInfoDictionaryKey: "CFBundleVersion")
-        if let number = value as? NSNumber { return number.intValue }
-        if let string = value as? String, let number = Int(string) { return number }
-        return 0
+    static func encodeProducedBackup(
+        backupType: String,
+        contains: [String]?
+    ) throws -> Data {
+        try encode(
+            backupType: backupType,
+            contains: contains,
+            manifestVersion: supportedManifestVersion,
+            andBibleVersion: AndBibleAndroidCompatibility.currentVersionCode
+        )
     }
 
     /**
@@ -84,12 +92,12 @@ enum AndroidBackupManifestCodec {
        - backupType: Android `BackupType` enum name.
        - contains: Ordered Android `DbType` names, or nil for a literal JSON `null`.
        - manifestVersion: Manifest schema version.
-       - andBibleVersion: Integer producer build.
+       - andBibleVersion: Android application compatibility version code.
      - Returns: UTF-8 JSON bytes accepted by Android's kotlinx serializer.
      - Side effects: None.
      - Failure modes: Rethrows JSON string/array encoding failures.
      */
-    static func encode(
+    private static func encode(
         backupType: String,
         contains: [String]?,
         manifestVersion: Int = supportedManifestVersion,

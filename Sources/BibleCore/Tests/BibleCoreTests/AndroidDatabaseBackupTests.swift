@@ -508,6 +508,10 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         XCTAssertEqual(manifest["backupType"] as? String, "DB_BACKUP")
         XCTAssertEqual(manifest["manifestVersion"] as? Int, 1)
         XCTAssertEqual(manifest["contains"] as? [String], expectedCategories.map(\.rawValue))
+        XCTAssertEqual(
+            manifest["andBibleVersion"] as? Int,
+            AndBibleAndroidCompatibility.currentVersionCode
+        )
 
         let loadedArchive = try service.loadArchive(from: export.data)
         defer { service.cleanup(loadedArchive) }

@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import BibleCore
 @testable import BibleView
+@testable import SwordKit
 
 /**
  Contract tests for the custom EPUB resource URL boundary shared by native HTML and WebKit.
@@ -12,6 +13,40 @@ import XCTest
 final class EpubResourceRouteTests: XCTestCase {
     /// Deterministic opaque generation token used by route fixtures.
     private let generation = "11111111-2222-3333-4444-555555555555"
+
+    /**
+     Verifies iOS add-on font routes preserve exact module/path identity.
+
+     - Setup: Parses stylesheet/resource URLs for canonically equivalent Java-distinct initials.
+     - Expected result: Both spellings remain distinct and traversal/backslash identities fail.
+     - Side effects: None.
+     - Failure meaning: WebKit could authorize a font through the wrong installed add-on owner.
+     */
+    func testFontRoutesPreserveJavaExactOwnerAndRejectTraversal() throws {
+        let composed = "Fónt"
+        let decomposed = "Fo\u{301}nt"
+        let composedStyle = try XCTUnwrap(URL(
+            string: "andbible-resource://font/\(composed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)/fonts.css"
+        ))
+        let decomposedResource = try XCTUnwrap(URL(
+            string: "andbible-resource://font/\(decomposed.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)/nested/Family.ttf"
+        ))
+
+        XCTAssertEqual(
+            EpubResourceRoute.parse(composedStyle),
+            .fontStyleSheet(moduleInitials: composed)
+        )
+        XCTAssertEqual(
+            EpubResourceRoute.parse(decomposedResource),
+            .fontResource(moduleInitials: decomposed, relativePath: "nested/Family.ttf")
+        )
+        XCTAssertNil(EpubResourceRoute.parse(try XCTUnwrap(URL(
+            string: "andbible-resource://font/Font/%2e%2e/secret.ttf"
+        ))))
+        XCTAssertNil(EpubResourceRoute.parse(try XCTUnwrap(URL(
+            string: "andbible-resource://font/Bad%2FName/fonts.css"
+        ))))
+    }
 
     /**
      Verifies identical package paths remain scoped to the initials encoded by their source EPUB.
@@ -134,5 +169,63 @@ final class EpubResourceRouteTests: XCTestCase {
                 canonicalPath: "OPS/images/literal%2Fname.png"
             )
         )
+    }
+
+    /**
+     Verifies a font replacement between admission and file open cannot redirect streamed bytes.
+
+     - Setup: Injects one exact provider whose resolver atomically replaces the path during the
+       required post-open authorization replay.
+     - Expected result: The changed inode is rejected and closed; an unchanged provider can be
+       opened and retains the exact descriptor contents.
+     - Side effects: Creates, replaces, opens, and removes files in one isolated temporary tree.
+     - Failure meaning: A concurrent add-on update can serve bytes from a different owner than the
+       shared projection authorized.
+     */
+    func testFontResourceOpenRejectsReplacementBetweenAuthorizationSnapshots() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fontURL = root.appendingPathComponent("Family.ttf")
+        let replacementURL = root.appendingPathComponent("Replacement.ttf")
+        try Data("old-font".utf8).write(to: fontURL)
+        try Data("new-font".utf8).write(to: replacementURL)
+        let provider = SwordAdmittedFont(
+            moduleName: "FONTOWNER",
+            name: "Family",
+            relativePath: "Family.ttf",
+            fileURL: fontURL
+        )
+        var resolverInvocations = 0
+        let replacingHandler = EpubResourceSchemeHandler(
+            modulePath: root.path,
+            fontProviderResolver: { requestedInitials in
+                XCTAssertEqual(requestedInitials, "FONTOWNER")
+                resolverInvocations += 1
+                if resolverInvocations == 2 {
+                    try! FileManager.default.removeItem(at: fontURL)
+                    try! FileManager.default.moveItem(at: replacementURL, to: fontURL)
+                }
+                return [provider]
+            }
+        )
+
+        XCTAssertNil(replacingHandler.openAuthorizedFontResource(
+            moduleInitials: "FONTOWNER",
+            relativePath: "Family.ttf"
+        ))
+        XCTAssertEqual(resolverInvocations, 2)
+
+        let stableHandler = EpubResourceSchemeHandler(
+            modulePath: root.path,
+            fontProviderResolver: { _ in [provider] }
+        )
+        let stable = try XCTUnwrap(stableHandler.openAuthorizedFontResource(
+            moduleInitials: "FONTOWNER",
+            relativePath: "Family.ttf"
+        ))
+        defer { try? stable.handle.close() }
+        XCTAssertEqual(try stable.handle.readToEnd(), Data("new-font".utf8))
     }
 }

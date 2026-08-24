@@ -16,7 +16,27 @@
  */
 
 import {setupEventBusListener} from "@/eventbus";
+import {getPlatform, type Platform} from "@/composables/native-bridge";
 import {onBeforeMount} from "vue";
+
+/**
+ * Resolve one admitted font module to the platform resource endpoint.
+ *
+ * @param moduleName exact installed module initials supplied by the native admitted projection
+ * @param platform current host platform; injectable for deterministic route tests
+ * @returns Android app-assets URL or the iOS contained custom-scheme URL
+ * @sideEffects none
+ * @throws never
+ */
+export function addonFontStyleSheetURL(
+    moduleName: string,
+    platform: Platform = getPlatform(),
+): string {
+    const encodedName = encodeURIComponent(moduleName);
+    return platform === "ios"
+        ? `andbible-resource://font/${encodedName}/fonts.css`
+        : `/fonts/${encodedName}/fonts.css`;
+}
 
 export function useAddonFonts() {
     const elements: HTMLElement[] = [];
@@ -32,7 +52,7 @@ export function useAddonFonts() {
         elements.splice(0);
         for (const modName of fontModuleNames) {
             const link = document.createElement("link");
-            link.href = `/fonts/${modName}/fonts.css`;
+            link.href = addonFontStyleSheetURL(modName);
             link.type = "text/css";
             link.rel = "stylesheet";
             document.getElementsByTagName("head")[0].appendChild(link)

@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import XCTest
 @testable import BibleCore
+import SwordKit
 
 /** Android `STUDYPAD_EXPORT` manifest, projection, filename, and import-routing contract tests. */
 final class AndroidStudyPadArchiveServiceTests: XCTestCase {
@@ -12,7 +13,7 @@ final class AndroidStudyPadArchiveServiceTests: XCTestCase {
      Setup:
      - seeds selected and excluded labels, each with bookmark and text-entry content
      - gives the selected bookmarks an excluded primary label to exercise Android's repair step
-     - exports with a deterministic producer build
+     - exports through the production pinned Android compatibility authority
 
      Expected result:
      - the manifest is the literal first member and carries all four Android fields
@@ -118,10 +119,7 @@ final class AndroidStudyPadArchiveServiceTests: XCTestCase {
 
         let scratch = try makeScratchDirectory()
         defer { try? FileManager.default.removeItem(at: scratch) }
-        let service = AndroidStudyPadArchiveService(
-            temporaryDirectory: scratch,
-            producerVersion: 777
-        )
+        let service = AndroidStudyPadArchiveService(temporaryDirectory: scratch)
         let export = try service.exportArchiveFile(labelIDs: [selectedLabel.id], modelContext: context)
         defer { service.cleanup(export) }
 
@@ -143,7 +141,10 @@ final class AndroidStudyPadArchiveServiceTests: XCTestCase {
         XCTAssertEqual(manifest["backupType"] as? String, "STUDYPAD_EXPORT")
         XCTAssertEqual(manifest["contains"] as? [String], ["BOOKMARKS"])
         XCTAssertEqual(manifest["manifestVersion"] as? Int, 1)
-        XCTAssertEqual(manifest["andBibleVersion"] as? Int, 777)
+        XCTAssertEqual(
+            manifest["andBibleVersion"] as? Int,
+            AndBibleAndroidCompatibility.currentVersionCode
+        )
 
         let inspection = try service.inspectImport(at: export.fileURL)
         defer { service.cleanup(inspection) }
