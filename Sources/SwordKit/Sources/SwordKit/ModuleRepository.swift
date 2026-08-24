@@ -2505,6 +2505,23 @@ public final class ModuleRepository: @unchecked Sendable {
         }
     }
 
+    /**
+     Uninstalls the exact config or generated CSV owner retained by an admitted add-on row.
+
+     - Parameter target: Opaque installed owner supplied by `SwordManager.admittedAddonModules()`.
+     - Side effects: Acquires the canonical module-store lease and transactionally removes only the
+       selected owner before invalidating inventory and posting the terminal store notification.
+     - Throws: `ModuleRepositoryError.moduleNotFound` for stale owners, or the publisher's unsafe
+       path, ownership, filesystem, cache, and rollback failures.
+     */
+    public func uninstallAddon(_ target: SwordInstalledAddonRemovalTarget) throws {
+        do {
+            try mutationPublisher.uninstallInstalledAddon(target)
+        } catch ModuleStoreMutationError.moduleNotFound {
+            throw ModuleRepositoryError.moduleNotFound(target.moduleName)
+        }
+    }
+
     // MARK: - Install from ZIP
 
     /**

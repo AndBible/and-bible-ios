@@ -71,8 +71,8 @@ final class ReaderSourceGuardTests: XCTestCase {
      - Setup: Extracts the private toolbar menu, next-document, suggested-Bible, Search, and chooser
        inventory boundaries from BibleUI source.
      - Expected result: Every automatic/quick/Search Bible path consumes the controller's
-       one-snapshot readable projection, while the full picker still consumes
-       `installedModules(for:)`.
+       one-snapshot readable projection, while the full picker consumes the inclusive installed
+       BookSet presentation projection.
      - Failure meaning: Locked Bibles can re-enter a no-prompt shortcut, or disappear from the only
        chooser that owns the existing passphrase flow.
      - Side effects: Reads package source only.
@@ -97,7 +97,9 @@ final class ReaderSourceGuardTests: XCTestCase {
         XCTAssertTrue(nextActionSource.contains("modules: controller.readableBibleModules"))
         XCTAssertTrue(suggestedSource.contains("let readableModules = controller.readableBibleModules"))
         XCTAssertTrue(readerSource.contains("installedBibleModules: controller?.readableBibleModules ?? []"))
-        XCTAssertTrue(pickerSource.contains("controller.installedModules(for: $0)"))
+        XCTAssertTrue(
+            pickerSource.contains("controller.installedBookPresentationsForDocumentPicker()")
+        )
         XCTAssertFalse(pickerSource.contains("controller.readableBibleModules"))
     }
 

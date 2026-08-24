@@ -10,10 +10,27 @@ import XCTest
 
  These tests protect the BibleUI-owned picker filtering, pseudo-document, document-management, and
  full-screen chooser presentation contracts without booting the app. Behavioral access regressions
- use an isolated temporary SWORD tree removed by inherited teardown. Failures indicate visual or
- behavioral drift from Android's document chooser, not app delegate or simulator lifecycle issues.
+ use isolated temporary SWORD trees removed by inherited teardown or local `defer` cleanup.
+ Failures indicate visual or behavioral drift from Android's document chooser, not app delegate or
+ simulator lifecycle issues.
  */
 final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
+    /**
+     Wraps lightweight test metadata in the exact presentation contract consumed by production.
+
+     - Parameter modules: Immutable module fixtures whose initials also serve as abbreviations.
+     - Returns: Installed-book presentations preserving fixture order and metadata.
+     - Side effects: None.
+     - Failure modes: None; every supplied module maps to exactly one presentation.
+     */
+    private func installedBooks(
+        _ modules: [ModuleInfo]
+    ) -> [BibleReaderInstalledBookPresentation] {
+        modules.map {
+            BibleReaderInstalledBookPresentation(info: $0, abbreviation: $0.name)
+        }
+    }
+
     func testBibleReaderModulePickerBuildsForBibleCategory() {
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let view = BibleReaderModulePicker(
@@ -47,85 +64,78 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
             ModuleInfo(name: "Devotion", description: "Daily devotional", category: .dailyDevotion, language: "en")
         ]
 
+        func filteredModules(
+            category: DocumentCategory?,
+            language: String = "",
+            searchText: String = ""
+        ) -> [ModuleInfo] {
+            BibleReaderModulePicker.filteredRows(
+                installedBooks: installedBooks(modules),
+                selectedFilter: category.map(BibleReaderModulePicker.DocumentTypeFilter.category)
+                    ?? .all,
+                selectedLanguage: language,
+                searchText: searchText
+            ).compactMap { row in
+                guard case .module(let module) = row else { return nil }
+                return module.info
+            }
+        }
+
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                modules,
-                selectedCategory: nil,
-                selectedLanguage: "",
-                searchText: ""
-            ).map(\.name),
+            filteredModules(category: nil).map(\.name),
             ["KJV", "MHC", "StrongsHebrew", "BookA", "MapA"]
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                modules,
-                selectedCategory: .dictionary,
-                selectedLanguage: "",
-                searchText: ""
-            ).map(\.name),
+            filteredModules(category: .dictionary).map(\.name),
             ["StrongsHebrew"]
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                modules,
-                selectedCategory: nil,
-                selectedLanguage: "en",
-                searchText: ""
-            ).map(\.name),
+            filteredModules(category: nil, language: "en").map(\.name),
             ["KJV", "MHC", "MapA"]
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                modules,
-                selectedCategory: .bible,
-                selectedLanguage: "he",
-                searchText: ""
-            ).map(\.name),
+            filteredModules(category: .bible, language: "he").map(\.name),
             []
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                modules,
-                selectedCategory: nil,
-                selectedLanguage: "",
-                searchText: "strong"
-            ).map(\.name),
+            filteredModules(category: nil, searchText: "strong").map(\.name),
             ["StrongsHebrew"]
         )
         XCTAssertEqual(
-            BibleReaderModulePicker.availableLanguages(from: modules),
+            BibleReaderModulePicker.availableLanguages(
+                from: BibleReaderModulePicker.allRows(installedBooks: installedBooks(modules))
+            ),
             ["en", "fr", "he"]
         )
         let bibleOnlyModules = [
             ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en")
         ]
         XCTAssertTrue(
-            BibleReaderModulePicker.shouldShowCategoryEmptyState(
-                bibleOnlyModules,
-                selectedCategory: .dictionary
+            BibleReaderModulePicker.shouldShowFilterEmptyState(
+                BibleReaderModulePicker.allRows(installedBooks: installedBooks(bibleOnlyModules)),
+                selectedFilter: .category(.dictionary)
             )
         )
         XCTAssertFalse(
-            BibleReaderModulePicker.shouldShowCategoryEmptyState(
-                bibleOnlyModules,
-                selectedCategory: .bible
+            BibleReaderModulePicker.shouldShowFilterEmptyState(
+                BibleReaderModulePicker.allRows(installedBooks: installedBooks(bibleOnlyModules)),
+                selectedFilter: .category(.bible)
             )
         )
         XCTAssertFalse(
-            BibleReaderModulePicker.shouldShowCategoryEmptyState(
-                modules,
-                selectedCategory: nil
+            BibleReaderModulePicker.shouldShowFilterEmptyState(
+                BibleReaderModulePicker.allRows(installedBooks: installedBooks(modules)),
+                selectedFilter: .all
             )
         )
     }
 
     /**
-     Preserves Java-distinct composed/decomposed module rows through dedupe and selection lookup.
+     Preserves Java-distinct composed/decomposed module rows through rendering identity.
 
-     - Setup: Supplies two visually equivalent initials with different UTF-16 spellings plus one
-       exact duplicate of the composed spelling.
-     - Expected: Only the exact duplicate is removed; each Java-distinct row has a distinct SwiftUI
-       identity and resolves only from its own exact initials token.
+     - Setup: Supplies two installed rows with visually equivalent initials and different UTF-16
+       spellings.
+     - Expected: Each Java-distinct row has a distinct SwiftUI identity and retains its exact token.
      - Failure meaning: Swift canonical String equality is still collapsing or misrouting an
        installed book that Android exposes as a separate registry identity.
      - Side effects: None.
@@ -148,12 +158,11 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
             language: "fr"
         )
 
-        let distinct = BibleReaderModulePicker.javaExactDistinctModules([
+        let distinct = [
             composedModule,
             decomposedModule,
-            composedModule,
-        ])
-        let rows = BibleReaderModulePicker.allRows(from: distinct)
+        ]
+        let rows = BibleReaderModulePicker.allRows(installedBooks: installedBooks(distinct))
             .filter { row in
                 if case .module = row { return true }
                 return false
@@ -161,18 +170,8 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(distinct.count, 2)
         XCTAssertNotEqual(try XCTUnwrap(rows.first).id, try XCTUnwrap(rows.last).id)
-        XCTAssertEqual(
-            Array(try XCTUnwrap(
-                BibleReaderModulePicker.javaExactModule(named: composed, in: distinct)
-            ).name.utf16),
-            Array(composed.utf16)
-        )
-        XCTAssertEqual(
-            Array(try XCTUnwrap(
-                BibleReaderModulePicker.javaExactModule(named: decomposed, in: distinct)
-            ).name.utf16),
-            Array(decomposed.utf16)
-        )
+        XCTAssertTrue(SwordJavaStringIdentity.equals(try XCTUnwrap(rows.first?.moduleInfo).name, composed))
+        XCTAssertTrue(SwordJavaStringIdentity.equals(try XCTUnwrap(rows.last?.moduleInfo).name, decomposed))
     }
 
     /**
@@ -193,7 +192,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .all,
                 selectedLanguage: "",
                 searchText: ""
@@ -209,7 +208,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .category(.commentary),
                 selectedLanguage: "",
                 searchText: ""
@@ -218,7 +217,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .category(.generalBook),
                 selectedLanguage: "",
                 searchText: ""
@@ -227,7 +226,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .addons,
                 selectedLanguage: "en",
                 searchText: ""
@@ -236,7 +235,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertTrue(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .category(.bible),
                 selectedLanguage: "",
                 searchText: "notes"
@@ -244,13 +243,178 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             BibleReaderModulePicker.filteredRows(
-                modules,
+                installedBooks: installedBooks(modules),
                 selectedFilter: .all,
                 selectedLanguage: "",
                 searchText: "notes"
             ).map(\.id),
             ["pseudo:myNotes"]
         )
+    }
+
+    /**
+     Verifies the picker add-on tab consumes the shared Android-admitted add-on projection.
+
+     - Setup: Writes four payload-backed compatible add-ons, including two comparator-distinct books
+       with the same initials and abbreviations opposing initials order, plus future and malformed
+       configs under one temporary manager root.
+     - Expected: Picker inventory contains every compatible JSword row, gives duplicates distinct
+       SwiftUI identities, and uses Android's abbreviation ordering rather than initials ordering.
+     - Side effects: Creates, reads, and removes one isolated SWORD config tree.
+     - Failure meaning: The picker can expose add-ons that prompt/feature execution correctly rejects.
+     */
+    func testPickerAddonInventoryUsesSharedAndroidAdmission() throws {
+        let swordFixtureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = swordFixtureURL.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: swordFixtureURL) }
+        let definitions = [
+            (file: "z-alpha.conf", initials: "ZZZADDON", description: "Alpha row", abbreviation: "Alpha", minimum: "1115"),
+            (file: "b-duplicate.conf", initials: "DUPADDON", description: "Duplicate beta", abbreviation: "Beta", minimum: "1115"),
+            (file: "c-duplicate.conf", initials: "DUPADDON", description: "Duplicate gamma", abbreviation: "Gamma", minimum: "1115"),
+            (file: "a-zulu.conf", initials: "AAAADDON", description: "Zulu row", abbreviation: "Zulu", minimum: "1115"),
+            (file: "future.conf", initials: "FUTURE", description: "Future", abbreviation: "Future", minimum: "1116"),
+            (file: "malformed.conf", initials: "MALFORMED", description: "Malformed", abbreviation: "Malformed", minimum: "later"),
+        ]
+        for definition in definitions {
+            let payloadDirectory = swordFixtureURL.appendingPathComponent(
+                "addons/\(definition.file)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: payloadDirectory,
+                withIntermediateDirectories: true
+            )
+            try """
+            [\(definition.initials)]
+            Description=\(definition.description)
+            Abbreviation=\(definition.abbreviation)
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./addons/\(definition.file)
+            AndBibleMinimumVersion=\(definition.minimum)
+            """.write(
+                to: configDirectory.appendingPathComponent(definition.file),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let manager = try XCTUnwrap(SwordManager(modulePath: swordFixtureURL.path))
+        let addons = BibleReaderModulePicker.selectableAddonModules(from: manager)
+
+        XCTAssertEqual(
+            addons.map(\.moduleInfo.name),
+            ["ZZZADDON", "DUPADDON", "DUPADDON", "AAAADDON"]
+        )
+        let rows = BibleReaderModulePicker.filteredRows(
+            installedBooks: [],
+            admittedAddons: addons,
+            selectedFilter: .addons,
+            selectedLanguage: "",
+            searchText: ""
+        )
+        XCTAssertEqual(
+            rows.compactMap(\.moduleInfo).map(\.description),
+            ["Alpha row", "Duplicate beta", "Duplicate gamma", "Zulu row"]
+        )
+        XCTAssertEqual(rows.map(\.primaryTitle), ["Alpha", "Beta", "Gamma", "Zulu"])
+        XCTAssertEqual(Set(rows.map(\.id)).count, 4)
+        XCTAssertEqual(Set(rows.map(\.moduleAccessibilityIdentifier)).count, 4)
+        XCTAssertEqual(Set(addons.map(\.removalTarget)).count, 4)
+        let deletionTargets = rows.compactMap { row -> SwordInstalledAddonRemovalTarget? in
+            guard let selection = BibleReaderModulePicker.deletionSelection(for: row),
+                  case .addon(let addon) = selection else {
+                return nil
+            }
+            return addon.removalTarget
+        }
+        XCTAssertEqual(deletionTargets, addons.map(\.removalTarget))
+    }
+
+    /**
+     Guards the picker delete action against collapsing an admitted add-on back to initials.
+
+     - Setup: Reads the production picker after the behavior-level row-selection oracle above and
+       extracts its exact add-on uninstall function.
+     - Expected result: The app bar captures immutable deletion identity before clearing contextual
+       state, and repository deletion receives the opaque target rather than the module-name API.
+     - Side effects: Reads one source-controlled Swift file without mutation.
+     - Failure meaning: Duplicate-initial or configless Android add-on rows can render distinctly but
+       invoke an ordinary uninstall path that rejects or removes a different installed Book.
+     */
+    func testAddonContextDeleteRetainsOpaqueInstalledOwner() throws {
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        )
+        let uninstallSource = try BibleUITestSourceLocator.extractFunction(
+            named: "uninstallInstalledAddon",
+            from: source
+        )
+
+        XCTAssertTrue(source.contains("@State private var pendingAddonUninstall"))
+        XCTAssertTrue(
+            source.contains(
+                "let contextualDeletion = contextualRow.flatMap(Self.deletionSelection)"
+            )
+        )
+        XCTAssertTrue(source.contains("case .addon(let addon):"))
+        XCTAssertTrue(source.contains("pendingAddonUninstall = addon"))
+        XCTAssertFalse(source.contains("if let contextualAddon"))
+        XCTAssertTrue(uninstallSource.contains("repository.uninstallAddon(addon.removalTarget)"))
+        XCTAssertFalse(uninstallSource.contains("repository.uninstallModule(named:"))
+    }
+
+    /**
+     Verifies ordinary installed books retain Android abbreviation rendering and locale sorting.
+
+     - Setup: Supplies Turkish-I abbreviations whose locale-lowercase order opposes initials, plus
+       two equal-lowercase abbreviations in a deliberate input order.
+     - Expected: Primary labels use abbreviations, Turkish lowercase controls ordering, and equal
+       keys remain stable instead of falling back to initials.
+     - Side effects: None; projects immutable in-memory installed metadata.
+     - Failure meaning: Non-add-on chooser rows diverge from Android `DocumentSelectionBase` and
+       `DocumentItemAdapter` even though add-on rows appear correct.
+     */
+    func testInstalledBookRowsRenderAndSortByAndroidAbbreviation() {
+        /**
+         Builds one Turkish-language installed presentation for deterministic row sorting.
+
+         - Parameters:
+           - initials: Exact installed module identity.
+           - abbreviation: Android primary label and locale-lowercase sort input.
+         - Returns: Immutable Bible-row presentation.
+         - Side effects: None.
+         - Failure modes: None.
+         */
+        func book(
+            _ initials: String,
+            _ abbreviation: String
+        ) -> BibleReaderInstalledBookPresentation {
+            BibleReaderInstalledBookPresentation(
+                info: ModuleInfo(
+                    name: initials,
+                    description: "\(initials) name",
+                    category: .bible,
+                    language: "tr"
+                ),
+                abbreviation: abbreviation
+            )
+        }
+        let rows = BibleReaderModulePicker.filteredRows(
+            installedBooks: [
+                book("AAA", "I"),
+                book("DDD", "SAME"),
+                book("CCC", "same"),
+                book("ZZZ", "İ"),
+            ],
+            selectedFilter: .category(.bible),
+            selectedLanguage: "",
+            searchText: ""
+        )
+
+        XCTAssertEqual(rows.map(\.primaryTitle), ["İ", "SAME", "same", "I"])
+        XCTAssertEqual(rows.compactMap(\.moduleInfo).map(\.name), ["ZZZ", "DDD", "CCC", "AAA"])
     }
 
     /**
@@ -321,7 +485,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(admitted.map(\.identifier), [admittedFirst.identifier, admittedLast.identifier])
         XCTAssertEqual(
-            BibleReaderModulePicker.allRows(from: [], epubs: admitted).compactMap { row in
+            BibleReaderModulePicker.allRows(installedBooks: [], epubs: admitted).compactMap { row in
                 guard case .epub(let epub) = row else { return nil }
                 return epub.identifier
             },
@@ -715,12 +879,12 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(BibleReaderModulePicker.requiresUnlock(locked))
         XCTAssertFalse(BibleReaderModulePicker.requiresUnlock(unlocked))
         XCTAssertEqual(
-            BibleReaderModulePicker.filteredModules(
-                [locked, unlocked],
-                selectedCategory: .bible,
+            BibleReaderModulePicker.filteredRows(
+                installedBooks: installedBooks([locked, unlocked]),
+                selectedFilter: .category(.bible),
                 selectedLanguage: "",
                 searchText: ""
-            ).map(\.name),
+            ).compactMap(\.moduleInfo).map(\.name),
             ["LOCKED", "OPEN"]
         )
 

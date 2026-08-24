@@ -724,6 +724,21 @@ struct BibleReaderLocalDocumentRegistration<LocalDocument> {
 }
 
 /**
+ One installed chooser book retaining Android's display abbreviation after global admission.
+
+ The reader uses `ModuleInfo` for content/category actions, while Android's document chooser renders
+ and sorts the separate JSword abbreviation. Values are immutable and already reflect native-first
+ plus custom-driver registration ownership.
+ */
+struct BibleReaderInstalledBookPresentation {
+    /// Inclusive installed owner metadata used by reader actions and secondary display text.
+    let info: ModuleInfo
+
+    /// JSword abbreviation used by Android as primary row text and locale-aware sort input.
+    let abbreviation: String
+}
+
+/**
  Resolves Android's single global installed-book registry across native and SQLite backends.
 
  Each custom SQLite driver first asks the current registry for its proposed initials and skips
@@ -910,19 +925,16 @@ struct BibleReaderInstalledModuleResolver {
         swordManager: SwordManager?,
         sqliteModules: [BibleReaderSQLiteModuleHandle]
     ) {
-        let installedSnapshot = swordManager?.installedModules() ?? []
-        self.nativeRegistrations = installedSnapshot.compactMap { info in
+        let installedSnapshot = swordManager?.installedBookRegistrations() ?? []
+        self.nativeRegistrations = installedSnapshot.compactMap { installedBook in
+            let info = installedBook.moduleInfo
             guard !BibleReaderSQLiteModuleCatalog.isSQLiteProjection(info) else { return nil }
             let installedModule = swordManager?.module(named: info.name)
             let readableModule = (!info.isEncrypted || info.isUnlocked) ? installedModule : nil
-            let configuredAbbreviation = installedModule?.configEntry("Abbreviation")
             return NativeRegistration(
                 info: info,
                 readableModule: readableModule,
-                abbreviation: BibleReaderJSwordConfigValue.abbreviation(
-                    configuredAbbreviation,
-                    initials: info.name
-                )
+                abbreviation: installedBook.abbreviation
             )
         }
         self.sqliteModules = sqliteModules
@@ -1160,6 +1172,23 @@ struct BibleReaderInstalledModuleResolver {
      */
     func registeredBookMetadata() -> [ModuleInfo] {
         jswordSortedRegistrations.map(\.info)
+    }
+
+    /**
+     Returns globally admitted installed books with Android's chooser abbreviation retained.
+
+     - Returns: Native and SQLite registrations in final installed TreeSet order.
+     - Side effects: Replays immutable custom admission and comparator replacement only.
+     - Failure modes: Rejected custom candidates remain absent; locked native owners retain metadata
+       and abbreviation without exposing a readable content handle.
+     */
+    func registeredBookPresentations() -> [BibleReaderInstalledBookPresentation] {
+        jswordSortedRegistrations.map {
+            BibleReaderInstalledBookPresentation(
+                info: $0.info,
+                abbreviation: $0.abbreviation
+            )
+        }
     }
 
     /**

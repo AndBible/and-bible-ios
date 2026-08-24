@@ -1,13 +1,15 @@
 import Foundation
 import SwiftData
+import SwordKit
 import XCTest
 @testable import BibleCore
 
 /**
  Protects Android v23 prompt identity, source precedence, credential placement, and model fallback.
 
- Every test uses an in-memory AI-only SwiftData container and a non-Keychain secret double, so the
- suite performs no network, disk, CloudKit, backup, or system-Keychain side effects.
+ Tests use in-memory AI-only SwiftData containers and a non-Keychain secret double. Prompt-pack
+ parity fixtures additionally create and remove isolated temporary SWORD trees; the suite performs
+ no network, CloudKit, backup, or system-Keychain side effects.
  */
 @MainActor
 final class AIPromptAndModelBehaviorTests: XCTestCase {
@@ -400,6 +402,117 @@ final class AIPromptAndModelBehaviorTests: XCTestCase {
         XCTAssertEqual(prompt.permissionMode, .askOncePerRun)
         XCTAssertFalse(prompt.strictContextMatching)
         XCTAssertTrue(prompt.bibleOnly)
+    }
+
+    /**
+     Verifies prompt discovery and repository lookup share Android add-on admission and BookSet order.
+
+     - Setup: Installs slashless-directory Alpha and file-prefix Zulu add-ons, writes one readable
+       standalone CSV with no config, and adds too-new and malformed-minimum config books.
+     - Expected: Only compatible payload-admitted packs load in abbreviation order; repository list
+       and direct lookup attribute the same prompt identities to those exact installed modules.
+     - Side effects: Creates and removes a temporary SWORD tree and creates an in-memory AI store.
+     - Failure meaning: Prompt UI/execution can expose a book Android filters out or choose a
+       different duplicate/order owner from the installed add-on inventory.
+     */
+    func testPromptRepositoryUsesSharedAdmittedAddonProjection() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let alphaID = UUID(uuidString: "10000000-0000-4000-8000-000000000001")!
+        let zuluID = UUID(uuidString: "10000000-0000-4000-8000-000000000002")!
+        let futureID = UUID(uuidString: "10000000-0000-4000-8000-000000000003")!
+        let malformedID = UUID(uuidString: "10000000-0000-4000-8000-000000000004")!
+        let standaloneID = UUID(uuidString: "10000000-0000-4000-8000-000000000005")!
+        let definitions: [(file: String, initials: String, abbreviation: String, minimum: String?, id: UUID)] = [
+            ("a-zulu.conf", "ZULUPROMPT", "Zulu", nil, zuluID),
+            ("z-alpha.conf", "ALPHAPROMPT", "Alpha", nil, alphaID),
+            ("future.conf", "FUTUREPROMPT", "Future", "1116", futureID),
+            ("malformed.conf", "MALFORMEDPROMPT", "Malformed", "later", malformedID),
+        ]
+        for definition in definitions {
+            let promptFileName = definition.initials == "ALPHAPROMPT"
+                ? "prompts.pack"
+                : "prompts.csv"
+            let payloadDirectory = moduleRoot.appendingPathComponent(
+                "addons/\(definition.initials.lowercased())",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: payloadDirectory, withIntermediateDirectories: true)
+            let csv = """
+            id;name;description;promptTemplate
+            \(definition.id.uuidString);\(definition.initials);Installed prompt;Run \(definition.initials)
+            """
+            try csv.write(
+                to: payloadDirectory.appendingPathComponent(promptFileName),
+                atomically: true,
+                encoding: .utf8
+            )
+            let dataPath: String
+            if definition.initials == "ALPHAPROMPT" {
+                dataPath = "./addons/alphaprompt"
+            } else if definition.initials == "ZULUPROMPT" {
+                dataPath = "./addons/zuluprompt/module"
+                try Data().write(to: payloadDirectory.appendingPathComponent("module.dat"))
+            } else {
+                dataPath = "./addons/\(definition.initials.lowercased())/"
+            }
+            var config = [
+                "[\(definition.initials)]",
+                "Description=\(definition.initials)",
+                "Abbreviation=\(definition.abbreviation)",
+                "Category=And Bible",
+                "ModDrv=RawGenBook",
+                "DataPath=\(dataPath)",
+                "AndBibleProvidesPrompts=\(promptFileName)",
+            ]
+            if let minimum = definition.minimum {
+                config.append("AndBibleMinimumVersion=\(minimum)")
+            }
+            try (config.joined(separator: "\n") + "\n").write(
+                to: configDirectory.appendingPathComponent(definition.file),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let promptsDirectory = moduleRoot.appendingPathComponent("prompts", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: promptsDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        id;name;description;promptTemplate
+        \(standaloneID.uuidString);Standalone;Installed prompt;Run standalone
+        """.write(
+            to: promptsDirectory.appendingPathComponent("Study Pack.csv"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let provider = SwordPromptPackProvider(swordManager: manager)
+        XCTAssertEqual(
+            try provider.loadPromptPacks().map(\.moduleName),
+            ["ALPHAPROMPT", "Prompts_Study Pack", "ZULUPROMPT"]
+        )
+
+        let container = try makeAIContainer()
+        let repository = PromptRepository(
+            settingsStore: AISettingsStore(modelContext: ModelContext(container)),
+            packProvider: provider,
+            builtInPrompts: { [] }
+        )
+        XCTAssertEqual(
+            try repository.allPromptsIncludingHidden().map(\.prompt.id),
+            [alphaID, standaloneID, zuluID]
+        )
+        XCTAssertEqual(try repository.entryById(alphaID)?.origin, .swordPack(moduleName: "ALPHAPROMPT"))
+        XCTAssertNil(try repository.entryById(futureID))
+        XCTAssertNil(try repository.entryById(malformedID))
     }
 }
 
