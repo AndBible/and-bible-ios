@@ -1142,7 +1142,7 @@ final class AndroidModuleBackupTests: XCTestCase {
             producerVersion: 777
         )
 
-        let export = try service.exportArchiveFile(moduleNames: ["KJV"])
+        let export = try service.exportArchiveFile(orderedModuleNames: ["KJV"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
 
         XCTAssertEqual(export.fileName, AndroidModuleBackupService.moduleBackupFileName)
@@ -1222,7 +1222,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         )
         let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
 
-        let export = try service.exportArchiveFile(moduleNames: ["KJV"])
+        let export = try service.exportArchiveFile(orderedModuleNames: ["KJV"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
 
         XCTAssertEqual(export.moduleNames, ["KJV"])
@@ -1252,7 +1252,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
 
         XCTAssertEqual(try service.installedContentCatalog().map(\.initials), ["KJV"])
-        let export = try service.exportArchiveFile(moduleNames: ["KJV"])
+        let export = try service.exportArchiveFile(orderedModuleNames: ["KJV"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
         XCTAssertEqual(export.moduleNames, ["KJV"])
         XCTAssertEqual(
@@ -1302,10 +1302,10 @@ final class AndroidModuleBackupTests: XCTestCase {
             try service.installedContentCatalog().map(\.initials),
             ["ASV", "KJV"]
         )
-        let export = try service.exportArchiveFile(moduleNames: ["KJV"])
+        let export = try service.exportArchiveFile(orderedModuleNames: ["KJV"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
         XCTAssertEqual(export.moduleNames, ["KJV"])
-        XCTAssertThrowsError(try service.exportArchiveFile(moduleNames: ["ASV"]))
+        XCTAssertThrowsError(try service.exportArchiveFile(orderedModuleNames: ["ASV"]))
     }
 
     /**
@@ -1396,13 +1396,13 @@ final class AndroidModuleBackupTests: XCTestCase {
     }
 
     /**
-     Verifies Android-compatible initials select each exported family independently.
+     Verifies exact Android initials select each exported family independently.
 
-     The complete mixed fixture is exported once per discovered identity using lowercase selection
-     input. Each archive must contain only that identity's files plus the manifest. The in-memory
-     compatibility API is also exercised for an unselected prompt identity. Failure means a
-     non-SWORD reader cannot participate in the same module-selection contract as Android's backup
-     UI, or Android's non-emittable prompt source leaks into export.
+     The complete mixed fixture is exported once per discovered identity using its exact Java
+     spelling. Each archive must contain only that identity's files plus the manifest. The
+     file-backed API is also exercised for an unselected prompt identity. Failure means a non-SWORD
+     reader cannot participate in the same module-selection contract as Android's backup UI, or
+     Android's non-emittable prompt source leaks into export.
      */
     func testAndroidModuleBackupSelectsEveryExportFamilyByAndroidInitials() throws {
         let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
@@ -1417,7 +1417,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         )
 
         for moduleName in fixture.archivePathsByModuleName.keys.sorted() {
-            let export = try service.exportArchiveFile(moduleNames: [moduleName.lowercased()])
+            let export = try service.exportArchiveFile(orderedModuleNames: [moduleName])
             let entryNames = Set(
                 try ZipArchiveReader.entries(in: Data(contentsOf: export.fileURL)).map(\.name)
             )
@@ -1433,7 +1433,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         }
 
         XCTAssertThrowsError(
-            try service.exportArchive(moduleNames: ["prompts_study pack"])
+            try service.exportArchiveFile(orderedModuleNames: ["prompts_study pack"])
         ) { error in
             guard case AndroidModuleBackupError.noExportableModules = error else {
                 return XCTFail("Expected omitted Android prompt source, received \(error)")
@@ -1543,7 +1543,7 @@ final class AndroidModuleBackupTests: XCTestCase {
             epubLibraryRootURL: epubLibraryRoot
         )
 
-        let export = try service.exportArchiveFile(moduleNames: ["Epub-Shared_Book_epub"])
+        let export = try service.exportArchiveFile(orderedModuleNames: ["Epub-Shared_Book_epub"])
         defer { try? FileManager.default.removeItem(at: export.fileURL) }
         let entries = try ZipArchiveReader.entries(in: Data(contentsOf: export.fileURL))
         let exportedData = Dictionary(uniqueKeysWithValues: entries.map { ($0.name, $0.data) })
@@ -1596,7 +1596,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         )
 
         XCTAssertThrowsError(
-            try symlinkService.exportArchiveFile(moduleNames: ["KJV"])
+            try symlinkService.exportArchiveFile(orderedModuleNames: ["KJV"])
         ) { error in
             guard case AndroidModuleBackupError.invalidModuleLayout = error else {
                 return XCTFail("Expected symbolic-link layout rejection, got \(error)")
@@ -1636,7 +1636,7 @@ final class AndroidModuleBackupTests: XCTestCase {
         )
 
         let configSymlinkExport = try configSymlinkService.exportArchiveFile(
-            moduleNames: ["MyBible-Book"]
+            orderedModuleNames: ["MyBible-Book"]
         )
         XCTAssertEqual(configSymlinkExport.moduleNames, ["MyBible-Book"])
         try fileManager.removeItem(at: configSymlinkExport.fileURL)
@@ -1657,7 +1657,9 @@ final class AndroidModuleBackupTests: XCTestCase {
             epubLibraryRootURL: missingRoot.appendingPathComponent("_epub-library")
         )
 
-        XCTAssertThrowsError(try missingService.exportArchiveFile(moduleNames: ["KJV"])) { error in
+        XCTAssertThrowsError(
+            try missingService.exportArchiveFile(orderedModuleNames: ["KJV"])
+        ) { error in
             XCTAssertEqual(
                 error as? AndroidModuleBackupError,
                 .missingExportData(
@@ -1755,6 +1757,203 @@ final class AndroidModuleBackupTests: XCTestCase {
             try Data(contentsOf: restoredRoot.appendingPathComponent("background/second/夜空.png")),
             Data("second".utf8)
         )
+    }
+
+    /**
+     Verifies backup selection preserves Java-exact UTF-16 module identity and caller order.
+
+     Setup writes two durable Android TTF registrations whose initials include canonically
+     equivalent composed/decomposed spellings. Separate backing directories avoid filesystem
+     normalization while the real installed catalog and ZIP writer consume the exact section names.
+     The request reverses discovery order, repeats one exact identity, and includes one missing
+     identity.
+
+     Expected result:
+     - both canonical spellings remain separate exported modules
+     - the exact duplicate is emitted once in first-request order
+     - the missing selection is omitted, while an all-missing request retains `noExportableModules`
+     - every selected Android backing payload is present exactly once in the archive; iOS-only
+       generated registration configs remain excluded
+
+     Failure meaning: Swift canonical equality or case folding escaped into the Android backup
+     boundary, silently dropping or redirecting a selected installed book.
+     */
+    func testAndroidModuleBackupSelectionPreservesJavaExactUTF16Identity() throws {
+        let moduleRoot = try makeTemporaryAndroidModuleBackupRoot()
+        let composedFileName = "Caf\u{00E9}.ttf"
+        let decomposedFileName = "Cafe\u{0301}.ttf"
+        let composed = "TTF_" + String(composedFileName.dropLast(4))
+        let decomposed = "TTF_" + String(decomposedFileName.dropLast(4))
+        let fixtures = [
+            (
+                config: "composed",
+                directory: "composed",
+                fileName: composedFileName,
+                initials: composed,
+                description: "Composed"
+            ),
+            (
+                config: "decomposed",
+                directory: "decomposed",
+                fileName: decomposedFileName,
+                initials: decomposed,
+                description: "Decomposed"
+            ),
+        ]
+        for fixture in fixtures {
+            try writeAndroidModuleBackupFixtureFile(
+                Data(
+                    """
+                    [\(fixture.initials)]
+                    DataPath=ttf/\(fixture.directory)
+                    ModDrv=RawGenBook
+                    Category=And Bible
+                    Description=\(fixture.description)
+                    AndBibleIOSGeneratedRegistration=true
+                    AndBibleIOSRegistrationFamily=ttf
+                    AndBibleIOSRegistrationPath=ttf/\(fixture.directory)/\(fixture.fileName)
+                    AndBibleProvidesFont=\(fixture.description);\(fixture.fileName)
+
+                    """.utf8
+                ),
+                relativePath: "mods.d/\(fixture.config).conf",
+                moduleRoot: moduleRoot
+            )
+            try writeAndroidModuleBackupFixtureFile(
+                Data(fixture.description.utf8),
+                relativePath: "ttf/\(fixture.directory)/\(fixture.fileName)",
+                moduleRoot: moduleRoot
+            )
+        }
+        let service = AndroidModuleBackupService(moduleDirectory: moduleRoot)
+        let requested = [decomposed, composed, composed, "missing"]
+
+        let export = try service.exportArchiveFile(orderedModuleNames: requested)
+        defer { try? FileManager.default.removeItem(at: export.fileURL) }
+
+        XCTAssertEqual(
+            export.moduleNames.map { Array($0.utf16) },
+            [decomposed, composed].map { Array($0.utf16) }
+        )
+        let entryNames = Set(try ZipArchiveReader.entryNames(inArchiveAt: export.fileURL))
+        for fixture in fixtures {
+            XCTAssertTrue(entryNames.contains("ttf/\(fixture.directory)/\(fixture.fileName)"))
+            XCTAssertFalse(entryNames.contains("mods.d/\(fixture.config).conf"))
+        }
+        XCTAssertThrowsError(
+            try service.exportArchiveFile(orderedModuleNames: ["missing"])
+        ) { error in
+            guard case AndroidModuleBackupError.noExportableModules = error else {
+                return XCTFail("Expected no exportable modules, received \(error)")
+            }
+        }
+    }
+
+    /**
+     Verifies ordered inventory selection keeps Java-distinct case variants and exact duplicates.
+
+     Setup supplies already-admitted synthetic catalog rows so the assertion is independent of the
+     simulator filesystem's case sensitivity. The selection requests lowercase first, uppercase
+     second, repeats lowercase, and includes one missing initials value.
+
+     Expected result: both case variants survive in request order, the exact duplicate appears once,
+     and the missing value is omitted. Failure means selection uses Swift canonical equality,
+     case-insensitive lookup, or catalog order instead of Android's exact requested identity.
+     */
+    func testAndroidModuleBackupInventorySelectionKeepsJavaExactCaseVariants() {
+        let upper = AndroidModuleBackupInstalledContent(
+            initials: "CASE",
+            displayName: "Upper",
+            language: "en",
+            family: .swordConfiguration
+        )
+        let lower = AndroidModuleBackupInstalledContent(
+            initials: "case",
+            displayName: "Lower",
+            language: "en",
+            family: .swordConfiguration
+        )
+
+        let selected = AndroidModuleBackupExportInventoryBuilder.selectedContent(
+            from: [upper, lower],
+            moduleNames: ["case", "CASE", "case", "missing"]
+        )
+
+        XCTAssertEqual(selected.map(\.initials), ["case", "CASE"])
+    }
+
+    /**
+     Verifies native EPUB materialization reopens only the exact selected backing row.
+
+     Setup supplies a fresh installed snapshot whose first row is canonically equivalent to the
+     requested initials and source filename, followed by the exact Java UTF-16 row. The resolver is
+     called with the exact second spelling.
+
+     Expected result: materialization selects the exact second identifier and rejects a request
+     whose initials or source filename differs only canonically. Failure means an exported EPUB can
+     borrow the wrong immutable generation after exact picker selection.
+     */
+    func testAndroidModuleBackupMaterializationReopensOnlyExactEpubIdentity() throws {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let installed = [
+            EpubInfo(
+                identifier: "composed",
+                initials: "Epub-\(composed)_epub",
+                sourceFileName: "\(composed).epub",
+                title: "Composed",
+                description: "",
+                author: "",
+                language: "en"
+            ),
+            EpubInfo(
+                identifier: "decomposed",
+                initials: "Epub-\(decomposed)_epub",
+                sourceFileName: "\(decomposed).epub",
+                title: "Decomposed",
+                description: "",
+                author: "",
+                language: "en"
+            ),
+        ]
+
+        let exact = AndroidModuleBackupExportInventoryBuilder.installedEpub(
+            matchingInitials: "Epub-\(decomposed)_epub",
+            sourceFileName: "\(decomposed).epub",
+            in: installed
+        )
+
+        XCTAssertEqual(try XCTUnwrap(exact).identifier, "decomposed")
+        XCTAssertNil(AndroidModuleBackupExportInventoryBuilder.installedEpub(
+            matchingInitials: "Epub-\(decomposed)_epub",
+            sourceFileName: "\(composed).epub",
+            in: Array(installed.dropFirst())
+        ))
+    }
+
+    /**
+     Verifies SWORD materialization rejects a normalization-only identity swap after discovery.
+
+     The production revalidation helper receives selected and freshly parsed section initials.
+     Exact UTF-16 identity must pass, while NFC/NFD and case variants must fail before payload files
+     are materialized. Failure means a changed configuration can borrow a prior exact selection.
+     */
+    func testAndroidModuleBackupSwordRevalidationUsesExactJavaIdentity() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+
+        XCTAssertTrue(AndroidModuleBackupExportInventoryBuilder.javaStringsAreExactlyEqual(
+            composed,
+            composed
+        ))
+        XCTAssertFalse(AndroidModuleBackupExportInventoryBuilder.javaStringsAreExactlyEqual(
+            composed,
+            decomposed
+        ))
+        XCTAssertFalse(AndroidModuleBackupExportInventoryBuilder.javaStringsAreExactlyEqual(
+            "CASE",
+            "case"
+        ))
     }
 
     /**
