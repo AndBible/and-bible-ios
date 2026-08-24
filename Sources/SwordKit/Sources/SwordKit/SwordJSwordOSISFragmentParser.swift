@@ -136,7 +136,7 @@ enum SwordJSwordOSISFragmentParser {
      tags. This method returns the repaired ThML tree; source-tag-to-OSIS conversion remains the
      caller's responsibility.
 
-     - Parameter source: Decoded ThML source after SWORD option filters.
+     - Parameter source: Decoded ThML source before any native display or markup option filter.
      - Returns: A synthetic `xxx` root containing structurally parseable ThML nodes, or an empty
        root when every pinned repair stage fails.
      - Side effects: Performs bounded in-memory XML parses with external entities disabled.
