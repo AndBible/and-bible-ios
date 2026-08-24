@@ -343,7 +343,8 @@ extension ModuleFeatures {
         if value.contains("Headings") || value.contains("OSISHeadings") {
             insert(.headings)
         }
-        if value.contains("RedLetterWords") || value.contains("OSISRedLetterWords") {
+        if value.contains("RedLetterWords") || value.contains("OSISRedLetterWords")
+            || value.contains("WordsOfChrist") {
             insert(.redLetterWords)
         }
         if value.contains("GreekDef") { insert(.greekDef) }
