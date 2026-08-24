@@ -24,8 +24,11 @@ public enum RemoteModuleAvailability: String, Sendable {
 
 /// Information about a remotely available module.
 public struct RemoteModuleInfo: Sendable, Identifiable {
-    /// Module abbreviation (e.g., "KJV").
+    /// Exact module initials used for installation and installed-owner lookup (e.g., "KJV").
     public let name: String
+
+    /// Android-visible remote-book abbreviation; ordinary SWORD rows fall back to `name`.
+    public let abbreviation: String
 
     /// Full description.
     public let description: String
@@ -57,8 +60,27 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
     /// Convenience flag for install controls.
     public var isInstallable: Bool { availability == .installable }
 
+    /**
+     Creates one immutable remote Downloads row.
+
+     - Parameters:
+       - name: Exact module initials used for installation and installed-owner lookup.
+       - abbreviation: Android-visible book abbreviation, or `nil` to use `name` for ordinary SWORD
+         catalogs whose metadata does not provide a distinct abbreviation.
+       - description: Full user-visible book name.
+       - category: Android/JSword book category.
+       - language: Book language code.
+       - sourceName: Exact repository identity.
+       - availability: Whether the package can be installed.
+       - unavailableReason: User-visible reason for an unavailable row.
+       - version: Catalog version used for update comparison.
+       - installSizeBytes: Reported installed byte count, when available.
+     - Side effects: None.
+     - Failure modes: None; source adapters validate unsupported metadata before construction.
+     */
     public init(
         name: String,
+        abbreviation: String? = nil,
         description: String,
         category: ModuleCategory,
         language: String,
@@ -69,6 +91,7 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
         installSizeBytes: Int64? = nil
     ) {
         self.name = name
+        self.abbreviation = abbreviation ?? name
         self.description = description
         self.category = category
         self.language = language
@@ -84,8 +107,8 @@ public struct RemoteModuleInfo: Sendable, Identifiable {
  Android default SWORD repository definition.
 
  Android stores built-in repositories in `app/src/main/res/raw/repositories.txt` as independent
- package and catalog directories. iOS still writes `InstallMgr.conf` in the legacy SWORD-compatible
- row shape, but this definition is the shared source of truth for Downloads package installs so iOS
+ package and catalog directories. iOS writes the required SWORD-compatible `InstallMgr.conf` row,
+ while this definition remains the shared source of truth for Downloads package installs so iOS
  does not reconstruct package URLs from catalog paths later.
  */
 private struct AndroidDefaultRepositorySource: Sendable {

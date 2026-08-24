@@ -190,6 +190,94 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies one installed MyBible projection drives Android's automatic reference defaults and
+     emitted reader metadata without a sidecar-owned capability path.
+
+     - Setup: Installs the checked-in Strong's/Words-of-Christ Bible and Strong's-definition
+       dictionary as package-owned MyBible books whose sidecars advertise unrelated version data.
+       It resolves the globally admitted BookSet inventory, automatic AI reference defaults, and a
+       real Genesis fragment through the production installed-source resolver.
+     - Expected result: Both rows expose Android's generated version `0.0`; Find All accepts the
+       Strong's Bible; Hebrew and Greek defaults select the payload-proven dictionary while
+       morphology retains Android's `Robinson` placeholder; and the emitted fragment advertises
+       Strong's from the same installed Bible metadata.
+     - Failure meaning: Automatic Search/prompt selection or reader output re-derives capabilities
+       independently from the payload-owned installed projection.
+     - Side effects: Copies two checked-in SQLite fixtures into an isolated temporary SWORD tree,
+       performs read-only discovery/content reads, and removes the tree in inherited teardown.
+     - Failure modes: Fixture installation, registry admission, or content rendering can throw or
+       fail closed and cause the corresponding assertion to fail.
+     */
+    func testInstalledMyBibleFeaturesDriveAutomaticReferencesAndFragmentMetadata() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let bibleInitials = "FeatureBible"
+        let dictionaryInitials = "FeatureDictionary"
+        try installMyBiblePackage(
+            initials: bibleInitials,
+            directoryName: "feature-bible",
+            in: modulePath
+        )
+        try installMyBibleAuxiliaryPackage(
+            initials: dictionaryInitials,
+            directoryName: "feature-dictionary",
+            fixtureName: "mybible-dictionary.SQLite3",
+            category: "Lexicons / Dictionaries",
+            in: modulePath
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let library = SQLiteDocumentModuleLibrary(
+            moduleRootURL: URL(fileURLWithPath: modulePath, isDirectory: true)
+        )
+        let resolver = BibleReaderInstalledModuleResolver(
+            swordManager: manager,
+            sqliteLibrary: library
+        )
+        let installed = resolver.registeredBookMetadata()
+        let bible = try XCTUnwrap(installed.first { $0.name == bibleInitials })
+        let dictionary = try XCTUnwrap(installed.first { $0.name == dictionaryInitials })
+
+        XCTAssertEqual(bible.version, "0.0")
+        XCTAssertTrue(bible.features.contains(.strongsNumbers))
+        XCTAssertTrue(bible.features.contains(.redLetterWords))
+        XCTAssertEqual(dictionary.version, "0.0")
+        XCTAssertTrue(dictionary.features.contains(.hebrewDef))
+        XCTAssertTrue(dictionary.features.contains(.greekDef))
+        XCTAssertFalse(dictionary.features.contains(.greekParse))
+
+        let strongsCandidates = SearchTranslationSelectionPolicy.candidateModules(
+            from: installed.filter { $0.category == .bible },
+            isStrongsFindAll: true
+        )
+        XCTAssertTrue(strongsCandidates.contains { $0.name == bibleInitials })
+
+        let environment = AIReaderReferenceEnvironmentResolver.resolve(
+            installedModules: installed,
+            excludedInitials: [],
+            indexedModule: { _ in false },
+            selectedStrongsHebrew: [],
+            selectedStrongsGreek: [],
+            selectedGreekMorphology: []
+        )
+        XCTAssertEqual(environment.preferredStrongsHebrew, dictionaryInitials)
+        XCTAssertEqual(environment.preferredStrongsGreek, dictionaryInitials)
+        XCTAssertEqual(environment.preferredGreekMorphology, "Robinson")
+
+        let source = try XCTUnwrap(resolver.scripture(named: bibleInitials))
+        let ordinal = try XCTUnwrap(
+            source.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1)
+        )
+        let reference = try XCTUnwrap(source.verseReference(ordinal: ordinal))
+        let fragment = try XCTUnwrap(BibleReaderInstalledScriptureFragmentBuilder.build(
+            source: source,
+            references: [reference],
+            requiresCompleteContent: true
+        ))
+        XCTAssertTrue(fragment.hasStrongs)
+        XCTAssertEqual(fragment.bookInitials, bibleInitials)
+    }
+
+    /**
      Verifies downstream catalog consumers use SQLite's exact JSword KJVA ordinal domain.
 
      - Setup: Creates a non-SWORD catalog over the real Genesis row shape exposed by SQLite.

@@ -1891,7 +1891,7 @@ public struct ModuleBrowserView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(module.name)
+                        Text(module.abbreviation)
                             .font(.system(size: 16, weight: .regular))
                             .foregroundStyle(surfacePalette.foregroundColor)
                             .lineLimit(1)
@@ -1937,7 +1937,7 @@ public struct ModuleBrowserView: View {
             handleRemoteModuleRowTap(module, status: status)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(module.name)
+        .accessibilityLabel(module.abbreviation)
         .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
         .accessibilityAddTraits(Self.primaryRowTapStartsDownload(status) ? .isButton : [])
         .accessibilityIdentifier("moduleBrowserRow::\(module.installIdentity.rawValue)")
@@ -2478,7 +2478,8 @@ public struct ModuleBrowserView: View {
                 return false
             }
             guard !query.isEmpty else { return true }
-            return module.name.localizedCaseInsensitiveContains(query) ||
+            return module.abbreviation.localizedCaseInsensitiveContains(query) ||
+                module.name.localizedCaseInsensitiveContains(query) ||
                 module.description.localizedCaseInsensitiveContains(query) ||
                 module.language.localizedCaseInsensitiveContains(query) ||
                 module.sourceName.localizedCaseInsensitiveContains(query)
@@ -2548,8 +2549,8 @@ public struct ModuleBrowserView: View {
        - selectedLanguage: Current language filter; Android only prioritizes recommended rows when
          a concrete language is active.
        - recommendedDocuments: Android recommended metadata.
-     - Returns: Modules sorted by install state, installed state, recommendation, category, and
-       localized initials.
+     - Returns: Modules sorted by install state, installed state, recommendation, category, and the
+       Android locale-lowercased abbreviation key; equal keys retain catalog input order.
 
      Side effects:
      - none
@@ -2566,7 +2567,9 @@ public struct ModuleBrowserView: View {
     ) -> [RemoteModuleInfo] {
         let installedModulesByName = installedModuleLookup(from: installedModules)
 
-        return modules.sorted { lhs, rhs in
+        return modules.enumerated().sorted { lhsEntry, rhsEntry in
+            let lhs = lhsEntry.element
+            let rhs = rhsEntry.element
             let lhsStatus = displayStatus(
                 for: lhs,
                 installedModulesByName: installedModulesByName,
@@ -2603,8 +2606,19 @@ public struct ModuleBrowserView: View {
                 return lhsCategoryRank < rhsCategoryRank
             }
 
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
+            let lhsAbbreviation = lhs.abbreviation.lowercased(
+                with: Locale(identifier: lhs.language)
+            )
+            let rhsAbbreviation = rhs.abbreviation.lowercased(
+                with: Locale(identifier: rhs.language)
+            )
+            let lhsUnits = Array(lhsAbbreviation.utf16)
+            let rhsUnits = Array(rhsAbbreviation.utf16)
+            if lhsUnits != rhsUnits {
+                return lhsUnits.lexicographicallyPrecedes(rhsUnits)
+            }
+            return lhsEntry.offset < rhsEntry.offset
+        }.map(\.element)
     }
 
     /**

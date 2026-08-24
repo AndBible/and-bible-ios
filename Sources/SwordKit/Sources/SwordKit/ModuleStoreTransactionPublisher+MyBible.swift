@@ -10,23 +10,34 @@ extension ModuleStoreTransactionPublisher {
        - stagingDirectory: Isolated directory containing payload and `module.json`.
        - moduleName: Safe MyBible initials used as the final directory name.
        - onCommitStarted: Callback invoked after cancellation closes and before live-tree work.
-     - Side effects: Replaces the live MyBible directory transactionally and posts one notification.
-     - Throws: Cancellation before mutation, unsafe paths, missing staged metadata/payload, or
-       filesystem/rollback errors.
+     - Side effects: Replaces the live MyBible directory, removes the one proven pre-parity owner in
+       the same rollback transaction when present, and posts one notification.
+     - Throws: Cancellation before mutation, unsafe paths, missing or identity-mismatched staged
+       metadata/payload, or filesystem/rollback errors.
      */
     public func publishStagedMyBibleInstall(
         from stagingDirectory: URL,
         moduleName: String,
         onCommitStarted: (() -> Void)? = nil
     ) throws {
-        let safeName = try resolver.safeModuleName(moduleName)
+        let safeName = try safeMyBibleDirectoryName(moduleName)
         try coordinator.withExclusiveTransaction(kind: .remoteMyBible, prepare: {
             let stagingCanonical = stagingDirectory.standardizedFileURL.resolvingSymlinksInPath()
             try validateIsolatedStagingRoot(stagingCanonical)
-            guard fileManager.fileExists(
-                atPath: stagingCanonical.appendingPathComponent("module.json").path
-            ) else {
+            let stagedMetadataURL = stagingCanonical.appendingPathComponent("module.json")
+            guard let stagedMetadataData = try? Data(contentsOf: stagedMetadataURL),
+                  let stagedMetadata = try? JSONDecoder().decode(
+                    InstalledMyBibleModule.self,
+                    from: stagedMetadataData
+                  ) else {
                 throw ModuleStoreMutationError.stagedFileMissing("module.json")
+            }
+            let stagedIdentity = MyBibleAndroidFilenameIdentity(
+                fileName: stagedMetadata.packageFileName
+            )
+            guard SwordJavaStringIdentity.equals(stagedMetadata.name, safeName),
+                  SwordJavaStringIdentity.equals(stagedIdentity.initials, safeName) else {
+                throw ModuleStoreMutationError.invalidConfiguration("module.json")
             }
             let children = try fileManager.contentsOfDirectory(
                 at: stagingCanonical,
@@ -40,10 +51,30 @@ extension ModuleStoreTransactionPublisher {
             try resolver.validateCanonicalContainment(of: myBibleRoot, beneath: canonicalRootURL)
             let finalURL = myBibleRoot.appendingPathComponent(safeName, isDirectory: true)
             try resolver.validateCanonicalContainment(of: finalURL, beneath: myBibleRoot)
+            let obsoleteName = try safeMyBibleDirectoryName(
+                MyBibleAndroidFilenameIdentity.obsoletePreParityIOSDirectoryName(
+                    forPackageFileName: stagedMetadata.packageFileName
+                )
+            )
+            let obsoleteURL = myBibleRoot.appendingPathComponent(obsoleteName, isDirectory: true)
+            try resolver.validateCanonicalContainment(of: obsoleteURL, beneath: myBibleRoot)
+            let obsoleteURLs: [URL]
+            if SwordJavaExactStringIdentity(obsoleteName) == SwordJavaExactStringIdentity(safeName) {
+                obsoleteURLs = []
+            } else if let provenObsoleteURL = try obsoleteMyBibleModuleURL(
+                obsoleteURL,
+                expectedModuleName: obsoleteName,
+                expectedPackageFileName: stagedMetadata.packageFileName
+            ) {
+                obsoleteURLs = [provenObsoleteURL]
+            } else {
+                obsoleteURLs = []
+            }
             return (
                 stagingCanonical: stagingCanonical,
                 myBibleRoot: myBibleRoot,
-                finalURL: finalURL
+                finalURL: finalURL,
+                obsoleteURLs: obsoleteURLs
             )
         }, commit: { prepared in
             onCommitStarted?()
@@ -51,21 +82,24 @@ extension ModuleStoreTransactionPublisher {
                 ".module-transaction-\(UUID().uuidString).backup",
                 isDirectory: true
             )
-            var backupMove: BackupMove?
+            var backupMoves: [BackupMove] = []
             var createdDirectories: [URL] = []
             do {
                 try createLiveDirectory(prepared.myBibleRoot, tracking: &createdDirectories)
-                if fileManager.fileExists(atPath: prepared.finalURL.path) {
+                for existingURL in [prepared.finalURL] + prepared.obsoleteURLs
+                    where fileManager.fileExists(atPath: existingURL.path) {
                     let backupURL = backupRoot.appendingPathComponent(
-                        "mybible/\(safeName)",
+                        "mybible/\(existingURL.lastPathComponent)",
                         isDirectory: true
                     )
                     try fileManager.createDirectory(
                         at: backupURL.deletingLastPathComponent(),
                         withIntermediateDirectories: true
                     )
-                    try fileManager.moveItem(at: prepared.finalURL, to: backupURL)
-                    backupMove = BackupMove(originalURL: prepared.finalURL, backupURL: backupURL)
+                    try fileManager.moveItem(at: existingURL, to: backupURL)
+                    backupMoves.append(
+                        BackupMove(originalURL: existingURL, backupURL: backupURL)
+                    )
                 }
                 try fileManager.copyItem(at: prepared.stagingCanonical, to: prepared.finalURL)
                 if fileManager.fileExists(atPath: backupRoot.path) {
@@ -75,7 +109,7 @@ extension ModuleStoreTransactionPublisher {
             } catch {
                 let rollbackFailures = rollback(
                     backupRoot: backupRoot,
-                    moves: backupMove.map { [$0] } ?? [],
+                    moves: backupMoves,
                     publishedURLs: [prepared.finalURL],
                     createdDirectories: createdDirectories
                 )
@@ -85,12 +119,91 @@ extension ModuleStoreTransactionPublisher {
     }
 
     /**
+     Validates one direct MyBible directory component.
+
+     Android's historical sanitizer deliberately preserves backslash, which is an ordinary filename
+     character on iOS rather than a path separator. The general SWORD module validator rejects it
+     because archive paths are cross-platform; this family-specific boundary admits it while still
+     rejecting every iOS path/control escape.
+
+     - Parameter moduleName: Exact Android-derived MyBible initials.
+     - Returns: The unchanged direct component.
+     - Side effects: None.
+     - Failure modes: Empty, dot, slash, percent, null, or line-break values throw
+       `ModuleStoreMutationError.unsafeModuleName`.
+     */
+    private func safeMyBibleDirectoryName(_ moduleName: String) throws -> String {
+        guard !moduleName.isEmpty,
+              moduleName != ".",
+              moduleName != "..",
+              !moduleName.contains("/"),
+              !moduleName.contains("%"),
+              !moduleName.contains("\0"),
+              !moduleName.contains("\n"),
+              !moduleName.contains("\r") else {
+            throw ModuleStoreMutationError.unsafeModuleName(moduleName)
+        }
+        return moduleName
+    }
+
+    /**
+     Resolves an obsolete pre-parity directory only when it belongs to the staged manifest package.
+
+     - Parameters:
+       - moduleURL: Canonical-contained candidate directory derived from the old iOS identity.
+       - expectedModuleName: Exact pre-parity owner stored in the sidecar before filesystem Unicode
+         decomposition.
+       - expectedPackageFileName: Exact manifest filename decoded from staged metadata.
+     - Returns: The unchanged directory when its valid sidecar names the same exact package, or nil
+       when the path is absent or belongs to another package.
+     - Side effects: Reads directory and sidecar file metadata plus bounded JSON content.
+     - Failure modes: Filesystem metadata errors propagate; symlinks, malformed sidecars, and
+       different package identities fail closed without becoming removal targets.
+     */
+    private func obsoleteMyBibleModuleURL(
+        _ moduleURL: URL,
+        expectedModuleName: String,
+        expectedPackageFileName: String
+    ) throws -> URL? {
+        guard fileManager.fileExists(atPath: moduleURL.path) else { return nil }
+        let directoryValues = try moduleURL.resourceValues(
+            forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+        )
+        guard directoryValues.isDirectory == true,
+              directoryValues.isSymbolicLink != true else {
+            return nil
+        }
+        let metadataURL = moduleURL.appendingPathComponent("module.json")
+        let metadataValues = try metadataURL.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard metadataValues.isRegularFile == true,
+              metadataValues.isSymbolicLink != true,
+              let fileSize = metadataValues.fileSize,
+              fileSize <= 1_024 * 1_024,
+              let data = try? Data(contentsOf: metadataURL),
+              let metadata = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
+              SwordJavaStringIdentity.equals(metadata.name, expectedModuleName),
+              fileSystemComponent(
+                moduleURL.lastPathComponent,
+                representsExactOwner: expectedModuleName
+              ),
+              SwordJavaStringIdentity.equals(
+                metadata.packageFileName,
+                expectedPackageFileName
+              ) else {
+            return nil
+        }
+        return moduleURL
+    }
+
+    /**
      Resolves a valid installed MyBible sidecar without mutating the live tree.
 
      - Parameter moduleName: Validated MyBible initials.
-     Direct sidecar-directory initials are retained for catalog/uninstall compatibility. When the
-     visible installed initials instead come from the actual database filename, the method scans
-     valid sidecars in deterministic raw UTF-16 path order and returns that payload owner.
+     Direct sidecar-directory initials are the remote package owner. When visible installed initials
+     instead come from the actual database filename, the method scans valid sidecars in
+     deterministic raw UTF-16 path order and returns that payload owner.
 
      - Returns: The contained module directory, or `nil` when no direct or database-derived identity
        matches.
@@ -104,7 +217,13 @@ extension ModuleStoreTransactionPublisher {
         let moduleURL = myBibleRoot.appendingPathComponent(moduleName, isDirectory: true)
         try resolver.validateCanonicalContainment(of: moduleURL, beneath: myBibleRoot)
         if fileManager.fileExists(atPath: moduleURL.path) {
-            return try validatedMyBibleModuleURL(moduleURL, moduleName: moduleName)
+            let validated = try validatedMyBibleModule(moduleURL, moduleName: moduleName)
+            guard SwordJavaStringIdentity.equals(validated.sidecar.name, moduleName) else {
+                throw ModuleStoreMutationError.invalidConfiguration(
+                    "mybible/\(moduleName)/module.json"
+                )
+            }
+            return validated.url
         }
 
         guard fileManager.fileExists(atPath: myBibleRoot.path) else { return nil }
@@ -117,17 +236,19 @@ extension ModuleStoreTransactionPublisher {
         }
         let requestedIdentity = SwordJavaExactStringIdentity(moduleName)
         for directory in directories {
-            let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard values.isDirectory == true, values.isSymbolicLink != true else { continue }
-            let metadataURL = directory.appendingPathComponent("module.json")
-            guard let data = try? Data(contentsOf: metadataURL),
-                  let sidecar = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
-                  InstalledMyBibleBookReader.registrations(in: directory, sidecar: sidecar).contains(
+            guard let validated = try? validatedMyBibleModule(
+                directory,
+                moduleName: moduleName
+            ),
+                  InstalledMyBibleBookReader.registrations(
+                    in: validated.url,
+                    sidecar: validated.sidecar
+                  ).contains(
                     where: { SwordJavaExactStringIdentity($0.info.name) == requestedIdentity }
                   ) else {
                 continue
             }
-            return try validatedMyBibleModuleURL(directory, moduleName: moduleName)
+            return validated.url
         }
         return nil
     }
@@ -138,14 +259,15 @@ extension ModuleStoreTransactionPublisher {
      - Parameters:
        - moduleURL: Candidate direct or database-derived module directory.
        - moduleName: Requested installed initials used in diagnostics.
-     - Returns: The unchanged canonical-contained directory.
-     - Side effects: Reads directory and `module.json` file metadata.
-     - Throws: Invalid/symlink directories and missing/malformed sidecar files fail closed.
+     - Returns: The unchanged canonical-contained directory and its decoded sidecar.
+     - Side effects: Reads directory and bounded `module.json` metadata.
+     - Throws: Invalid/symlink directories, missing/malformed sidecars, and sidecars whose exact
+       remote owner differs from the directory component fail closed.
      */
-    private func validatedMyBibleModuleURL(
+    private func validatedMyBibleModule(
         _ moduleURL: URL,
         moduleName: String
-    ) throws -> URL {
+    ) throws -> (url: URL, sidecar: InstalledMyBibleModule) {
         let myBibleRoot = canonicalRootURL.appendingPathComponent("mybible", isDirectory: true)
         try resolver.validateCanonicalContainment(of: moduleURL, beneath: myBibleRoot)
         let moduleValues = try moduleURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -156,12 +278,47 @@ extension ModuleStoreTransactionPublisher {
         guard fileManager.fileExists(atPath: metadataURL.path) else {
             throw ModuleStoreMutationError.invalidConfiguration("mybible/\(moduleName)/module.json")
         }
-        let metadataValues = try metadataURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        let metadataValues = try metadataURL.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
         guard metadataValues.isRegularFile == true,
-              metadataValues.isSymbolicLink != true else {
+              metadataValues.isSymbolicLink != true,
+              let fileSize = metadataValues.fileSize,
+              fileSize <= 1_024 * 1_024,
+              let data = try? Data(contentsOf: metadataURL),
+              let metadata = try? JSONDecoder().decode(InstalledMyBibleModule.self, from: data),
+              fileSystemComponent(
+                moduleURL.lastPathComponent,
+                representsExactOwner: metadata.name
+              ) else {
             throw ModuleStoreMutationError.invalidConfiguration("mybible/\(moduleName)/module.json")
         }
-        return moduleURL
+        return (moduleURL, metadata)
+    }
+
+    /**
+     Tests whether a URL directory component represents one exact sidecar owner on Apple filesystems.
+
+     Foundation exposes filesystem path components in decomposed Unicode form even when the app
+     supplied a composed Java string. The sidecar remains the authoritative raw identity; this
+     comparison permits only canonical composition differences needed to bind that identity to its
+     storage directory. It deliberately performs no case folding.
+
+     - Parameters:
+       - component: Directory component returned by Foundation URL handling.
+       - owner: Exact Java-visible owner stored in the sidecar.
+     - Returns: `true` only when both strings have identical canonical decomposition.
+     - Side effects: None.
+     - Failure modes: None; every Swift string supports deterministic canonical decomposition.
+     */
+    private func fileSystemComponent(
+        _ component: String,
+        representsExactOwner owner: String
+    ) -> Bool {
+        SwordJavaStringIdentity.equals(
+            component.decomposedStringWithCanonicalMapping,
+            owner.decomposedStringWithCanonicalMapping
+        )
     }
 
     /** Removes one prevalidated MyBible directory through rollback storage. */

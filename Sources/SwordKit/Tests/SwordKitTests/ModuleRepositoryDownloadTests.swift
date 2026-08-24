@@ -64,11 +64,27 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
               "update_info": "http upgraded"
             },
             {
+              "file_name": "nested/Å-[x]^_.commentaries.SQLite3.zip",
+              "description": "Exact commentary identity",
+              "download_url": "https://mybible.example/exact-commentary.zip",
+              "language_code": "en",
+              "update_date": "2026-05-03",
+              "update_info": "android filename contract"
+            },
+            {
+              "file_name": "upper.COMMENTARIES.SQLite3.zip",
+              "description": "Case-sensitive Bible marker",
+              "download_url": "https://mybible.example/upper.zip",
+              "language_code": "en",
+              "update_date": "2026-05-04",
+              "update_info": "case-sensitive marker"
+            },
+            {
               "file_name": "ignored.SQLite3.zip",
               "description": "Unsupported URL",
               "download_url": "ftp://mybible.example/ignored.SQLite3.zip",
               "language_code": "en",
-              "update_date": "2026-05-03",
+              "update_date": "2026-05-05",
               "update_info": "ignored"
             }
           ]
@@ -97,18 +113,56 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
 
         let modules = try await repository.refreshCatalog(for: source)
 
-        XCTAssertEqual(modules.map(\.name), ["MyBible-finrk_SQLite3", "MyBible-legacy_SQLite3"])
+        XCTAssertEqual(modules.map(\.name), [
+            "MyBible-finrk_SQLite3",
+            "MyBible-legacy_SQLite3",
+            "MyBible-__[x]^__commentaries_SQLite3",
+            "MyBible-upper_COMMENTARIES_SQLite3",
+        ])
         XCTAssertEqual(modules.first?.description, "Finnish RK")
         XCTAssertEqual(modules.first?.category, .bible)
         XCTAssertEqual(modules.first?.language, "fi")
         XCTAssertEqual(modules.first?.sourceName, "Example MyBible")
+        XCTAssertEqual(modules[2].abbreviation, "Å-[x]^_")
+        XCTAssertEqual(modules[2].category, .commentary)
+        XCTAssertEqual(modules[3].abbreviation, "upper")
+        XCTAssertEqual(modules[3].category, .bible)
+
+        let cachedModules = repository.loadCachedCatalogs()
+        let cachedCommentary = try XCTUnwrap(
+            cachedModules.first { $0.name == "MyBible-__[x]^__commentaries_SQLite3" }
+        )
+        XCTAssertEqual(cachedCommentary.abbreviation, "Å-[x]^_")
+        XCTAssertEqual(cachedCommentary.category, .commentary)
     }
 
     /**
-     Verifies SWORD-compatible Android custom-driver catalog rows classify by driver.
+     Verifies Android's historical remote MyBible sanitizer without filesystem or manifest noise.
+
+     - Setup: Projects a basename containing every punctuation value between ASCII `Z` and `a`, a
+       backslash, and a non-ASCII letter.
+     - Expected result: `[\\]^_\`` and ASCII letters remain exact while the non-ASCII letter and
+       hyphen become underscores.
+     - Side effects: None.
+     - Failure meaning: iOS has replaced Android's pinned `[^a-zA-z0-9]` behavior with a Unicode or
+       conventional ASCII-alphanumeric sanitizer.
+     */
+    func testMyBibleRemoteIdentityPreservesAndroidHistoricalASCIIRange() {
+        let identity = MyBibleAndroidFilenameIdentity(
+            fileName: "nested/Å-[\\]^_`.SQLite3.zip"
+        )
+
+        XCTAssertEqual(identity.nameWithoutExtension, "Å-[\\]^_`.SQLite3")
+        XCTAssertEqual(identity.initials, "MyBible-__[\\]^_`_SQLite3")
+        XCTAssertEqual(identity.abbreviation, "Å-[\\]^_`")
+    }
+
+    /**
+     Verifies SWORD-compatible Android custom-driver catalog rows retain JSword metadata.
 
      Android registers `MyBibleDictionary` as a dictionary `BookType`, so a repository or restored
-     catalog row with `Category=Unknown` must still appear in Downloads' dictionary filters.
+     catalog row with `Category=Unknown` must still appear in Downloads' dictionary filters. Its
+     explicit `Abbreviation` must also survive as the primary Android Downloads label.
 
      - Setup: Serves a `mods.d.tar.gz` containing a BDBT-style `MyBibleDictionary` config.
      - Expected result: Catalog refresh returns BDBT as a dictionary.
@@ -133,6 +187,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
             modDrv: "MyBibleDictionary",
             dataPath: "./modules/texts/MyBible/BDBT/",
             extraConf: """
+            Abbreviation=BDBT Short
             Feature=GreekDef
             Feature=HebrewDef
             """
@@ -162,6 +217,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let bdbt = try XCTUnwrap(modules.first { $0.name == "BDBT" })
 
         XCTAssertEqual(bdbt.category, .dictionary)
+        XCTAssertEqual(bdbt.abbreviation, "BDBT Short")
         XCTAssertEqual(bdbt.language, "en")
         XCTAssertEqual(bdbt.sourceName, "AndBible")
     }
@@ -309,6 +365,151 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: moduleDir.path))
         XCTAssertEqual(repository.loadInstalledMyBibleModules().map(\.name), ["MyBible-companion"])
         await fulfillment(of: [notificationExpectation], timeout: 0.2)
+    }
+
+    /**
+     Verifies a remote install atomically replaces the pre-parity iOS directory identity.
+
+     - Setup: Seeds a valid previously downloaded package under the old Unicode-alphanumeric
+       directory, then refreshes and installs the same manifest package through Android's current
+       filename projection.
+     - Expected result: The old package remains discoverable by its payload-owned installed identity;
+       after update, the catalog, new directory, sidecar, package lookup, and visible abbreviation
+       share Android's exact remote identity and the proven old directory is removed in the same
+       publication transaction.
+     - Side effects: Creates and removes one isolated SWORD root and serves a manifest/package from
+       the in-process URL protocol.
+     - Failure meaning: Existing iOS downloads become orphaned/duplicated, or catalog and installed
+       package identity diverge after adopting Android's historical sanitizer.
+     */
+    func testModuleRepositoryMigratesPreParityMyBibleDirectoryAtomically() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let packageFileName = "nested/Å-[x]^_.commentaries.SQLite3.zip"
+        let currentName = "MyBible-__[x]^__commentaries_SQLite3"
+        let obsoleteName = "MyBible-Å__x____commentaries_SQLite3"
+        let payloadFileName = "Å-[x]^_.commentaries.SQLite3"
+        let databaseURL = tempDir.appendingPathComponent(payloadFileName)
+        try makeMyBibleFixtureDatabase(at: databaseURL)
+        let packageData = makeModuleRepositoryZip([
+            (payloadFileName, try Data(contentsOf: databaseURL))
+        ])
+
+        let oldDirectory = swordDir
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent(obsoleteName, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: oldDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.copyItem(
+            at: databaseURL,
+            to: oldDirectory.appendingPathComponent(payloadFileName)
+        )
+        let oldSidecar = InstalledMyBibleModule(
+            name: obsoleteName,
+            description: "Old iOS package",
+            category: ModuleCategory.commentary.rawValue,
+            language: "fi",
+            version: "2026-05-01",
+            sourceName: "Example MyBible",
+            packageFileName: packageFileName,
+            downloadURL: "https://mybible.example/exact-commentary.zip",
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        try JSONEncoder().encode(oldSidecar).write(
+            to: oldDirectory.appendingPathComponent("module.json"),
+            options: .atomic
+        )
+
+        let manifestData = """
+        {
+          "url": "https://mybible.example/manifest.json",
+          "file_name": "Example MyBible",
+          "description": "Example MyBible catalog",
+          "modules": [
+            {
+              "file_name": "nested/Å-[x]^_.commentaries.SQLite3.zip",
+              "description": "Exact commentary identity",
+              "download_url": "https://mybible.example/exact-commentary.zip",
+              "language_code": "fi",
+              "update_date": "2026-05-01",
+              "update_info": "android filename contract"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let source = SourceConfig(
+            name: "Example MyBible",
+            type: "HTTP",
+            host: "mybible.example",
+            catalogPath: "/manifest.json",
+            repositoryType: SourceConfig.myBibleHTTPSRepositoryType,
+            manifestURL: URL(string: "https://mybible.example/manifest.json")
+        )
+        ModuleRepositoryDownloadMockURLProtocol.requestHandler = { request in
+            let data = request.url?.path == "/manifest.json" ? manifestData : packageData
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                data
+            )
+        }
+        defer { ModuleRepositoryDownloadMockURLProtocol.requestHandler = nil }
+
+        let repository = ModuleRepository(
+            basePath: tempDir.appendingPathComponent("repository", isDirectory: true).path,
+            swordPath: swordDir.path,
+            session: makeModuleRepositoryDownloadMockSession()
+        )
+        let publisher = ModuleStoreTransactionPublisher(moduleRootURL: swordDir)
+        let preMigrationInventory = repository.loadInstalledMyBibleModules()
+        XCTAssertEqual(preMigrationInventory.count, 1)
+        let preMigrationInstalled = try XCTUnwrap(preMigrationInventory.first)
+        XCTAssertEqual(
+            try publisher.myBibleModuleURLIfPresent(
+                moduleName: preMigrationInstalled.name
+            ),
+            oldDirectory
+        )
+        let rows = try await repository.refreshCatalog(for: source)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.name, currentName)
+        XCTAssertEqual(row.abbreviation, "Å-[x]^_")
+        XCTAssertEqual(row.category, .commentary)
+
+        try await repository.installModule(named: currentName, from: source)
+
+        let currentDirectory = oldDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent(currentName, isDirectory: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: currentDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: currentDirectory.appendingPathComponent(payloadFileName).path
+        ))
+        let currentSidecarData = try Data(
+            contentsOf: currentDirectory.appendingPathComponent("module.json")
+        )
+        let currentSidecar = try JSONDecoder().decode(
+            InstalledMyBibleModule.self,
+            from: currentSidecarData
+        )
+        XCTAssertEqual(currentSidecar.name, currentName)
+        XCTAssertEqual(currentSidecar.packageFileName, packageFileName)
+        XCTAssertEqual(
+            try publisher.myBibleModuleURLIfPresent(moduleName: currentName),
+            currentDirectory
+        )
+        XCTAssertEqual(repository.loadInstalledMyBibleModules().count, 1)
     }
 
     /**

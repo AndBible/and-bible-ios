@@ -184,9 +184,12 @@ final class ModuleStoreTransactionTests: XCTestCase {
     func testMyBibleVersusUninstallSerializesDeterministically() async throws {
         let context = try makeContext()
         defer { try? FileManager.default.removeItem(at: context.parent) }
+        let moduleName = "MyBible-race_SQLite3"
         let staging = context.parent.appendingPathComponent("mybible-staging", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: staging.appendingPathComponent("module.json"))
+        try myBibleSidecarData(name: moduleName, packageFileName: "race.SQLite3.zip").write(
+            to: staging.appendingPathComponent("module.json")
+        )
         try Data("sqlite".utf8).write(to: staging.appendingPathComponent("race.SQLite3"))
 
         try await assertSerialized(
@@ -195,15 +198,172 @@ final class ModuleStoreTransactionTests: XCTestCase {
             secondKind: .uninstall,
             first: { try context.firstPublisher.publishStagedMyBibleInstall(
                 from: staging,
-                moduleName: "RACE"
+                moduleName: moduleName
             ) },
-            second: { try context.secondPublisher.uninstall(moduleName: "RACE") }
+            second: { try context.secondPublisher.uninstall(moduleName: moduleName) }
         )
 
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: context.root.appendingPathComponent("mybible/RACE").path
+            atPath: context.root.appendingPathComponent("mybible/\(moduleName)").path
         ))
         try assertNoTransactionBackups(in: context.root)
+    }
+
+    /**
+     Verifies one-way MyBible identity migration rolls the old directory back on publish failure.
+
+     - Setup: Seeds a proven pre-parity directory, stages the same manifest package under Android's
+       current identity, and injects a failure while copying the replacement directory.
+     - Expected result: Publication throws, the old directory and payload are restored byte-for-byte,
+       no new directory survives, and transaction backup storage is removed.
+     - Side effects: Creates and removes one isolated module root and exercises real rollback moves.
+     - Failure meaning: A failed update can erase the only installed copy while migrating durable
+       MyBible package identity.
+     */
+    func testMyBibleIdentityMigrationRollsBackObsoleteDirectoryOnCopyFailure() throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let packageFileName = "nested/Å-[x]^_.commentaries.SQLite3.zip"
+        let obsoleteName = "MyBible-Å__x____commentaries_SQLite3"
+        let currentName = "MyBible-__[x]^__commentaries_SQLite3"
+        let myBibleRoot = context.root.appendingPathComponent("mybible", isDirectory: true)
+        let obsoleteDirectory = myBibleRoot.appendingPathComponent(
+            obsoleteName,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: obsoleteDirectory,
+            withIntermediateDirectories: true
+        )
+        try myBibleSidecarData(
+            name: obsoleteName,
+            packageFileName: packageFileName
+        ).write(to: obsoleteDirectory.appendingPathComponent("module.json"))
+        try Data("old".utf8).write(
+            to: obsoleteDirectory.appendingPathComponent("old.SQLite3")
+        )
+
+        let staging = context.parent.appendingPathComponent(
+            "mybible-migration-staging",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try myBibleSidecarData(
+            name: currentName,
+            packageFileName: packageFileName
+        ).write(to: staging.appendingPathComponent("module.json"))
+        try Data("new".utf8).write(to: staging.appendingPathComponent("new.SQLite3"))
+
+        let faultManager = ModuleStoreMyBibleCopyFaultFileManager(
+            failingDirectoryName: currentName,
+            requiredBackedUpURL: obsoleteDirectory
+        )
+        let publisher = ModuleStoreTransactionPublisher(
+            moduleRootURL: context.root,
+            fileManager: faultManager
+        )
+        XCTAssertThrowsError(
+            try publisher.publishStagedMyBibleInstall(
+                from: staging,
+                moduleName: currentName
+            )
+        )
+
+        XCTAssertTrue(faultManager.observedRequiredOwnerBackedUp)
+        XCTAssertEqual(
+            try String(
+                contentsOf: obsoleteDirectory.appendingPathComponent("old.SQLite3"),
+                encoding: .utf8
+            ),
+            "old"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: myBibleRoot.appendingPathComponent(currentName).path
+        ))
+        try assertNoTransactionBackups(in: context.root)
+    }
+
+    /**
+     Verifies MyBible publication requires one exact Android remote identity across every boundary.
+
+     - Setup: Stages one sidecar whose declared name differs from the destination and another whose
+       package filename projects different Android initials.
+     - Expected result: Both publications fail before the live MyBible root is created.
+     - Side effects: Creates and removes isolated staging directories only.
+     - Failure meaning: A caller can publish catalog, directory, and sidecar identities that Android
+       would treat as different books, defeating exact owner lookup and one-way migration.
+     */
+    func testMyBiblePublicationRejectsMismatchedSidecarAndPackageIdentityBeforeMutation() throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let moduleName = "MyBible-expected_SQLite3"
+        let variants = [
+            (suffix: "sidecar", sidecarName: "MyBible-other_SQLite3", package: "expected.SQLite3.zip"),
+            (suffix: "package", sidecarName: moduleName, package: "other.SQLite3.zip"),
+        ]
+
+        for variant in variants {
+            let staging = context.parent.appendingPathComponent(
+                "mybible-identity-\(variant.suffix)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            try myBibleSidecarData(
+                name: variant.sidecarName,
+                packageFileName: variant.package
+            ).write(to: staging.appendingPathComponent("module.json"))
+            try Data("sqlite".utf8).write(to: staging.appendingPathComponent("expected.SQLite3"))
+
+            XCTAssertThrowsError(try context.firstPublisher.publishStagedMyBibleInstall(
+                from: staging,
+                moduleName: moduleName
+            )) { error in
+                guard case ModuleStoreMutationError.invalidConfiguration("module.json") = error else {
+                    return XCTFail("Expected exact identity rejection, received \(error)")
+                }
+            }
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: context.root.appendingPathComponent("mybible").path
+        ))
+        try assertNoTransactionBackups(in: context.root)
+    }
+
+    /**
+     Verifies direct MyBible lookup rejects a sidecar owned by a different remote identity.
+
+     - Setup: Creates a live directory under the requested Android initials but writes a valid
+       sidecar whose exact name belongs to another book.
+     - Expected result: Lookup throws `invalidConfiguration` instead of authorizing the directory.
+     - Side effects: Creates and removes one isolated live MyBible directory.
+     - Failure meaning: A mismatched sidecar can masquerade as the catalog or uninstall owner merely
+       by occupying its durable path.
+     */
+    func testMyBibleLookupRejectsSidecarWhoseExactOwnerDiffersFromDirectory() throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let requestedName = "MyBible-expected_SQLite3"
+        let moduleDirectory = context.root
+            .appendingPathComponent("mybible", isDirectory: true)
+            .appendingPathComponent(requestedName, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: moduleDirectory,
+            withIntermediateDirectories: true
+        )
+        try myBibleSidecarData(
+            name: "MyBible-other_SQLite3",
+            packageFileName: "expected.SQLite3.zip"
+        ).write(to: moduleDirectory.appendingPathComponent("module.json"))
+        try Data("sqlite".utf8).write(to: moduleDirectory.appendingPathComponent("expected.SQLite3"))
+
+        XCTAssertThrowsError(
+            try context.firstPublisher.myBibleModuleURLIfPresent(moduleName: requestedName)
+        ) { error in
+            guard case ModuleStoreMutationError.invalidConfiguration = error else {
+                return XCTFail("Expected mismatched sidecar rejection, received \(error)")
+            }
+        }
     }
 
     /** Verifies TTF addon publication shares the SWORD writer's canonical-root lease. */
@@ -298,7 +458,11 @@ final class ModuleStoreTransactionTests: XCTestCase {
             at: sqliteStaging,
             withIntermediateDirectories: true
         )
-        try Data("{}".utf8).write(to: sqliteStaging.appendingPathComponent("module.json"))
+        let sqliteModuleName = "MyBible-race_SQLite3"
+        try myBibleSidecarData(
+            name: sqliteModuleName,
+            packageFileName: "race.SQLite3.zip"
+        ).write(to: sqliteStaging.appendingPathComponent("module.json"))
         try Data("sqlite".utf8).write(to: sqliteStaging.appendingPathComponent("race.SQLite3"))
         try await assertSerialized(
             root: context.root,
@@ -307,7 +471,7 @@ final class ModuleStoreTransactionTests: XCTestCase {
             first: {
                 try context.firstPublisher.publishStagedMyBibleInstall(
                     from: sqliteStaging,
-                    moduleName: "EPUBSQLITE"
+                    moduleName: sqliteModuleName
                 )
             },
             second: {
@@ -341,7 +505,7 @@ final class ModuleStoreTransactionTests: XCTestCase {
 
         XCTAssertEqual(try payloadString(context.root, native.payloadPath), "native")
         XCTAssertTrue(FileManager.default.fileExists(atPath: context.root.appendingPathComponent(
-            "mybible/EPUBSQLITE/module.json"
+            "mybible/\(sqliteModuleName)/module.json"
         ).path))
         try assertNoTransactionBackups(in: context.root)
     }
@@ -1421,6 +1585,33 @@ final class ModuleStoreTransactionTests: XCTestCase {
         )
     }
 
+    /**
+     Encodes one valid MyBible sidecar for transaction-only fixtures.
+
+     - Parameters:
+       - name: Exact directory/install identity represented by the sidecar.
+       - packageFileName: Exact manifest package identity used to authorize migration.
+     - Returns: JSON data accepted by the production publisher.
+     - Side effects: None.
+     - Failure modes: Encoding errors propagate to the test.
+     */
+    private func myBibleSidecarData(
+        name: String,
+        packageFileName: String
+    ) throws -> Data {
+        try JSONEncoder().encode(InstalledMyBibleModule(
+            name: name,
+            description: "Transaction fixture",
+            category: ModuleCategory.bible.rawValue,
+            language: "en",
+            version: "1.0",
+            sourceName: "Fixture",
+            packageFileName: packageFileName,
+            downloadURL: "https://fixture.invalid/\(packageFileName)",
+            installedAt: Date(timeIntervalSince1970: 0)
+        ))
+    }
+
     /** Builds and validates an isolated staged install fixture. */
     private func makeStagedInstall(
         context: ModuleStoreTestContext,
@@ -1663,6 +1854,71 @@ private final class ModuleStoreConfigCopyFaultFileManager: FileManager, @uncheck
             throw CocoaError(.fileWriteNoPermission)
         }
         try super.moveItem(at: srcURL, to: dstURL)
+    }
+}
+
+/**
+ Test-only file manager that injects one deterministic MyBible publication failure.
+
+ The publisher first backs up the proven pre-parity owner, then this probe rejects the replacement
+ directory copy so the test can verify transactional rollback. It performs no work until a copy is
+ requested and otherwise delegates exactly to `FileManager`.
+ */
+private final class ModuleStoreMyBibleCopyFaultFileManager: FileManager, @unchecked Sendable {
+    /// Exact final MyBible directory name whose staged copy must fail.
+    private let failingDirectoryName: String
+
+    /// Obsolete live owner that must already be absent when the replacement copy begins.
+    private let requiredBackedUpURL: URL
+
+    /// Synchronizes the observation read after the injected publication failure.
+    private let observationLock = NSLock()
+
+    /// Whether the publisher had moved the required obsolete owner before attempting replacement.
+    private var storedObservedRequiredOwnerBackedUp = false
+
+    /// Thread-safe observation proving migration entered rollback storage before replacement.
+    var observedRequiredOwnerBackedUp: Bool {
+        observationLock.withLock { storedObservedRequiredOwnerBackedUp }
+    }
+
+    /**
+     Creates a file manager that rejects one chosen final MyBible directory.
+
+     - Parameters:
+       - failingDirectoryName: Exact destination directory component to reject.
+       - requiredBackedUpURL: Obsolete owner that must be absent before the rejected copy.
+     - Side effects: Initializes only in-memory test state.
+     - Failure modes: None.
+     */
+    init(failingDirectoryName: String, requiredBackedUpURL: URL) {
+        self.failingDirectoryName = failingDirectoryName
+        self.requiredBackedUpURL = requiredBackedUpURL
+        super.init()
+    }
+
+    /**
+     Copies ordinary files while rejecting the selected staged MyBible destination.
+
+     - Parameters:
+       - srcURL: Source item requested by the production publisher.
+       - dstURL: Destination item requested by the production publisher.
+     - Side effects: Throws before mutating the selected destination; delegates all other copies to
+       `FileManager`.
+     - Failure modes: Throws `CocoaError.fileWriteNoPermission` for the selected final MyBible
+       directory; delegated filesystem failures otherwise propagate.
+     */
+    override func copyItem(at srcURL: URL, to dstURL: URL) throws {
+        if dstURL.lastPathComponent == failingDirectoryName,
+           dstURL.deletingLastPathComponent().lastPathComponent == "mybible" {
+            observationLock.withLock {
+                storedObservedRequiredOwnerBackedUp = !fileExists(
+                    atPath: requiredBackedUpURL.path
+                )
+            }
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.copyItem(at: srcURL, to: dstURL)
     }
 }
 

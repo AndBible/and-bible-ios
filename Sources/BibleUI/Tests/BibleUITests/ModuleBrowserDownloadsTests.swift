@@ -1044,6 +1044,127 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies Downloads keeps MyBible remote identity separate from Android's visible abbreviation.
+
+     - Setup: Builds remote rows whose initials oppose their abbreviations, Turkish abbreviations
+       whose locale-lowercase order differs from locale-independent case order, and equal lowercase
+       keys, then reads the row-rendering source boundary.
+     - Expected result: Sorting and search use Android's per-book locale-lowercased abbreviation and
+       preserve catalog order for equal keys, while installation identity remains exact initials;
+       primary text and accessibility expose the same abbreviation.
+     - Side effects: Reads package source only for the rendering assertion.
+     - Failure meaning: MyBible catalog identity is displayed or ordered as initials even though
+       Android's Download adapter renders `Book.abbreviation`.
+     */
+    func testModuleBrowserUsesAndroidRemoteAbbreviationForDisplaySearchAndOrder() throws {
+        let modules = [
+            RemoteModuleInfo(
+                name: "MyBible-OMEGA_SQLite3",
+                abbreviation: "Alpha",
+                description: "First",
+                category: .bible,
+                language: "en",
+                sourceName: "MyBible"
+            ),
+            RemoteModuleInfo(
+                name: "MyBible-BETA_SQLite3",
+                abbreviation: "Zulu",
+                description: "Second",
+                category: .bible,
+                language: "en",
+                sourceName: "MyBible"
+            ),
+        ]
+
+        let sorted = ModuleBrowserView.sortedDownloadModules(
+            modules,
+            installedModules: [],
+            downloadActivities: [:],
+            selectedLanguage: "",
+            recommendedDocuments: nil
+        )
+        XCTAssertEqual(sorted.map(\.name), [
+            "MyBible-OMEGA_SQLite3",
+            "MyBible-BETA_SQLite3",
+        ])
+        let filtered = ModuleBrowserView.filteredDownloadModules(
+            modules,
+            selectedCategory: nil,
+            selectedLanguage: "",
+            searchText: "Alpha",
+            installedModules: [],
+            downloadActivities: [:],
+            recommendedDocuments: nil,
+            badDocuments: nil
+        )
+        XCTAssertEqual(filtered.map(\.name), ["MyBible-OMEGA_SQLite3"])
+
+        let turkish = [
+            RemoteModuleInfo(
+                name: "TURKISH-DOTLESS",
+                abbreviation: "I",
+                description: "Dotless lowercase",
+                category: .bible,
+                language: "tr",
+                sourceName: "MyBible"
+            ),
+            RemoteModuleInfo(
+                name: "TURKISH-DOTTED",
+                abbreviation: "İ",
+                description: "Dotted lowercase",
+                category: .bible,
+                language: "tr",
+                sourceName: "MyBible"
+            ),
+        ]
+        XCTAssertEqual(
+            ModuleBrowserView.sortedDownloadModules(
+                turkish,
+                installedModules: [],
+                downloadActivities: [:],
+                selectedLanguage: "",
+                recommendedDocuments: nil
+            ).map(\.name),
+            ["TURKISH-DOTTED", "TURKISH-DOTLESS"]
+        )
+
+        let stableEqualKeys = [
+            RemoteModuleInfo(
+                name: "SECOND-BY-INITIALS",
+                abbreviation: "ALPHA",
+                description: "First catalog row",
+                category: .bible,
+                language: "en",
+                sourceName: "MyBible"
+            ),
+            RemoteModuleInfo(
+                name: "FIRST-BY-INITIALS",
+                abbreviation: "Alpha",
+                description: "Second catalog row",
+                category: .bible,
+                language: "en",
+                sourceName: "MyBible"
+            ),
+        ]
+        XCTAssertEqual(
+            ModuleBrowserView.sortedDownloadModules(
+                stableEqualKeys,
+                installedModules: [],
+                downloadActivities: [:],
+                selectedLanguage: "",
+                recommendedDocuments: nil
+            ).map(\.name),
+            ["SECOND-BY-INITIALS", "FIRST-BY-INITIALS"]
+        )
+
+        let source = try BibleUITestSourceLocator.source(
+            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
+        )
+        XCTAssertTrue(source.contains("Text(module.abbreviation)"))
+        XCTAssertTrue(source.contains(".accessibilityLabel(module.abbreviation)"))
+    }
+
+    /**
      Verifies same-repository malformed versions stay updateable while blank versions compare as 1.0.
 
      Android constructs both values with JSword `Version`; a constructor failure deliberately
