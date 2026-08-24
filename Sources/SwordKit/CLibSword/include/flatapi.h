@@ -95,10 +95,11 @@ const char *SWModule_getRenderText(void *module);
 /// Get raw entry text at the current position (no markup).
 const char *SWModule_getRawEntry(void *module);
 
-/// Get the current entry after native option and encoding filters without source-format conversion.
-/// Swift's JSword-compatible ThML filter consumes this exact decoded source representation.
+/// Get the current entry after backend extraction and native encoding conversion only.
+/// No libsword option/source filter runs because Swift's pinned JSword filters own the complete
+/// semantic conversion for every Android-supported source family.
 /// The returned pointer is thread-local and remains valid until the next call on that thread.
-const char *SWModule_getFilteredSourceFragment(void *module);
+const char *SWModule_getDecodedSourceFragment(void *module);
 
 /// Get the current VerseKey as a canonical OSIS reference, or an empty string for other key types.
 /// The returned pointer is thread-local and remains valid until the next call on that thread.
@@ -109,17 +110,11 @@ const char *SWModule_getCurrentOSISRef(void *module);
 /// thread-local and remains valid until the next call on that thread.
 const char *SWModule_resolveOSISReference(void *module, const char *reference);
 
-/// Convert the current non-ThML entry from its declared source format to canonical OSIS XML.
-/// ThML deliberately returns an empty string so callers cannot reintroduce libsword's malformed
-/// `ThMLOSIS` path instead of the shared JSword-compatible Swift filter. The returned pointer is
-/// thread-local and remains valid until the next call on that thread.
-const char *SWModule_getNativeSourceOSISFragment(void *module);
-
-/// Read one physical RawLD-family index record through its source-family filter boundary.
-/// RawLD/RawLD4 callers provide fixed-record bytes; zLD reads/decompresses by index. Non-ThML
-/// source is canonical OSIS; ThML is decoded/option-filtered source for Swift's JSword converter.
-/// The returned pointer is thread-local.
-const char *SWModule_getRawDictionarySourceFragmentAtIndex(void *module,
+/// Read one physical RawLD-family index record through its backend/decode boundary.
+/// RawLD/RawLD4 callers provide fixed-record bytes; zLD reads/decompresses by index. Every source
+/// family returns backend-extracted, decoded source without libsword option/source conversion for
+/// the shared Swift JSword converter. The returned pointer is thread-local.
+const char *SWModule_getRawDictionaryDecodedSourceAtIndex(void *module,
                                                           long index,
                                                           const unsigned char *rawRecord,
                                                           unsigned long rawRecordLength);

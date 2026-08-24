@@ -6,8 +6,9 @@ import Foundation
 /**
  Converts the current SWORD entry to the same structural OSIS source family used by Android.
 
- Pinned JSword owns ThML conversion through `THMLFilter`; libsword's `ThMLOSIS` is not equivalent
- and emits malformed reference end tags for real CrossWire modules such as Barnes. Every native
+ Pinned JSword selects `OSISFilter` for OSIS/TEI, `THMLFilter` for ThML, `GBFFilter` for GBF, and
+ `PlainTextFilter` for plain/unknown source types. Native libsword filters are not equivalent: they
+ can emit malformed markup or different line, Strong, reference, and tag semantics. Every native
  read crosses this boundary so reader, Search, speech, AI, and unlock validation cannot drift.
  */
 enum SwordSourceFormatOSISConverter {
@@ -18,23 +19,53 @@ enum SwordSourceFormatOSISConverter {
        caller.
      - Returns: Canonical structural OSIS for the current entry, or an empty string when source
        metadata/content cannot be converted under the Android contract.
-     - Side effects: Reads module metadata and entry buffers; ThML passage references are resolved
-       against the current native VerseKey.
-     - Failure modes: Never throws. Missing source, invalid references, and irreparable ThML fail
-       closed as empty/attribute-free structural output rather than rendered-text substitution.
+     - Side effects: Reads module metadata and one backend-extracted/decoded entry buffer; ThML/GBF
+       passage references are resolved against the current native VerseKey.
+     - Failure modes: Never throws. Missing source, invalid references, and irreparable structured
+       markup fail closed without rendered-text substitution.
      - Important: Call only while holding `SwordRuntime`; native pointers are copied immediately.
      */
     static func fragment(handle: UnsafeMutableRawPointer) -> String {
-        guard let sourceTypePointer = SWModule_getConfigEntry(handle, "SourceType") else {
-            return SWModule_getNativeSourceOSISFragment(handle).map(String.init(cString:)) ?? ""
-        }
-        let sourceType = String(cString: sourceTypePointer)
-        guard sourceType.lowercased() == "thml" else {
-            return SWModule_getNativeSourceOSISFragment(handle).map(String.init(cString:)) ?? ""
-        }
+        let source = SWModule_getDecodedSourceFragment(handle).map(String.init(cString:)) ?? ""
+        return fragment(handle: handle, decodedSource: source)
+    }
 
-        let source = SWModule_getFilteredSourceFragment(handle).map(String.init(cString:)) ?? ""
-        return thmlFragment(handle: handle, filteredSource: source)
+    /**
+     Converts one already-decoded physical source record through the configured JSword filter.
+
+     - Parameters:
+       - handle: Live SWORD module supplying source metadata and current key/reference context.
+       - decodedSource: Exact backend-extracted source after native encoding conversion only.
+     - Returns: Pinned JSword-compatible structural OSIS for the configured source family.
+     - Side effects: Reads module metadata and may resolve ThML/GBF references against the current
+       native key; no cursor or persisted state is mutated.
+     - Failure modes: Missing/unknown `SourceType` follows JSword's plain-text default. Irreparable
+       OSIS/TEI/ThML becomes empty output; malformed GBF tags follow its tolerant tokenizer.
+     - Important: Call only while holding `SwordRuntime`.
+     */
+    static func fragment(
+        handle: UnsafeMutableRawPointer,
+        decodedSource: String
+    ) -> String {
+        let sourceType = SWModule_getConfigEntry(handle, "SourceType")
+            .map { String(cString: $0).lowercased(with: Locale(identifier: "en")) } ?? ""
+        let moduleInitials = String(cString: SWModule_getName(handle))
+        switch sourceType {
+        case "osis", "tei":
+            return SwordJSwordOSISSourceCompatibility.repairedSourceXML(
+                decodedSource,
+                moduleInitials: moduleInitials
+            )
+        case "thml":
+            return thmlFragment(handle: handle, decodedSource: decodedSource)
+        case "gbf":
+            return SwordJSwordGBFSourceFilter.convert(
+                decodedSource,
+                resolveReference: referenceResolver(handle: handle)
+            )
+        default:
+            return SwordJSwordPlainTextSourceFilter.convert(decodedSource)
+        }
     }
 
     /**
@@ -42,7 +73,7 @@ enum SwordSourceFormatOSISConverter {
 
      - Parameters:
        - handle: Live SWORD module supplying current key/reference context.
-       - filteredSource: Exact decoded/option-filtered ThML, including physical RawLD records that
+       - decodedSource: Exact backend-extracted/decoded ThML, including physical RawLD records that
          bypass an ambiguous native key lookup.
      - Returns: JSword-compatible structural OSIS.
      - Side effects: Resolves scripture references against native VerseKey context when available.
@@ -52,21 +83,37 @@ enum SwordSourceFormatOSISConverter {
      */
     static func thmlFragment(
         handle: UnsafeMutableRawPointer,
-        filteredSource: String
+        decodedSource: String
     ) -> String {
-        guard !filteredSource.isEmpty else { return "" }
+        guard !decodedSource.isEmpty else { return "" }
         let currentOSISRef = SWModule_getCurrentOSISRef(handle).map(String.init(cString:)) ?? ""
         let verseOrdinal = Int(SWModule_getVerseKeyIndex(handle))
         return SwordJSwordThMLSourceFilter.convert(
-            filteredSource,
+            decodedSource,
             verseOSISRef: positiveVerseOSISRef(currentOSISRef),
             verseOrdinal: verseOrdinal >= 0 ? verseOrdinal : nil,
-            resolveReference: { reference in
-                reference.withCString { pointer in
-                    SWModule_resolveOSISReference(handle, pointer).map(String.init(cString:)) ?? ""
-                }
-            }
+            resolveReference: referenceResolver(handle: handle)
         )
+    }
+
+    /**
+     Creates one copied-string scripture-reference resolver for structural source filters.
+
+     - Parameter handle: Live SWORD module positioned on the source entry owning relative context.
+     - Returns: Closure mapping one source reference to canonical space-delimited OSIS, or empty
+       text when native VerseKey parsing rejects it.
+     - Side effects: Calls the native reference parser without moving the module cursor.
+     - Failure modes: Invalid and non-VerseKey references return an empty string without throwing.
+     - Important: The closure must not escape the enclosing `SwordRuntime` lease.
+     */
+    private static func referenceResolver(
+        handle: UnsafeMutableRawPointer
+    ) -> (String) -> String {
+        { reference in
+            reference.withCString { pointer in
+                SWModule_resolveOSISReference(handle, pointer).map(String.init(cString:)) ?? ""
+            }
+        }
     }
 
     /**
@@ -120,7 +167,8 @@ enum SwordJSwordThMLSourceFilter {
      Converts one decoded ThML source fragment to JSword-compatible OSIS.
 
      - Parameters:
-       - source: Exact decoded ThML after native option filters.
+       - source: Exact decoded ThML after physical extraction, decryption, and character decoding;
+         no native display or markup option filter has transformed it.
        - verseOSISRef: Positive current VerseKey reference, or nil for generic/intro content.
        - verseOrdinal: Current native VerseKey ordinal used by JSword's generated verse element.
        - resolveReference: Resolver for ThML `scripRef` text relative to the current VerseKey.
