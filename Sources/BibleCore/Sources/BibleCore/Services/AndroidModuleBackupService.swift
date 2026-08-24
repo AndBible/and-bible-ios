@@ -178,41 +178,6 @@ public enum AndroidModuleBackupExternalFileFamily: Sendable, Equatable {
 }
 
 /**
- Android-compatible module backup archive produced from locally installed module families.
- */
-public struct AndroidModuleBackupExport: Sendable, Equatable {
-    /// Android-compatible export filename.
-    public let fileName: String
-
-    /// Raw `.abmd.zip` archive bytes.
-    public let data: Data
-
-    /// Exported Android-compatible module initials across all represented families.
-    public let moduleNames: [String]
-
-    /// Number of file entries written into the ZIP, including the manifest.
-    public let entryCount: Int
-
-    /**
-     Creates one module backup export result.
-
-     - Parameters:
-       - fileName: Android-compatible backup filename.
-       - data: Raw ZIP archive bytes.
-       - moduleNames: Exported Android-compatible module initials.
-       - entryCount: Number of ZIP file entries.
-     - Side effects: none.
-     - Failure modes: This initializer cannot fail.
-     */
-    public init(fileName: String, data: Data, moduleNames: [String], entryCount: Int) {
-        self.fileName = fileName
-        self.data = data
-        self.moduleNames = moduleNames
-        self.entryCount = entryCount
-    }
-}
-
-/**
  File-backed Android module backup export used by production Files and Share workflows.
 
  Payload files are streamed into the ZIP and remain file-backed through destination presentation,
@@ -673,29 +638,14 @@ public final class AndroidModuleBackupService {
     }
 
     /**
-     Exports installed Android-compatible module families as in-memory `.abmd.zip` bytes.
-
-     - Parameter moduleNames: Optional Android-compatible initials across SWORD, SQLite document,
-       EPUB, font, background, and prompt families. `nil` exports every discovered module.
-     - Returns: Android-compatible module backup bytes and exported module initials.
-     - Side effects: Streams a temporary file-backed archive, reads it into memory for compatibility,
-       then removes the temporary file. Production destination flows should use `exportArchiveFile`.
-     - Throws: `AndroidModuleBackupError` for missing/unsafe/colliding installed content and
-       `ZipArchiveWriterError` when the archive cannot be represented or persisted as ZIP64.
-     */
-    public func exportArchive(moduleNames: Set<String>? = nil) throws -> AndroidModuleBackupExport {
-        try exporter.exportArchive(moduleNames: moduleNames)
-    }
-
-    /**
-     Streams every selected Android module family into one `.abmd.zip` backup.
+     Streams selected Android module families into one `.abmd.zip` backup in caller order.
 
      SWORD entries retain driver-owned payload boundaries. Android-native custom families are
      discovered from their canonical roots, while iOS EPUB generations contribute expanded package
      trees only when no authoritative raw Android tree owns the same initials.
 
-     - Parameter moduleNames: Optional Android-compatible initials for every family; `nil` selects
-       all discovered modules.
+     - Parameter orderedModuleNames: Optional exact Java UTF-16 initials for every family in caller
+       selection order; `nil` selects all discovered modules.
      - Returns: Complete temporary archive plus exported module summary. The caller owns cleanup.
      - Side effects: Reads installed files, temporarily leases immutable EPUB generations, and
        streams one archive beneath the configured temporary directory.
@@ -704,20 +654,8 @@ public final class AndroidModuleBackupService {
        error.
      - Note: The Android manifest is always the literal first ZIP entry.
      */
-    public func exportArchiveFile(moduleNames: Set<String>? = nil) throws -> AndroidModuleBackupFileExport {
-        try exporter.exportArchiveFile(moduleNames: moduleNames)
-    }
-
-    /**
-     Exports selected installed content in exact Android picker order.
-
-     - Parameter orderedModuleNames: Runtime initials in the order shown by the picker.
-     - Returns: Completed file-backed module backup owned by the caller.
-     - Side effects: Enumerates and streams selected installed content into a temporary archive.
-     - Throws: Discovery, cancellation, source-integrity, ZIP, or filesystem errors.
-     */
     public func exportArchiveFile(
-        orderedModuleNames: [String]
+        orderedModuleNames: [String]? = nil
     ) throws -> AndroidModuleBackupFileExport {
         try exporter.exportArchiveFile(orderedModuleNames: orderedModuleNames)
     }

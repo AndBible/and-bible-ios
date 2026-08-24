@@ -169,7 +169,8 @@ internal struct AndroidModuleBackupExportInventoryBuilder {
      Builds the complete selected inventory while retaining native EPUB package generations.
 
      - Parameter moduleNames: Optional Android-compatible initials in exact picker selection order.
-       Matching uses Java `String.equalsIgnoreCase`; `nil` exports Android registration order.
+       Matching and duplicate suppression use Java's exact UTF-16 `String.equals` identity; `nil`
+       exports Android registration order.
      - Returns: Validated file-backed entries, stable module names, and generation leases that stay
        alive until ZIP writing finishes.
      - Side effects: Reads installed registrations and metadata, then pins only selected artifacts.
@@ -180,21 +181,10 @@ internal struct AndroidModuleBackupExportInventoryBuilder {
     internal func prepare(moduleNames: [String]?) throws -> AndroidModuleBackupExportInventory {
         try Task.checkCancellation()
         let catalog = try installedContentCatalog()
-        let selectedContent: [AndroidModuleBackupInstalledContent]
-        if let moduleNames {
-            let contentByInitials = Dictionary(
-                catalog.map { (SQLiteDocumentIdentity($0.initials), $0) },
-                uniquingKeysWith: { first, _ in first }
-            )
-            var selectedIdentities = Set<SQLiteDocumentIdentity>()
-            selectedContent = moduleNames.compactMap { selectedName in
-                let identity = SQLiteDocumentIdentity(selectedName)
-                guard selectedIdentities.insert(identity).inserted else { return nil }
-                return contentByInitials[identity]
-            }
-        } else {
-            selectedContent = catalog
-        }
+        let selectedContent = Self.selectedContent(
+            from: catalog,
+            moduleNames: moduleNames
+        )
 
         var leasedGenerations: [EpubGenerationLocation] = []
         let libraryRootURL = resolvedEpubLibraryRootURL
@@ -229,9 +219,33 @@ internal struct AndroidModuleBackupExportInventoryBuilder {
         )
     }
 
-    /** Compatibility overload for unordered API callers retained outside picker workflows. */
-    internal func prepare(moduleNames: Set<String>?) throws -> AndroidModuleBackupExportInventory {
-        try prepare(moduleNames: moduleNames?.sorted())
+    /**
+     Selects catalog rows using Android's exact `String.equals` identity in caller order.
+
+     - Parameters:
+       - catalog: Already-admitted installed rows in Android registration order.
+       - moduleNames: Optional exact initials in caller selection order; `nil` selects the catalog.
+     - Returns: First requested occurrence of every exact installed identity. Missing requests are
+       omitted, preserving the exporter's existing partial-selection contract.
+     - Side effects: None.
+     - Failure modes: None; an empty or wholly missing selection returns an empty array so the
+       exporter can publish `AndroidModuleBackupError.noExportableModules`.
+     */
+    internal static func selectedContent(
+        from catalog: [AndroidModuleBackupInstalledContent],
+        moduleNames: [String]?
+    ) -> [AndroidModuleBackupInstalledContent] {
+        guard let moduleNames else { return catalog }
+        let contentByInitials = Dictionary(
+            catalog.map { (SwordJavaExactStringIdentity($0.initials), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var selectedIdentities = Set<SwordJavaExactStringIdentity>()
+        return moduleNames.compactMap { selectedName in
+            let identity = SwordJavaExactStringIdentity(selectedName)
+            guard selectedIdentities.insert(identity).inserted else { return nil }
+            return contentByInitials[identity]
+        }
     }
 
     /**
@@ -368,6 +382,45 @@ internal struct AndroidModuleBackupExportInventoryBuilder {
             configSource: source
         )
     }
+
+    /**
+     Reopens one selected native EPUB by both exact Android identity fields.
+
+     - Parameters:
+       - initials: Exact initials captured by installed-catalog selection.
+       - sourceFileName: Exact Android source directory name captured by the catalog row.
+       - installedEpubs: Fresh read-only native EPUB snapshot in registration order.
+     - Returns: The first row whose initials and source filename both match by raw Java UTF-16 code
+       units, or `nil` when the selected backing row disappeared or changed.
+     - Side effects: None.
+     - Failure modes: Canonically equivalent, case-only, missing, or otherwise changed identities
+       fail closed instead of borrowing another installed EPUB generation.
+     */
+    internal static func installedEpub(
+        matchingInitials initials: String,
+        sourceFileName: String,
+        in installedEpubs: [EpubInfo]
+    ) -> EpubInfo? {
+        installedEpubs.first {
+            javaStringsAreExactlyEqual($0.initials, initials)
+                && javaStringsAreExactlyEqual($0.sourceFileName, sourceFileName)
+        }
+    }
+
+    /**
+     Compares two Android identities with Java `String.equals` raw UTF-16 semantics.
+
+     - Parameters:
+       - lhs: First exact initials or source-filename value.
+       - rhs: Second exact initials or source-filename value.
+     - Returns: `true` only when both strings contain the same UTF-16 code units in the same order.
+     - Side effects: None.
+     - Failure modes: None; empty and malformed-scalar replacement content compare as ordinary
+       Swift UTF-16 views without normalization or case folding.
+     */
+    internal static func javaStringsAreExactlyEqual(_ lhs: String, _ rhs: String) -> Bool {
+        SwordJavaExactStringIdentity(lhs) == SwordJavaExactStringIdentity(rhs)
+    }
 }
 
 /** Selected-row materialization after read-only installed-book discovery. */
@@ -446,7 +499,7 @@ private extension AndroidModuleBackupExportInventoryBuilder {
             fallbackPath: configURL.path,
             configSource: source
         )
-        guard configuration.moduleName == content.initials else {
+        guard Self.javaStringsAreExactlyEqual(configuration.moduleName, content.initials) else {
             throw AndroidModuleBackupError.invalidModuleLayout(
                 "Installed SWORD identity changed after selection: \(content.initials)."
             )
@@ -574,13 +627,14 @@ private extension AndroidModuleBackupExportInventoryBuilder {
             )
         }
 
-        let metadata = EpubReader.readOnlyInstalledEpubs(
-            libraryRootURL: libraryRootURL,
-            fileManager: fileManager
-        ).first {
-            SQLiteDocumentIdentity($0.initials) == SQLiteDocumentIdentity(content.initials)
-                && $0.sourceFileName == displayName
-        }
+        let metadata = Self.installedEpub(
+            matchingInitials: content.initials,
+            sourceFileName: displayName,
+            in: EpubReader.readOnlyInstalledEpubs(
+                libraryRootURL: libraryRootURL,
+                fileManager: fileManager
+            )
+        )
         guard let metadata,
               let location = EpubReader.acquireCurrentGeneration(
                 identifier: metadata.identifier,
@@ -989,20 +1043,6 @@ private extension AndroidModuleBackupExportInventoryBuilder {
             )
         }
         return value
-    }
-
-    /**
-     Reports whether one Android-compatible identity is part of the optional selection.
-
-     - Parameters:
-       - moduleName: Exact discovered initials.
-       - requestedKeys: Optional normalized selection keys.
-     - Returns: `true` when all modules were requested or the normalized identity is selected.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    func isSelected(_ moduleName: String, requestedKeys: Set<String>?) -> Bool {
-        requestedKeys?.contains(collisionKey(moduleName)) ?? true
     }
 
     /**
