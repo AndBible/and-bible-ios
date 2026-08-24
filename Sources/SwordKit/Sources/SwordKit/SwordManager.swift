@@ -543,7 +543,8 @@ public final class SwordManager: @unchecked Sendable {
      backend read errors enabled. SWORD's raw ciphers are unauthenticated, so a wrong key can still
      produce bytes without a backend error. The probe therefore requires the first non-empty entry
      to decode under the module's configured SWORD character encoding without cipher-like controls,
-     then requires the native source-to-OSIS result to parse for the module's category and contain
+     then requires the shared Android-compatible source-to-OSIS result to parse for the module's
+     category and contain
      renderable content before the key can be persisted. Because the C bridge can truncate wrong-key
      bytes at an embedded NUL, the bounded traversal requires at least 16 validated source scalars
      across readable entries rather than accepting a one-character prefix as proof.
@@ -581,11 +582,11 @@ public final class SwordManager: @unchecked Sendable {
             }
             if !rawText.isEmpty {
                 guard isPlausibleDecryptedModuleText(rawText),
-                      let osisPointer = SWModule_getOSISFragment(moduleHandle),
-                      SWModule_popError(moduleHandle) == 0,
-                      let osisFragment = String(validatingUTF8: osisPointer) else {
+                      SWModule_popError(moduleHandle) == 0 else {
                     return false
                 }
+                let osisFragment = SwordSourceFormatOSISConverter.fragment(handle: moduleHandle)
+                guard SWModule_popError(moduleHandle) == 0 else { return false }
                 guard cipherEntryIsStructurallyReadable(
                     osisFragment: osisFragment,
                     category: info.category,
@@ -667,7 +668,7 @@ public final class SwordManager: @unchecked Sendable {
      Validates decrypted entry shape independently of SWORD's unauthenticated backend status.
 
      - Parameters:
-       - osisFragment: UTF-8 fragment emitted by the native source-to-OSIS filter.
+       - osisFragment: UTF-8 fragment emitted by the shared Android-compatible source converter.
        - category: Module category controlling commentary and generic-book structural processing.
        - moduleInitials: Exact initials used by source-specific OSIS repair.
      - Returns: `true` only for non-empty, control-safe content that parses into renderable OSIS.

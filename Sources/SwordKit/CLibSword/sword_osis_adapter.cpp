@@ -10,11 +10,12 @@
 #include <string>
 
 #include <gbfosis.h>
+#include <listkey.h>
 #include <swbuf.h>
 #include <swkey.h>
 #include <swmodule.h>
-#include <thmlosis.h>
 #include <treekey.h>
+#include <versekey.h>
 #include <zld.h>
 
 namespace {
@@ -26,6 +27,9 @@ struct FlatAPIHandleSWModule {
 
 thread_local std::string osisFragmentStorage;
 thread_local std::string currentKeyNameStorage;
+thread_local std::string filteredSourceStorage;
+thread_local std::string currentOSISRefStorage;
+thread_local std::string resolvedOSISRefStorage;
 
 std::string escapeXMLText(const char *value) {
     std::string result;
@@ -52,22 +56,33 @@ std::string escapeXMLText(const char *value) {
     return result;
 }
 
-void convertSourceToOSIS(sword::SWModule *module, sword::SWBuf &source) {
+/** Returns one ASCII-insensitive SWORD metadata token without locale-dependent ordering. */
+std::string lowercaseASCII(const char *value) {
+    std::string result = value ? value : "";
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char unit) {
+        return static_cast<char>(std::tolower(unit));
+    });
+    return result;
+}
+
+/**
+ Converts one non-ThML native source entry to OSIS after applying SWORD's option filters.
+
+ ThML is intentionally excluded because libsword's `ThMLOSIS` emits malformed reference markup for
+ valid CrossWire modules such as Barnes. Swift owns that source family through the pinned JSword
+ parser. Other source types retain their existing native conversion and encoding behavior.
+ */
+void convertNativeSourceToOSIS(sword::SWModule *module, sword::SWBuf &source) {
     const sword::SWKey *key = module->getKey();
     module->optionFilter(source, key);
 
-    const char *configuredSourceType = module->getConfigEntry("SourceType");
-    std::string sourceType = configuredSourceType ? configuredSourceType : "";
-    std::transform(sourceType.begin(), sourceType.end(), sourceType.begin(), [](unsigned char value) {
-        return static_cast<char>(std::tolower(value));
-    });
+    const std::string sourceType = lowercaseASCII(module->getConfigEntry("SourceType"));
 
     if (sourceType == "osis") {
         // Raw OSIS is already the semantic source representation. SWORD's OSISOSIS render filter
         // intentionally drops unrecognized elements such as dictionary entryFree/orth nodes.
     } else if (sourceType == "thml") {
-        sword::ThMLOSIS converter;
-        converter.processText(source, key, module);
+        source = "";
     } else if (sourceType == "gbf") {
         sword::GBFOSIS converter;
         converter.processText(source, key, module);
@@ -86,7 +101,82 @@ void convertSourceToOSIS(sword::SWModule *module, sword::SWBuf &source) {
 
 } // namespace
 
-extern "C" const char *SWModule_getOSISFragment(void *moduleHandle) {
+extern "C" const char *SWModule_getFilteredSourceFragment(void *moduleHandle) {
+    filteredSourceStorage.clear();
+    if (!moduleHandle) {
+        return filteredSourceStorage.c_str();
+    }
+
+    auto *handle = reinterpret_cast<FlatAPIHandleSWModule *>(moduleHandle);
+    auto *module = handle->mod;
+    if (!module) {
+        return filteredSourceStorage.c_str();
+    }
+
+    sword::SWBuf source = module->getRawEntryBuf();
+    const sword::SWKey *key = module->getKey();
+    module->optionFilter(source, key);
+    module->encodingFilter(source, key);
+    filteredSourceStorage = source.c_str();
+    return filteredSourceStorage.c_str();
+}
+
+extern "C" const char *SWModule_getCurrentOSISRef(void *moduleHandle) {
+    currentOSISRefStorage.clear();
+    if (!moduleHandle) {
+        return currentOSISRefStorage.c_str();
+    }
+
+    auto *handle = reinterpret_cast<FlatAPIHandleSWModule *>(moduleHandle);
+    auto *module = handle->mod;
+    const auto *verseKey = module ? dynamic_cast<const sword::VerseKey *>(module->getKey()) : nullptr;
+    if (verseKey) {
+        currentOSISRefStorage = verseKey->getOSISRef();
+    }
+    return currentOSISRefStorage.c_str();
+}
+
+extern "C" const char *SWModule_resolveOSISReference(
+    void *moduleHandle,
+    const char *reference
+) {
+    resolvedOSISRefStorage.clear();
+    if (!moduleHandle || !reference || !*reference) {
+        return resolvedOSISRefStorage.c_str();
+    }
+
+    auto *handle = reinterpret_cast<FlatAPIHandleSWModule *>(moduleHandle);
+    auto *module = handle->mod;
+    if (!module) {
+        return resolvedOSISRefStorage.c_str();
+    }
+
+    const auto *verseKey = dynamic_cast<const sword::VerseKey *>(module->getKey());
+    sword::VerseKey parser = verseKey ? *verseKey : sword::VerseKey();
+    sword::ListKey parsed = parser.parseVerseList(
+        reference,
+        verseKey ? verseKey->getText() : nullptr,
+        false
+    );
+    for (int index = 0; index < parsed.getCount(); ++index) {
+        const auto *parsedVerse = dynamic_cast<const sword::VerseKey *>(parsed.getElement(index));
+        if (!parsedVerse || parsedVerse->getError()) {
+            resolvedOSISRefStorage.clear();
+            break;
+        }
+        const char *osisReference = parsedVerse->getOSISRefRangeText();
+        if (!osisReference || !*osisReference) {
+            continue;
+        }
+        if (!resolvedOSISRefStorage.empty()) {
+            resolvedOSISRefStorage += " ";
+        }
+        resolvedOSISRefStorage += osisReference;
+    }
+    return resolvedOSISRefStorage.c_str();
+}
+
+extern "C" const char *SWModule_getNativeSourceOSISFragment(void *moduleHandle) {
     osisFragmentStorage.clear();
     if (!moduleHandle) {
         return osisFragmentStorage.c_str();
@@ -103,12 +193,12 @@ extern "C" const char *SWModule_getOSISFragment(void *moduleHandle) {
         return osisFragmentStorage.c_str();
     }
 
-    convertSourceToOSIS(module, source);
+    convertNativeSourceToOSIS(module, source);
     osisFragmentStorage = source.c_str();
     return osisFragmentStorage.c_str();
 }
 
-extern "C" const char *SWModule_getRawDictionaryOSISFragmentAtIndex(
+extern "C" const char *SWModule_getRawDictionarySourceFragmentAtIndex(
     void *moduleHandle,
     long index,
     const unsigned char *rawRecord,
@@ -186,7 +276,13 @@ extern "C" const char *SWModule_getRawDictionaryOSISFragmentAtIndex(
         source = sword::SWBuf(source.c_str() + start, end - start);
     }
 
-    convertSourceToOSIS(module, source);
+    const std::string sourceType = lowercaseASCII(module->getConfigEntry("SourceType"));
+    if (sourceType == "thml") {
+        module->optionFilter(source, key);
+        module->encodingFilter(source, key);
+    } else {
+        convertNativeSourceToOSIS(module, source);
+    }
     osisFragmentStorage = source.c_str();
     return osisFragmentStorage.c_str();
 }
@@ -260,12 +356,27 @@ extern "C" int SWModule_restoreClonedKey(void *moduleHandle, void *clonedKeyHand
 
 #else
 
-extern "C" const char *SWModule_getOSISFragment(void *module) {
+extern "C" const char *SWModule_getFilteredSourceFragment(void *module) {
     static const char *empty = "";
     return empty;
 }
 
-extern "C" const char *SWModule_getRawDictionaryOSISFragmentAtIndex(
+extern "C" const char *SWModule_getCurrentOSISRef(void *module) {
+    static const char *empty = "";
+    return empty;
+}
+
+extern "C" const char *SWModule_resolveOSISReference(void *module, const char *reference) {
+    static const char *empty = "";
+    return empty;
+}
+
+extern "C" const char *SWModule_getNativeSourceOSISFragment(void *module) {
+    static const char *empty = "";
+    return empty;
+}
+
+extern "C" const char *SWModule_getRawDictionarySourceFragmentAtIndex(
     void *module,
     long index,
     const unsigned char *rawRecord,

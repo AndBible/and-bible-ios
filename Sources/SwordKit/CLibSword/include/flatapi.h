@@ -95,17 +95,34 @@ const char *SWModule_getRenderText(void *module);
 /// Get raw entry text at the current position (no markup).
 const char *SWModule_getRawEntry(void *module);
 
-/// Get the current entry converted from its declared source format to canonical OSIS XML.
+/// Get the current entry after native option and encoding filters without source-format conversion.
+/// Swift's JSword-compatible ThML filter consumes this exact decoded source representation.
 /// The returned pointer is thread-local and remains valid until the next call on that thread.
-const char *SWModule_getOSISFragment(void *module);
+const char *SWModule_getFilteredSourceFragment(void *module);
 
-/// Read one physical RawLD-family index record and convert it through the module's native filters.
-/// RawLD/RawLD4 callers provide the fixed-record bytes; zLD reads/decompresses by index itself.
+/// Get the current VerseKey as a canonical OSIS reference, or an empty string for other key types.
+/// The returned pointer is thread-local and remains valid until the next call on that thread.
+const char *SWModule_getCurrentOSISRef(void *module);
+
+/// Resolve one human-readable passage against the current VerseKey and return its OSIS reference.
+/// Invalid references and non-VerseKey modules return an empty string. The returned pointer is
+/// thread-local and remains valid until the next call on that thread.
+const char *SWModule_resolveOSISReference(void *module, const char *reference);
+
+/// Convert the current non-ThML entry from its declared source format to canonical OSIS XML.
+/// ThML deliberately returns an empty string so callers cannot reintroduce libsword's malformed
+/// `ThMLOSIS` path instead of the shared JSword-compatible Swift filter. The returned pointer is
+/// thread-local and remains valid until the next call on that thread.
+const char *SWModule_getNativeSourceOSISFragment(void *module);
+
+/// Read one physical RawLD-family index record through its source-family filter boundary.
+/// RawLD/RawLD4 callers provide fixed-record bytes; zLD reads/decompresses by index. Non-ThML
+/// source is canonical OSIS; ThML is decoded/option-filtered source for Swift's JSword converter.
 /// The returned pointer is thread-local.
-const char *SWModule_getRawDictionaryOSISFragmentAtIndex(void *module,
-                                                        long index,
-                                                        const unsigned char *rawRecord,
-                                                        unsigned long rawRecordLength);
+const char *SWModule_getRawDictionarySourceFragmentAtIndex(void *module,
+                                                          long index,
+                                                          const unsigned char *rawRecord,
+                                                          unsigned long rawRecordLength);
 
 /// Get the current key's Android-equivalent display name. TreeKey modules return the local node
 /// name while other modules return the key's short text. The pointer is thread-local.
