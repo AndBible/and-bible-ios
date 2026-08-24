@@ -1,4 +1,21 @@
 import Foundation
+
+/**
+ Wire payload for Android's shared `reload_addons` WebView event.
+
+ Every field comes from the same admitted installed BookSet projection so fonts, reference-parser
+ features, and custom styles cannot observe different compatibility or ownership decisions.
+ */
+struct BibleReaderAddonReloadPayload: Encodable, Equatable, Sendable {
+    /// Exact installed initials whose admitted owners carry Android's font-provider marker.
+    let fontModuleNames: [String]
+
+    /// Exact installed initials whose admitted owners expose WebView feature bundles.
+    let featureModuleNames: [String]
+
+    /// Exact installed initials whose admitted owners expose WebView style bundles.
+    let styleModuleNames: [String]
+}
 import BibleView
 
 /**

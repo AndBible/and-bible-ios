@@ -1484,6 +1484,74 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
+     Returns Android's provided-font map values in stable insertion order.
+
+     Android iterates admitted books in installed TreeSet order and writes each readable provider to
+     a linked map keyed by exact Java font name. A later exact-name provider replaces the value
+     without moving its original position; canonically equivalent Java-distinct names remain
+     separate.
+
+     - Returns: Winning readable font providers in Android map-value order.
+     - Side effects: Builds or reuses the shared admitted add-on projection; no font bytes are read.
+     - Failure modes: Malformed, missing, unreadable, escaped, or ambiguous providers are omitted
+       fail closed by the shared projection.
+     */
+    public func admittedFonts() -> [SwordAdmittedFont] {
+        var orderedNames: [SwordJavaExactStringIdentity] = []
+        var providersByName: [SwordJavaExactStringIdentity: SwordAdmittedFont] = [:]
+        for module in admittedAddonModules() {
+            for provider in module.providedFonts {
+                let key = SwordJavaExactStringIdentity(provider.name)
+                if providersByName[key] == nil {
+                    orderedNames.append(key)
+                }
+                providersByName[key] = provider
+            }
+        }
+        return orderedNames.compactMap { providersByName[$0] }
+    }
+
+    /**
+     Returns exact installed module names whose admitted owners carry Android's font marker.
+
+     - Returns: Module initials in installed TreeSet order without Swift canonical folding.
+     - Side effects: Builds or reuses the shared admitted add-on projection.
+     - Failure modes: Rejected, exact-initials-ambiguous, and marker-free owners contribute no name;
+       an unreadable provider still leaves Android's marker-owning reload row present.
+     */
+    public func admittedFontModuleNames() -> [String] {
+        return admittedAddonModules().compactMap { module in
+            module.providesFont ? module.moduleInfo.name : nil
+        }
+    }
+
+    /**
+     Returns admitted WebView feature-module names in installed TreeSet order.
+
+     - Returns: Exact initials for owners carrying `AndBibleProvidesFeature`.
+     - Side effects: Builds or reuses the shared admitted add-on projection.
+     - Failure modes: Rejected owners and owners without the marker contribute no name.
+     */
+    public func admittedWebFeatureModuleNames() -> [String] {
+        admittedAddonModules().compactMap { module in
+            module.providesWebFeature ? module.moduleInfo.name : nil
+        }
+    }
+
+    /**
+     Returns admitted WebView style-module names in installed TreeSet order.
+
+     - Returns: Exact initials for owners carrying `AndBibleProvidesStyle`.
+     - Side effects: Builds or reuses the shared admitted add-on projection.
+     - Failure modes: Rejected owners and owners without the marker contribute no name.
+     */
+    public func admittedWebStyleModuleNames() -> [String] {
+        admittedAddonModules().compactMap { module in
+            module.providesWebStyle ? module.moduleInfo.name : nil
+        }
+    }
+
+    /**
      Projects installed configs through Android's add-on admission and BookSet contract.
 
      - Parameters:
@@ -1514,15 +1582,96 @@ public final class SwordManager: @unchecked Sendable {
     private func admittedAddonModules(
         applicationVersionNumber: Int
     ) -> [SwordAdmittedAddonModule] {
-        admittedAddonCandidates(
+        let candidates = admittedAddonCandidates(
             applicationVersionNumber: applicationVersionNumber
-        ).map { candidate in
-            SwordAdmittedAddonModule(
+        )
+        var exactInitialCounts: [SwordJavaExactStringIdentity: Int] = [:]
+        for candidate in candidates {
+            exactInitialCounts[
+                SwordJavaExactStringIdentity(candidate.registration.info.name),
+                default: 0
+            ] += 1
+        }
+        return candidates.map { candidate in
+            let initialsKey = SwordJavaExactStringIdentity(candidate.registration.info.name)
+            let hasUnambiguousInitials = exactInitialCounts[initialsKey] == 1
+            let candidateFonts = Self.admittedFontProviders(for: candidate)
+            return SwordAdmittedAddonModule(
                 moduleInfo: candidate.registration.info,
                 abbreviation: candidate.registration.abbreviation,
                 promptFileName: candidate.config.values["AndBibleProvidesPrompts"]?.first,
+                providedFonts: hasUnambiguousInitials ? candidateFonts : [],
+                reservedFontFileURLs: candidateFonts.map(\.fileURL),
+                providesFont: hasUnambiguousInitials
+                    && candidate.config.values["AndBibleProvidesFont"] != nil,
+                providesWebFeature: candidate.config.values["AndBibleProvidesFeature"] != nil,
+                providesWebStyle: candidate.config.values["AndBibleProvidesStyle"] != nil,
                 locationURL: candidate.locationURL,
-                removalTarget: candidate.removalTarget
+                removalTarget: candidate.removalTarget,
+                isManualTtfRegistration: candidate.config.values["AndBibleIOSManualTtf"]?.first?
+                    .caseInsensitiveCompare("true") == .orderedSame
+            )
+        }
+    }
+
+    /**
+     Resolves valid readable font markers for one already-admitted exact add-on owner.
+
+     - Parameter candidate: Installed TreeSet owner carrying its parsed metadata and adjusted
+       location.
+     - Returns: Provider rows in repeated-property order with exact names and safe contained paths.
+     - Side effects: Reads filesystem metadata and resolves symlinks; font contents are not read.
+     - Failure modes: A missing location, malformed marker, traversal, escaped symlink, missing file,
+       directory, or unreadable file omits only that provider row.
+     */
+    private static func admittedFontProviders(
+        for candidate: InstalledAddonCandidate
+    ) -> [SwordAdmittedFont] {
+        guard let locationURL = candidate.locationURL,
+              let markers = candidate.config.values["AndBibleProvidesFont"] else {
+            return []
+        }
+        let root = locationURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        let fileManager = FileManager.default
+        return markers.compactMap { marker in
+            let fields = marker.split(
+                separator: ";",
+                omittingEmptySubsequences: false
+            ).map(String.init)
+            guard fields.count >= 2 else { return nil }
+            let name = fields[0]
+            let relativePath = fields[1]
+            let components = relativePath.split(
+                separator: "/",
+                omittingEmptySubsequences: false
+            ).map(String.init)
+            guard !name.isEmpty,
+                  name.unicodeScalars.allSatisfy({
+                      !CharacterSet.controlCharacters.contains($0)
+                  }),
+                  !components.isEmpty,
+                  components.allSatisfy({
+                      !$0.isEmpty && $0 != "." && $0 != ".."
+                          && !$0.contains("\\") && !$0.contains("\0")
+                  }) else {
+                return nil
+            }
+            let unresolved = components.reduce(root) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            let resolved = unresolved.standardizedFileURL.resolvingSymlinksInPath()
+            guard resolved.path.hasPrefix(rootPrefix),
+                  let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true,
+                  fileManager.isReadableFile(atPath: resolved.path) else {
+                return nil
+            }
+            return SwordAdmittedFont(
+                moduleName: candidate.registration.info.name,
+                name: name,
+                relativePath: relativePath,
+                fileURL: resolved
             )
         }
     }

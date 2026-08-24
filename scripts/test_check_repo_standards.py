@@ -675,7 +675,7 @@ class RepoStandardsTests(unittest.TestCase):
                 "}",
             ]
         )
-        self.assertEqual(find_unshared_addon_feature_discovery(text, path), [5])
+        self.assertEqual(find_unshared_addon_feature_discovery(text, path), [2, 5])
 
 
 if __name__ == "__main__":

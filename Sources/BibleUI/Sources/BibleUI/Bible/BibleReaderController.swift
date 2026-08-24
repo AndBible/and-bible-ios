@@ -4812,6 +4812,43 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
 
         logBookListRefresh(module: activeModule, books: moduleBookList)
+        if clientReady {
+            emitAdmittedAddonReload(using: mgr, bridge: bridge)
+        }
+    }
+
+    /**
+     Builds the Android `reload_addons` payload from one shared admitted installed projection.
+
+     - Parameter manager: Live manager for the pane's canonical installed-module root.
+     - Returns: Exact font, feature, and style owner names in installed TreeSet order.
+     - Side effects: Reads and may cache the manager's admitted add-on projection.
+     - Failure modes: Rejected, shadowed, unsupported, and exact-initials-ambiguous font owners are
+       absent. Android retains an admitted marker owner in this reload list even when one of its
+       individual font files is unreadable; settings and CSS still omit that unreadable provider.
+     */
+    static func addonReloadPayload(manager: SwordManager) -> BibleReaderAddonReloadPayload {
+        BibleReaderAddonReloadPayload(
+            fontModuleNames: manager.admittedFontModuleNames(),
+            featureModuleNames: manager.admittedWebFeatureModuleNames(),
+            styleModuleNames: manager.admittedWebStyleModuleNames()
+        )
+    }
+
+    /**
+     Emits Android's complete admitted add-on inventory to the Vue reader.
+
+     - Parameters:
+       - manager: Live manager whose shared projection owns the payload.
+       - bridge: Ready bridge receiving the typed event.
+     - Side effects: Encodes and emits one `reload_addons` event.
+     - Failure modes: Bridge encoding/evaluation failures are logged by `BibleBridge`.
+     */
+    private func emitAdmittedAddonReload(using manager: SwordManager, bridge: BibleBridge) {
+        bridge.emitEncoded(
+            event: "reload_addons",
+            data: Self.addonReloadPayload(manager: manager)
+        )
     }
 
   /**
@@ -5536,6 +5573,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         loadRecentLabels()
         applyNightModeBackground()
         updateActiveLanguages()
+        if let swordManager {
+            emitAdmittedAddonReload(using: swordManager, bridge: bridge)
+        }
         bridge.emit(event: "set_config", data: buildConfigJSON())
         reloadVisibleDocumentAfterClientReady()
         if let deferredSynchronizedScrollOrdinal {

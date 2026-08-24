@@ -40,6 +40,9 @@ public struct WorkspaceSelectorView: View {
     /// Explicit reader-destination dismissal, with environment dismissal as a standalone fallback.
     private let onDismiss: (() -> Void)?
 
+    /// Canonical installed-module root shared by nested Android font-family settings.
+    private let moduleStoreRootURL: URL
+
     @Environment(WindowManager.self) private var windowManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -99,12 +102,15 @@ public struct WorkspaceSelectorView: View {
     /**
      Creates the standalone selector using the standard application palette.
 
-     - Parameter speakService: Optional live speech runtime to rebind on workspace activation.
+     - Parameters:
+       - speakService: Optional live speech runtime to rebind on workspace activation.
+       - moduleStoreRootURL: Canonical installed-module root used by nested font settings.
      - Side effects: none during construction.
      - Failure modes: nil speech service preserves headless and preview callers.
      */
-    public init(speakService: SpeakService? = nil) {
+    public init(speakService: SpeakService? = nil, moduleStoreRootURL: URL) {
         self.speakService = speakService
+        self.moduleStoreRootURL = moduleStoreRootURL
         surfacePalette = .standard
         onDismiss = nil
     }
@@ -114,6 +120,7 @@ public struct WorkspaceSelectorView: View {
 
      - Parameters:
        - speakService: Reader speech runtime to checkpoint and rebind on activation.
+       - moduleStoreRootURL: Canonical installed-module root used by nested font settings.
        - surfacePalette: Workspace/window palette shared with the launching reader.
        - onDismiss: Explicit reader destination close command.
      - Side effects: none during construction.
@@ -121,10 +128,12 @@ public struct WorkspaceSelectorView: View {
      */
     init(
         speakService: SpeakService?,
+        moduleStoreRootURL: URL,
         surfacePalette: ReaderThemeSurfacePalette,
         onDismiss: @escaping () -> Void
     ) {
         self.speakService = speakService
+        self.moduleStoreRootURL = moduleStoreRootURL
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
     }
@@ -554,6 +563,7 @@ public struct WorkspaceSelectorView: View {
             if let draft = drafts.first(where: { $0.id == draftID }) {
                 TextDisplaySettingsView(
                     settings: textDisplaySettingsBinding(for: draftID),
+                    moduleStoreRootURL: moduleStoreRootURL,
                     workspaceColor: workspaceColorBinding(for: draftID),
                     navigationTitle: String.localizedStringWithFormat(
                         String(
@@ -577,6 +587,7 @@ public struct WorkspaceSelectorView: View {
         case .global(let returningDraftID):
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
+                moduleStoreRootURL: moduleStoreRootURL,
                 workspaceColor: workspaceColorBinding(for: returningDraftID),
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",

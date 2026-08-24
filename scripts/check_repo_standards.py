@@ -798,10 +798,10 @@ def find_unshared_addon_feature_discovery(
     text: str,
     relative_path: str = "",
 ) -> list[int]:
-    """Return lines that recreate prompt/picker add-on discovery outside SwordKit admission.
+    """Return lines that recreate feature/picker add-on discovery outside SwordKit admission.
 
-    Comments and strings are masked; the helper performs no filesystem access or mutation. Prompt
-    and picker consumers may not enumerate or reopen raw installed modules, and production helpers
+    Comments and strings are masked; the helper performs no filesystem access or mutation. Prompt,
+    font, WebView, and picker consumers may not enumerate or reopen raw installed modules, and helpers
     outside the explicit SwordKit infrastructure allowlist may not scan raw configs or request the
     unfiltered add-on category instead of consuming the shared compatibility/BookSet projection.
     """
@@ -821,10 +821,6 @@ def find_unshared_addon_feature_discovery(
         (
             "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
             "androidCustomInstalledRegistrations",
-        ),
-        (
-            "Sources/SwordKit/Sources/SwordKit/TtfFontRepository.swift",
-            "configuredFontPackPathKeys",
         ),
         (
             "Sources/SwordKit/Sources/SwordKit/ModuleStoreTransactionPublisher+Uninstall.swift",
@@ -971,10 +967,11 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
 
     The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle,
     prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
-    bypass Android-compatible global ownership admission, and keep prompt/picker add-on discovery on
-    SwordKit's shared installed BookSet projection. Missing fixed-path files fail closed, and the
-    publisher/add-on scans follow every non-test Swift file under `Sources` and `AndBible` across
-    moves while narrowing infrastructure exceptions to audited functions. iOS marketing/build
+    bypass Android-compatible global ownership admission, and keep prompt/font/WebView/picker
+    add-on discovery on SwordKit's shared installed BookSet projection. Missing fixed-path files
+    fail closed, and the publisher/add-on scans follow every non-test Swift file under `Sources`
+    and `AndBible` across moves while narrowing infrastructure exceptions to audited functions. iOS
+    marketing/build
     metadata access remains confined to its display-only owner so Android manifests and admission
     cannot reuse unrelated bundle version values.
     """
@@ -1033,7 +1030,7 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
                     path=str(relative),
                     line=line,
                     message=(
-                        "Production prompt/picker code bypasses SwordKit's shared Android add-on "
+                        "Production add-on feature/picker code bypasses SwordKit's shared Android "
                         "compatibility and installed BookSet projection."
                     ),
                 )

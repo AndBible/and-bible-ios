@@ -2242,6 +2242,118 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Verifies font settings and WebView inventory share Android's admitted linked-map projection.
+
+     - Setup: Installs ordered add-ons with a replaced exact font name, NFC/NFD and case-variant
+       owners, a future owner, and two comparator-distinct rows sharing exact initials.
+     - Expected result: The later exact-name font replaces without moving, Java-distinct owners
+       survive, and incompatible/ambiguous owners claim no font or module event.
+     - Side effects: Creates, reads, and removes one isolated SWORD tree with readable font files.
+     - Failure meaning: Settings, CSS, or reload inventory can disagree with Android's admitted
+       `Books.installed()` font map.
+     */
+    func testAdmittedFontsUseAndroidMapOrderAndExactOwnerIdentity() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        /**
+         Installs one payload-admitted font add-on fixture.
+
+         - Parameters:
+           - fileStem: Unique config/payload filename stem.
+           - initials: Exact SWORD section identity.
+           - abbreviation: JSword TreeSet abbreviation.
+           - description: Exact full-name metadata.
+           - fontName: Android provider-map key.
+           - minimumVersion: Android compatibility boundary.
+         - Side effects: Creates one payload directory/font file and atomically writes its config.
+         - Throws: Propagates fixture filesystem failures.
+         */
+        func installFontAddon(
+            fileStem: String,
+            initials: String,
+            abbreviation: String,
+            description: String,
+            fontName: String,
+            minimumVersion: Int = 1115
+        ) throws {
+            let payload = moduleRoot.appendingPathComponent("addons/\(fileStem)", isDirectory: true)
+            try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
+            try Data([0x00, 0x01, 0x02]).write(
+                to: payload.appendingPathComponent("Family.ttf")
+            )
+            try """
+            [\(initials)]
+            Description=\(description)
+            Abbreviation=\(abbreviation)
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./addons/\(fileStem)/
+            Encoding=UTF-8
+            AndBibleMinimumVersion=\(minimumVersion)
+            AndBibleProvidesFont=\(fontName);Family.ttf
+            """.write(
+                to: configDirectory.appendingPathComponent("\(fileStem).conf"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let composed = "FÓNT"
+        let decomposed = "FO\u{301}NT"
+        try installFontAddon(
+            fileStem: "a-first", initials: "FIRST", abbreviation: "A",
+            description: "First shared owner", fontName: "Shared"
+        )
+        try installFontAddon(
+            fileStem: "b-composed", initials: composed, abbreviation: "B",
+            description: "Composed owner", fontName: "Composed"
+        )
+        try installFontAddon(
+            fileStem: "c-decomposed", initials: decomposed, abbreviation: "C",
+            description: "Decomposed owner", fontName: "Decomposed"
+        )
+        try installFontAddon(
+            fileStem: "d-upper", initials: "CASEFONT", abbreviation: "D",
+            description: "Upper owner", fontName: "Upper"
+        )
+        try installFontAddon(
+            fileStem: "e-lower", initials: "casefont", abbreviation: "E",
+            description: "Lower owner", fontName: "Lower"
+        )
+        try installFontAddon(
+            fileStem: "f-last", initials: "LAST", abbreviation: "F",
+            description: "Last shared owner", fontName: "Shared"
+        )
+        try installFontAddon(
+            fileStem: "g-future", initials: "FUTURE", abbreviation: "G",
+            description: "Future owner", fontName: "Future", minimumVersion: 1116
+        )
+        try installFontAddon(
+            fileStem: "h-ambiguous", initials: "AMBIG", abbreviation: "H",
+            description: "Ambiguous first", fontName: "Ambiguous first"
+        )
+        try installFontAddon(
+            fileStem: "i-ambiguous", initials: "AMBIG", abbreviation: "I",
+            description: "Ambiguous second", fontName: "Ambiguous second"
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let fonts = manager.admittedFonts()
+        XCTAssertEqual(fonts.map(\.name), ["Shared", "Composed", "Decomposed", "Upper", "Lower"])
+        XCTAssertEqual(fonts.first?.moduleName, "LAST")
+        XCTAssertEqual(
+            manager.admittedFontModuleNames(),
+            ["FIRST", composed, decomposed, "CASEFONT", "casefont", "LAST"]
+        )
+        XCTAssertEqual(Set(fonts.map { SwordJavaExactStringIdentity($0.moduleName) }).count, 5)
+        XCTAssertFalse(fonts.contains { $0.moduleName == "FUTURE" || $0.moduleName == "AMBIG" })
+    }
+
+    /**
      Verifies JSword payload adjustment rejects a broken native row before driver HashSet ownership.
 
      - Setup: Writes equality-identical RawGenBook configs in path order, first without `DataPath`,
