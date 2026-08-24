@@ -60,6 +60,7 @@ int main(int argc, char **argv) {
         if (u_isWhitespace((UChar32)value)) flags |= 4;
         if (u_hasBinaryProperty((UChar32)value, UCHAR_CASED)) flags |= 8;
         if (u_hasBinaryProperty((UChar32)value, UCHAR_CASE_IGNORABLE)) flags |= 16;
+        if (u_isupper((UChar32)value)) flags |= 32;
         int32_t digit = u_digit((UChar32)value, 36);
         unsigned char encoded_digit = digit < 0 ? 0xFF : (unsigned char)digit;
 

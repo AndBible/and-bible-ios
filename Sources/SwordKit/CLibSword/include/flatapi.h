@@ -95,17 +95,29 @@ const char *SWModule_getRenderText(void *module);
 /// Get raw entry text at the current position (no markup).
 const char *SWModule_getRawEntry(void *module);
 
-/// Get the current entry converted from its declared source format to canonical OSIS XML.
+/// Get the current entry after backend extraction and native encoding conversion only.
+/// No libsword option/source filter runs because Swift's pinned JSword filters own the complete
+/// semantic conversion for every Android-supported source family.
 /// The returned pointer is thread-local and remains valid until the next call on that thread.
-const char *SWModule_getOSISFragment(void *module);
+const char *SWModule_getDecodedSourceFragment(void *module);
 
-/// Read one physical RawLD-family index record and convert it through the module's native filters.
-/// RawLD/RawLD4 callers provide the fixed-record bytes; zLD reads/decompresses by index itself.
-/// The returned pointer is thread-local.
-const char *SWModule_getRawDictionaryOSISFragmentAtIndex(void *module,
-                                                        long index,
-                                                        const unsigned char *rawRecord,
-                                                        unsigned long rawRecordLength);
+/// Get the current VerseKey as a canonical OSIS reference, or an empty string for other key types.
+/// The returned pointer is thread-local and remains valid until the next call on that thread.
+const char *SWModule_getCurrentOSISRef(void *module);
+
+/// Resolve one human-readable passage against the current VerseKey and return its OSIS reference.
+/// Invalid references and non-VerseKey modules return an empty string. The returned pointer is
+/// thread-local and remains valid until the next call on that thread.
+const char *SWModule_resolveOSISReference(void *module, const char *reference);
+
+/// Read one physical RawLD-family index record through its backend/decode boundary.
+/// RawLD/RawLD4 callers provide fixed-record bytes; zLD reads/decompresses by index. Every source
+/// family returns backend-extracted, decoded source without libsword option/source conversion for
+/// the shared Swift JSword converter. The returned pointer is thread-local.
+const char *SWModule_getRawDictionaryDecodedSourceAtIndex(void *module,
+                                                          long index,
+                                                          const unsigned char *rawRecord,
+                                                          unsigned long rawRecordLength);
 
 /// Get the current key's Android-equivalent display name. TreeKey modules return the local node
 /// name while other modules return the key's short text. The pointer is thread-local.

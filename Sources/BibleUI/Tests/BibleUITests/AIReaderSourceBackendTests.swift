@@ -186,9 +186,10 @@ final class AIReaderSourceBackendTests: XCTestCase {
 
    - Setup: Writes real RawLD modules declared as OSIS, ThML, GBF, and undeclared plain text, plus
      malformed OSIS, then reads each through the production extractor.
-   - Expected result: Every valid source type yields anchored content and empty selected text; the
-     plain entry's markup-looking bytes stay escaped, and malformed OSIS retains only exact identity.
-   - Failure meaning: AI context is parsing raw module bytes as OSIS or discarding partial context.
+   - Expected result: Every source type yields anchored content and empty selected text; the plain
+     entry's markup-looking bytes stay escaped, and malformed OSIS is repaired through JSword's
+     reclose ladder instead of being discarded.
+   - Failure meaning: AI context bypasses the shared source filter or drops Android-repairable OSIS.
    - Side effects: Creates and removes one temporary native SWORD module root.
    */
   func testGenericSwordCaptureConvertsNonOSISSourcesAndSurvivesMalformedOSIS() throws {
@@ -239,7 +240,8 @@ final class AIReaderSourceBackendTests: XCTestCase {
     XCTAssertEqual(malformed.sourceDocumentInitials, "CTXBROKEN")
     XCTAssertEqual(malformed.sourceBookKey, "EXACT")
     XCTAssertEqual(malformed.selectedText, "")
-    XCTAssertNil(malformed.selectedContent)
+    XCTAssertTrue(malformed.selectedContent?.contains("broken") == true)
+    XCTAssertTrue(malformed.selectedContent?.contains("<BVA") == true)
   }
 
   /** Creates one isolated directory for a real backend fixture. */

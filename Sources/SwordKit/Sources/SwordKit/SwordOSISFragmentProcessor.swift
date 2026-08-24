@@ -40,7 +40,7 @@ public enum SwordOSISFragmentProcessor {
      Processes one source-format-converted OSIS entry.
 
      - Parameters:
-       - sourceXML: Canonical OSIS/TEI content returned by the native source filter.
+       - sourceXML: Canonical source-family OSIS returned by the shared backend converter.
        - category: Module category controlling Android's commentary unwrapping rule.
        - moduleInitials: Exact module initials used by Android's source-specific structural repair.
      - Returns: Preserved source XML plus anchored XML and derived metadata.

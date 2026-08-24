@@ -25,7 +25,10 @@ enum SwordJavaTextCompatibility {
         let lowercaseOfUppercase: UInt16
         /// `Character.toLowerCase(source)` as one Java `char`.
         let lowercase: UInt16
-        /// Packed `isLetterOrDigit`, `isDigit`, `isWhitespace`, `Cased`, and `Case_Ignorable`.
+        /**
+         Packed `isLetterOrDigit`, `isDigit`, `isWhitespace`, `Cased`, `Case_Ignorable`, and
+         `isUpperCase` predicates.
+         */
         let flags: UInt8
         /// `Character.digit(source, 36)`, encoded as `0xFF` for `-1`.
         let digit: UInt8
@@ -74,6 +77,8 @@ enum SwordJavaTextCompatibility {
               result[0x2003].flags & 0x04 != 0,
               result[0x03A3].flags & 0x08 != 0,
               result[0x0301].flags & 0x10 != 0,
+              result[0x0041].flags & 0x20 != 0,
+              result[0x0061].flags & 0x20 == 0,
               result[0x0665].digit == 5 else {
             return []
         }
@@ -126,6 +131,20 @@ enum SwordJavaTextCompatibility {
     static func isWhitespace(_ unit: UInt16) -> Bool {
         guard characterRows.count == expectedBundledCharacterRowCount else { return false }
         return characterRows[Int(unit)].flags & 0x04 != 0
+    }
+
+    /**
+     Returns Android 37 `Character.isUpperCase(char)` for one UTF-16 code unit.
+
+     - Parameter unit: Exact Java `char` immediately after a possible GBF opening angle bracket.
+     - Returns: Pinned ICU uppercase-property membership, including non-ASCII BMP uppercase chars;
+       surrogate units and uncased characters return false.
+     - Side effects: Loads the generated compatibility table on first use.
+     - Failure modes: Returns false if the resource failed integrity validation.
+     */
+    static func isUpperCase(_ unit: UInt16) -> Bool {
+        guard characterRows.count == expectedBundledCharacterRowCount else { return false }
+        return characterRows[Int(unit)].flags & 0x20 != 0
     }
 
     /**
