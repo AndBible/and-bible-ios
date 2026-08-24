@@ -248,40 +248,26 @@ public struct TtfFontRepository: Sendable {
     }
 
     /**
-     Resolves files already owned by installed FontPack configs beneath `ttf/`.
+     Resolves files already owned by admitted installed FontPack books beneath `ttf/`.
 
      Android registers configured font packs as their existing SWORD module and only synthesizes
-     `TTF_` books for otherwise unowned manual files. iOS-generated manual registrations carry an
-     explicit marker and remain eligible for deterministic refresh.
+     `TTF_` books for otherwise unowned manual files. This projection deliberately starts from
+     `SwordManager.admittedAddonModules()` so rejected, shadowed, and ambiguous configs cannot claim
+     a font through a second raw-config scan. iOS-generated manual registrations remain eligible for
+     deterministic refresh.
 
      - Returns: Filesystem collision keys for config-owned TTF paths.
-     - Side effects: Reads installed SWORD configs through the shared parser.
-     - Failure modes: Malformed, unsafe, and non-TTF provider rows are ignored; normal module
-       inventory remains responsible for reporting an unusable FontPack.
+     - Side effects: Builds the shared installed-book/add-on snapshot and reads no font contents.
+     - Failure modes: If the shared manager cannot be created, no configured path is claimed;
+       malformed, rejected, escaped, and unreadable providers are omitted fail closed.
      */
     private func configuredFontPackPathKeys() -> Set<String> {
         var keys = Set<String>()
-        for config in SwordModuleConfig.readAll(modulePath: swordPath) {
-            guard config.values["AndBibleIOSManualTtf"] == nil,
-                  let providers = config.values["AndBibleProvidesFont"],
-                  config.dataPath.hasPrefix("ttf/") else {
-                continue
-            }
-            let parent = String(config.dataPath.dropFirst("ttf/".count))
-            for provider in providers {
-                guard let separator = provider.firstIndex(of: ";") else { continue }
-                let fileName = provider[provider.index(after: separator)...]
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let relativePath = parent + fileName
-                let components = relativePath.split(
-                    separator: "/",
-                    omittingEmptySubsequences: false
-                )
-                guard !components.isEmpty,
-                      components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
-                      !relativePath.contains("\\"),
-                      !relativePath.contains("\0"),
-                      (relativePath as NSString).pathExtension.lowercased() == "ttf" else {
+        guard let manager = SwordManager(modulePath: swordPath) else { return keys }
+        for module in manager.admittedAddonModules() where !module.isManualTtfRegistration {
+            for fileURL in module.reservedFontFileURLs {
+                guard fileURL.pathExtension.lowercased() == "ttf",
+                      let relativePath = relativeFontPath(for: fileURL) else {
                     continue
                 }
                 keys.insert(filesystemCollisionKey(relativePath))
@@ -328,6 +314,8 @@ public struct TtfFontRepository: Sendable {
         Encoding=UTF-8
         AndBibleProvidesFont=\(font.fontName);\(font.fileName)
         AndBibleIOSGeneratedRegistration=true
+        AndBibleIOSRegistrationFamily=ttf
+        AndBibleIOSRegistrationPath=ttf/\(font.relativePath)
         AndBibleIOSManualTtf=true
         AndBibleMinimumVersion=892
 

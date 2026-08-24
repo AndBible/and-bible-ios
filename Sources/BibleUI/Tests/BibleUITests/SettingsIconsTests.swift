@@ -935,20 +935,22 @@ final class SettingsIconsTests: XCTestCase {
     }
 
     /**
-     Verifies the iOS font-family editor uses Android's fixed widget list instead of the iOS font
-     catalog.
+     Verifies the iOS font-family editor prepends Android-admitted fonts to the fixed widget list.
 
      Android `FontSizeWidget.kt` appends this standard family list after any add-on fonts and writes
-     the selected `realFontFamily` string directly into text-display settings. iOS does not currently
-     have Android add-on font files, so the standard families are the parity floor and must not be
-     replaced by `UIFontPickerViewController` choices.
+     the selected `realFontFamily` string directly into text-display settings. Java-distinct names
+     must remain separate and the standard families must not be replaced by the iOS font catalog.
      */
     func testTextDisplayFontFamilyOptionsMirrorAndroidWidgetList() {
-        let options = TextDisplaySettingsView.androidFontFamilyOptions()
+        let composed = "Fónt"
+        let decomposed = "Fo\u{301}nt"
+        let options = TextDisplaySettingsView.androidFontFamilyOptions(
+            providedFonts: [composed, decomposed]
+        )
 
         XCTAssertEqual(
             options.map(\.value),
-            [
+            [composed, decomposed] + [
                 "sans-serif-thin",
                 "sans-serif-light",
                 "sans-serif",
@@ -966,9 +968,16 @@ final class SettingsIconsTests: XCTestCase {
                 "sans-serif-smallcaps",
             ]
         )
-        XCTAssertEqual(options[0].label, "Sans serif thin")
-        XCTAssertEqual(options[7].label, "Sans serif condensed medium")
+        XCTAssertEqual(options[2].label, "Sans serif thin")
+        XCTAssertEqual(options[9].label, "Sans serif condensed medium")
         XCTAssertEqual(options.last?.label, "Sans serif smallcaps")
+        XCTAssertEqual(
+            TextDisplaySettingsView.androidFontFamilySelectedIndex(
+                for: decomposed,
+                providedFonts: [composed, decomposed]
+            ),
+            1
+        )
     }
 
     /**

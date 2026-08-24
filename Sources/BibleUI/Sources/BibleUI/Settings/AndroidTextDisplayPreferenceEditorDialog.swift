@@ -19,8 +19,8 @@ import SwiftUI
  Side effects: only OK and Reset mutate the supplied settings binding; Cancel/outside tap discard
  the draft
 
- Failure modes: invalid legacy values are clamped for presentation and normalized by existing draft
- helpers; unknown font names render with the system fallback without rewriting storage
+ Failure modes: out-of-range persisted values are clamped for presentation and normalized by the
+ staged draft helpers; unknown font names render with the system fallback without rewriting storage
  */
 struct AndroidTextDisplayPreferenceEditorDialog: View {
     /// Exact Android preference widget being presented.
@@ -31,6 +31,9 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
 
     /// Android inheritance level used by neutral Reset behavior.
     let scope: TextDisplaySettingsScope
+
+    /// Android-admitted add-on font names preceding the fixed platform families.
+    let providedFontNames: [String]
 
     /// Owning reader/workspace palette used by the shared app-owned seek bar.
     let surfacePalette: ReaderThemeSurfacePalette
@@ -50,11 +53,26 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
     /// Current appearance used by the shared Android dialog palette.
     @Environment(\.colorScheme) private var colorScheme
 
-    /** Creates a fresh staged editor for one presentation. */
+    /**
+     Creates a fresh staged editor for one presentation.
+
+     - Parameters:
+       - editor: Exact Android preference widget.
+       - settings: Current scope settings copied into the staged draft.
+       - scope: Android inheritance level used by Reset.
+       - providedFontNames: Shared admitted font names in Android map order.
+       - surfacePalette: Owning reader/workspace colors.
+       - onCommit: Terminal OK callback.
+       - onReset: Terminal Reset callback.
+       - onCancel: Terminal cancel/outside-tap callback.
+     - Side effects: Seeds local draft state; no supplied setting is mutated.
+     - Failure modes: None.
+     */
     init(
         editor: TextDisplayPreferenceEditorKind,
         settings: Binding<TextDisplaySettings>,
         scope: TextDisplaySettingsScope,
+        providedFontNames: [String],
         surfacePalette: ReaderThemeSurfacePalette,
         onCommit: @escaping () -> Void,
         onReset: @escaping () -> Void,
@@ -63,6 +81,7 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
         self.editor = editor
         self._settings = settings
         self.scope = scope
+        self.providedFontNames = providedFontNames
         self.surfacePalette = surfacePalette
         self.onCommit = onCommit
         self.onReset = onReset
@@ -136,7 +155,11 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
                     accessibilityIdentifier: "textDisplayFontFamilyOptionList"
                 ) {
                     LazyVStack(spacing: 0) {
-                        ForEach(TextDisplaySettingsView.androidFontFamilyOptions()) { option in
+                        ForEach(
+                            TextDisplaySettingsView.androidFontFamilyOptions(
+                                providedFonts: providedFontNames
+                            )
+                        ) { option in
                             fontFamilyChoiceRow(option)
                             Divider().background(secondaryText.opacity(0.18))
                         }
@@ -265,7 +288,10 @@ struct AndroidTextDisplayPreferenceEditorDialog: View {
 
     /// Android font-family radio row retaining source values and ordering.
     private func fontFamilyChoiceRow(_ option: TextDisplayFontFamilyOption) -> some View {
-        let selectedIndex = TextDisplaySettingsView.androidFontFamilySelectedIndex(for: draft.fontFamily)
+        let selectedIndex = TextDisplaySettingsView.androidFontFamilySelectedIndex(
+            for: draft.fontFamily,
+            providedFonts: providedFontNames
+        )
         let isSelected = option.androidIndex == selectedIndex
         return AndroidRadioRow(
             title: option.label,

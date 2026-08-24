@@ -1,4 +1,5 @@
 import XCTest
+@testable import BibleUI
 @testable import BibleView
 
 /**
@@ -9,6 +10,38 @@ import XCTest
  persistence, network, or asynchronous work; scripts are captured by the test-only observer.
  */
 final class BibleUIBridgeTestSupportTests: XCTestCase {
+    /**
+     Verifies the add-on reload event retains all Android consumer inventories and exact spellings.
+
+     - Setup: Emits a typed payload containing NFC/NFD font owners plus feature/style owners.
+     - Expected result: Vue receives all three arrays in supplied order without canonical folding.
+     - Side effects: Records one in-memory bridge JavaScript evaluation.
+     - Failure meaning: Font reload can erase sibling add-on inventories or collapse exact owners.
+     */
+    func testAddonReloadPayloadPreservesCompleteExactInventory() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let composed = "FÓNT"
+        let decomposed = "FO\u{301}NT"
+        bridge.emitEncoded(
+            event: "reload_addons",
+            data: BibleReaderAddonReloadPayload(
+                fontModuleNames: [composed, decomposed],
+                featureModuleNames: ["RefParser"],
+                styleModuleNames: ["StylePack"]
+            )
+        )
+
+        let payload = try XCTUnwrap(
+            try bridgeEmissionPayload(
+                from: recordedScripts(),
+                event: "reload_addons"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(payload["fontModuleNames"] as? [String], [composed, decomposed])
+        XCTAssertEqual(payload["featureModuleNames"] as? [String], ["RefParser"])
+        XCTAssertEqual(payload["styleModuleNames"] as? [String], ["StylePack"])
+    }
+
     /**
      Verifies atomic replacement extraction stops at the matching event boundary.
 

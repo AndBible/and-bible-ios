@@ -105,7 +105,7 @@ let package = Package(
         // BibleView: WKWebView + Vue.js bridge
         .target(
             name: "BibleView",
-            dependencies: ["BibleCore"],
+            dependencies: ["BibleCore", "SwordKit"],
             path: "Sources/BibleView/Sources/BibleView",
             resources: [
                 .copy("Resources/index.html"),

@@ -1,7 +1,9 @@
 // EpubResourceSchemeHandler.swift -- contained EPUB resources for the shared reader
 
 import BibleCore
+import Darwin
 import Foundation
+import SwordKit
 import WebKit
 
 /**
@@ -16,6 +18,12 @@ enum EpubResourceRoute: Equatable, Sendable {
 
     /// Sanitized linked stylesheets for one numeric general-book fragment key.
     case styleSheet(bookInitials: String, generationIdentifier: String, key: String)
+
+    /// Generated CSS for every readable font claimed by one admitted add-on owner.
+    case fontStyleSheet(moduleInitials: String)
+
+    /// One exact readable font claimed by one admitted add-on owner.
+    case fontResource(moduleInitials: String, relativePath: String)
 
     /**
      Parses one custom-scheme request URL.
@@ -35,22 +43,21 @@ enum EpubResourceRoute: Equatable, Sendable {
             return nil
         }
         let components = url.pathComponents.filter { $0 != "/" }
-        guard components.count >= 2,
-              let initials = components.first,
+        guard let initials = components.first,
               !initials.isEmpty,
               initials != ".",
               initials != "..",
               !initials.contains("\0"),
               components.dropFirst().allSatisfy({
                   !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("\\") && !$0.contains("\0")
-              }),
-              isSafeGenerationIdentifier(components[1]) else {
+              }) else {
             return nil
         }
-        let generationIdentifier = components[1]
         switch host {
         case "epub":
-            guard components.count >= 3 else { return nil }
+            guard components.count >= 3,
+                  isSafeGenerationIdentifier(components[1]) else { return nil }
+            let generationIdentifier = components[1]
             if components.count == 5,
                components[2] == ".module-style",
                components[4] == "style.css",
@@ -69,6 +76,13 @@ enum EpubResourceRoute: Equatable, Sendable {
                 generationIdentifier: generationIdentifier,
                 canonicalPath: path
             )
+        case "font":
+            guard components.count >= 2 else { return nil }
+            let resourcePath = components.dropFirst().joined(separator: "/")
+            if resourcePath == "fonts.css" {
+                return .fontStyleSheet(moduleInitials: initials)
+            }
+            return .fontResource(moduleInitials: initials, relativePath: resourcePath)
         default:
             return nil
         }
@@ -88,11 +102,38 @@ enum EpubResourceRoute: Equatable, Sendable {
 }
 
 /**
- Serves installed EPUB package resources to `WKWebView` through a contained custom scheme.
+ One ownership-pinned font descriptor opened only after live shared-projection authorization.
 
- Resource requests resolve the addressed EPUB by stable initials, validate the canonical path in
- `EpubReader`, and stream bytes in bounded chunks. Stylesheet requests return the adapter's
- Android-compatible sanitized CSS bundle. WebKit cancellation stops later callbacks.
+ The open descriptor retains the authorized inode while WebKit streams, so an uninstall or exact
+ replacement after authorization cannot redirect the request to a different path owner.
+ */
+struct EpubAuthorizedFontResource {
+    /// Exact authorized live file URL used for MIME classification.
+    let fileURL: URL
+
+    /// Size of the already-open descriptor, or -1 when it cannot fit in `Int`.
+    let fileSize: Int
+
+    /// Single owned descriptor consumed and closed by the scheme-handler stream.
+    let handle: FileHandle
+}
+
+/// Native device/inode identity used to compare an open descriptor with its current live path.
+private struct EpubFileSystemIdentity: Equatable {
+    /// Filesystem device containing the file.
+    let device: UInt64
+
+    /// Inode retained by the open descriptor.
+    let inode: UInt64
+}
+
+/**
+ Serves installed EPUB packages and Android-admitted add-on fonts to `WKWebView` through one
+ contained custom scheme.
+
+ EPUB requests resolve the addressed package by stable initials/generation. Font requests replay the
+ live shared add-on projection and expose only winning exact-name providers. WebKit cancellation
+ stops later callbacks.
  */
 final class EpubResourceSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
     /// Serial state lock protecting cancellation ids shared with the worker queue.
@@ -103,6 +144,32 @@ final class EpubResourceSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked 
 
     /// Background queue used so large media files never block the main actor.
     private let workerQueue = DispatchQueue(label: "org.andbible.epub-resources", qos: .userInitiated)
+
+    /// Canonical SWORD root whose shared installed projection authorizes font resources.
+    private let modulePath: String
+
+    /// Test-only resolver override; production always builds a fresh shared manager projection.
+    private let fontProviderResolver: ((String) -> [SwordAdmittedFont]?)?
+
+    /**
+     Creates the contained resource handler for one installed module root.
+
+     - Parameters:
+       - modulePath: SWORD root used for live admitted-font authorization. Production uses the same
+         default root as `SwordManager`; tests may supply an isolated fixture root.
+       - fontProviderResolver: Optional deterministic test seam invoked in place of manager
+         construction. Production leaves it nil.
+     - Side effects: None; managers and files are opened only for concrete requests.
+     - Failure modes: None during initialization.
+     */
+    init(
+        modulePath: String = SwordManager.defaultModulePath(),
+        fontProviderResolver: ((String) -> [SwordAdmittedFont]?)? = nil
+    ) {
+        self.modulePath = modulePath
+        self.fontProviderResolver = fontProviderResolver
+        super.init()
+    }
 
     /**
      Starts one resource request.
@@ -181,10 +248,226 @@ final class EpubResourceSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked 
                 task: task,
                 identifier: identifier
             )
+        case .fontStyleSheet(let moduleInitials):
+            guard let fonts = admittedFonts(moduleInitials: moduleInitials),
+                  let data = Self.fontStyleSheetData(fonts: fonts) else {
+                fail(task, identifier: identifier, code: .fileDoesNotExist)
+                return
+            }
+            send(
+                data,
+                mimeType: "text/css",
+                requestURL: url,
+                task: task,
+                identifier: identifier
+            )
+        case .fontResource(let moduleInitials, let relativePath):
+            guard let resource = openAuthorizedFontResource(
+                moduleInitials: moduleInitials,
+                relativePath: relativePath
+            ) else {
+                fail(task, identifier: identifier, code: .fileDoesNotExist)
+                return
+            }
+            stream(resource, requestURL: url, task: task, identifier: identifier)
         }
     }
 
-    /// Streams a contained file in bounded chunks and closes it on every path.
+    /**
+     Resolves one Java-exact, unambiguous installed font owner through the live shared projection.
+
+     - Parameter moduleInitials: Exact percent-decoded initials from the custom resource route.
+     - Returns: Winning readable font providers owned by the exact module, or nil.
+     - Side effects: Production creates a fresh `SwordManager` and reads installed metadata/filesystem
+       state; deterministic tests may invoke the injected resolver instead.
+     - Failure modes: Manager creation failure, replacement, ambiguity, rejection, or no readable
+       fonts returns nil before any resource is opened.
+     */
+    private func admittedFonts(moduleInitials: String) -> [SwordAdmittedFont]? {
+        let providers: [SwordAdmittedFont]
+        if let fontProviderResolver {
+            guard let resolved = fontProviderResolver(moduleInitials) else { return nil }
+            providers = resolved
+        } else {
+            guard let manager = SwordManager(modulePath: modulePath) else { return nil }
+            providers = manager.admittedFonts()
+        }
+        let matches = providers.filter {
+            SwordJavaStringIdentity.equals($0.moduleName, moduleInitials)
+        }
+        return matches.isEmpty ? nil : matches
+    }
+
+    /**
+     Opens one exact font file and then replays live authorization against the opened inode.
+
+     - Parameters:
+       - moduleInitials: Exact route owner identity.
+       - relativePath: Exact admitted provider path within that owner.
+     - Returns: An ownership-pinned open descriptor, or nil when either authorization snapshot,
+       path identity, regular-file check, or open operation fails.
+     - Side effects: Builds two fresh manager projections, reads file metadata, and opens one file.
+     - Failure modes: Any replacement/uninstall between the first projection and post-open replay
+       closes the descriptor and returns nil before font bytes are read.
+     */
+    func openAuthorizedFontResource(
+        moduleInitials: String,
+        relativePath: String
+    ) -> EpubAuthorizedFontResource? {
+        guard let firstFonts = admittedFonts(moduleInitials: moduleInitials),
+              let firstFont = firstFonts.first(where: {
+                  SwordJavaStringIdentity.equals($0.relativePath, relativePath)
+              }),
+              let handle = try? FileHandle(forReadingFrom: firstFont.fileURL) else {
+            return nil
+        }
+        var retainsHandle = false
+        defer {
+            if !retainsHandle {
+                try? handle.close()
+            }
+        }
+        guard let currentFonts = admittedFonts(moduleInitials: moduleInitials),
+              let currentFont = currentFonts.first(where: {
+                  SwordJavaStringIdentity.equals($0.relativePath, relativePath)
+              }),
+              currentFont.fileURL.standardizedFileURL == firstFont.fileURL.standardizedFileURL,
+              let current = try? currentFont.fileURL.resourceValues(forKeys: [.isRegularFileKey]),
+              current.isRegularFile == true,
+              let descriptorIdentity = Self.fileSystemIdentity(for: handle),
+              let liveIdentity = Self.fileSystemIdentity(at: currentFont.fileURL),
+              descriptorIdentity == liveIdentity,
+              let descriptorSize = try? handle.seekToEnd() else {
+            return nil
+        }
+        do {
+            try handle.seek(toOffset: 0)
+        } catch {
+            return nil
+        }
+        retainsHandle = true
+        return EpubAuthorizedFontResource(
+            fileURL: firstFont.fileURL,
+            fileSize: Int(exactly: descriptorSize) ?? -1,
+            handle: handle
+        )
+    }
+
+    /**
+     Reads native device/inode identity from one open descriptor.
+
+     - Parameter handle: File descriptor already opened after shared-projection authorization.
+     - Returns: Stable descriptor identity, or nil when `fstat` fails.
+     - Side effects: Executes `fstat`; it does not move the descriptor cursor or read contents.
+     - Failure modes: Invalid/closed descriptors return nil.
+     */
+    private static func fileSystemIdentity(for handle: FileHandle) -> EpubFileSystemIdentity? {
+        var metadata = Darwin.stat()
+        guard Darwin.fstat(handle.fileDescriptor, &metadata) == 0 else { return nil }
+        return EpubFileSystemIdentity(
+            device: UInt64(metadata.st_dev),
+            inode: UInt64(metadata.st_ino)
+        )
+    }
+
+    /**
+     Reads native device/inode identity for the file currently published at one URL.
+
+     - Parameter url: Reauthorized live font path.
+     - Returns: Current path identity, or nil when the path cannot be represented or stated.
+     - Side effects: Executes `stat`; it does not open or read file contents.
+     - Failure modes: Missing, replaced-during-stat, or unrepresentable paths return nil.
+     */
+    private static func fileSystemIdentity(at url: URL) -> EpubFileSystemIdentity? {
+        var metadata = Darwin.stat()
+        let result: Int32 = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.lstat(path, &metadata)
+        }
+        guard result == 0 else { return nil }
+        return EpubFileSystemIdentity(
+            device: UInt64(metadata.st_dev),
+            inode: UInt64(metadata.st_ino)
+        )
+    }
+
+    /**
+     Builds Android's per-module `fonts.css` from already-authorized provider rows.
+
+     - Parameter fonts: Winning readable font providers for one exact admitted add-on owner.
+     - Returns: UTF-8 CSS with one `@font-face` rule per provider, or nil when none exist.
+     - Side effects: None; file contents are not read.
+     - Failure modes: Unsafe path components that cannot be percent-encoded omit the complete
+       stylesheet rather than emitting a partial or cross-file claim.
+     */
+    private static func fontStyleSheetData(
+        fonts: [SwordAdmittedFont]
+    ) -> Data? {
+        guard !fonts.isEmpty else { return nil }
+        var rules: [String] = []
+        for font in fonts {
+            guard let encodedPath = encodedFontResourcePath(font.relativePath) else { return nil }
+            let family = cssSingleQuotedString(font.name)
+            rules.append(
+                "@font-face {\nfont-family: '\(family)';\nsrc: url('\(encodedPath)') format('truetype');\n}"
+            )
+        }
+        return Data((rules.joined(separator: "\n") + "\n").utf8)
+    }
+
+    /**
+     Percent-encodes one validated relative font path component by component.
+
+     - Parameter relativePath: Slash-separated provider path already admitted by SwordKit.
+     - Returns: A relative CSS URL path, or nil for an empty component/encoding failure.
+     - Side effects: None.
+     - Failure modes: Returns nil instead of emitting a partial or absolute path.
+     */
+    private static func encodedFontResourcePath(_ relativePath: String) -> String? {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let components = relativePath.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        )
+        guard !components.isEmpty else { return nil }
+        var encoded: [String] = []
+        for component in components {
+            guard !component.isEmpty,
+                  let value = String(component).addingPercentEncoding(
+                      withAllowedCharacters: allowed
+                  ) else {
+                return nil
+            }
+            encoded.append(value)
+        }
+        return encoded.joined(separator: "/")
+    }
+
+    /**
+     Escapes one validated font-family name for a single-quoted CSS literal.
+
+     - Parameter value: Control-free admitted provider name.
+     - Returns: CSS-safe text with backslashes and single quotes escaped.
+     - Side effects: None.
+     - Failure modes: None; control characters were rejected during shared admission.
+     */
+    private static func cssSingleQuotedString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+    }
+
+    /**
+     Streams one contained EPUB file in bounded chunks.
+
+     - Parameters:
+       - fileURL: Already-contained EPUB package member.
+       - requestURL: Custom-scheme response URL.
+       - task: WebKit callback channel.
+       - identifier: Cancellation identity for the request.
+     - Side effects: Opens and reads the file, emits WebKit callbacks, and clears cancellation state.
+     - Failure modes: Open/read/metadata errors fail the task unless WebKit already cancelled it.
+     */
     private func stream(
         _ fileURL: URL,
         requestURL: URL,
@@ -205,6 +488,49 @@ final class EpubResourceSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked 
             defer { try? handle.close() }
             while !isCancelled(identifier) {
                 guard let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty else { break }
+                task.didReceive(data)
+            }
+            guard !isCancelled(identifier) else { return }
+            task.didFinish()
+        } catch {
+            guard !isCancelled(identifier) else { return }
+            task.didFailWithError(error)
+        }
+    }
+
+    /**
+     Streams one already-open ownership-pinned font descriptor in bounded chunks.
+
+     - Parameters:
+       - resource: Descriptor returned by post-open live authorization.
+       - requestURL: Custom-scheme response URL.
+       - task: WebKit callback channel.
+       - identifier: Cancellation identity for the request.
+     - Side effects: Reads and closes the descriptor, emits WebKit callbacks, and clears
+       cancellation state.
+     - Failure modes: Descriptor read errors fail the task unless WebKit already cancelled it.
+     */
+    private func stream(
+        _ resource: EpubAuthorizedFontResource,
+        requestURL: URL,
+        task: WKURLSchemeTask,
+        identifier: ObjectIdentifier
+    ) {
+        defer { clearCancellation(identifier) }
+        defer { try? resource.handle.close() }
+        guard !isCancelled(identifier) else { return }
+        task.didReceive(URLResponse(
+            url: requestURL,
+            mimeType: Self.mimeType(for: resource.fileURL),
+            expectedContentLength: resource.fileSize,
+            textEncodingName: nil
+        ))
+        do {
+            while !isCancelled(identifier) {
+                guard let data = try resource.handle.read(upToCount: 64 * 1024),
+                      !data.isEmpty else {
+                    break
+                }
                 task.didReceive(data)
             }
             guard !isCancelled(identifier) else { return }

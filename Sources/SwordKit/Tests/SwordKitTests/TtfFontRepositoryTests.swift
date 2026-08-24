@@ -237,4 +237,57 @@ final class TtfFontRepositoryTests: XCTestCase {
             true
         )
     }
+
+    /**
+     Verifies ambiguous exact-initials add-ons cannot reappear as generated manual TTF books.
+
+     - Setup: Installs two comparator-distinct add-on configs with the same exact initials and two
+       readable TTF providers below the manual-font scan root.
+     - Expected result: Shared admission publishes neither provider, and startup registration
+       reserves both physical files instead of synthesizing a second ownership path.
+     - Side effects: Creates, scans, and removes one isolated SWORD tree.
+     - Failure meaning: A fail-closed config collision can be bypassed by manual TTF discovery.
+     */
+    func testTtfFontRepositoryDoesNotSynthesizeAmbiguousConfigOwnedFonts() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = tempDir.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        for (index, abbreviation) in ["Alpha", "Beta"].enumerated() {
+            let component = index == 0 ? "first" : "second"
+            let fileName = index == 0 ? "First.ttf" : "Second.ttf"
+            let payload = tempDir.appendingPathComponent("ttf/\(component)", isDirectory: true)
+            try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
+            try Data([0x00, UInt8(index)]).write(to: payload.appendingPathComponent(fileName))
+            try """
+            [AMBIGFONT]
+            Description=Ambiguous \(abbreviation)
+            Abbreviation=\(abbreviation)
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./ttf/\(component)/
+            Encoding=UTF-8
+            AndBibleProvidesFont=\(abbreviation);\(fileName)
+            """.write(
+                to: configDirectory.appendingPathComponent("\(component).conf"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: tempDir.path))
+        XCTAssertTrue(manager.admittedFonts().isEmpty)
+
+        let registered = try TtfFontRepository(swordPath: tempDir.path).registerInstalledFonts()
+
+        XCTAssertTrue(registered.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: configDirectory.appendingPathComponent("ttf_first.conf").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: configDirectory.appendingPathComponent("ttf_second.conf").path
+        ))
+    }
 }
