@@ -18,10 +18,13 @@ extension AndBibleUITests {
      *     initials whose install tasks should remain in progress until cancelled.
      * - Returns: A configured `XCUIApplication` that has not yet been launched by the caller.
      * - Side effects:
-     *   - terminates any previously launched app process through CoreSimulator when possible
+     *   - terminates a previously tracked app directly before reusing the current test instance
      *   - assigns a fresh `UITEST_SESSION_ID` and standard locale/accessibility launch flags
-     *   - prepares the fixture scenario declared for the current test method
+     *   - prepares the fixture scenario declared for the current test method; fixture preparation
+     *     owns the stale-process launch barrier when host-side mutation is required
      * - Failure modes:
+     *   - records an XCTest failure and skips fixture mutation when app-process isolation cannot
+     *     be established
      *   - fixture preparation records XCTest failures when required host-side setup cannot complete
      */
     func makeApp(
@@ -29,10 +32,11 @@ extension AndBibleUITests {
         remoteSyncBootstrapScenario: String? = nil,
         heldDownloadModules: [String] = []
     ) -> XCUIApplication {
+        let didStopPreviousProcess: Bool
         if let trackedApp {
-            _ = terminateAppReliably(trackedApp)
+            didStopPreviousProcess = terminateAppReliably(trackedApp)
         } else {
-            _ = terminateInstalledAppProcessIfPresent()
+            didStopPreviousProcess = true
         }
         let app = XCUIApplication()
         trackedApp = app
@@ -53,8 +57,49 @@ extension AndBibleUITests {
             app.launchEnvironment["UITEST_HELD_DOWNLOAD_MODULES"] = heldDownloadModuleList
             app.launchArguments += ["-UITEST_HELD_DOWNLOAD_MODULES", heldDownloadModuleList]
         }
+        guard didStopPreviousProcess else {
+            XCTFail(
+                "Unable to confirm that the previous app process stopped before fixture mutation."
+            )
+            return app
+        }
         prepareFixtureIfRequested(for: app)
         return app
+    }
+
+    /**
+     Establishes an XCTest-owned process boundary before the fixture tool mutates the app container.
+     *
+     * A new XCTestCase instance has no handle for the preceding test's process, and host-side
+     * `simctl terminate` can stall while CoreSimulator is under load. Launching with the dedicated
+     * bootstrap-exit contract forces XCTest to replace any stale process, then gives this test a
+     * handle whose stopped state can be observed deterministically.
+     *
+     * - Parameter app: Fresh application handle that the caller will configure and launch again
+     *   after fixture preparation.
+     * - Returns: `true` when the bootstrap process exits or is stopped through its owned handle.
+     * - Side effects:
+     *   - launches the installed app once with `UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH=1`
+     *   - may create the simulator data container before the fixture tool resets it
+     *   - removes the temporary bootstrap environment flag before returning
+     * - Failure modes:
+     *   - returns `false` when neither the app's two-second bootstrap exit nor direct XCTest
+     *     termination reaches `.notRunning` within the bounded waits
+     * - Important: The fixture tool must run only after this function returns `true`.
+     */
+    func synchronizeAppProcessBeforeFixtureMutation(_ app: XCUIApplication) -> Bool {
+        app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
+        defer {
+            app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
+        }
+
+        app.launch()
+        if waitForAppToStop(app, timeout: 10) {
+            return true
+        }
+
+        app.terminate()
+        return waitForAppToStop(app, timeout: 5)
     }
 
     /**
@@ -62,11 +107,14 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - resolves the app data container from the current simulator UDID
+     *   - runs an XCTest-owned bootstrap-exit launch before any host-side fixture mutation
      *   - runs `UITestFixtureTool reset` and `seed` against that installed app container
      *   - passes the fixture tool's encoded preference seed to the first app launch
      *   - skips host-side fixture work when the manifest uses the `none` sentinel for a
      *     launch-configuration-only test
      * - Failure modes:
+     *   - records an XCTest failure when a prior app process cannot be replaced and stopped before
+     *     fixture mutation
      *   - records an XCTest failure when the fixture tool path, simulator UDID, or data container
      *     cannot be resolved from the current test-host environment
      *   - records an XCTest failure when the fixture reset or seed subprocess exits non-zero
@@ -96,6 +144,14 @@ extension AndBibleUITests {
             return
         }
         let bundleID = environment["UITEST_BUNDLE_ID"] ?? "org.andbible.ios"
+        guard synchronizeAppProcessBeforeFixtureMutation(XCUIApplication()) else {
+            XCTFail(
+                "Unable to establish an app-process boundary before fixture mutation.",
+                file: file,
+                line: line
+            )
+            return
+        }
         guard let dataContainerPath = ensureInstalledAppDataContainer(
             for: app,
             bundleIdentifier: bundleID,
@@ -316,12 +372,13 @@ extension AndBibleUITests {
      *   - bundleIdentifier: Bundle identifier of the app under test.
      *   - simulatorID: Current simulator UDID when already known.
      *   - timeout: Maximum time to wait for `simctl terminate`.
-     * - Returns: `true` when `simctl terminate` exits successfully.
+     * - Returns: `true` when `simctl` either terminates the process or confirms that no matching
+     *   process remains.
      * - Side effects:
      *   - resolves the simulator UDID from the current test environment when needed
      *   - runs `xcrun simctl terminate` against the app under test
-     * - Failure modes: Returns `false` when the simulator cannot be resolved or the host-side
-     *   terminate command reports that no matching app process was stopped.
+     * - Failure modes: Returns `false` when the simulator cannot be resolved, the command times
+     *   out, or CoreSimulator reports a failure other than an already-absent process.
      */
     @discardableResult
     func terminateInstalledAppProcessIfPresent(
@@ -339,28 +396,32 @@ extension AndBibleUITests {
             arguments: ["simctl", "terminate", resolvedSimulatorID, resolvedBundleIdentifier],
             timeout: timeout
         )
+        let diagnostic = "\(terminateResult.stdout)\n\(terminateResult.stderr)"
+            .lowercased()
         return terminateResult.status == 0
+            || diagnostic.contains("found nothing to terminate")
+            || diagnostic.contains("no such process")
     }
 
     /**
-     Terminates the app under test through CoreSimulator instead of XCTest's direct terminate path.
+     Terminates an XCTest-owned app process, with CoreSimulator as a bounded fallback.
      *
-     * XCTest's `terminate()` is not reliable for apps launched solely to materialize the simulator
-     * data container during fixture seeding. It can also report `.notRunning` after losing the
-     * process ID for an app that CoreSimulator still needs to terminate before the next launch.
-     * Host-side `simctl terminate` is a better source of truth because the fixture tool and the
-     * launch preflight also run against the simulator host.
+     * Direct XCTest termination is authoritative when this test owns the process handle. The
+     * host-side fallback remains for bootstrap paths whose process handle stops reporting state.
      *
      * - Parameters:
      *   - app: App handle to stop when XCTest still tracks it.
      *   - bundleIdentifier: Bundle identifier of the app under test.
      *   - simulatorID: Current simulator UDID when already known.
-     * - Returns: `true` when the app is already stopped from XCTest's perspective or a host-side
-     *   terminate succeeds.
+     * - Returns: `true` when XCTest observes `.notRunning`, or CoreSimulator terminates or confirms
+     *   the process is absent.
      * - Side effects:
+     *   - requests termination through the XCTest application handle
      *   - resolves the simulator UDID from the current test environment when needed
-     *   - retries `xcrun simctl terminate` a small number of times before giving up
-     * - Failure modes: This helper does not record XCTest failures directly.
+     *   - retries the bounded `xcrun simctl terminate` confirmation before giving up
+     * - Failure modes:
+     *   - returns `false` when the simulator cannot be resolved or the stopped state cannot be
+     *     confirmed; this helper does not record XCTest failures directly
      */
     func terminateAppReliably(
         _ app: XCUIApplication,
@@ -369,27 +430,30 @@ extension AndBibleUITests {
     ) -> Bool {
         let resolvedBundleIdentifier = bundleIdentifier ?? currentUITestBundleIdentifier()
         let resolvedSimulatorID = simulatorID ?? resolveCurrentSimulatorID()
-        let alreadyStopped = app.state == .notRunning
+        app.terminate()
+        if waitForAppToStop(app, timeout: 5) {
+            return true
+        }
 
         guard let resolvedSimulatorID else {
-            return alreadyStopped
+            return false
         }
 
         for _ in 0..<3 {
             if terminateInstalledAppProcessIfPresent(
                 bundleIdentifier: resolvedBundleIdentifier,
                 simulatorID: resolvedSimulatorID,
-                timeout: 15
+                timeout: 5
             ) {
                 return true
             }
-            if app.state == .notRunning {
+            app.terminate()
+            if waitForAppToStop(app, timeout: 2) {
                 return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(1))
         }
 
-        return app.state == .notRunning
+        return false
     }
 
     /**
