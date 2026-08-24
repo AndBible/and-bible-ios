@@ -299,7 +299,7 @@ private final class ModuleFileDownloadDelegate: NSObject, URLSessionDownloadDele
 /**
  Configuration for a remote module source consumed by Downloads.
 
- The struct keeps the legacy SWORD tuple (`type`, `host`, `catalogPath`) while also carrying
+ The struct keeps the required SWORD tuple (`type`, `host`, `catalogPath`) while also carrying
  Android custom-repository metadata. SWORD rows use `sword-https` by default and can be projected
  into `InstallMgr.conf`; MyBible rows use `mybible-https` and are refreshed from their manifest
  URL without pretending to be SWORD sources.
@@ -403,8 +403,11 @@ public struct SourceConfig: Sendable, Identifiable {
  - Note: The struct is immutable and performs no file or network I/O.
  */
 public struct CatalogModule: Sendable, Identifiable {
-    /// Module initials shown in Downloads and used as install identity.
+    /// Exact module initials used as install identity.
     public let name: String
+
+    /// Android-visible remote-book abbreviation; ordinary SWORD rows fall back to `name`.
+    public let abbreviation: String
 
     /// User-visible module description.
     public let description: String
@@ -450,6 +453,7 @@ public struct CatalogModule: Sendable, Identifiable {
 
      - Parameters:
        - name: Module initials shown in Downloads.
+       - abbreviation: Android-visible remote-book abbreviation, defaulting to `name`.
        - description: User-visible module description.
        - category: Download category.
        - language: Module language code.
@@ -467,6 +471,7 @@ public struct CatalogModule: Sendable, Identifiable {
      */
     public init(
         name: String,
+        abbreviation: String? = nil,
         description: String,
         category: ModuleCategory,
         language: String,
@@ -481,6 +486,7 @@ public struct CatalogModule: Sendable, Identifiable {
         packageFileName: String? = nil
     ) {
         self.name = name
+        self.abbreviation = abbreviation ?? name
         self.description = description
         self.category = category
         self.language = language
@@ -499,6 +505,7 @@ public struct CatalogModule: Sendable, Identifiable {
     public var remoteModuleInfo: RemoteModuleInfo {
         RemoteModuleInfo(
             name: name,
+            abbreviation: abbreviation,
             description: description,
             category: category,
             language: language,
@@ -970,6 +977,8 @@ public final class ModuleRepository: @unchecked Sendable {
 
     private struct CachedModule: Codable {
         var name: String
+        /// Persisted Android-visible abbreviation; absent older cache rows fall back to initials.
+        var abbreviation: String?
         var description: String
         var category: String
         var language: String
@@ -1003,6 +1012,7 @@ public final class ModuleRepository: @unchecked Sendable {
                 let cat = ModuleCategory(typeString: m.category, modDrv: m.modDrv)
                 let entry = CatalogModule(
                     name: m.name,
+                    abbreviation: m.abbreviation,
                     description: m.description,
                     category: cat,
                     language: m.language,
@@ -1034,6 +1044,7 @@ public final class ModuleRepository: @unchecked Sendable {
             modules: entries.map { e in
                 CachedModule(
                     name: e.name,
+                    abbreviation: e.abbreviation,
                     description: e.description,
                     category: e.category.rawValue,
                     language: e.language,
@@ -1158,11 +1169,15 @@ public final class ModuleRepository: @unchecked Sendable {
             let normalizedDownloadURL = Self.normalizedMyBibleDownloadURL(module.downloadURL)
             guard let downloadURL = normalizedDownloadURL else { return nil }
             let languageCode = module.languageCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            let filenameIdentity = MyBibleAndroidFilenameIdentity(fileName: module.fileName)
 
             return CatalogModule(
-                name: Self.myBibleModuleInitials(fileName: module.fileName),
+                name: filenameIdentity.initials,
+                abbreviation: filenameIdentity.abbreviation,
                 description: module.description,
-                category: Self.myBibleCategory(fileName: module.fileName),
+                category: MyBibleAndroidFilenameIdentity.category(
+                    forPackageFileName: module.fileName
+                ),
                 language: languageCode.isEmpty
                     ? "en"
                     : languageCode,
@@ -1188,7 +1203,8 @@ public final class ModuleRepository: @unchecked Sendable {
      Normalizes Android MyBible module download URLs while preserving HTTPS-only behavior.
 
      Android rewrites cached `http://` MyBible module URLs to HTTPS before exposing module rows.
-     iOS mirrors that compatibility path, then drops rows that still cannot produce an HTTPS URL.
+     iOS mirrors that current Android rewrite, then drops rows that still cannot produce an HTTPS
+     URL.
 
      - Parameter rawURL: Manifest `download_url` value.
      - Returns: HTTPS URL suitable for package download, or `nil` when the row is unsupported.
@@ -1208,55 +1224,6 @@ public final class ModuleRepository: @unchecked Sendable {
         return url
     }
 
-    /**
-     Builds Android-compatible MyBible module initials from a package filename.
-
-     - Parameter fileName: Manifest `file_name`, usually a `.SQLite3.zip` package.
-     - Returns: Initials prefixed with `MyBible-` and sanitized for local identifiers.
-     - Side effects: none.
-     - Failure modes: empty filenames collapse to `MyBible-module`.
-     */
-    private static func myBibleModuleInitials(fileName: String) -> String {
-        let base = ((fileName as NSString).deletingPathExtension as NSString).lastPathComponent
-        let fallback = base.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "module" : base
-        return "MyBible-" + sanitizeMyBibleModuleName(fallback)
-    }
-
-    /**
-     Maps Android MyBible filename conventions to common module categories.
-
-     - Parameter fileName: Manifest package filename.
-     - Returns: Commentaries for `.commentaries`, dictionaries for `.dictionaries`, otherwise Bible.
-     - Side effects: none.
-     - Failure modes: unknown filename families intentionally fall back to Bible, matching Android's
-       default category behavior.
-     */
-    private static func myBibleCategory(fileName: String) -> ModuleCategory {
-        let lowercased = fileName.lowercased()
-        if lowercased.contains(".commentaries") {
-            return .commentary
-        }
-        if lowercased.contains(".dictionaries") {
-            return .dictionary
-        }
-        return .bible
-    }
-
-    /**
-     Sanitizes MyBible package basenames using Android's identifier policy.
-
-     - Parameter name: Package basename without its outer archive extension.
-     - Returns: ASCII alphanumerics preserved and every other scalar replaced with `_`.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private static func sanitizeMyBibleModuleName(_ name: String) -> String {
-        let allowed = CharacterSet.alphanumerics
-        return String(name.unicodeScalars.map { scalar in
-            allowed.contains(scalar) ? Character(scalar) : "_"
-        })
-    }
-
     // MARK: - Module Installation
 
     /**
@@ -1267,7 +1234,7 @@ public final class ModuleRepository: @unchecked Sendable {
      transient missing raw files cannot publish partial Bible or commentary data.
 
      - Parameters:
-       - moduleName: Module abbreviation from the refreshed catalog, such as `KJV`.
+       - moduleName: Exact module initials from the refreshed catalog, such as `KJV`.
        - source: Remote source whose in-memory catalog entry supplies package metadata and module
          layout.
        - progress: Optional callback receiving normalized completion in the range `0.0...1.0`.
@@ -3298,6 +3265,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
         return CatalogModule(
             name: config.name,
+            abbreviation: config.values["Abbreviation"]?.first ?? config.name,
             description: config.description,
             category: config.category,
             language: config.language,

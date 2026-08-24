@@ -121,9 +121,10 @@ enum InstalledMyBibleBookReader {
         defer { sqlite3_close(database) }
 
         guard let metadata = databaseMetadata(from: database) else { return nil }
-        let baseName = androidNameWithoutExtension(payloadURL.lastPathComponent)
-        let initials = "MyBible-" + sanitizeAndroidMyBibleModuleName(baseName)
-        let abbreviation = androidAbbreviation(from: baseName)
+        let filenameIdentity = MyBibleAndroidFilenameIdentity(
+            fileName: payloadURL.lastPathComponent
+        )
+        let initials = filenameIdentity.initials
         let driver = moduleDriver(for: metadata.category)
         let moduleInfo = ModuleInfo(
             name: initials,
@@ -140,7 +141,7 @@ enum InstalledMyBibleBookReader {
         )
         return InstalledMyBibleBookRegistration(
             info: moduleInfo,
-            abbreviation: abbreviation,
+            abbreviation: filenameIdentity.abbreviation,
             moduleDirectoryURL: payloadURL.deletingLastPathComponent(),
             databaseURL: payloadURL
         )
@@ -349,53 +350,6 @@ enum InstalledMyBibleBookReader {
         guard valueUnits.count >= suffixUnits.count else { return false }
         let candidate = String(decoding: valueUnits.suffix(suffixUnits.count), as: UTF16.self)
         return SwordJavaStringIdentity.equalsIgnoreCase(candidate, suffix)
-    }
-
-    /**
-     Removes exactly the last dot extension like Kotlin `File.nameWithoutExtension`.
-
-     - Parameter fileName: Exact final path component of the payload.
-     - Returns: Text before the last dot, the full name when no dot exists, or an empty string for a
-       leading-dot-only basename.
-     - Side effects: None.
-     - Failure modes: None.
-     */
-    private static func androidNameWithoutExtension(_ fileName: String) -> String {
-        guard let dot = fileName.lastIndex(of: ".") else { return fileName }
-        return String(fileName[..<dot])
-    }
-
-    /**
-     Derives Android's unsanitized MyBible abbreviation from one payload basename.
-
-     - Parameter baseName: Filename after removing only its final extension.
-     - Returns: Exact text before the first dot, including an empty value for a leading dot.
-     - Side effects: None.
-     - Failure modes: None; basenames without a dot are returned unchanged.
-     */
-    private static func androidAbbreviation(from baseName: String) -> String {
-        guard let dot = baseName.firstIndex(of: ".") else { return baseName }
-        return String(baseName[..<dot])
-    }
-
-    /**
-     Applies Android's historical MyBible `[^a-zA-z0-9]` replacement exactly.
-
-     Java's `A-z` range spans ASCII values 65 through 122, so it deliberately preserves the six
-     punctuation characters between `Z` and `a` in addition to letters, digits, and underscore.
-
-     - Parameter value: Exact payload basename before initials are prefixed.
-     - Returns: ASCII digits and code points `A...z` unchanged; every other Unicode scalar becomes
-       one underscore.
-     - Side effects: None.
-     - Failure modes: None; every Swift string has a finite Unicode-scalar projection.
-     */
-    private static func sanitizeAndroidMyBibleModuleName(_ value: String) -> String {
-        value.unicodeScalars.map { scalar in
-            let code = scalar.value
-            let accepted = (48...57).contains(code) || (65...122).contains(code)
-            return accepted ? String(scalar) : "_"
-        }.joined()
     }
 
     /**

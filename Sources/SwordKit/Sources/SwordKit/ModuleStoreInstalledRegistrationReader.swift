@@ -411,7 +411,7 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && ["mybiblebible", "mybiblecommentary", "mybibledictionary"].contains(driver)
                 && databaseCategory.map(categoryMatches) == true
                 && config.name.caseInsensitiveCompare(
-                    "MyBible-" + sanitizeMyBibleModuleName(stem)
+                    "MyBible-" + MyBibleAndroidFilenameIdentity.sanitizeModuleName(stem)
                 ) == .orderedSame
                 && markerEquals("AndBibleMyBibleModule", "1")
                 && markerEquals("AndBibleDbFile", relativePath)
@@ -422,7 +422,7 @@ public enum ModuleStoreInstalledRegistrationReader {
                 && ["myswordbible", "myswordcommentary", "mysworddictionary"].contains(driver)
                 && databaseCategory.map(categoryMatches) == true
                 && config.name.caseInsensitiveCompare(
-                    "MySword-" + sanitizeMyBibleModuleName(stem)
+                    "MySword-" + sanitizeMySwordModuleName(stem)
                 ) == .orderedSame
                 && markerEquals("AndBibleMySwordModule", "1")
                 && markerEquals("AndBibleDbFile", relativePath)
@@ -489,8 +489,16 @@ public enum ModuleStoreInstalledRegistrationReader {
         }
     }
 
-    /** Applies Android's historical MyBible/MySword `[^a-zA-z0-9]` replacement. */
-    private static func sanitizeMyBibleModuleName(_ value: String) -> String {
+    /**
+     Applies Android's historical MySword `[^a-zA-z0-9]` replacement.
+
+     - Parameter value: Exact payload basename before the `MySword-` prefix.
+     - Returns: ASCII digits and code points `A...z` unchanged; every other Unicode scalar becomes
+       one underscore.
+     - Side effects: None.
+     - Failure modes: None; every Swift string has a finite Unicode-scalar projection.
+     */
+    private static func sanitizeMySwordModuleName(_ value: String) -> String {
         value.unicodeScalars.map { scalar in
             let code = scalar.value
             return (48...57).contains(code) || (65...122).contains(code)
