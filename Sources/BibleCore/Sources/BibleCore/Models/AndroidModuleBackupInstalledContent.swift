@@ -1,6 +1,7 @@
 // AndroidModuleBackupInstalledContent.swift - Shared Android backup selection identity
 
 import Foundation
+import SwordKit
 
 /**
  One installed document that Android can select for a module backup.
@@ -25,8 +26,8 @@ public struct AndroidModuleBackupInstalledContent: Sendable, Equatable, Identifi
     /// Exact module-store path whose registrar owns this identity, when one exists.
     internal let registrationRelativePath: String?
 
-    /// Stable SwiftUI identity using Android's non-normalizing initials comparison.
-    public var id: SQLiteDocumentIdentity { SQLiteDocumentIdentity(initials) }
+    /// Stable SwiftUI identity using Android's exact UTF-16 initials comparison.
+    public var id: SwordJavaExactStringIdentity { SwordJavaExactStringIdentity(initials) }
 
     /**
      Creates one canonical Android module-backup catalog row.

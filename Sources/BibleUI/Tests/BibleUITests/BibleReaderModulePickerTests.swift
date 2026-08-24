@@ -919,21 +919,37 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies chooser backup candidates use Android's language-first deterministic order.
+     Verifies chooser backup candidates use Android's localized language-name order.
 
-     A failure means the backup sheet can reorder between presentations or diverge from Android's
-     installed-document selection list.
+     Equal-language modules include a canonically equivalent Java-distinct pair and intentionally
+     reverse description/initials order. German, English, and French codes prove sorting follows
+     localized names rather than raw codes. A failure means the backup sheet applies iOS
+     tie-breakers or code order instead of Android's `Language.getName()` order before
+     position-filtered selection.
      */
     func testBibleReaderModulePickerSortsBackupCandidatesLikeAndroid() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
         let modules = [
             ModuleInfo(name: "ZZZ", description: "Beta", category: .bible, language: "fr"),
             ModuleInfo(name: "BBB", description: "Alpha", category: .bible, language: "en"),
+            ModuleInfo(name: composed, description: "Zulu", category: .bible, language: "en"),
+            ModuleInfo(name: decomposed, description: "Alpha", category: .bible, language: "en"),
             ModuleInfo(name: "AAA", description: "Alpha", category: .commentary, language: "en"),
+            ModuleInfo(name: "DDD", description: "German", category: .bible, language: "de"),
+        ]
+        let languageNames = [
+            "de": "German",
+            "en": "English",
+            "fr": "French",
         ]
 
         XCTAssertEqual(
-            BibleReaderModulePicker.sortedBackupModules(modules).map(\.name),
-            ["AAA", "BBB", "ZZZ"]
+            BibleReaderModulePicker.sortedBackupModules(
+                modules,
+                languageName: { languageNames[$0] ?? $0 }
+            ).map { Array($0.name.utf16) },
+            ["BBB", composed, decomposed, "AAA", "ZZZ", "DDD"].map { Array($0.utf16) }
         )
     }
 
@@ -955,7 +971,9 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(source.contains("modulePickerBackupDocumentsButton"))
         XCTAssertTrue(source.contains("modulePickerInstallZipButton"))
         XCTAssertTrue(source.contains("AndroidModuleBackupExportSheet("))
-        XCTAssertTrue(source.contains("AndroidModuleBackupService().exportArchive"))
+        XCTAssertTrue(source.contains("AndroidModuleBackupService().exportArchiveFile("))
+        XCTAssertTrue(source.contains("orderedModuleNames: moduleNames"))
+        XCTAssertFalse(source.contains("Set(moduleNames)"))
         XCTAssertTrue(source.contains(".fileExporter("))
         XCTAssertTrue(source.contains(".fileImporter("))
         XCTAssertTrue(source.contains("service.preflightDocument(request)"))

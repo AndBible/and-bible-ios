@@ -57,54 +57,13 @@ internal final class AndroidModuleBackupArchiveExporter {
     }
 
     /**
-     Exports selected installed modules as in-memory archive bytes for compatibility callers.
-
-     - Parameter moduleNames: Optional case/Unicode-insensitive Android initials selection; `nil`
-       exports every discovered module family.
-     - Returns: Complete Android backup bytes and the same summary as the file-backed export.
-     - Side effects: Creates a temporary archive, reads it into memory, and removes it before return.
-     - Throws: Discovery, path-validation, file-read, ZIP-writing, or cleanup-independent read errors.
-       The temporary archive is removed best-effort even when the compatibility read fails.
-     */
-    internal func exportArchive(moduleNames: Set<String>?) throws -> AndroidModuleBackupExport {
-        let fileExport = try exportArchiveFile(
-            orderedModuleNames: moduleNames?.sorted()
-        )
-        defer { try? fileManager.removeItem(at: fileExport.fileURL) }
-        return AndroidModuleBackupExport(
-            fileName: fileExport.fileName,
-            data: try Data(contentsOf: fileExport.fileURL),
-            moduleNames: fileExport.moduleNames,
-            entryCount: fileExport.entryCount
-        )
-    }
-
-    /**
-     Streams selected installed modules into one Android-compatible `.abmd.zip` archive.
-
-     - Parameter moduleNames: Optional case/Unicode-insensitive Android initials selection; `nil`
-       exports every discovered module family.
-     - Returns: A completed temporary archive owned by the caller, sorted module initials, and the
-       number of ZIP members including the manifest.
-     - Side effects: Enumerates installed content, leases immutable EPUB generations, creates one
-       temporary archive, and streams payload files into it. Leases are released after writing.
-     - Throws: `AndroidModuleBackupError` for empty, missing, unsafe, or colliding inventory;
-       filesystem errors; or `ZipArchiveWriterError` for unsupported ZIP limits. Partial output is
-       removed before an error escapes.
-     - Note: The manifest is always the literal first ZIP member and payload ordering comes directly
-       from the validated inventory.
-     */
-    internal func exportArchiveFile(moduleNames: Set<String>?) throws -> AndroidModuleBackupFileExport {
-        try exportArchiveFile(orderedModuleNames: moduleNames?.sorted())
-    }
-
-    /**
      Streams picker-selected content in exact display/selection order.
 
      - Parameter orderedModuleNames: Android runtime initials in picker order, or nil for all.
      - Returns: Completed file-backed Android module backup.
-     - Side effects: Performs the same inventory, lease, and temporary-file work as the unordered
-       compatibility overload.
+     - Side effects: Enumerates installed content, leases immutable EPUB generations, creates one
+       temporary archive, and streams selected payload files into it. Leases are released after
+       writing.
      - Throws: The same discovery, source-integrity, cancellation, ZIP, and filesystem errors.
      */
     internal func exportArchiveFile(
