@@ -67,9 +67,10 @@ public protocol SwordPromptPackProviding {
 /**
  Discovers Android `AndBibleProvidesPrompts` files through an installed `SwordManager`.
 
- Each referenced filename is constrained to its adjusted module payload directory inside the SWORD
- root. Traversal, absolute paths, unreadable files, and malformed packs are skipped rather than
- weakening the precedence of remaining installed packs.
+ Add-on admission, duplicate ownership, and ordering come from the shared Android `Books.installed()`
+ projection. Each referenced filename is constrained to its adjusted module payload directory inside
+ the SWORD root. Traversal, absolute paths, unreadable files, and malformed packs are skipped rather
+ than weakening the precedence of remaining installed packs.
  */
 public final class SwordPromptPackProvider: SwordPromptPackProviding {
     /// Upper bound preventing an installed prompt pack from exhausting memory during parsing.
@@ -95,24 +96,21 @@ public final class SwordPromptPackProvider: SwordPromptPackProviding {
     }
 
     /**
-     Loads prompt packs referenced by installed SWORD module metadata.
+     Loads prompt packs referenced by Android-admitted add-on metadata.
 
-     - Returns: Parsed packs sorted by module initials.
-     - Side effects: Enumerates installed modules and reads referenced CSV files.
+     - Returns: Parsed packs in pinned JSword installed TreeSet order.
+     - Side effects: Reads the manager's shared admitted add-on projection and referenced CSV files.
      - Throws: This production implementation skips per-module failures and does not throw.
      */
     public func loadPromptPacks() throws -> [SwordPromptPack] {
-        return swordManager.installedModules()
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            .compactMap { info in
-                guard let module = swordManager.module(named: info.name),
-                      let rawFilename = module.configEntry("AndBibleProvidesPrompts")?
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
+        return swordManager.admittedAddonModules()
+            .compactMap { addon in
+                guard let rawFilename = addon.promptFileName,
                       !rawFilename.isEmpty,
-                      rawFilename.lowercased().hasSuffix(".csv"),
+                      let locationURL = addon.locationURL,
                       let fileURL = promptFileURL(
                         filename: rawFilename,
-                        dataPath: module.configEntry("DataPath")
+                        locationURL: locationURL
                       ) else {
                     return nil
                 }
@@ -121,7 +119,7 @@ public final class SwordPromptPackProvider: SwordPromptPackProviding {
                       let prompts = try? PromptCSVParser.parse(data: data) else {
                     return nil
                 }
-                return SwordPromptPack(moduleName: info.name, prompts: prompts)
+                return SwordPromptPack(moduleName: addon.moduleInfo.name, prompts: prompts)
             }
     }
 
@@ -139,33 +137,25 @@ public final class SwordPromptPackProvider: SwordPromptPackProviding {
     /**
      Resolves a prompt-pack file relative to Android's adjusted module location.
 
-     Directory DataPath values are the module location. Single-file driver paths use their parent
-     directory. Standalone prompt modules therefore resolve ./prompts/<file>, while ordinary add-ons
-     can colocate a pack with their own payload. Absolute paths and parent traversal are rejected.
+     - Parameters:
+       - filename: Singular first `AndBibleProvidesPrompts` value from installed metadata.
+       - locationURL: Filesystem-adjusted JSword book location supplied by shared admission.
+     - Returns: Standardized readable-candidate URL below the manager root, or nil for an unsafe
+       absolute/traversing/escaped path. File readability is checked by the caller.
+     - Side effects: Resolves filesystem symlinks without mutation.
+     - Failure modes: Absolute paths, parent traversal, and symlink escapes return nil.
      */
-    private func promptFileURL(filename: String, dataPath: String?) -> URL? {
+    private func promptFileURL(filename: String, locationURL: URL) -> URL? {
         let normalizedFilename = filename.replacingOccurrences(of: "\\", with: "/")
         guard !normalizedFilename.hasPrefix("/"),
               !normalizedFilename.split(separator: "/", omittingEmptySubsequences: false)
                 .contains(where: { $0 == ".." }) else {
             return nil
         }
-        let rawDataPath = dataPath?
-            .replacingOccurrences(of: "\\", with: "/")
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let basePath: String
-        if rawDataPath.isEmpty || rawDataPath.hasSuffix("/") {
-            basePath = rawDataPath
-        } else {
-            let parent = (rawDataPath as NSString).deletingLastPathComponent
-            basePath = parent == "." ? "" : parent
-        }
-        let separator = basePath.isEmpty || basePath.hasSuffix("/") ? "" : "/"
-        let relativePath = "\(basePath)\(separator)\(normalizedFilename)"
         let root = URL(fileURLWithPath: swordManager.modulePath, isDirectory: true)
             .resolvingSymlinksInPath()
             .standardizedFileURL
-        let resolved = root.appendingPathComponent(relativePath)
+        let resolved = locationURL.appendingPathComponent(normalizedFilename)
             .resolvingSymlinksInPath()
             .standardizedFileURL
         let rootPrefix = root.path.hasSuffix("/") ? root.path : "\(root.path)/"

@@ -67,7 +67,26 @@ enum BibleUITestSourceLocator {
      - Throws: An `NSError` when the declaration is missing or the function body is unbalanced.
      */
     static func extractFunction(named functionName: String, from source: String) throws -> String {
-        guard let functionRange = source.range(of: "func \(functionName)") else {
+        let declarationPrefix = "func \(functionName)"
+        var searchRange = source.startIndex..<source.endIndex
+        var functionRange: Range<String.Index>?
+        while let candidate = source.range(of: declarationPrefix, range: searchRange) {
+            let nextCharacter = candidate.upperBound < source.endIndex
+                ? source[candidate.upperBound]
+                : nil
+            let continuesIdentifier = nextCharacter.map { character in
+                character == "_" || character.unicodeScalars.allSatisfy {
+                    CharacterSet.alphanumerics.contains($0)
+                }
+            } ?? false
+            if !continuesIdentifier {
+                functionRange = candidate
+                break
+            }
+            searchRange = candidate.upperBound..<source.endIndex
+        }
+
+        guard let functionRange else {
             throw NSError(
                 domain: "BibleUITestSourceLocator",
                 code: 2,

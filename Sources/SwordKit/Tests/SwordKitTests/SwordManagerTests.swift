@@ -561,7 +561,7 @@ final class SwordManagerTests: XCTestCase {
         Abbreviation=Zulu
         Category=Lexicons / Dictionaries
         ModDrv=RawGenBook
-        DataPath=./modules/genbook/rawgenbook/class-genbook/class-genbook
+        DataPath=./modules/genbook/rawgenbook/class-genbook/
         Encoding=UTF-8
         Lang=en
         Versification=KJV
@@ -2006,6 +2006,7 @@ final class SwordManagerTests: XCTestCase {
             atomically: true,
             encoding: .utf8
         )
+        try Data().write(to: dictionaryDirectory.appendingPathComponent("module.dat"))
         try "1=Luke.1\n".write(
             to: genBookDirectory.appendingPathComponent("genbook_class.properties"),
             atomically: true,
@@ -2052,6 +2053,717 @@ final class SwordManagerTests: XCTestCase {
             "Shared cross-class provider",
             "Shared cross-class provider",
         ])
+    }
+
+    /**
+     Verifies the shared add-on feature inventory applies Android admission and TreeSet identity.
+
+     - Setup: Writes supported, duplicate, future, malformed-minimum, and wrong-category configs;
+       supported case/NFC-NFD variants; and comparator-equal cross-class compatible/future books in
+       deliberately opposite file/order fields.
+     - Expected result: Only admitted HashSet-distinct add-ons survive; Java-distinct variants remain
+       separate in abbreviation/initials TreeSet order, the first singular prompt property is
+       retained, and filtering the future TreeSet owner does not resurrect its compatible sibling.
+     - Side effects: Creates, reads, and removes one isolated temporary SWORD config tree.
+     - Failure meaning: Prompt, picker, and other add-on consumers can observe different books from
+       Android's `AndBibleAddonFilter`/`Books.installed()` projection.
+     */
+    func testAdmittedAddonModulesShareAndroidAdmissionIdentityAndOrder() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let composed = "CAF\u{00C9}"
+        let decomposed = "CAFE\u{0301}"
+        let definitions: [(file: String, initials: String, abbreviation: String, category: String, minimum: String?, prompts: [String])] = [
+            ("z-alpha.conf", "ALPHA", "Alpha", "And Bible", nil, ["first.csv", "ignored.csv"]),
+            ("zz-alpha-duplicate.conf", "ALPHA", "Zulu duplicate", "And Bible", nil, ["duplicate.csv"]),
+            ("a-composed.conf", composed, "Beta", "And Bible", "1115", ["composed.csv"]),
+            ("b-decomposed.conf", decomposed, "Beta", "And Bible", "1115", ["decomposed.csv"]),
+            ("c-case-upper.conf", "CASE", "Gamma", "And Bible", "1115", ["upper.csv"]),
+            ("d-case-lower.conf", "case", "Gamma", "And Bible", "1115", ["lower.csv"]),
+            ("future.conf", "FUTURE", "Future", "And Bible", "1116", ["future.csv"]),
+            ("malformed.conf", "MALFORMED", "Malformed", "And Bible", "later", ["bad.csv"]),
+            ("wrong.conf", "WRONG", "Wrong", "Generic Books", nil, ["wrong.csv"]),
+        ]
+        for definition in definitions {
+            let payloadDirectory = moduleRoot.appendingPathComponent(
+                "addons/\(definition.file)",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: payloadDirectory,
+                withIntermediateDirectories: true
+            )
+            var lines = [
+                "[\(definition.initials)]",
+                "Description=\(definition.initials) add-on",
+                "Abbreviation=\(definition.abbreviation)",
+                "Category=\(definition.category)",
+                "ModDrv=RawGenBook",
+                "DataPath=./addons/\(definition.file)",
+                "Encoding=UTF-8",
+            ]
+            if let minimum = definition.minimum {
+                lines.append("AndBibleMinimumVersion=\(minimum)")
+            }
+            lines.append(contentsOf: definition.prompts.map { "AndBibleProvidesPrompts=\($0)" })
+            try (lines.joined(separator: "\n") + "\n").write(
+                to: configDirectory.appendingPathComponent(definition.file),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        try """
+        [MISSINGDRIVER]
+        Description=Missing driver
+        Category=And Bible
+        AndBibleProvidesPrompts=missing.csv
+        """.write(
+            to: configDirectory.appendingPathComponent("missing-driver.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [GHOST]
+        Description=Missing payload add-on
+        Abbreviation=Ghost
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/missing-payload
+        AndBibleProvidesPrompts=ghost.csv
+        """.write(
+            to: configDirectory.appendingPathComponent("ghost.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let rawTextPrefix = moduleRoot.appendingPathComponent("addons/rawtext-prefix")
+        try Data().write(to: URL(fileURLWithPath: rawTextPrefix.path + ".dat"))
+        try """
+        [PREFIXTEXT]
+        Description=RawText prefix add-on
+        Abbreviation=Epsilon
+        Category=And Bible
+        ModDrv=RawText
+        DataPath=./addons/rawtext-prefix
+        AndBibleMinimumVersion=1115
+        AndBibleProvidesPrompts=rawtext.csv
+        """.write(
+            to: configDirectory.appendingPathComponent("rawtext-prefix.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let compatibleReplacementDirectory = moduleRoot.appendingPathComponent(
+            "addons/replaced-compatible",
+            isDirectory: true
+        )
+        let futureReplacementDirectory = moduleRoot.appendingPathComponent(
+            "addons/replaced-future",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: compatibleReplacementDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: futureReplacementDirectory,
+            withIntermediateDirectories: true
+        )
+        try """
+        [REPLACED]
+        Description=Comparator replacement
+        Abbreviation=Delta
+        Category=And Bible
+        ModDrv=RawLD
+        DataPath=./addons/replaced-compatible/
+        Version=1.0
+        AndBibleMinimumVersion=1115
+        AndBibleProvidesPrompts=compatible.csv
+        """.write(
+            to: configDirectory.appendingPathComponent("a-compatible-replacement.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [REPLACED]
+        Description=Comparator replacement
+        Abbreviation=Delta
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/replaced-future/
+        Version=2.0
+        AndBibleMinimumVersion=1116
+        AndBibleProvidesPrompts=future-replacement.csv
+        """.write(
+            to: configDirectory.appendingPathComponent("z-future-replacement.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let replacedOwners = manager.installedModules().filter {
+            SwordJavaStringIdentity.equals($0.name, "REPLACED")
+        }
+        XCTAssertEqual(replacedOwners.map(\.version), ["2.0"])
+        let modules = manager.admittedAddonModules()
+
+        XCTAssertEqual(
+            modules.map(\.moduleInfo.name),
+            ["ALPHA", decomposed, composed, "PREFIXTEXT", "CASE", "case"]
+        )
+        XCTAssertEqual(modules.map(\.promptFileName), [
+            "first.csv", "decomposed.csv", "composed.csv", "rawtext.csv", "upper.csv",
+            "lower.csv",
+        ])
+        XCTAssertEqual(
+            modules.first?.locationURL,
+            moduleRoot.appendingPathComponent("addons/z-alpha.conf", isDirectory: true)
+                .standardizedFileURL
+        )
+        XCTAssertEqual(Set(modules.map { SwordJavaExactStringIdentity($0.moduleInfo.name) }).count, 6)
+    }
+
+    /**
+     Verifies JSword payload adjustment rejects a broken native row before driver HashSet ownership.
+
+     - Setup: Writes equality-identical RawGenBook configs in path order, first without `DataPath`,
+       then with a missing payload, and finally with an existing directory.
+     - Expected result: The valid later config becomes the sole installed/admitted owner and carries
+       its adjusted directory location.
+     - Side effects: Creates, reads, and removes one isolated SWORD tree.
+     - Failure meaning: A ghost config can consume the native HashSet slot and hide a valid Android
+       installed add-on.
+     */
+    func testAddonPayloadAdmissionPrecedesNativeHashSetOwnership() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let validDirectory = moduleRoot.appendingPathComponent("addons/valid", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: validDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        /**
+         Writes one equality-identical add-on config with a caller-selected payload path.
+
+         - Parameters:
+           - file: Config filename controlling deterministic native enumeration.
+           - dataPath: Optional raw `DataPath`; nil deliberately omits the required property.
+         - Side effects: Atomically writes one config below the fixture root.
+         - Throws: Propagates filesystem encoding/write failures.
+         */
+        func writeConfig(file: String, dataPath: String?) throws {
+            var lines = [
+                "[PAYLOADWIN]",
+                "Description=Payload equality owner",
+                "Abbreviation=Payload",
+                "Category=And Bible",
+                "ModDrv=RawGenBook",
+            ]
+            if let dataPath {
+                lines.append("DataPath=\(dataPath)")
+            }
+            lines.append("AndBibleMinimumVersion=1115")
+            try lines.joined(separator: "\n").write(
+                to: configDirectory.appendingPathComponent(file),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        try writeConfig(file: "a-missing.conf", dataPath: nil)
+        try writeConfig(file: "b-broken.conf", dataPath: "./addons/missing/")
+        try writeConfig(file: "z-valid.conf", dataPath: "./addons/valid/")
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        XCTAssertEqual(
+            manager.installedModules().filter { $0.name == "PAYLOADWIN" }.map(\.name),
+            ["PAYLOADWIN"]
+        )
+        let addon = try XCTUnwrap(
+            manager.admittedAddonModules().first { $0.moduleInfo.name == "PAYLOADWIN" }
+        )
+        XCTAssertEqual(addon.locationURL, validDirectory.standardizedFileURL)
+    }
+
+    /**
+     Verifies adjusted-location parity distinguishes no-location metadata from an explicit root.
+
+     - Setup: Writes one add-on with slashless `DataPath=foo` and one with `DataPath=./`.
+     - Expected result: Both books remain installed, but only the explicit root owns a feature-file
+       location; the slashless book cannot borrow files from the module root.
+     - Side effects: Creates, reads, and removes one isolated SWORD tree.
+     - Failure meaning: Prompt/plan discovery can read files from a location JSword never assigned.
+     */
+    func testAddonAdjustedLocationDistinguishesSlashlessPathFromExplicitRoot() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        try """
+        [NOLOCATION]
+        Description=No location
+        Abbreviation=No location
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=foo
+        """.write(
+            to: configDirectory.appendingPathComponent("no-location.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        [ROOTLOCATION]
+        Description=Root location
+        Abbreviation=Root location
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./
+        """.write(
+            to: configDirectory.appendingPathComponent("root-location.conf"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let addons = manager.admittedAddonModules()
+        XCTAssertNil(addons.first { $0.moduleInfo.name == "NOLOCATION" }?.locationURL)
+        XCTAssertEqual(
+            addons.first { $0.moduleInfo.name == "ROOTLOCATION" }?.locationURL,
+            moduleRoot.standardizedFileURL
+        )
+    }
+
+    /**
+     Verifies configless prompt CSV files become Android synthetic installed books.
+
+     - Setup: Writes one readable mixed-case-extension CSV under `prompts` and no `.conf` file.
+     - Expected result: Installed module/registration inventory and the admitted add-on projection
+       expose the same synthetic Android identity, metadata, prompt filename, and parent location.
+     - Side effects: Creates, reads, and removes one isolated SWORD tree.
+     - Failure meaning: Manually installed Android prompt packs remain invisible on iOS.
+     */
+    func testStandalonePromptCSVIsSynthesizedWithoutConfig() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let promptDirectory = moduleRoot.appendingPathComponent("prompts", isDirectory: true)
+        try FileManager.default.createDirectory(at: promptDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        try "id;name;description;promptTemplate\n".write(
+            to: promptDirectory.appendingPathComponent("Study Pack.CSV"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        XCTAssertEqual(manager.installedModules().map(\.name), ["Prompts_Study Pack"])
+        let installed = manager.installedBookRegistrations()
+        XCTAssertEqual(installed.count, 1)
+        XCTAssertEqual(installed.first?.moduleInfo.name, "Prompts_Study Pack")
+        XCTAssertEqual(installed.first?.abbreviation, "Prompts_Study Pack")
+        let addons = manager.admittedAddonModules()
+        XCTAssertEqual(addons.count, 1)
+        let addon = try XCTUnwrap(addons.first)
+        XCTAssertEqual(addon.moduleInfo.name, "Prompts_Study Pack")
+        XCTAssertEqual(addon.moduleInfo.description, "Study Pack prompts")
+        XCTAssertEqual(addon.abbreviation, "Prompts_Study Pack")
+        XCTAssertEqual(addon.promptFileName, "Study Pack.CSV")
+        XCTAssertEqual(addon.locationURL, promptDirectory.standardizedFileURL)
+    }
+
+    /**
+     Verifies Android synthetic prompt uninstall deletes the exact CSV owner without a config.
+
+     - Setup: Synthesizes one configless `CsvPromptBook`, captures its opaque installed owner, and
+       invokes the production repository deletion API.
+     - Expected result: The CSV is removed transactionally, no config is required, a fresh manager
+       exposes no installed/add-on row, and no transaction backup remains.
+     - Side effects: Creates and removes one isolated SWORD root and performs one real deletion.
+     - Failure meaning: The picker can advertise Android's Uninstall action for a generated prompt
+       book but route it into the ordinary config lookup and fail with `moduleNotFound`.
+     */
+    func testStandalonePromptCSVUninstallDeletesExactGeneratedBookOwner() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let promptDirectory = moduleRoot.appendingPathComponent("prompts", isDirectory: true)
+        let csvURL = promptDirectory.appendingPathComponent("Delete Me.csv")
+        try FileManager.default.createDirectory(at: promptDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        try "id;name;description;promptTemplate\n".write(
+            to: csvURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let addon = try XCTUnwrap(manager.admittedAddonModules().first)
+        let repository = ModuleRepository(
+            basePath: moduleRoot.appendingPathComponent("install-manager").path,
+            swordPath: moduleRoot.path
+        )
+
+        try repository.uninstallAddon(addon.removalTarget)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: csvURL.path))
+        let refreshed = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        XCTAssertTrue(refreshed.installedModules().isEmpty)
+        XCTAssertTrue(refreshed.admittedAddonModules().isEmpty)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: moduleRoot.path)
+                .contains { $0.hasPrefix(".module-transaction-") }
+        )
+    }
+
+    /**
+     Verifies duplicate-initial add-on uninstall retains the selected concrete config owner.
+
+     - Setup: Installs two JSword-retained RawGenBook add-ons with exact-equal initials but distinct
+       names, abbreviations, config files, and payload directories, then selects the Beta row.
+     - Expected result: Repository deletion removes only Beta's config/payload; Gamma survives and a
+       fresh admitted projection contains only the Gamma row.
+     - Side effects: Creates and removes one isolated SWORD tree and performs one real transaction.
+     - Failure meaning: Destructive picker actions collapse comparator-distinct rows back to initials
+       and delete, reject, or otherwise target the wrong Android Book.
+     */
+    func testAddonUninstallTargetsSelectedComparatorDistinctConfigOwner() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let betaDirectory = moduleRoot.appendingPathComponent("addons/beta", isDirectory: true)
+        let gammaDirectory = moduleRoot.appendingPathComponent("addons/gamma", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: betaDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: gammaDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let betaConfigURL = configDirectory.appendingPathComponent("beta.conf")
+        let gammaConfigURL = configDirectory.appendingPathComponent("gamma.conf")
+        try """
+        [DUPDELETE]
+        Description=Duplicate beta owner
+        Abbreviation=Beta
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/beta/
+        AndBibleMinimumVersion=1115
+        """.write(to: betaConfigURL, atomically: true, encoding: .utf8)
+        try """
+        [DUPDELETE]
+        Description=Duplicate gamma owner
+        Abbreviation=Gamma
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/gamma/
+        AndBibleMinimumVersion=1115
+        """.write(to: gammaConfigURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let addons = manager.admittedAddonModules()
+        XCTAssertEqual(addons.map(\.abbreviation), ["Beta", "Gamma"])
+        let beta = try XCTUnwrap(addons.first { $0.abbreviation == "Beta" })
+        let repository = ModuleRepository(
+            basePath: moduleRoot.appendingPathComponent("install-manager").path,
+            swordPath: moduleRoot.path
+        )
+
+        try repository.uninstallAddon(beta.removalTarget)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: betaConfigURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: betaDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gammaConfigURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: gammaDirectory.path))
+        XCTAssertThrowsError(try repository.uninstallAddon(beta.removalTarget)) { error in
+            guard case ModuleRepositoryError.moduleNotFound(let name) = error else {
+                return XCTFail("Expected stale exact-owner rejection, received \(error)")
+            }
+            XCTAssertEqual(name, "DUPDELETE")
+        }
+        let refreshed = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        XCTAssertEqual(refreshed.admittedAddonModules().map(\.abbreviation), ["Gamma"])
+    }
+
+    /**
+     Verifies opaque deletion tokens preserve Java-distinct canonical spellings.
+
+     - Setup: Constructs generated-prompt targets whose filenames and initials use composed and
+       decomposed spellings that Swift normally treats as canonically equivalent.
+     - Expected result: Equality distinguishes the tokens and a `Set` retains both owners.
+     - Side effects: None.
+     - Failure meaning: Picker confirmation or fresh-owner revalidation can collapse one installed
+       Android Book into its canonically equivalent sibling.
+     */
+    func testAddonRemovalTargetHashingUsesExactJavaStringIdentity() {
+        let composed = SwordInstalledAddonRemovalTarget(
+            standalonePromptFileName: "\u{00E9}.csv",
+            moduleName: "Prompts_\u{00E9}"
+        )
+        let decomposed = SwordInstalledAddonRemovalTarget(
+            standalonePromptFileName: "e\u{0301}.csv",
+            moduleName: "Prompts_e\u{0301}"
+        )
+
+        XCTAssertNotEqual(composed, decomposed)
+        XCTAssertEqual(Set([composed, decomposed]).count, 2)
+    }
+
+    /**
+     Verifies a stale token cannot delete a config replaced in the current installed TreeSet.
+
+     - Setup: Captures a RawLD add-on token, then installs a later RawGenBook with comparator-equal
+       metadata and a distinct payload/config before invoking repository deletion.
+     - Expected result: Under-lease registry replay rejects the stale token and leaves both configs
+       and payloads byte-for-byte present; the fresh installed projection exposes the replacement.
+     - Side effects: Creates and removes one isolated SWORD tree and attempts one real transaction.
+     - Failure meaning: A row captured before module-store replacement can delete a Book that is no
+       longer the owner visible through Android's `Books.installed()` TreeSet.
+     */
+    func testAddonUninstallRejectsOwnerReplacedAfterRowCapture() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let dictionaryDirectory = moduleRoot.appendingPathComponent(
+            "addons/original",
+            isDirectory: true
+        )
+        let replacementDirectory = moduleRoot.appendingPathComponent(
+            "addons/replacement",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: dictionaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let originalConfigURL = configDirectory.appendingPathComponent("a-original.conf")
+        let originalPrefixURL = dictionaryDirectory.appendingPathComponent("module")
+        try Data().write(to: URL(fileURLWithPath: originalPrefixURL.path + ".dat"))
+        try """
+        [CURRENTOWNER]
+        Description=Current owner
+        Abbreviation=Current
+        Category=And Bible
+        ModDrv=RawLD
+        DataPath=./addons/original/module
+        AndBibleMinimumVersion=1115
+        """.write(to: originalConfigURL, atomically: true, encoding: .utf8)
+
+        let initialManager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let staleTarget = try XCTUnwrap(
+            initialManager.admittedAddonModules().first?.removalTarget
+        )
+
+        try FileManager.default.createDirectory(
+            at: replacementDirectory,
+            withIntermediateDirectories: true
+        )
+        let replacementConfigURL = configDirectory.appendingPathComponent("z-replacement.conf")
+        try """
+        [CURRENTOWNER]
+        Description=Current owner
+        Abbreviation=Current
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./addons/replacement/
+        AndBibleMinimumVersion=1115
+        """.write(to: replacementConfigURL, atomically: true, encoding: .utf8)
+
+        let currentManager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let currentAddons = currentManager.admittedAddonModules()
+        XCTAssertEqual(currentAddons.count, 1)
+        XCTAssertEqual(currentAddons.first?.locationURL, replacementDirectory.standardizedFileURL)
+        XCTAssertNotEqual(currentAddons.first?.removalTarget, staleTarget)
+
+        let repository = ModuleRepository(
+            basePath: moduleRoot.appendingPathComponent("install-manager").path,
+            swordPath: moduleRoot.path
+        )
+        XCTAssertThrowsError(try repository.uninstallAddon(staleTarget)) { error in
+            guard case ModuleRepositoryError.moduleNotFound(let name) = error else {
+                return XCTFail("Expected stale owner rejection, received \(error)")
+            }
+            XCTAssertEqual(name, "CURRENTOWNER")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalConfigURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalPrefixURL.path + ".dat"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacementConfigURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacementDirectory.path))
+    }
+
+    /**
+     Verifies add-on deletion cannot remove a shared Android installed-family root.
+
+     - Setup: Installs one config-backed add-on whose adjusted location is the canonical `prompts`
+       root alongside a separately synthesized standalone CSV prompt Book.
+     - Expected result: Deletion rejects the shared root and preserves the config, directory, and
+       standalone CSV owner without creating rollback residue.
+     - Side effects: Creates and removes one isolated SWORD tree and attempts one real transaction.
+     - Failure meaning: Deleting a config-backed add-on can silently erase independently registered
+       raw-family books that do not own a SWORD config location.
+     */
+    func testAddonUninstallRejectsSharedInstalledFamilyRoot() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        let promptsDirectory = moduleRoot.appendingPathComponent("prompts", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: promptsDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        let csvURL = promptsDirectory.appendingPathComponent("Other.csv")
+        try "id;name;description;promptTemplate\n".write(
+            to: csvURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let configURL = configDirectory.appendingPathComponent("shared-root.conf")
+        try """
+        [SHAREDROOT]
+        Description=Shared prompts root
+        Abbreviation=Shared prompts root
+        Category=And Bible
+        ModDrv=RawGenBook
+        DataPath=./prompts/
+        AndBibleMinimumVersion=1115
+        AndBibleProvidesPrompts=Other.csv
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let addon = try XCTUnwrap(
+            manager.admittedAddonModules().first {
+                SwordJavaStringIdentity.equals($0.moduleInfo.name, "SHAREDROOT")
+            }
+        )
+        XCTAssertNotNil(
+            manager.admittedAddonModules().first {
+                SwordJavaStringIdentity.equals($0.moduleInfo.name, "Prompts_Other")
+            }
+        )
+        let repository = ModuleRepository(
+            basePath: moduleRoot.appendingPathComponent("install-manager").path,
+            swordPath: moduleRoot.path
+        )
+
+        XCTAssertThrowsError(try repository.uninstallAddon(addon.removalTarget)) { error in
+            guard case ModuleStoreMutationError.installedOwnershipConflict(
+                let moduleName,
+                let owner
+            ) = error else {
+                return XCTFail("Expected protected-root rejection, received \(error)")
+            }
+            XCTAssertEqual(moduleName, "SHAREDROOT")
+            XCTAssertEqual(owner, "prompts")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: configURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: csvURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: promptsDirectory.path))
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: moduleRoot.path)
+                .contains { $0.hasPrefix(".module-transaction-") }
+        )
+    }
+
+    /**
+     Verifies admitted add-ons retain live cipher state and invalidate their cached projection.
+
+     - Setup: Converts a genuine encrypted RawLD fixture to an And Bible book, captures it locked,
+       then unlocks it with the fixture key after the projection cache is populated.
+     - Expected result: Installed and add-on projections agree on abbreviation/encryption state,
+       and the post-unlock add-on projection reports the same owner as unlocked.
+     - Side effects: Creates encrypted fixture files and atomically persists the verified key.
+     - Failure meaning: Picker unlock affordances or feature inventory can remain stale/diverge from
+       the installed registry.
+     */
+    func testAdmittedAddonProjectionRetainsAndRefreshesCipherState() throws {
+        let fixture = try makeEncryptedRawLDFixture(moduleName: "LOCKEDADDON")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var config = try String(contentsOf: fixture.configURL, encoding: .utf8)
+        config = config.replacingOccurrences(
+            of: "Category=Lexicons / Dictionaries",
+            with: "Category=And Bible\nAbbreviation=Locked feature"
+        )
+        try config.write(to: fixture.configURL, atomically: true, encoding: .utf8)
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let installedBefore = try XCTUnwrap(
+            manager.installedBookRegistrations().first { $0.moduleInfo.name == "LOCKEDADDON" }
+        )
+        let addonBefore = try XCTUnwrap(
+            manager.admittedAddonModules().first { $0.moduleInfo.name == "LOCKEDADDON" }
+        )
+        XCTAssertEqual(installedBefore.abbreviation, "Locked feature")
+        XCTAssertTrue(installedBefore.moduleInfo.isEncrypted)
+        XCTAssertFalse(installedBefore.moduleInfo.isUnlocked)
+        XCTAssertEqual(addonBefore.moduleInfo.isEncrypted, installedBefore.moduleInfo.isEncrypted)
+        XCTAssertEqual(addonBefore.moduleInfo.isUnlocked, installedBefore.moduleInfo.isUnlocked)
+
+        XCTAssertTrue(manager.unlockModule(named: "LOCKEDADDON", withCipherKey: fixture.cipherKey))
+        let addonAfter = try XCTUnwrap(
+            manager.admittedAddonModules().first { $0.moduleInfo.name == "LOCKEDADDON" }
+        )
+        XCTAssertTrue(addonAfter.moduleInfo.isEncrypted)
+        XCTAssertTrue(addonAfter.moduleInfo.isUnlocked)
+    }
+
+    /**
+     Verifies manager-lifetime add-on projection caches compatibility until explicit invalidation.
+
+     - Setup: Reads one installed add-on, rewrites its minimum version above the supported Android
+       boundary, then invalidates Swift-owned snapshots.
+     - Expected result: Repeated access keeps the captured generation stable, while `refresh()`
+       reparses the installed config and omits the now-incompatible book.
+     - Side effects: Creates, mutates, reads, and removes one isolated SWORD config tree.
+     - Failure meaning: Prompt and picker calls can disagree within one installed-state generation,
+       or explicit invalidation leaves stale Android compatibility admission behind.
+     */
+    func testAdmittedAddonModulesCacheUntilManagerRefresh() throws {
+        let moduleRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let configDirectory = moduleRoot.appendingPathComponent("mods.d", isDirectory: true)
+        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+
+        func writeAddon(_ initials: String, minimumVersion: Int) throws {
+            try FileManager.default.createDirectory(
+                at: moduleRoot.appendingPathComponent("addons/\(initials.lowercased())"),
+                withIntermediateDirectories: true
+            )
+            try """
+            [\(initials)]
+            Description=\(initials)
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./addons/\(initials.lowercased())/
+            AndBibleMinimumVersion=\(minimumVersion)
+            """.write(
+                to: configDirectory.appendingPathComponent("\(initials.lowercased()).conf"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+
+        try writeAddon("FIRST", minimumVersion: 1115)
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        XCTAssertEqual(manager.admittedAddonModules().map(\.moduleInfo.name), ["FIRST"])
+
+        try writeAddon("FIRST", minimumVersion: 1116)
+        XCTAssertEqual(manager.admittedAddonModules().map(\.moduleInfo.name), ["FIRST"])
+
+        manager.refresh()
+        XCTAssertTrue(manager.admittedAddonModules().isEmpty)
     }
 
     /**

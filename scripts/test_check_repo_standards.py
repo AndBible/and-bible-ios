@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_repo_standards import (
     find_legacy_root_sidebar_shell,
     find_multiline_slash_docblocks,
+    find_unshared_addon_feature_discovery,
     find_unsafe_direct_document_publishers,
     validate_commit_message,
     validate_source_guards,
@@ -539,6 +540,114 @@ class RepoStandardsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(find_unsafe_direct_document_publishers(strict_text, path), [])
+
+    def test_find_unshared_addon_feature_discovery_rejects_prompt_rescans(self) -> None:
+        path = "Sources/BibleCore/Sources/BibleCore/AI/PromptRepository.swift"
+        unsafe_text = "\n".join(
+            [
+                "func loadPromptPacks() {",
+                "  let admitted = swordManager.admittedAddonModules()",
+                "  let manager = swordManager",
+                "  let rows = manager.installedModules()",
+                "    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }",
+                "  let raw = SwordModuleConfig.readAll(modulePath: swordManager.modulePath)",
+                "  let module = manager.module(named: name)",
+                "  let hidden = rescanInstalledAddons(swordManager)",
+                "  let discover = manager.installedModules",
+                "  _ = discover()",
+                "}",
+            ]
+        )
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(unsafe_text, path),
+            [4, 5, 6, 7, 8, 9],
+        )
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(
+                "func loadPromptPacks() {\n"
+                "  let addons = swordManager.admittedAddonModules()\n"
+                "}",
+                path,
+            ),
+            [],
+        )
+
+    def test_find_unshared_addon_feature_discovery_rejects_picker_raw_addons(self) -> None:
+        path = "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(
+                "func selectableAddonModules() {\n"
+                "  let shared = manager.admittedAddonModules()\n"
+                "  let addons = manager.installedModules(category: .addon)\n"
+                "}",
+                path,
+            ),
+            [3],
+        )
+
+    def test_find_unshared_addon_feature_discovery_rejects_external_helpers(self) -> None:
+        path = "Sources/BibleCore/Sources/BibleCore/AI/AddonRescan.swift"
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(
+                "func rescan(_ manager: SwordManager) {\n"
+                "  _ = SwordModuleConfig.readAll(modulePath: manager.modulePath)\n"
+                "  _ = manager.installedModules(category: .addon)\n"
+                "}",
+                path,
+            ),
+            [2, 3],
+        )
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(
+                "func selectableAddonModules() {\n"
+                "  let addons = manager.admittedAddonModules()\n"
+                "}",
+                path,
+            ),
+            [],
+        )
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(
+                "func selectableAddonModules() {\n"
+                "  let shared = manager.admittedAddonModules()\n"
+                "  let rows = manager.installedModules().filter { $0.category == .addon }\n"
+                "}",
+                path,
+            ),
+            [3],
+        )
+
+        indirection_text = "\n".join(
+            [
+                "typealias Reader = SwordModuleConfig",
+                "func raw(_ root: String) { _ = Reader.readAll(modulePath: root) }",
+                "func choose(_ manager: SwordManager, _ category: ModuleCategory) {",
+                "  _ = manager.installedModules(category: category)",
+                "}",
+                "func alias(_ manager: SwordManager) {",
+                "  let get: () -> [ModuleInfo] = manager.installedModules",
+                "  _ = get().filter { $0.category == .addon }",
+                "}",
+            ]
+        )
+        self.assertEqual(
+            find_unshared_addon_feature_discovery(indirection_text, path),
+            [2, 4, 7],
+        )
+
+    def test_find_unshared_addon_feature_discovery_scopes_infrastructure_exceptions(self) -> None:
+        path = "Sources/SwordKit/Sources/SwordKit/TtfFontRepository.swift"
+        text = "\n".join(
+            [
+                "func configuredFontPackPathKeys() {",
+                "  _ = SwordModuleConfig.readAll(modulePath: swordPath)",
+                "}",
+                "func rescanAddons() {",
+                "  _ = SwordModuleConfig.readAll(modulePath: swordPath)",
+                "}",
+            ]
+        )
+        self.assertEqual(find_unshared_addon_feature_discovery(text, path), [5])
 
 
 if __name__ == "__main__":

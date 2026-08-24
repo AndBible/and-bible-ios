@@ -8392,6 +8392,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     }
 
     /**
+     Returns installed document-picker rows with Android's exact display abbreviations.
+
+     - Returns: Globally admitted native and SQLite books preserving final JSword TreeSet ownership
+       metadata; the chooser applies its visible category filter.
+     - Side effects: Captures one fresh installed resolver; no content is read and reader state is
+       unchanged.
+     - Failure modes: Missing, unsupported, and shadowed rows are omitted by registry admission
+       rather than reconstructed from stale controller arrays.
+     */
+    func installedBookPresentationsForDocumentPicker() -> [BibleReaderInstalledBookPresentation] {
+        installedModuleResolver().registeredBookPresentations()
+    }
+
+    /**
      Authorizes one installed AI window-document request and validates its optional key atomically.
 
      - Parameters:

@@ -79,8 +79,13 @@ public final class SwordManager: @unchecked Sendable {
      cache. Values are immutable after the single config/native capture and read no content.
      */
     private struct NativeModuleRegistrySnapshot {
+        /// Payload-admitted native books eligible for installed-TreeSet projection.
+        let installedBooks: [NativeInstalledBook]
+
         /// Supported native metadata rows eligible for installed-TreeSet projection.
-        let installedRegistrations: [InstalledModuleRegistration]
+        var installedRegistrations: [InstalledModuleRegistration] {
+            installedBooks.map(\.registration)
+        }
 
         /// Ownership-proven registrations keyed by unique exact initials.
         let exactInitials: [SwordJavaExactStringIdentity: NativeModuleRegistration]
@@ -93,6 +98,68 @@ public final class SwordManager: @unchecked Sendable {
 
         /// Ownership-proven registrations in installed JSword TreeSet order for alias lookup.
         let treeSetRegistrations: [NativeModuleRegistration]
+    }
+
+    /**
+     One native book after JSword payload adjustment and driver HashSet admission.
+
+     The parsed config, live access-state registration, and optional adjusted location travel as
+     one immutable owner so feature projections cannot reopen configs and lose cipher state or
+     select a different equality-group member.
+     */
+    private struct NativeInstalledBook {
+        /// Metadata and abbreviation captured from the admitted native owner.
+        let registration: InstalledModuleRegistration
+
+        /// Exact parsed config that produced this installed book.
+        let config: SwordModuleConfig
+
+        /// JSword-adjusted feature location, or nil when slashless `DataPath` retained no location.
+        let locationURL: URL?
+    }
+
+    /**
+     One installed add-on candidate before TreeSet replacement and compatibility filtering.
+
+     Native books arrive after driver HashSet admission. Standalone CSV prompt books are appended
+     later through Android's explicit `Books.addBook` path and therefore bypass the driver HashSet.
+     */
+    private struct InstalledAddonCandidate {
+        /// Metadata and abbreviation participating in installed TreeSet comparison.
+        let registration: InstalledModuleRegistration
+
+        /// Parsed feature metadata supplying minimum version and prompt-pack filename.
+        let config: SwordModuleConfig
+
+        /// Filesystem-adjusted location used by feature consumers, when JSword assigned one.
+        let locationURL: URL?
+
+        /// Exact installed config or generated CSV owner used for deletion.
+        let removalTarget: SwordInstalledAddonRemovalTarget
+    }
+
+    /** One immutable installed generation shared by public inventory and add-on consumers. */
+    private struct InstalledRegistryProjection {
+        /// Supported public books after the complete Android add sequence and TreeSet replay.
+        let registrations: [SwordInstalledBookRegistration]
+
+        /// Installed add-on owners carrying config and location before compatibility filtering.
+        let addonCandidates: [InstalledAddonCandidate]
+    }
+
+    /** Result of JSword `SwordBookMetaData.adjustLocation` payload admission. */
+    enum AdjustedModuleLocation {
+        /// The book remains installed, but a slashless `DataPath` assigned no feature location.
+        case noLocation
+
+        /// The book remains installed with this validated directory location.
+        case location(URL)
+
+        /// Optional URL exposed to installed feature projections.
+        var url: URL? {
+            guard case .location(let url) = self else { return nil }
+            return url
+        }
     }
 
     /**
@@ -181,6 +248,12 @@ public final class SwordManager: @unchecked Sendable {
     /// One manager-lifetime config/registry capture, invalidated by unlock and explicit refresh.
     private var nativeRegistrySnapshotCache: NativeModuleRegistrySnapshot?
 
+    /// Complete installed generation shared by public book and feature projections.
+    private var installedRegistryProjectionCache: InstalledRegistryProjection?
+
+    /// Android-admitted add-ons in installed TreeSet order, invalidated with installed inventory.
+    private var admittedAddonModulesCache: [SwordAdmittedAddonModule]?
+
     /// Current-session unlock overrides keyed by the exact canonical initials that were verified.
     private var sessionUnlockedModuleNames: Set<SwordJavaExactStringIdentity> = []
 
@@ -203,6 +276,8 @@ public final class SwordManager: @unchecked Sendable {
     deinit {
         SwordRuntime.sync {
             nativeRegistrySnapshotCache = nil
+            installedRegistryProjectionCache = nil
+            admittedAddonModulesCache = nil
             moduleCache.removeAll()
             SWMgr_delete(handle)
         }
@@ -235,40 +310,93 @@ public final class SwordManager: @unchecked Sendable {
      in inventory so they can expose Android's unlock action. Android custom drivers restored from
      Android module backups, such as `MyBibleDictionary`, are stored as `.conf` rows plus SQLite
      payloads but are not opened by libsword. Manifest-installed MyBible packages are stored in iOS'
-     sidecar package directory. Android exposes both families through `Books.installed().books`;
-     iOS mirrors that inventory here by projecting readable custom modules into `ModuleInfo` rows.
+     sidecar package directory. Configless CSV files in `prompts` become Android `CsvPromptBook`
+     registrations. Android exposes all of these families through `Books.installed().books`; iOS
+     mirrors that inventory here through one cached installed-registry projection.
 
      - Returns: SWORD modules and readable Android custom modules projected through JSword's
        category/abbreviation/initials/name TreeSet comparator. Canonically equivalent Java-distinct
        UTF-16 spellings and comparator-distinct duplicate-initial metadata remain separate books.
-     - Side effects: Reads `mods.d` configs, sidecar metadata, and checks custom payload files.
+     - Side effects: Reads `mods.d` configs, sidecar metadata, checks custom payload files, and
+       enumerates readable direct-child CSV files in the `prompts` directory.
      - Failure modes: Malformed configs, modules libsword cannot resolve, and custom rows without
        readable payloads are skipped.
      - Note: Locked encrypted modules remain visible with `isUnlocked == false`; a key verified in
        this manager session overrides only that module's stale native metadata snapshot.
      */
     public func installedModules() -> [ModuleInfo] {
-        let swordModules = nativeModuleRegistrySnapshot().installedRegistrations
-        let restoredCustomModules = Self.androidCustomInstalledRegistrations(modulePath: modulePath)
-        let packageModules = Self.admittedMyBiblePackageRegistrations(
-            Self.myBiblePackageRegistrations(modulePath: modulePath),
-            after: swordModules + restoredCustomModules
-        )
+        installedBookRegistrations().map(\.moduleInfo)
+    }
 
-        let merged = Self.mergedInstalledModules(
-            swordModules: swordModules,
-            customModules: restoredCustomModules + packageModules
-        )
-        // Exclude modules SWORD cannot fully use (e.g. a Bible with an unrecognized versification),
-        // mirroring Android's `Books.installed()`, which never contains an unsupported book. Such a
-        // module is then invisible everywhere — not readable, not in pickers, and shown as
-        // not-installed in Downloads (so it appears re-downloadable, which overwrites a broken conf).
-        // Uninstall/index operate by name and are unaffected. See ADR-0010.
-        //
-        // `isSupported` reads SWORD's versification manager per Bible module; run the whole filter in
-        // one serialization hop (re-entrant `SwordRuntime.sync`) so a large library costs a single
-        // queue round-trip rather than one per module.
-        return SwordRuntime.sync { merged.filter(\.isSupported) }
+    /**
+     Lists installed books with the exact JSword abbreviation retained through registry admission.
+
+     - Returns: Comparator-distinct native, Android custom, and generated standalone prompt books
+       in installed TreeSet order, carrying inclusive access state and display abbreviation.
+     - Side effects: Builds the same cached native snapshot, reads custom payload metadata, and
+       enumerates standalone prompt CSV files exactly as `installedModules()`; no content is read.
+     - Failure modes: Malformed, unsupported, payload-missing, and shadowed books are omitted by the
+       shared installed registry rather than approximated by consumers.
+     */
+    public func installedBookRegistrations() -> [SwordInstalledBookRegistration] {
+        installedRegistryProjection().registrations
+    }
+
+    /**
+     Builds one installed generation for every public inventory and add-on feature consumer.
+
+     - Returns: Supported TreeSet registrations plus config/location-bearing add-on owners captured
+       from the same native/custom/package/standalone add sequence.
+     - Side effects: On first access, reads installed configs, package metadata, payload paths, and
+       the standalone prompts directory; later access reuses the immutable manager snapshot.
+     - Failure modes: Malformed, unsupported, payload-missing, shadowed, and unreadable books are
+       omitted fail closed; an unreadable standalone directory contributes no synthetic books.
+     */
+    private func installedRegistryProjection() -> InstalledRegistryProjection {
+        SwordRuntime.sync {
+            if let installedRegistryProjectionCache { return installedRegistryProjectionCache }
+
+            let nativeSnapshot = nativeModuleRegistrySnapshot()
+            let swordModules = nativeSnapshot.installedRegistrations
+            let restoredCustomModules = Self.androidCustomInstalledRegistrations(modulePath: modulePath)
+            let packageModules = Self.admittedMyBiblePackageRegistrations(
+                Self.myBiblePackageRegistrations(modulePath: modulePath),
+                after: swordModules + restoredCustomModules
+            )
+            var installedRegistrations = swordModules + restoredCustomModules + packageModules
+            var addonCandidates: [InstalledAddonCandidate] = nativeSnapshot.installedBooks.compactMap { book in
+                guard book.registration.info.category == .addon else { return nil }
+                return InstalledAddonCandidate(
+                    registration: book.registration,
+                    config: book.config,
+                    locationURL: book.locationURL,
+                    removalTarget: Self.configRemovalTarget(
+                        config: book.config,
+                        registration: book.registration,
+                        locationURL: book.locationURL,
+                        modulePath: modulePath
+                    )
+                )
+            }
+            addonCandidates.append(contentsOf: Self.standalonePromptCandidates(
+                modulePath: modulePath,
+                installedRegistrations: &installedRegistrations
+            ))
+            let registrations = Self.installedRegistrationOrderProjection(installedRegistrations)
+                .filter(\.info.isSupported)
+                .map {
+                    SwordInstalledBookRegistration(
+                        moduleInfo: $0.info,
+                        abbreviation: $0.abbreviation
+                    )
+                }
+            let projection = InstalledRegistryProjection(
+                registrations: registrations,
+                addonCandidates: addonCandidates
+            )
+            installedRegistryProjectionCache = projection
+            return projection
+        }
     }
 
     /// List installed modules filtered by category.
@@ -402,6 +530,8 @@ public final class SwordManager: @unchecked Sendable {
             SWMgr_setCipherKey(handle, canonicalName, cipherKey)
             sessionUnlockedModuleNames.insert(SwordJavaExactStringIdentity(canonicalName))
             nativeRegistrySnapshotCache = nil
+            installedRegistryProjectionCache = nil
+            admittedAddonModulesCache = nil
             return true
         }
     }
@@ -783,10 +913,11 @@ public final class SwordManager: @unchecked Sendable {
        order. Subsequent lookups reuse the same immutable snapshot until unlock or `refresh()`.
      - Side effects: On first access, reads installed configs, asks libsword for exact handles, and
        populates the exact-keyed module cache only for raw-unique identities. No content is read.
-     - Failure modes: Custom, missing, cross-resolved, and unsupported configs are omitted from
-       native inventory. Duplicate identity detection occurs before those filters, preventing one
-       filtered config from making a surviving backend appear safely owned. Exact full-name
-       collisions remain individually readable by initials but fail closed through the name map.
+     - Failure modes: Custom, payload-invalid, missing, cross-resolved, and unsupported configs are
+       omitted before driver HashSet ownership. Duplicate exact-initial detection still covers the
+       raw config set, preventing a filtered duplicate from making content ownership appear safe.
+       Exact full-name collisions remain individually readable by initials but fail closed through
+       the name map.
      - Important: All native work executes through the re-entrant `SwordRuntime` serialization gate.
      - Complexity: O(N log N) once per cache lifetime; cached exact lookup is O(1).
      */
@@ -808,11 +939,15 @@ public final class SwordManager: @unchecked Sendable {
                 Self.javaStringCompare($0.sourceURL?.path ?? "", $1.sourceURL?.path ?? "") < 0
             }
             var nativeHashIdentities: Set<NativeSwordBookHashIdentity> = []
-            var installedRegistrations: [InstalledModuleRegistration] = []
+            var installedBooks: [NativeInstalledBook] = []
             var resolvableRegistrations: [NativeModuleRegistration] = []
             for config in deterministicConfigs {
                 guard !config.isAndroidCustomDriver,
                       let configURL = config.sourceURL,
+                      let adjustedLocation = Self.adjustedModuleLocation(
+                        for: config,
+                        modulePath: modulePath
+                      ),
                       let moduleHandle = SWMgr_getModuleByName(handle, config.name) else {
                     continue
                 }
@@ -844,11 +979,15 @@ public final class SwordManager: @unchecked Sendable {
                     .map(SwordJavaStringIdentity.trim)
                 let abbreviation = configuredAbbreviation.flatMap { $0.isEmpty ? nil : $0 }
                     ?? info.name
-                installedRegistrations.append(
-                    InstalledModuleRegistration(
-                        info: info,
-                        abbreviation: abbreviation,
-                        fullName: config.description
+                installedBooks.append(
+                    NativeInstalledBook(
+                        registration: InstalledModuleRegistration(
+                            info: info,
+                            abbreviation: abbreviation,
+                            fullName: config.description
+                        ),
+                        config: config,
+                        locationURL: adjustedLocation.url
                     )
                 )
 
@@ -891,7 +1030,7 @@ public final class SwordManager: @unchecked Sendable {
                 }
             }
             let snapshot = NativeModuleRegistrySnapshot(
-                installedRegistrations: installedRegistrations,
+                installedBooks: installedBooks,
                 exactInitials: exactInitials,
                 exactFullNames: exactFullNames,
                 ambiguousExactFullNames: Set(
@@ -988,25 +1127,6 @@ public final class SwordManager: @unchecked Sendable {
         guard SwordJavaExactStringIdentity(module.info.name) == identity else { return nil }
         moduleCache[identity] = module
         return module
-    }
-
-    /**
-     Merges libsword and Android custom-driver registrations through JSword TreeSet semantics.
-
-     - Parameters:
-       - swordModules: Modules enumerated by libsword.
-       - customModules: Config-projected custom modules.
-     - Returns: Comparator-distinct modules sorted by pinned category, abbreviation, exact initials,
-       and exact full name. Same-initials books with different comparator fields remain installed.
-     - Side effects: Loads the pinned Android character table used by the sort comparator.
-     - Failure modes: none.
-     */
-    private static func mergedInstalledModules(
-        swordModules: [InstalledModuleRegistration],
-        customModules: [InstalledModuleRegistration]
-    ) -> [ModuleInfo] {
-        installedRegistrationOrderProjection(swordModules + customModules)
-            .map(\.info)
     }
 
     /**
@@ -1281,16 +1401,18 @@ public final class SwordManager: @unchecked Sendable {
         let compatibleVersion = applicationVersionNumber
             ?? androidCompatibilityVersionNumber
 
-        let configs = addonConfigsInInstalledOrder(
-            SwordModuleConfig.readAll(modulePath: modulePath),
+        guard let manager = SwordManager(modulePath: modulePath) else { return [] }
+        let candidates = manager.admittedAddonCandidates(
             applicationVersionNumber: compatibleVersion
         )
-        for config in configs {
+        for candidate in candidates {
+            let config = candidate.config
             let planFileNames = config.values["AndBibleProvidesReadingPlan"] ?? []
             for fileName in planFileNames {
-                guard let fileURL = readingPlanProviderFileURL(
+                guard let locationURL = candidate.locationURL,
+                      let fileURL = readingPlanProviderFileURL(
                     fileName: fileName,
-                    config: config,
+                    locationURL: locationURL,
                     modulePath: modulePath
                 ) else {
                     continue
@@ -1321,6 +1443,323 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
+     Returns installed add-ons admitted by Android's shared feature filter and registry ordering.
+
+     This is the common source for prompt packs and the Add-ons document picker. It applies pinned
+     current-stable Android compatibility, supported-book admission, native driver HashSet identity,
+     and JSword TreeSet replacement/order once, preventing feature surfaces from scanning or sorting
+     raw SWORD configs independently.
+
+     - Returns: Admitted add-on metadata and feature-file fields in installed TreeSet order.
+     - Side effects: On first access, reads installed config files, enumerates standalone prompt CSV
+       files, and caches the immutable result for this manager. `refresh()` invalidates the cache.
+     - Failure modes: Malformed or unsupported configs and malformed/too-new minimum versions fail
+       closed and are omitted. An unreadable config directory omits config-backed rows, while
+       independently readable standalone prompt books may remain installed.
+     */
+    public func admittedAddonModules() -> [SwordAdmittedAddonModule] {
+        SwordRuntime.sync {
+            if let admittedAddonModulesCache { return admittedAddonModulesCache }
+            let modules = admittedAddonModules(
+                applicationVersionNumber: Self.androidCompatibilityVersionNumber
+            )
+            admittedAddonModulesCache = modules
+            return modules
+        }
+    }
+
+    /**
+     Projects installed configs through Android's add-on admission and BookSet contract.
+
+     - Parameters:
+       - modulePath: SWORD module root containing the installed `mods.d` configs.
+       - applicationVersionNumber: Exact Android version-code boundary used by deterministic tests.
+     - Returns: Admitted add-ons in pinned JSword TreeSet order, with singular prompt metadata.
+     - Side effects: Reads local config files and the pinned Android comparison table.
+     - Failure modes: Missing, malformed, unsupported, or future configs are omitted fail closed.
+     */
+    static func admittedAddonModules(
+        modulePath: String,
+        applicationVersionNumber: Int
+    ) -> [SwordAdmittedAddonModule] {
+        guard let manager = SwordManager(modulePath: modulePath) else { return [] }
+        return manager.admittedAddonModules(applicationVersionNumber: applicationVersionNumber)
+    }
+
+    /**
+     Projects only books that entered this manager's installed registry through Android admission.
+
+     - Parameter applicationVersionNumber: Android compatibility version used by feature filtering.
+     - Returns: Payload-admitted add-ons in installed TreeSet order with adjusted locations.
+     - Side effects: Builds the manager's native registry snapshot, reads configs, and checks custom
+       payload metadata; document content is not read.
+     - Failure modes: Missing payloads, unsafe locations, unsupported drivers, and incompatible
+       add-ons are omitted fail closed.
+     */
+    private func admittedAddonModules(
+        applicationVersionNumber: Int
+    ) -> [SwordAdmittedAddonModule] {
+        admittedAddonCandidates(
+            applicationVersionNumber: applicationVersionNumber
+        ).map { candidate in
+            SwordAdmittedAddonModule(
+                moduleInfo: candidate.registration.info,
+                abbreviation: candidate.registration.abbreviation,
+                promptFileName: candidate.config.values["AndBibleProvidesPrompts"]?.first,
+                locationURL: candidate.locationURL,
+                removalTarget: candidate.removalTarget
+            )
+        }
+    }
+
+    /**
+     Builds the shared installed add-on owners before consumer-specific field projection.
+
+     - Parameter applicationVersionNumber: Android compatibility version used by feature filtering.
+     - Returns: Final installed TreeSet owners carrying their exact config, access state, and
+       adjusted location.
+     - Side effects: Builds the manager's native registry snapshot and enumerates standalone CSV
+       prompt files; document content is not read.
+     - Failure modes: Invalid native payloads, rejected custom owners, duplicate standalone
+       identities, and incompatible final owners are omitted fail closed.
+     */
+    private func admittedAddonCandidates(
+        applicationVersionNumber: Int
+    ) -> [InstalledAddonCandidate] {
+        return Self.addonCandidatesInInstalledOrder(
+            installedRegistryProjection().addonCandidates,
+            applicationVersionNumber: applicationVersionNumber
+        )
+    }
+
+    /**
+     Synthesizes Android's configless CSV books under `modulesDir/prompts` after driver registration.
+
+     - Parameters:
+       - modulePath: Installed SWORD root containing the optional readable `prompts` directory.
+       - installedRegistrations: Current Books registry in add order; accepted synthetic books are
+         appended so later files replay Android's `Books.getBook(initials)` preflight.
+     - Returns: Readable CSV prompt books in filesystem enumeration order with exact Android
+       generated metadata and their prompts-directory location.
+     - Side effects: Enumerates the prompts directory and reads file metadata without CSV content.
+     - Failure modes: Missing/unreadable directories, non-files, non-CSV extensions, unreadable
+       files, malformed generated metadata, and an existing lookup owner are omitted fail closed.
+     */
+    private static func standalonePromptCandidates(
+        modulePath: String,
+        installedRegistrations: inout [InstalledModuleRegistration]
+    ) -> [InstalledAddonCandidate] {
+        let fileManager = FileManager.default
+        let promptDirectory = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("prompts", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: promptDirectory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              fileManager.isReadableFile(atPath: promptDirectory.path),
+              let files = try? fileManager.contentsOfDirectory(
+                at: promptDirectory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: []
+              ) else {
+            return []
+        }
+
+        var candidates: [InstalledAddonCandidate] = []
+        for fileURL in files {
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true,
+                  fileManager.isReadableFile(atPath: fileURL.path),
+                  SwordJavaStringIdentity.equalsIgnoreCase(fileURL.pathExtension, "csv") else {
+                continue
+            }
+            let packName = fileURL.deletingPathExtension().lastPathComponent
+            let initials = "Prompts_\(packName)"
+            guard installedRegistration(named: initials, in: installedRegistrations) == nil else {
+                continue
+            }
+            let content = """
+            [\(initials)]
+            Description=\(packName) prompts
+            Category=And Bible
+            ModDrv=RawGenBook
+            DataPath=./prompts/
+            Encoding=UTF-8
+            AndBibleProvidesPrompts=\(fileURL.lastPathComponent)
+            AndBibleMinimumVersion=892
+            """
+            guard let config = SwordModuleConfig.parse(content, sourceURL: fileURL),
+                  SwordJavaStringIdentity.equals(config.name, initials),
+                  config.values["AndBibleProvidesPrompts"]?.first == fileURL.lastPathComponent else {
+                continue
+            }
+            let registration = installedRegistration(for: config)
+            installedRegistrations.append(registration)
+            candidates.append(
+                InstalledAddonCandidate(
+                    registration: registration,
+                    config: config,
+                    locationURL: promptDirectory.standardizedFileURL,
+                    removalTarget: SwordInstalledAddonRemovalTarget(
+                        standalonePromptFileName: fileURL.lastPathComponent,
+                        moduleName: initials
+                    )
+                )
+            )
+        }
+        return candidates
+    }
+
+    /**
+     Captures the exact installed config owner used by add-on deletion.
+
+     - Parameters:
+       - config: Parsed, payload-admitted native config with a concrete source file.
+       - registration: Installed Book metadata and abbreviation produced from that config.
+       - locationURL: JSword-adjusted installed location, or nil when metadata retained none.
+       - modulePath: Canonical manager root used to express the config as a bounded relative path.
+     - Returns: Opaque config-backed removal identity.
+     - Side effects: Resolves standardized filesystem paths without mutation.
+     - Failure modes: None; native admission already requires a direct-root source config. A
+       defensive nonrelative source produces a path that the mutation boundary rejects fail closed.
+     */
+    private static func configRemovalTarget(
+        config: SwordModuleConfig,
+        registration: InstalledModuleRegistration,
+        locationURL: URL?,
+        modulePath: String
+    ) -> SwordInstalledAddonRemovalTarget {
+        let rootURL = URL(fileURLWithPath: modulePath, isDirectory: true).standardizedFileURL
+        let configURL = config.sourceURL?.standardizedFileURL
+        let rootPrefix = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
+        let relativePath: String
+        if let configURL, configURL.path.hasPrefix(rootPrefix) {
+            relativePath = String(configURL.path.dropFirst(rootPrefix.count))
+        } else {
+            relativePath = configURL?.lastPathComponent ?? ""
+        }
+        let standardizedLocation = locationURL?.standardizedFileURL
+        let locationRelativePath: String?
+        if let standardizedLocation, standardizedLocation.path.hasPrefix(rootPrefix) {
+            locationRelativePath = String(standardizedLocation.path.dropFirst(rootPrefix.count))
+        } else {
+            locationRelativePath = nil
+        }
+        return SwordInstalledAddonRemovalTarget(
+            configRelativePath: relativePath,
+            moduleName: registration.info.name,
+            fullName: registration.fullName,
+            abbreviation: registration.abbreviation,
+            driver: config.modDrv,
+            dataPath: config.dataPath,
+            locationRelativePath: locationRelativePath
+        )
+    }
+
+    /**
+     Resolves one `Books.getBook` token against the current installed add sequence.
+
+     - Parameters:
+       - name: Exact initials/name or Java case-insensitive alias proposed by a synthetic book.
+       - registrations: Books in Android add order before the new synthetic book.
+     - Returns: The surviving exact-initials owner, exact-name owner, then first TreeSet alias.
+     - Side effects: Loads the pinned Android case-fold table for TreeSet alias comparison.
+     - Failure modes: Empty or unmatched names return nil without changing the registry.
+     */
+    private static func installedRegistration(
+        named name: String,
+        in registrations: [InstalledModuleRegistration]
+    ) -> InstalledModuleRegistration? {
+        var surviving: [InstalledModuleRegistration] = []
+        for registration in registrations {
+            let identity = installedBookSetIdentity(registration)
+            surviving.removeAll { installedBookSetIdentity($0) == identity }
+            surviving.append(registration)
+        }
+        return surviving.last { SwordJavaStringIdentity.equals($0.info.name, name) }
+            ?? surviving.last { SwordJavaStringIdentity.equals($0.fullName, name) }
+            ?? surviving.sorted { installedModuleComparison($0, $1) < 0 }.first {
+                SwordJavaStringIdentity.equalsIgnoreCase($0.info.name, name)
+                    || SwordJavaStringIdentity.equalsIgnoreCase($0.fullName, name)
+            }
+    }
+
+    /**
+     Resolves JSword's filesystem-adjusted book location for one installed config.
+
+     JSword treats an existing `DataPath` directory as the book location even without a trailing
+     slash. A declared directory must exist; otherwise `DataPath` is a file prefix whose `.dat`
+     sentinel must exist and whose parent becomes the location.
+
+     - Parameters:
+       - config: Payload-admitted config whose first raw `DataPath` owns the book location.
+       - modulePath: SWORD root that bounds all accepted feature files.
+     - Returns: An admitted location state, including explicit no-location for slashless paths, or
+       nil when JSword would reject the payload.
+     - Side effects: Resolves symlinks and reads filesystem metadata without mutation.
+     - Failure modes: An absent `DataPath`, escaped paths, and missing declared directories or
+       prefix sentinels return nil.
+     */
+    static func adjustedModuleLocation(
+        for config: SwordModuleConfig,
+        modulePath: String
+    ) -> AdjustedModuleLocation? {
+        let root = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        guard let rawDataPath = config.values["DataPath"]?.first else { return nil }
+        let trimmedDataPath = SwordJavaStringIdentity.trim(rawDataPath)
+        guard !trimmedDataPath.isEmpty else { return .noLocation }
+        if !trimmedDataPath.contains("/") {
+            return .noLocation
+        }
+        let relativeDataPathWithShape = trimmedDataPath.hasPrefix("./")
+            ? String(trimmedDataPath.dropFirst(2))
+            : trimmedDataPath
+        let declaredDirectory = relativeDataPathWithShape.hasSuffix("/")
+        let relativeDataPath = declaredDirectory
+            ? String(relativeDataPathWithShape.dropLast())
+            : relativeDataPathWithShape
+        let dataURL = root.appendingPathComponent(relativeDataPath)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : "\(root.path)/"
+        guard dataURL == root || dataURL.path.hasPrefix(rootPrefix) else { return nil }
+
+        var isDirectory: ObjCBool = false
+        let dataPathExists = FileManager.default.fileExists(
+            atPath: dataURL.path,
+            isDirectory: &isDirectory
+        )
+        let location: URL
+        if dataPathExists && isDirectory.boolValue {
+            location = dataURL
+        } else {
+            guard !declaredDirectory else { return nil }
+            let sentinelURL = URL(fileURLWithPath: dataURL.path + ".dat")
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+            guard sentinelURL.path.hasPrefix(rootPrefix) else { return nil }
+            var sentinelIsDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(
+                atPath: sentinelURL.path,
+                isDirectory: &sentinelIsDirectory
+            ), !sentinelIsDirectory.boolValue else {
+                return nil
+            }
+            location = dataURL.deletingLastPathComponent()
+        }
+        guard location == root || location.path.hasPrefix(rootPrefix) else { return nil }
+        var locationIsDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: location.path,
+            isDirectory: &locationIsDirectory
+        ), locationIsDirectory.boolValue else {
+            return nil
+        }
+        return .location(location)
+    }
+
+    /**
      Android current-stable version code whose add-on feature contract this iOS build implements.
 
      Pinned And Bible commit `00b4ea24` declares version code 1115. This deliberately does not read
@@ -1331,42 +1770,38 @@ public final class SwordManager: @unchecked Sendable {
     private static let androidCompatibilityVersionNumber = 1115
 
     /**
-     Filters and orders configs through Android's `AndBibleAddonFilter` plus installed TreeSet.
+     Replays installed TreeSet ownership before applying Android's add-on feature filter.
+
+     Native candidates have already passed `SwordBookDriver` payload and HashSet admission;
+     standalone CSV candidates entered later through Android's direct `Books.addBook` path. Android
+     filters the final `Books.installed()` TreeSet, so compatibility cannot resurrect an earlier
+     comparator-equal owner when the later owner is too new.
 
      - Parameters:
-       - configs: Parsed installed configs in the captured platform enumeration sequence.
+       - candidates: Installed native and synthetic candidates in Android add order.
        - applicationVersionNumber: Android version-code compatibility supported by this build.
-     - Returns: Comparator-distinct admitted add-on configs in pinned installed-book order.
+     - Returns: Comparator-distinct final TreeSet owners that pass add-on admission, in pinned
+       installed-book order.
      - Side effects: Loads the pinned Android character table for category and abbreviation matching.
      - Failure modes: Missing minimum version defaults to zero; malformed/overflowing minimum values
        fail closed instead of reproducing Android's process-level `NumberFormatException`.
      */
-    private static func addonConfigsInInstalledOrder(
-        _ configs: [SwordModuleConfig],
+    private static func addonCandidatesInInstalledOrder(
+        _ candidates: [InstalledAddonCandidate],
         applicationVersionNumber: Int
-    ) -> [SwordModuleConfig] {
-        let deterministicConfigs = configs.sorted {
-            javaStringCompare($0.sourceURL?.path ?? "", $1.sourceURL?.path ?? "") < 0
-        }
-        var nativeBooks: Set<NativeSwordBookHashIdentity> = []
-        var surviving: [InstalledBookSetIdentity: (SwordModuleConfig, InstalledModuleRegistration)] = [:]
-        for config in deterministicConfigs where addonConfigIsAdmitted(
-            config,
-            applicationVersionNumber: applicationVersionNumber
-        ) {
-            let registration = installedRegistration(for: config)
-            let nativeIdentity = NativeSwordBookHashIdentity(
-                bookClass: nativeSwordBookClassIdentity(for: config),
-                categoryOrdinal: jswordCategoryOrdinal(registration.info.category),
-                initials: SwordJavaExactStringIdentity(registration.info.name),
-                fullName: SwordJavaExactStringIdentity(registration.fullName)
-            )
-            guard nativeBooks.insert(nativeIdentity).inserted else { continue }
-            surviving[installedBookSetIdentity(registration)] = (config, registration)
+    ) -> [InstalledAddonCandidate] {
+        var surviving: [InstalledBookSetIdentity: InstalledAddonCandidate] = [:]
+        for candidate in candidates {
+            surviving[installedBookSetIdentity(candidate.registration)] = candidate
         }
         return surviving.values.sorted {
-            installedModuleComparison($0.1, $1.1) < 0
-        }.map(\.0)
+            installedModuleComparison($0.registration, $1.registration) < 0
+        }.filter {
+            addonConfigIsAdmitted(
+                $0.config,
+                applicationVersionNumber: applicationVersionNumber
+            )
+        }
     }
 
     /**
@@ -1601,19 +2036,19 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
-     Resolves one `AndBibleProvidesReadingPlan` file reference for a module config.
+     Resolves one `AndBibleProvidesReadingPlan` file reference from an adjusted JSword location.
 
      - Parameters:
        - fileName: Config value containing the provider file name.
-       - config: Parsed provider module config.
+       - locationURL: Payload-admitted location assigned by JSword metadata adjustment.
        - modulePath: SWORD module root.
      - Returns: Validated provider file URL, or `nil` when the file is unavailable or unsafe.
      - Side effects: Checks file metadata on disk.
-     - Failure modes: Missing `DataPath`, escaped provider paths, and unreadable files return `nil`.
+     - Failure modes: Escaped provider paths and unreadable files return `nil`.
      */
     private static func readingPlanProviderFileURL(
         fileName: String,
-        config: SwordModuleConfig,
+        locationURL: URL,
         modulePath: String
     ) -> URL? {
         let normalizedFileName = fileName
@@ -1621,32 +2056,18 @@ public final class SwordManager: @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedFileName.isEmpty else { return nil }
 
-        let basePath = readingPlanProviderBasePath(config.dataPath)
-        let separator = basePath.isEmpty || basePath.hasSuffix("/") ? "" : "/"
-        return readableURL(
-            "\(basePath)\(separator)\(normalizedFileName)",
-            modulePath: modulePath,
-            isDirectory: false
-        )
-    }
-
-    /**
-     Derives the Android add-on resource base from a module `DataPath`.
-
-     JSword exposes add-on files relative to the adjusted module location. Directory `DataPath`
-     values are already that location; single-file driver paths resolve through their parent
-     directory, which is where add-on sidecar resources live.
-
-     - Parameter dataPath: Normalized SWORD config `DataPath`.
-     - Returns: Relative provider-file base path under the SWORD root.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private static func readingPlanProviderBasePath(_ dataPath: String) -> String {
-        let path = dataPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty, !path.hasSuffix("/") else { return path }
-        let parent = (path as NSString).deletingLastPathComponent
-        return parent == "." ? "" : parent
+        let root = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let resolved = locationURL.appendingPathComponent(normalizedFileName)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : "\(root.path)/"
+        guard resolved.path.hasPrefix(rootPrefix),
+              FileManager.default.isReadableFile(atPath: resolved.path) else {
+            return nil
+        }
+        return resolved
     }
 
     /**
@@ -1751,12 +2172,17 @@ public final class SwordManager: @unchecked Sendable {
     // MARK: - Module Refresh
 
     /**
-     Re-scan the module directory for changes.
-     Call after installing or uninstalling modules.
+     Invalidates Swift-owned snapshots after an installed-module state change.
+
+     - Side effects: Clears native, complete installed-registry, add-on, and module-wrapper caches.
+     - Failure modes: None. The underlying libsword manager is immutable; callers must construct a
+       new `SwordManager` to discover newly installed native handles.
      */
     public func refresh() {
         SwordRuntime.sync {
             nativeRegistrySnapshotCache = nil
+            installedRegistryProjectionCache = nil
+            admittedAddonModulesCache = nil
             moduleCache.removeAll()
         }
         // Recreate is the simplest way to refresh libsword's module list.

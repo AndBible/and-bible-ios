@@ -39,7 +39,7 @@ struct BibleReaderModulePicker: View {
 
     /// Single installed document selected by Android's contextual action mode.
     private enum ContextualDocument: Equatable {
-        /// Installed SWORD/SQLite module initials.
+        /// Stable chooser-row identity for one installed SWORD/SQLite/add-on book.
         case module(String)
 
         /// Installed EPUB stable library identifier.
@@ -83,6 +83,9 @@ struct BibleReaderModulePicker: View {
 
     /// Confirmation payload for destructive Android document actions.
     @State private var pendingRowActionConfirmation: ModuleBrowserRowActionConfirmation?
+
+    /// Exact admitted add-on owner awaiting Android's destructive delete confirmation.
+    @State private var pendingAddonUninstall: SwordAdmittedAddonModule?
 
     /// Success-only EPUB deletion state shared with the reader reconciliation boundary.
     @State private var epubDeletionState = EpubLibraryDeletionState()
@@ -204,21 +207,54 @@ struct BibleReaderModulePicker: View {
     /**
      All installed modules Android's document-type spinner can expose.
 
-     - Returns: Installed Bible, commentary, dictionary, general book, map, and add-on modules,
-       de-duplicated only by Java-exact UTF-16 initials while preserving registry order.
+     - Returns: Installed Bible, commentary, dictionary, general book, map, and every comparator-
+       distinct add-on supplied by the shared Android compatibility/BookSet projection.
      */
     private var allSelectableModules: [ModuleInfo] {
-        let documentModules = Self.documentCategoryFilterOrder
-            .flatMap { controller.installedModules(for: $0) }
-        let addonModules = controller.swordManager?.installedModules(category: .addon) ?? []
+        selectableDocumentModules.map(\.info) + selectableAddons.map(\.moduleInfo)
+    }
 
-        return Self.javaExactDistinctModules(documentModules + addonModules)
+    /**
+     Returns non-add-on installed documents gathered once per Android document category.
+
+     - Side effects: Reads current controller inventory without changing reader state.
+     - Failure modes: Categories with no installed owner contribute no rows.
+     */
+    private var selectableDocumentModules: [BibleReaderInstalledBookPresentation] {
+        controller.installedBookPresentationsForDocumentPicker().filter {
+            Self.documentCategory(for: $0.info.category) != nil
+        }
+    }
+
+    /**
+     Returns shared payload-admitted add-ons with JSword abbreviation and identity metadata intact.
+
+     - Side effects: May populate the current manager's immutable add-on projection cache.
+     - Failure modes: Missing manager state and rejected add-ons produce no rows.
+     */
+    private var selectableAddons: [SwordAdmittedAddonModule] {
+        Self.selectableAddonModules(from: controller.swordManager)
+    }
+
+    /**
+     Returns the shared Android-admitted add-on inventory for picker presentation.
+
+     - Parameter swordManager: Current installed-module manager, or nil before module startup.
+     - Returns: Admitted add-on metadata in pinned JSword TreeSet order, or an empty list without a
+       manager.
+     - Side effects: May populate the manager's installed add-on projection cache.
+     - Failure modes: Invalid, unsupported, or future add-ons are omitted fail closed by SwordKit.
+     */
+    static func selectableAddonModules(
+        from swordManager: SwordManager?
+    ) -> [SwordAdmittedAddonModule] {
+        swordManager?.admittedAddonModules() ?? []
     }
 
     /**
      Returns only EPUBs that own their Android book identity in the current combined registry.
 
-     The on-disk EPUB library can contain a legacy or concurrently imported package whose initials
+     The on-disk EPUB library can contain a stale or concurrently imported package whose initials
      are rejected by an earlier native, SQLite, EPUB, or My Documents registration. Android never
      exposes that package through `ChooseDocument`, because the corresponding `Book` was not added
      to `Books.installed()`. Resolving each candidate through the controller keeps the picker on the
@@ -251,13 +287,18 @@ struct BibleReaderModulePicker: View {
 
     /// Android chooser rows before filters are applied, including only globally admitted EPUBs.
     private var allRows: [DocumentChooserRow] {
-        Self.allRows(from: allSelectableModules, epubs: selectableEpubs)
+        Self.allRows(
+            installedBooks: selectableDocumentModules,
+            admittedAddons: selectableAddons,
+            epubs: selectableEpubs
+        )
     }
 
     /// Rows after applying Android-compatible admission, type, language, and free-text filters.
     private var filteredDocumentRows: [DocumentChooserRow] {
         Self.filteredRows(
-            allSelectableModules,
+            installedBooks: selectableDocumentModules,
+            admittedAddons: selectableAddons,
             epubs: selectableEpubs,
             selectedFilter: selectedFilter,
             selectedLanguage: selectedLanguage,
@@ -265,10 +306,15 @@ struct BibleReaderModulePicker: View {
         )
     }
 
-    /// Installed row currently driving Android's contextual document menu.
+    /// Exact installed row currently driving Android's contextual document menu.
+    private var contextualRow: DocumentChooserRow? {
+        guard case .module(let rowID) = contextualDocument else { return nil }
+        return allRows.first(where: { $0.id == rowID })
+    }
+
+    /// Installed metadata currently driving Android's contextual document menu.
     private var contextualModule: ModuleInfo? {
-        guard case .module(let moduleName) = contextualDocument else { return nil }
-        return Self.javaExactModule(named: moduleName, in: allSelectableModules)
+        contextualRow?.moduleInfo
     }
 
     /// Installed EPUB currently driving Android's contextual document menu.
@@ -467,6 +513,29 @@ struct BibleReaderModulePicker: View {
                         },
                     ]
                 )
+            } else if let addon = pendingAddonUninstall {
+                let confirmation = confirmation(.uninstall, for: addon.moduleInfo)
+                ModulePickerDecisionDialog(
+                    title: confirmation.title,
+                    message: confirmation.message,
+                    actions: [
+                        .init(
+                            id: "confirm",
+                            title: confirmation.confirmButtonTitle,
+                            role: .destructive
+                        ) {
+                            pendingAddonUninstall = nil
+                            uninstallInstalledAddon(addon)
+                        },
+                        .init(
+                            id: "cancel",
+                            title: confirmation.cancelButtonTitle,
+                            role: nil
+                        ) {
+                            pendingAddonUninstall = nil
+                        },
+                    ]
+                )
             } else if let confirmation = pendingRowActionConfirmation {
                 ModulePickerDecisionDialog(title: confirmation.title, message: confirmation.message, actions: [
                     .init(id: "confirm", title: confirmation.confirmButtonTitle, role: .destructive) {
@@ -575,6 +644,7 @@ struct BibleReaderModulePicker: View {
     @ViewBuilder
     private var androidTopAppBar: some View {
         if let contextualModule {
+            let contextualDeletion = contextualRow.flatMap(Self.deletionSelection)
             AndroidDocumentContextActionBar(
                 actions: contextualModuleActions,
                 surfacePalette: surfacePalette,
@@ -586,7 +656,17 @@ struct BibleReaderModulePicker: View {
                 },
                 onDelete: {
                     clearContextualModuleSelection()
-                    pendingRowActionConfirmation = confirmation(.uninstall, for: contextualModule)
+                    switch contextualDeletion {
+                    case .addon(let addon):
+                        pendingAddonUninstall = addon
+                    case .module(let module):
+                        pendingRowActionConfirmation = confirmation(
+                            .uninstall,
+                            for: module
+                        )
+                    case nil:
+                        break
+                    }
                 },
                 onUnlock: {
                     clearContextualModuleSelection()
@@ -810,7 +890,19 @@ struct BibleReaderModulePicker: View {
     private func androidDocumentRow(_ row: DocumentChooserRow) -> some View {
         switch row {
         case .module(let module):
-            moduleRow(module)
+            moduleRow(
+                module.info,
+                rowID: row.id,
+                primaryTitle: row.primaryTitle,
+                accessibilityIdentifier: row.moduleAccessibilityIdentifier
+            )
+        case .addon(let addon):
+            moduleRow(
+                addon.moduleInfo,
+                rowID: row.id,
+                primaryTitle: row.primaryTitle,
+                accessibilityIdentifier: row.moduleAccessibilityIdentifier
+            )
         case .epub(let epub):
             epubRow(epub)
         case .pseudoDocument(let document):
@@ -869,15 +961,28 @@ struct BibleReaderModulePicker: View {
     /**
      Builds one installed module row with Android list-item columns and row actions.
 
-     - Parameter module: Installed module metadata from the active controller.
+     - Parameters:
+       - module: Installed module metadata from the active controller.
+       - rowID: Comparator-distinct chooser identity retained through contextual selection.
+       - primaryTitle: Android `Book.abbreviation` text rendered above the book name.
+       - accessibilityIdentifier: Exact row identifier exposed to UI automation.
      - Returns: Tappable row that switches or opens the selected document.
+     - Side effects: User gestures may open About, start contextual selection, or invoke reader
+       switching through the existing picker callbacks.
+     - Failure modes: Locked and stale modules remain visible; selection preflights fail closed in
+       the controller without dismissing the picker.
      */
-    private func moduleRow(_ module: ModuleInfo) -> some View {
+    private func moduleRow(
+        _ module: ModuleInfo,
+        rowID: String,
+        primaryTitle: String,
+        accessibilityIdentifier: String
+    ) -> some View {
         let actions = Self.rowActions(for: module, installedModules: allSelectableModules)
         return androidRowContainer(
-            accessibilityIdentifier: "modulePickerRow::\(module.name)",
-            isSelected: isContextualModuleSelected(module.name),
-            onLongPress: { beginContextualModuleSelection(module) },
+            accessibilityIdentifier: accessibilityIdentifier,
+            isSelected: isContextualModuleSelected(rowID),
+            onLongPress: { beginContextualModuleSelection(rowID: rowID) },
             leading: {
                 AndroidDocumentListLeadingColumn(
                     category: module.category,
@@ -893,7 +998,7 @@ struct BibleReaderModulePicker: View {
             },
             center: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(module.name)
+                    Text(primaryTitle)
                         .font(.system(size: 16, weight: .regular))
                         .foregroundStyle(surfacePalette.foregroundColor)
                         .lineLimit(1)
@@ -912,7 +1017,7 @@ struct BibleReaderModulePicker: View {
                 .frame(width: 48, alignment: .trailing)
             },
             selection: {
-                handleModuleRowTap(module)
+                handleModuleRowTap(module, rowID: rowID)
             }
         )
     }
@@ -1087,14 +1192,16 @@ struct BibleReaderModulePicker: View {
     /**
      Enters Android's single-choice contextual mode for an installed chooser row.
 
-     - Parameter module: Long-pressed installed module.
+     - Parameter rowID: Comparator-distinct chooser identity for the long-pressed row.
      - Side effects: Closes the ordinary overflow popup and replaces the app bar with contextual
        document actions.
-     - Failure modes: none; the module remains validated against `allSelectableModules` when read.
+     - Failure modes: A stale or comparator-colliding row ID absent from the current `allRows`
+       snapshot is ignored before contextual state changes.
      */
-    private func beginContextualModuleSelection(_ module: ModuleInfo) {
+    private func beginContextualModuleSelection(rowID: String) {
+        guard allRows.contains(where: { $0.id == rowID && $0.moduleInfo != nil }) else { return }
         showOverflowMenu = false
-        contextualDocument = .module(module.name)
+        contextualDocument = .module(rowID)
     }
 
     /**
@@ -1115,31 +1222,33 @@ struct BibleReaderModulePicker: View {
     /**
      Applies Android row-tap behavior in normal or contextual mode.
 
-     - Parameter module: Tapped installed module.
+     - Parameters:
+       - module: Tapped installed module.
+       - rowID: Comparator-distinct chooser identity for the rendered row.
      - Side effects: Selects the document normally when no contextual action mode exists; otherwise
        changes the single selected contextual row or closes contextual mode when the same row is tapped.
      - Failure modes: Ordinary document selection retains the existing unlock and key-validation paths.
      */
-    private func handleModuleRowTap(_ module: ModuleInfo) {
+    private func handleModuleRowTap(_ module: ModuleInfo, rowID: String) {
         guard hasContextualDocumentSelection else {
             select(module)
             return
         }
-        let selection = ContextualDocument.module(module.name)
-        contextualDocument = isContextualModuleSelected(module.name) ? nil : selection
+        let selection = ContextualDocument.module(rowID)
+        contextualDocument = isContextualModuleSelected(rowID) ? nil : selection
     }
 
     /**
-     Tests contextual module selection with Java `String.equals` identity.
+     Tests contextual module selection with the row's comparator-distinct encoded identity.
 
-     - Parameter initials: Installed module initials represented by the row being rendered/tapped.
-     - Returns: True only when the selected module has the same UTF-16 code units.
+     - Parameter rowID: Stable ASCII chooser identity represented by the rendered/tapped row.
+     - Returns: True only when the same comparator-distinct row owns contextual selection.
      - Side effects: None.
-     - Failure modes: None; canonically equivalent Swift strings intentionally remain distinct.
+     - Failure modes: None; row IDs encode Java-exact fields before reaching this comparison.
      */
-    private func isContextualModuleSelected(_ initials: String) -> Bool {
-        guard case .module(let selectedInitials) = contextualDocument else { return false }
-        return SwordJavaStringIdentity.equals(selectedInitials, initials)
+    private func isContextualModuleSelected(_ rowID: String) -> Bool {
+        guard case .module(let selectedRowID) = contextualDocument else { return false }
+        return selectedRowID == rowID
     }
 
     /**
@@ -1586,6 +1695,40 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
+     Uninstalls the exact config or generated CSV owner selected from Android's Add-ons filter.
+
+     - Parameter addon: Admitted add-on row retaining its opaque installed deletion identity.
+     - Side effects: Deletes the shared initials-based Search index first, then transactionally
+       removes only the selected config/payload or standalone prompt CSV off the main actor.
+     - Failure modes: Stale owner, path/ownership, filesystem, and rollback failures are retained
+       as the row-action error; no same-initials fallback is attempted.
+     */
+    private func uninstallInstalledAddon(_ addon: SwordAdmittedAddonModule) {
+        let repository = repository
+        let searchIndexService = searchIndexService
+
+        Task {
+            do {
+                try await ModuleSearchIndexUninstaller.uninstall(
+                    moduleName: addon.moduleInfo.name,
+                    deleteSearchIndex: { moduleName in
+                        await searchIndexService.deleteIndex(for: moduleName)
+                    },
+                    removeModule: { _ in
+                        try await Task.detached(priority: .userInitiated) {
+                            try repository.uninstallAddon(addon.removalTarget)
+                        }.value
+                    }
+                )
+            } catch {
+                await MainActor.run {
+                    rowActionErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /**
      Commits the EPUB deletion confirmed from Android's shared document action mode.
 
      - Side effects: Removes the published EPUB, notifies the reader owner only after durable
@@ -1944,49 +2087,12 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Removes repeated installed rows with Java `String.equals` identity while preserving order.
-
-     - Parameter modules: Category-concatenated installed module snapshots.
-     - Returns: First occurrence of each exact UTF-16 initials value; composed/decomposed and
-       case-variant names remain distinct just as they do in JSword's exact-name maps.
-     - Side effects: None.
-     - Failure modes: None; Swift strings expose valid UTF-16 views.
-     */
-    static func javaExactDistinctModules(_ modules: [ModuleInfo]) -> [ModuleInfo] {
-        var seenInitials: [String] = []
-        return modules.filter { module in
-            guard !seenInitials.contains(where: {
-                SwordJavaStringIdentity.equals($0, module.name)
-            }) else {
-                return false
-            }
-            seenInitials.append(module.name)
-            return true
-        }
-    }
-
-    /**
-     Selects one installed row with Java `String.equals` identity.
-
-     - Parameters:
-       - initials: Exact module initials retained by picker state.
-       - modules: Current selectable module rows.
-     - Returns: The first row with the same UTF-16 code units, or nil when that exact identity is
-       no longer installed.
-     - Side effects: None.
-     - Failure modes: None; canonically equivalent Swift strings intentionally do not alias.
-     */
-    static func javaExactModule(named initials: String, in modules: [ModuleInfo]) -> ModuleInfo? {
-        modules.first { SwordJavaStringIdentity.equals($0.name, initials) }
-    }
-
-    /**
      Builds a SwiftUI row ID that cannot canonically fold Java-distinct module identities.
 
      - Parameters:
        - namespace: Stable backend namespace such as `module` or `epub`.
        - value: Exact JSword initials value.
-     - Returns: The legacy readable ASCII ID for ASCII values, or a lowercase UTF-16 hexadecimal
+     - Returns: A readable ASCII ID for ASCII values, or a lowercase UTF-16 hexadecimal
        ID for non-ASCII values so composed/decomposed spellings remain distinct to SwiftUI.
      - Side effects: None.
      - Failure modes: None; every Swift string has a valid UTF-16 view.
@@ -2000,86 +2106,86 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Builds all Android chooser rows from installed modules and visible pseudo-documents.
+     Encodes one comparator-distinct installed add-on identity for SwiftUI and contextual state.
+
+     - Parameter addon: Shared admitted add-on retaining TreeSet abbreviation/identity fields.
+     - Returns: ASCII ID containing length-delimited hexadecimal UTF-16 abbreviation, initials, and
+       full-name fields; books retained by JSword cannot collide through Swift normalization.
+     - Side effects: None.
+     - Failure modes: None; every source field exposes valid UTF-16 code units.
+     */
+    private static func addonRowID(_ addon: SwordAdmittedAddonModule) -> String {
+        let fields = [
+            addon.abbreviation,
+            addon.moduleInfo.name,
+            addon.moduleInfo.description,
+        ].map { value -> String in
+            let units = Array(value.utf16)
+            let encoded = units.map { String($0, radix: 16) }.joined(separator: "-")
+            return "\(units.count):\(encoded)"
+        }
+        return "addon:\(fields.joined(separator: ":"))"
+    }
+
+    /**
+     Builds Android chooser rows from globally admitted books retaining exact abbreviations.
 
      - Parameters:
-       - modules: Installed SWORD module snapshots.
+       - installedBooks: Native/SQLite books after global ownership and BookSet projection.
+       - admittedAddons: Shared payload-admitted add-ons retaining abbreviation/BookSet identity.
        - epubs: Installed EPUB general-book adapters.
      - Returns: Installed module/EPUB rows plus My Notes, StudyPads, and Compare pseudo-document rows.
+     - Side effects: None.
+     - Failure modes: None; caller-owned immutable metadata is projected without content reads.
      */
-    static func allRows(from modules: [ModuleInfo], epubs: [EpubInfo] = []) -> [DocumentChooserRow] {
-        modules.map(DocumentChooserRow.module) +
+    static func allRows(
+        installedBooks: [BibleReaderInstalledBookPresentation],
+        admittedAddons: [SwordAdmittedAddonModule] = [],
+        epubs: [EpubInfo] = []
+    ) -> [DocumentChooserRow] {
+        installedBooks.map(DocumentChooserRow.module) +
+            admittedAddons.map(DocumentChooserRow.addon) +
             epubs.map(DocumentChooserRow.epub) +
             visibleAndroidPseudoDocuments.map(DocumentChooserRow.pseudoDocument)
     }
 
     /**
-     Filters and sorts chooser rows using Android `DocumentSelectionBase` semantics.
+     Filters and sorts globally admitted chooser books using Android presentation metadata.
 
      - Parameters:
-       - modules: Complete installed SWORD-module set.
+       - installedBooks: Installed books retaining exact JSword abbreviations.
+       - admittedAddons: Shared payload-admitted add-ons retaining abbreviation/BookSet identity.
        - epubs: Installed EPUB general-book adapters.
        - selectedFilter: Android document-type filter.
        - selectedLanguage: ISO language filter, or empty for all languages.
-       - searchText: Free-text search over initials, description, category, and language.
-     - Returns: Filtered rows sorted by Android category/status order and localized initials.
+       - searchText: Free-text search over initials, abbreviation, name, category, and language.
+     - Returns: Filtered rows stably sorted by Android status/category and language-locale-lowercased
+       abbreviation.
+     - Side effects: None.
+     - Failure modes: None; empty or unmatched inventories return an empty array.
      */
     static func filteredRows(
-        _ modules: [ModuleInfo],
+        installedBooks: [BibleReaderInstalledBookPresentation],
+        admittedAddons: [SwordAdmittedAddonModule] = [],
         epubs: [EpubInfo] = [],
         selectedFilter: DocumentTypeFilter,
         selectedLanguage: String,
         searchText: String
     ) -> [DocumentChooserRow] {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return allRows(from: modules, epubs: epubs).filter { row in
+        let matchingRows = allRows(
+            installedBooks: installedBooks,
+            admittedAddons: admittedAddons,
+            epubs: epubs
+        ).filter { row in
             rowMatchesFilter(row, selectedFilter: selectedFilter) &&
             rowMatchesLanguage(row, selectedLanguage: selectedLanguage) &&
             rowMatchesSearch(row, searchText: trimmedSearch)
         }
-        .sorted(by: sortRows)
-    }
-
-    /**
-     Filters and sorts installed modules using the legacy module-only projection.
-
-     - Parameters:
-       - modules: Complete installed-module set.
-       - selectedCategory: Optional document-type filter, with `nil` meaning all types.
-       - selectedLanguage: ISO language filter, or empty for all languages.
-       - searchText: Free-text search over initials, description, category, and language.
-     - Returns: Filtered normal reader modules sorted by Android category order and initials.
-     */
-    static func filteredModules(
-        _ modules: [ModuleInfo],
-        selectedCategory: DocumentCategory?,
-        selectedLanguage: String,
-        searchText: String
-    ) -> [ModuleInfo] {
-        let selectedFilter = selectedCategory.map(DocumentTypeFilter.category) ?? .all
-        return filteredRows(
-            modules,
-            selectedFilter: selectedFilter,
-            selectedLanguage: selectedLanguage,
-            searchText: searchText
-        )
-        .compactMap { row in
-            guard case .module(let module) = row,
-                  documentCategory(for: module.category) != nil else {
-                return nil
-            }
-            return module
-        }
-    }
-
-    /**
-     Builds the alphabetized language list shown in the chooser language filter.
-
-     - Parameter modules: Complete installed-module set.
-     - Returns: Unique ISO language codes sorted by localized display name.
-     */
-    static func availableLanguages(from modules: [ModuleInfo]) -> [String] {
-        availableLanguages(from: allRows(from: modules))
+        return matchingRows.enumerated().sorted { lhs, rhs in
+            let comparison = rowSortComparison(lhs.element, rhs.element)
+            return comparison == 0 ? lhs.offset < rhs.offset : comparison < 0
+        }.map(\.element)
     }
 
     /**
@@ -2092,23 +2198,6 @@ struct BibleReaderModulePicker: View {
         Array(Set(rows.map(\.language))).sorted {
             displayName(for: $0).localizedCaseInsensitiveCompare(displayName(for: $1)) == .orderedAscending
         }
-    }
-
-    /**
-     Tests whether the selected Android document type has no installed modules at all.
-
-     - Parameters:
-       - modules: Complete installed-module set.
-       - selectedCategory: Optional document-type filter, with `nil` meaning all types.
-     - Returns: `true` only when a concrete type is selected and that type has no modules before
-       language or free-text filters run.
-     */
-    static func shouldShowCategoryEmptyState(
-        _ modules: [ModuleInfo],
-        selectedCategory: DocumentCategory?
-    ) -> Bool {
-        let selectedFilter = selectedCategory.map(DocumentTypeFilter.category) ?? .all
-        return shouldShowFilterEmptyState(allRows(from: modules), selectedFilter: selectedFilter)
     }
 
     /**
@@ -2358,27 +2447,51 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Sorts chooser rows using Android's document status, pseudo-document, category, and initials order.
+     Compares chooser rows using Android's document status, category, and abbreviation order.
 
      - Parameters:
        - lhs: Left row.
        - rhs: Right row.
-     - Returns: `true` when `lhs` should precede `rhs`.
+     - Returns: Negative, zero, or positive in Android chooser order; zero retains stable input order.
      */
-    private static func sortRows(_ lhs: DocumentChooserRow, _ rhs: DocumentChooserRow) -> Bool {
+    private static func rowSortComparison(
+        _ lhs: DocumentChooserRow,
+        _ rhs: DocumentChooserRow
+    ) -> Int {
         let lhsInstalledRank = lhs.isRealInstalledDocument ? 0 : 1
         let rhsInstalledRank = rhs.isRealInstalledDocument ? 0 : 1
         if lhsInstalledRank != rhsInstalledRank {
-            return lhsInstalledRank < rhsInstalledRank
+            return lhsInstalledRank - rhsInstalledRank
         }
 
         let lhsRank = categoryRank(for: lhs)
         let rhsRank = categoryRank(for: rhs)
         if lhsRank != rhsRank {
-            return lhsRank < rhsRank
+            return lhsRank - rhsRank
         }
 
-        return lhs.sortTitle.localizedCaseInsensitiveCompare(rhs.sortTitle) == .orderedAscending
+        let lhsKey = lhs.sortAbbreviation.lowercased(with: Locale(identifier: lhs.language))
+        let rhsKey = rhs.sortAbbreviation.lowercased(with: Locale(identifier: rhs.language))
+        return javaStringCompare(lhsKey, rhsKey)
+    }
+
+    /**
+     Compares strings by Java `String.compareTo` unsigned UTF-16 ordering.
+
+     - Parameters:
+       - lhs: Left Android chooser sort key.
+       - rhs: Right Android chooser sort key.
+     - Returns: First UTF-16 unit difference, then length difference when one is a prefix.
+     - Side effects: None.
+     - Failure modes: None; every Swift string exposes valid UTF-16 code units.
+     */
+    private static func javaStringCompare(_ lhs: String, _ rhs: String) -> Int {
+        let left = lhs.utf16
+        let right = rhs.utf16
+        for (leftUnit, rightUnit) in zip(left, right) where leftUnit != rightUnit {
+            return Int(leftUnit) - Int(rightUnit)
+        }
+        return left.count - right.count
     }
 
     /**
@@ -2428,12 +2541,15 @@ struct BibleReaderModulePicker: View {
     /**
      One row in the Android document chooser.
 
-     Rows are either installed SWORD modules or the visible `FakeBookFactory` pseudo-documents that
-     Android includes in `ChooseDocument`.
+     Rows retain installed SWORD documents, comparator-distinct add-ons, imported EPUBs, and the
+     visible `FakeBookFactory` pseudo-documents that Android includes in `ChooseDocument`.
      */
     enum DocumentChooserRow: Identifiable, Equatable {
         /// Installed local module row.
-        case module(ModuleInfo)
+        case module(BibleReaderInstalledBookPresentation)
+
+        /// Payload-admitted And Bible add-on retaining JSword abbreviation and full identity.
+        case addon(SwordAdmittedAddonModule)
 
         /// Imported EPUB exposed through Android's general-book contract.
         case epub(EpubInfo)
@@ -2447,8 +2563,10 @@ struct BibleReaderModulePicker: View {
             case .module(let module):
                 return BibleReaderModulePicker.javaExactRowID(
                     namespace: "module",
-                    value: module.name
+                    value: module.info.name
                 )
+            case .addon(let addon):
+                return BibleReaderModulePicker.addonRowID(addon)
             case .epub(let epub):
                 return BibleReaderModulePicker.javaExactRowID(
                     namespace: "epub",
@@ -2463,7 +2581,9 @@ struct BibleReaderModulePicker: View {
         var documentCategory: DocumentCategory? {
             switch self {
             case .module(let module):
-                return BibleReaderModulePicker.documentCategory(for: module.category)
+                return BibleReaderModulePicker.documentCategory(for: module.info.category)
+            case .addon:
+                return nil
             case .epub:
                 return .generalBook
             case .pseudoDocument(let document):
@@ -2475,7 +2595,9 @@ struct BibleReaderModulePicker: View {
         var language: String {
             switch self {
             case .module(let module):
-                return module.language
+                return module.info.language
+            case .addon(let addon):
+                return addon.moduleInfo.language
             case .epub(let epub):
                 return epub.language
             case .pseudoDocument(let document):
@@ -2485,26 +2607,71 @@ struct BibleReaderModulePicker: View {
 
         /// Whether the row is an Android AND_BIBLE add-on.
         var isAndroidAddon: Bool {
+            if case .addon = self { return true }
             guard case .module(let module) = self else { return false }
-            return module.category == .addon
+            return module.info.category == .addon
         }
 
         /// Whether Android would rank the row as a real installed SWORD document before fake rows.
         var isRealInstalledDocument: Bool {
             if case .epub = self { return true }
+            if case .addon = self { return true }
             guard case .module(let module) = self else { return false }
-            return BibleReaderModulePicker.documentCategory(for: module.category) != nil || module.category == .addon
+            return BibleReaderModulePicker.documentCategory(for: module.info.category) != nil
+                || module.info.category == .addon
         }
 
         /// Sort key matching Android's abbreviation-based row ordering.
-        var sortTitle: String {
+        var sortAbbreviation: String {
             switch self {
             case .module(let module):
-                return module.name
+                return module.abbreviation
+            case .addon(let addon):
+                return addon.abbreviation
             case .epub(let epub):
                 return epub.initials
             case .pseudoDocument(let document):
                 return document.title
+            }
+        }
+
+        /**
+         Returns the Android `Book.abbreviation` text rendered as the chooser row's primary label.
+
+         - Returns: The retained JSword abbreviation for installed books/add-ons, or the matching
+           adapter/pseudo-document abbreviation.
+         - Side effects: None.
+         - Failure modes: None; every row case owns a nonoptional display identity.
+         */
+        var primaryTitle: String {
+            switch self {
+            case .module(let module):
+                return module.abbreviation
+            case .addon(let addon):
+                return addon.abbreviation
+            case .epub(let epub):
+                return epub.initials
+            case .pseudoDocument(let document):
+                return document.androidInitials
+            }
+        }
+
+        /**
+         Returns the stable accessibility identifier for an installed module or add-on row.
+
+         - Returns: The established initials-based identifier for ordinary modules, or the exact
+           comparator-distinct add-on row ID when duplicate initials survive Android BookSet replay.
+         - Side effects: None.
+         - Failure modes: None; non-module rows return their stable row identity defensively.
+         */
+        var moduleAccessibilityIdentifier: String {
+            switch self {
+            case .module(let module):
+                return "modulePickerRow::\(module.info.name)"
+            case .addon:
+                return "modulePickerRow::\(id)"
+            case .epub, .pseudoDocument:
+                return id
             }
         }
 
@@ -2513,7 +2680,18 @@ struct BibleReaderModulePicker: View {
             switch self {
             case .module(let module):
                 return [
+                    module.info.name,
+                    module.abbreviation,
+                    module.info.description,
+                    module.info.language,
+                    BibleReaderModulePicker.displayName(for: module.info.language),
+                    BibleReaderModulePicker.moduleCategoryTitle(for: module.info.category)
+                ]
+            case .addon(let addon):
+                let module = addon.moduleInfo
+                return [
                     module.name,
+                    addon.abbreviation,
                     module.description,
                     module.language,
                     BibleReaderModulePicker.displayName(for: module.language),
@@ -2540,16 +2718,60 @@ struct BibleReaderModulePicker: View {
             }
         }
 
+        /// Installed module metadata used by rendering and contextual actions, when applicable.
+        var moduleInfo: ModuleInfo? {
+            switch self {
+            case .module(let module):
+                return module.info
+            case .addon(let addon):
+                return addon.moduleInfo
+            case .epub, .pseudoDocument:
+                return nil
+            }
+        }
+
         /**
          Compares rows by stable identity.
 
          - Parameters:
            - lhs: Left row.
            - rhs: Right row.
-         - Returns: `true` when both rows represent the same module or pseudo-document.
+         - Returns: `true` when both rows represent the same exact module, add-on, EPUB, or
+           pseudo-document identity.
          */
         static func == (lhs: DocumentChooserRow, rhs: DocumentChooserRow) -> Bool {
             lhs.id == rhs.id
+        }
+    }
+
+    /** Exact installed owner retained before the contextual selection state is cleared. */
+    enum InstalledDocumentDeletionSelection {
+        /// Ordinary installed module routed through the established module uninstall boundary.
+        case module(ModuleInfo)
+
+        /// Comparator-distinct add-on routed through its opaque installed-owner token.
+        case addon(SwordAdmittedAddonModule)
+    }
+
+    /**
+     Captures the destructive owner represented by one installed chooser row.
+
+     - Parameter row: Current chooser row before contextual selection state is cleared.
+     - Returns: Ordinary module metadata or the exact admitted add-on owner; EPUB and pseudo rows
+       return nil because their deletion flows are owned by separate boundaries.
+     - Side effects: None; the returned value is immutable and survives subsequent UI-state reset.
+     - Failure modes: None; unsupported row families return nil rather than approximating identity.
+     */
+    static func deletionSelection(
+        for row: DocumentChooserRow
+    ) -> InstalledDocumentDeletionSelection? {
+        switch row {
+        case .module(let module):
+            return .module(module.info)
+        case .addon(let addon):
+            return .addon(addon)
+        case .epub, .pseudoDocument:
+            return nil
         }
     }
 

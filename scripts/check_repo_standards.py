@@ -794,14 +794,162 @@ def find_unsafe_direct_document_publishers(
     return sorted(set(matches))
 
 
+def find_unshared_addon_feature_discovery(
+    text: str,
+    relative_path: str = "",
+) -> list[int]:
+    """Return lines that recreate prompt/picker add-on discovery outside SwordKit admission.
+
+    Comments and strings are masked; the helper performs no filesystem access or mutation. Prompt
+    and picker consumers may not enumerate or reopen raw installed modules, and production helpers
+    outside the explicit SwordKit infrastructure allowlist may not scan raw configs or request the
+    unfiltered add-on category instead of consuming the shared compatibility/BookSet projection.
+    """
+    masked_source = _mask_swift_comments_and_strings(text)
+    patterns: tuple[re.Pattern[str], ...] = ()
+    required_function: str | None = None
+    function_ranges = _swift_function_ranges(masked_source)
+    raw_config_allowed_owners = {
+        (
+            "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
+            "moduleConfigURL",
+        ),
+        (
+            "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
+            "nativeModuleRegistrySnapshot",
+        ),
+        (
+            "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
+            "androidCustomInstalledRegistrations",
+        ),
+        (
+            "Sources/SwordKit/Sources/SwordKit/TtfFontRepository.swift",
+            "configuredFontPackPathKeys",
+        ),
+        (
+            "Sources/SwordKit/Sources/SwordKit/ModuleStoreTransactionPublisher+Uninstall.swift",
+            "uninstall",
+        ),
+        (
+            "Sources/SwordKit/Sources/SwordKit/ModuleStoreTransactionPublisher+Uninstall.swift",
+            "uninstallInstalledAddon",
+        ),
+    }
+    config_reader_names = {"SwordModuleConfig"}
+    config_reader_names.update(
+        match.group(1)
+        for match in re.finditer(
+            r"\btypealias\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+            r"(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*SwordModuleConfig\b",
+            masked_source,
+        )
+    )
+    config_reader_pattern = re.compile(
+        r"\b(?:" + "|".join(map(re.escape, sorted(config_reader_names)))
+        + r")\s*\.\s*readAll\b"
+    )
+    matches = set()
+    for match in config_reader_pattern.finditer(masked_source):
+        owner = (
+            relative_path,
+            _enclosing_swift_function_name(function_ranges, match.start()),
+        )
+        if owner not in raw_config_allowed_owners:
+            matches.add(text.count("\n", 0, match.start()) + 1)
+    if not relative_path.endswith("/SwordManager.swift"):
+        non_addon_category = (
+            r"(?:ModuleCategory\s*\.\s*|\.\s*)?"
+            r"(?:bible|commentary|dictionary|generalBook|map|dailyDevotion|glossary|"
+            r"questionable|essays|images|unknown)\s*\)"
+        )
+        patterns += (
+            re.compile(
+                r"\.\s*installedModules\s*\(\s*category\s*:(?!\s*"
+                + non_addon_category
+                + r")\s*"
+            ),
+            re.compile(
+                r"\.\s*installedModules\s*\([^)]*\)\s*\.\s*filter\b"
+                r"[\s\S]{0,240}?\.\s*category\s*==\s*\.\s*addon\b"
+            ),
+        )
+        for method_reference in re.finditer(
+            r"\b(?:let|var)\s+([A-Za-z_][A-Za-z0-9_]*)"
+            r"(?:\s*:[^=\n]+)?\s*=\s*"
+            r"[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*"
+            r"\s*\.\s*installedModules\b(?!\s*\()",
+            masked_source,
+        ):
+            alias = method_reference.group(1)
+            if re.search(
+                rf"\b{re.escape(alias)}\s*\(",
+                masked_source[method_reference.end():],
+            ):
+                matches.add(text.count("\n", 0, method_reference.start()) + 1)
+    if relative_path.endswith("/PromptRepository.swift"):
+        required_function = "loadPromptPacks"
+        patterns += (
+            re.compile(r"\binstalledModules\b"),
+            re.compile(r"\bSwordModuleConfig\b"),
+            re.compile(r"\bmodule\s*\(\s*named\s*:"),
+            re.compile(r"\blocalizedCaseInsensitiveCompare\s*\("),
+            re.compile(
+                r"\b(?!admittedAddonModules\b)[A-Za-z_][A-Za-z0-9_]*addon[A-Za-z0-9_]*"
+                r"\s*\(\s*swordManager\b",
+                re.IGNORECASE,
+            ),
+        )
+    elif relative_path.endswith("/BibleReaderModulePicker.swift"):
+        required_function = "selectableAddonModules"
+        patterns += (
+            re.compile(
+                r"\.\s*installedModules\s*\(\s*category\s*:\s*\.\s*addon\s*\)"
+            ),
+            re.compile(
+                r"\binstalledModules\s*\([^)]*\)\s*\.\s*filter\b[\s\S]{0,240}?\.\s*addon\b"
+            ),
+        )
+
+    matches.update(
+        text.count("\n", 0, match.start()) + 1
+        for pattern in patterns
+        for match in pattern.finditer(masked_source)
+    )
+    if required_function is not None:
+        required_function_ranges = [
+            item for item in _swift_function_ranges(masked_source)
+            if item[0] == required_function
+        ]
+        if not required_function_ranges:
+            matches.add(1)
+        else:
+            _, start, end = required_function_ranges[-1]
+            function_source = masked_source[start:end]
+            if len(re.findall(r"\badmittedAddonModules\s*\(", function_source)) != 1:
+                matches.add(text.count("\n", 0, start) + 1)
+            forbidden_function_calls = (
+                r"\binstalledModules\s*\(",
+                r"\bSwordModuleConfig\b",
+                r"\bmodule\s*\(\s*named\s*:",
+                r"\b(?!admittedAddonModules\b|selectableAddonModules\b)"
+                r"[A-Za-z_][A-Za-z0-9_]*addon[A-Za-z0-9_]*\s*\(",
+            )
+            for pattern in forbidden_function_calls:
+                for match in re.finditer(pattern, function_source, re.IGNORECASE):
+                    matches.add(text.count("\n", 0, start + match.start()) + 1)
+
+    return sorted(matches)
+
+
 def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
     """Validate static source contracts that should run outside XCTest.
 
-    The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle and
+    The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle,
     prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
-    bypass Android-compatible global ownership admission. Missing fixed-path files fail closed, and
-    the document publisher scan follows every non-test Swift file under `Sources` and `AndBible`
-    across moves.
+    bypass Android-compatible global ownership admission, and keep prompt/picker add-on discovery on
+    SwordKit's shared installed BookSet projection. Missing fixed-path files fail closed, and the
+    publisher/add-on scans follow every non-test Swift file under `Sources` and `AndBible` across
+    moves while narrowing infrastructure exceptions to audited functions.
     """
     content_view_path = repo_root / "AndBible/ContentView.swift"
     relative_path = "AndBible/ContentView.swift"
@@ -852,6 +1000,17 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
                     ),
                 )
                 for line in find_unsafe_direct_document_publishers(source, str(relative))
+            )
+            issues.extend(
+                SourceGuardIssue(
+                    path=str(relative),
+                    line=line,
+                    message=(
+                        "Production prompt/picker code bypasses SwordKit's shared Android add-on "
+                        "compatibility and installed BookSet projection."
+                    ),
+                )
+                for line in find_unshared_addon_feature_discovery(source, str(relative))
             )
 
     return issues
