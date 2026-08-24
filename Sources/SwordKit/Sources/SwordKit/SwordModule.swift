@@ -77,7 +77,7 @@ public struct SwordVerseSourceEntry: Equatable, Sendable {
     /// Exact source-versification reference resolved from the requested ordinal.
     public let reference: VerseKeyReference
 
-    /// Source-format-neutral OSIS returned by `SWModule_getOSISFragment`, when available.
+    /// Source-format-neutral OSIS returned by the shared Android-compatible converter, when available.
     public let osisFragment: String?
 
     /// Canonical visible text returned by SWORD's strip-text filter, when available.
@@ -670,7 +670,7 @@ public final class SwordModule: @unchecked Sendable {
     }
 
     /**
-     Atomically captures one exact verse through SWORD's source-to-OSIS filter and restores the
+     Atomically captures one exact verse through the shared source-to-OSIS converter and restores the
      caller's complete cursor.
 
      JSword converts each backend's configured source type to OSIS before its structural repair and
@@ -682,8 +682,8 @@ public final class SwordModule: @unchecked Sendable {
        verse zero.
      - Returns: Resolved key text, structured VerseKey metadata, and source-neutral OSIS. Missing or
        empty native content is returned as an empty fragment for the caller to reject or omit.
-     - Side effects: Temporarily moves the native module cursor and runs SWORD option, source, and
-       encoding filters while holding the process-wide runtime gate.
+     - Side effects: Temporarily moves the native module cursor and runs SWORD decoding/options plus
+       the shared Android-compatible source converter while holding the process-wide runtime gate.
      - Throws: `SwordVerseSourceInspectionError.cursorRestorationFailed` when SWORD cannot restore
        both the prior key text and VerseKey ordinal; no captured content is published in that case.
      - Important: The returned strings and metadata are copied before the runtime lease ends and do
@@ -703,7 +703,7 @@ public final class SwordModule: @unchecked Sendable {
             let result = (
                 actualKey: String(cString: SWModule_getKeyText(handle)),
                 verseKey: Self.currentVerseKeyChildren(handle: handle),
-                osisFragment: SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                osisFragment: SwordSourceFormatOSISConverter.fragment(handle: handle)
             )
 
             SWModule_setKeyText(handle, cursorSnapshot.keyText)
@@ -763,7 +763,7 @@ public final class SwordModule: @unchecked Sendable {
                     ? String(cString: SWModule_getRenderText(handle))
                     : "",
                 osisFragment: includeOSISFragment
-                    ? SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                    ? SwordSourceFormatOSISConverter.fragment(handle: handle)
                     : ""
             )
 
@@ -893,11 +893,11 @@ public final class SwordModule: @unchecked Sendable {
                     for offset in 0..<count {
                         let ordinal = startOrdinal + offset
                         guard let reference = referenceAtOrdinal(ordinal) else { continue }
-                        let osis = SWModule_getOSISFragment(handle).map(String.init(cString:))
+                        let osis = SwordSourceFormatOSISConverter.fragment(handle: handle)
                         let canonical = SWModule_getStripText(handle).map(String.init(cString:))
                         entries.append(SwordVerseSourceEntry(
                             reference: reference,
-                            osisFragment: osis.flatMap { $0.isEmpty ? nil : $0 },
+                            osisFragment: osis.isEmpty ? nil : osis,
                             canonicalText: canonical.flatMap { $0.isEmpty ? nil : $0 }
                         ))
                     }
@@ -2021,7 +2021,7 @@ public final class SwordModule: @unchecked Sendable {
                     let key = String(cString: SWModule_getKeyText(handle))
                     let text = String(cString: SWModule_getStripText(handle))
                     let rawEntry = String(cString: SWModule_getRawEntry(handle))
-                    let osisFragment = SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                    let osisFragment = SwordSourceFormatOSISConverter.fragment(handle: handle)
                     guard callback(key, text, rawEntry, osisFragment, index) else {
                         shouldContinue = false
                         return

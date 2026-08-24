@@ -36,12 +36,14 @@ public enum SwordJSwordOSISSourceCompatibility {
 }
 
 /**
- Parses source-level OSIS fragments with the repair ladder used by AndBible's pinned JSword.
+ Parses source-level OSIS and ThML fragments with the repair ladders used by AndBible's pinned JSword.
 
  `OSISFilter` first applies its exact MapM structural workaround, parses the fragment, then retries
  after `XMLUtil.cleanAllEntities`, `XMLUtil.recloseTags`, and finally `XMLUtil.cleanAllTags`.
- Keeping that policy beside the shared XML tree parser gives native SWORD and SQLite Search sources
- one structural compatibility boundary. No stage renders HTML or substitutes stripped text.
+ `THMLFilter` instead cleans entities first, then retries invalid-character, HTML-void-tag, and
+ destructive tag repairs before its tag-to-OSIS projection. Keeping both policies beside the shared
+ XML tree parser gives native SWORD and SQLite Search sources one structural compatibility boundary.
+ No stage renders HTML or substitutes stripped text.
  */
 enum SwordJSwordOSISFragmentParser {
     /// Synthetic fragment root used by pinned JSword's `OSISFilter.parse` method.
@@ -127,6 +129,43 @@ enum SwordJSwordOSISFragmentParser {
     }
 
     /**
+     Parses one raw ThML fragment through pinned JSword's `THMLFilter.cleanParse` ladder.
+
+     Unlike OSIS repair, ThML always cleans entities before its first parse, then retries after
+     replacing invalid XML characters, closing HTML void tags, and finally removing malformed
+     tags. This method returns the repaired ThML tree; source-tag-to-OSIS conversion remains the
+     caller's responsibility.
+
+     - Parameter source: Decoded ThML source after SWORD option filters.
+     - Returns: A synthetic `xxx` root containing structurally parseable ThML nodes, or an empty
+       root when every pinned repair stage fails.
+     - Side effects: Performs bounded in-memory XML parses with external entities disabled.
+     - Failure modes: Never throws; irreparable content becomes an empty root like JSword's empty
+       fallback paragraph content.
+     */
+    static func parseThML(_ source: String) -> SwordXMLNode {
+        let entityCleaned = cleanAllEntities(source)
+        if let parsed = try? parseRawFragment(entityCleaned) {
+            return parsed
+        }
+
+        let characterCleaned = cleanAllCharacters(entityCleaned)
+        if let parsed = try? parseRawFragment(characterCleaned) {
+            return parsed
+        }
+
+        let emptyTagsClosed = closeEmptyTags(characterCleaned)
+        if let parsed = try? parseRawFragment(emptyTagsClosed) {
+            return parsed
+        }
+
+        if let parsed = try? parseRawFragment(cleanAllTags(characterCleaned)) {
+            return parsed
+        }
+        return SwordXMLNode.element(name: fragmentRootName, attributes: [:])
+    }
+
+    /**
      Wraps and parses one fragment exactly as pinned JSword `OSISFilter.parse` does.
 
      - Parameter source: One raw or repaired OSIS fragment without a required document root.
@@ -147,7 +186,7 @@ enum SwordJSwordOSISFragmentParser {
      euro, and single-quote entities become Unicode; unknown entities become one space; a bare or
      syntactically invalid ampersand is escaped. The omitted `apos` entity is deliberate parity.
 
-     - Parameter source: MapM-repaired source that failed the raw XML parse.
+     - Parameter source: Source fragment requiring JSword-compatible entity repair.
      - Returns: UTF-16-compatible entity-cleaned source, including pinned mutable-index advancement.
      - Side effects: Allocates and mutates one bounded UTF-16 buffer.
      - Failure modes: Unterminated ampersands are escaped and return immediately; no error is thrown.
@@ -193,6 +232,51 @@ enum SwordJSwordOSISFragmentParser {
             cleanFrom = min(nextCleanFrom ?? working.count, working.count)
         }
         return String(decoding: working, as: UTF16.self)
+    }
+
+    /**
+     Applies pinned JSword `XMLUtil.cleanAllCharacters` semantics.
+
+     - Parameter source: Entity-cleaned ThML that failed XML parsing.
+     - Returns: Source with XML-invalid UTF-16 code units replaced by one ASCII space.
+     - Side effects: Allocates one bounded UTF-16 buffer.
+     - Failure modes: None; valid tabs, line feeds, carriage returns, BMP characters, and surrogate
+       code units are retained exactly like JSword's Java-regex implementation.
+     */
+    private static func cleanAllCharacters(_ source: String) -> String {
+        let repaired = source.utf16.map { unit -> UInt16 in
+            switch unit {
+            case 0x09, 0x0A, 0x0D, 0x20...0xD7FF, 0xE000...0xFFFD:
+                return unit
+            default:
+                return 0x20
+            }
+        }
+        return String(decoding: repaired, as: UTF16.self)
+    }
+
+    /**
+     Applies pinned JSword `XMLUtil.closeEmptyTags` to common unclosed HTML void elements.
+
+     - Parameter source: Character-cleaned ThML that still failed XML parsing.
+     - Returns: Source where lowercase `img`, `hr`, and `br` start tags become self-closing unless
+       they already end in `/`.
+     - Side effects: Runs one bounded regular-expression replacement in memory.
+     - Failure modes: If Foundation cannot compile the pinned expression, returns the input so the
+       final tag-cleaning stage still runs; no error is exposed.
+     */
+    private static func closeEmptyTags(_ source: String) -> String {
+        guard let expression = try? NSRegularExpression(
+            pattern: #"<(img|hr|br)([^>]*)(?<!/)>"#
+        ) else {
+            return source
+        }
+        let range = NSRange(location: 0, length: (source as NSString).length)
+        return expression.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "<$1$2/>"
+        )
     }
 
     /**

@@ -237,8 +237,8 @@ public extension SwordModule {
 
      A stored dictionary can contain distinct keys that libsword collapses after case or Strong's
      padding normalization. Android selects the first matching physical RawLD index record; this
-     boundary preserves that record identity and asks the native source filters to process its exact
-     body without performing a second ambiguous key search.
+     boundary preserves that record identity and asks the shared Android-compatible source filter to
+     process its exact body without performing a second ambiguous key search.
 
      - Parameters:
        - index: Zero-based physical index returned by the JSword-compatible search.
@@ -247,7 +247,8 @@ public extension SwordModule {
      - Side effects: Reads/caches the fixed-width source index, temporarily changes the native key
        used as filter context, and restores the previous key under `SwordRuntime` serialization.
      - Failure modes: Throws for unsupported drivers, changed/mismatched slots, zero-size records,
-       contained-file read failures, native decompression/filter failures, or malformed OSIS.
+       contained-file read failures, native decompression/shared conversion failures, or malformed
+       OSIS.
      */
     func rawDictionaryOSISFragment(
         forIndex index: Int,
@@ -274,20 +275,28 @@ public extension SwordModule {
             defer { SWModule_setKeyText(handle, previousKey) }
             SWModule_setKeyText(handle, storedKey)
 
-            let converted: String = rawRecord?.withUnsafeBytes { bytes in
+            let sourceRepresentation: String = rawRecord?.withUnsafeBytes { bytes in
                 let pointer = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self)
-                return SWModule_getRawDictionaryOSISFragmentAtIndex(
+                return SWModule_getRawDictionarySourceFragmentAtIndex(
                     handle,
                     Int(index),
                     pointer,
                     UInt(bytes.count)
                 ).map(String.init(cString:)) ?? ""
-            } ?? SWModule_getRawDictionaryOSISFragmentAtIndex(
+            } ?? SWModule_getRawDictionarySourceFragmentAtIndex(
                 handle,
                 Int(index),
                 nil,
                 0
             ).map(String.init(cString:)) ?? ""
+
+            let sourceType = Self.nonEmptyConfigValue(handle: handle, key: "SourceType") ?? ""
+            let converted = sourceType.lowercased() == "thml"
+                ? SwordSourceFormatOSISConverter.thmlFragment(
+                    handle: handle,
+                    filteredSource: sourceRepresentation
+                )
+                : sourceRepresentation
 
             let abbreviation = Self.nonEmptyConfigValue(handle: handle, key: "Abbreviation") ?? info.name
             let versification = info.aboutMetadata.versification.isEmpty
@@ -417,11 +426,11 @@ public extension SwordModule {
                 osisRef = children.osisRef
                 keyOrdinalRange = children.index...children.index
                 isNewTestament = children.testament == 2
-                osis = SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                osis = SwordSourceFormatOSISConverter.fragment(handle: handle)
             } else {
                 SWModule_setKeyText(handle, requestedKey)
                 // RawLD/TreeKey modules finalize their snapped key while loading the entry.
-                osis = SWModule_getOSISFragment(handle).map(String.init(cString:)) ?? ""
+                osis = SwordSourceFormatOSISConverter.fragment(handle: handle)
                 let resolvedKey = String(cString: SWModule_getKeyText(handle))
                 guard resolvedKey == requestedKey else {
                     throw SwordRawOSISFragmentError.keyNotFound(
