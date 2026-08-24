@@ -5,136 +5,6 @@ import Observation
 import SQLite3
 import SwordKit
 
-/** Thread-safe cancellation state shared between a Swift task and the serial SQLite mutation queue. */
-private final class SearchIndexCancellationProbe: @unchecked Sendable {
-    /// Protects the cancellation bit across task and GCD execution contexts.
-    private let lock = NSLock()
-
-    /// Whether the owning indexing task has requested cancellation.
-    private var cancelled = false
-
-    /** Records cancellation without blocking on the index mutation queue. */
-    func cancel() {
-        lock.lock()
-        cancelled = true
-        lock.unlock()
-    }
-
-    /** Throws before the next source read or generated-index write after cancellation. */
-    func checkCancellation() throws {
-        lock.lock()
-        let shouldCancel = cancelled
-        lock.unlock()
-        if shouldCancel { throw CancellationError() }
-    }
-}
-
-/**
- Explicitly transfers one backend source into the service's serialized indexing queue.
-
- Source adapters include mutable SWORD cursors and operation-owned SQLite readers that cannot claim
- general `Sendable` conformance. `createIndex` captures this box once and `buildIndex` is the only code
- that accesses its value after the handoff, entirely on `indexMutationQueue`.
- */
-private final class SearchIndexSourceTransfer: @unchecked Sendable {
-    /// Source value accessed only by the receiving serialized mutation closure.
-    let value: any BibleSearchIndexSource
-
-    /** Wraps one source without reading or mutating its backend. */
-    init(_ value: any BibleSearchIndexSource) {
-        self.value = value
-    }
-}
-
-/**
- Opaque proof that one installed Search source was captured in a specific module-store generation.
-
- Search queues may retain source objects while earlier modules build. The token binds that retained
- source identity to the service instance, durable store generation, and monotonic in-memory
- invalidation epoch that were current at discovery. Callers can store and return the value only to
- the issuing `SearchIndexService`; they cannot construct or inspect its authorization fields.
- */
-public struct SearchIndexSourceAuthorization: Sendable {
-    /// Service instance that issued the authorization and is allowed to consume it.
-    fileprivate let serviceIdentifier: UUID
-
-    /// Exact source identity observed when the queue captured the source object.
-    fileprivate let sourceIdentity: SearchIndexSourceIdentity
-
-    /// Durable module-store generation observed with the source capture.
-    fileprivate let storeGeneration: Int64
-
-    /// In-memory invalidation epoch that detects a replacement even across an old SQLite snapshot.
-    fileprivate let invalidationEpoch: UInt64
-}
-
-/**
- Tracks Android-compatible per-module Search mutation status across asynchronous queue handoffs.
-
- Android exposes a book as `SCHEDULED`/`CREATING`, rather than `DONE`, from the moment indexing is
- requested until its terminal outcome. Counts preserve that contract when duplicate requests for the
- same initials are queued: finishing the first request cannot make the module readable while another
- mutation remains scheduled.
- */
-private final class SearchIndexModuleMutationState: @unchecked Sendable {
-    /// Protects reference counts shared by callers, the mutation queue, Search tasks, and agent work.
-    private let lock = NSLock()
-
-    /// Number of scheduled or active mutations for each exact module initials value.
-    private var countsByModule: [SwordJavaExactStringIdentity: Int] = [:]
-
-    /**
-     Marks one module unavailable before its mutation is handed to the serial SQLite queue.
-
-     - Parameter moduleName: Exact generated-index owner entering scheduled/creating state.
-     - Side effects: Increments one lock-protected reference count.
-     - Failure modes: None; duplicate requests intentionally retain independent counts.
-     - Important: Every call must be paired with `finishMutation(for:)` on every terminal path.
-     */
-    func beginMutation(for moduleName: String) {
-        let identity = SwordJavaExactStringIdentity(moduleName)
-        lock.lock()
-        countsByModule[identity, default: 0] += 1
-        lock.unlock()
-    }
-
-    /**
-     Releases one scheduled/active mutation without clearing a later duplicate request.
-
-     - Parameter moduleName: Exact generated-index owner reaching success, failure, or cancellation.
-     - Side effects: Decrements or removes one lock-protected reference count.
-     - Failure modes: An unmatched release is ignored defensively and cannot create a negative count.
-     */
-    func finishMutation(for moduleName: String) {
-        let identity = SwordJavaExactStringIdentity(moduleName)
-        lock.lock()
-        if let count = countsByModule[identity] {
-            if count > 1 {
-                countsByModule[identity] = count - 1
-            } else {
-                countsByModule.removeValue(forKey: identity)
-            }
-        }
-        lock.unlock()
-    }
-
-    /**
-     Returns whether Android would currently expose one module as scheduled or creating.
-
-     - Parameter moduleName: Exact generated-index owner queried by Search or agent code.
-     - Returns: `true` while at least one mutation request remains pending or active.
-     - Side effects: Acquires the state lock briefly; no database or observable state is changed.
-     - Failure modes: None.
-     */
-    func isMutating(_ moduleName: String) -> Bool {
-        let identity = SwordJavaExactStringIdentity(moduleName)
-        lock.lock()
-        let mutating = countsByModule[identity] != nil
-        lock.unlock()
-        return mutating
-    }
-}
-
 /**
  Builds and queries Android-compatible Bible search indexes.
 
@@ -185,17 +55,8 @@ public final class SearchIndexService: @unchecked Sendable {
     /// Observer token removed during service teardown.
     @ObservationIgnored private var moduleStoreObserver: NSObjectProtocol?
 
-    /// Protects the fail-closed readiness bit and monotonic invalidation epoch across all readers.
-    @ObservationIgnored private let moduleStoreInvalidationLock = NSLock()
-
-    /// Number of overlapping notification handlers whose durable generation updates have not finished.
-    @ObservationIgnored private var moduleStoreInvalidationsPending = 0
-
-    /// Permanently retains fail-closed state when any durable invalidation cannot be persisted.
-    @ObservationIgnored private var moduleStoreInvalidationFailed = false
-
-    /// Advances before every store invalidation so already-pinned SQLite snapshots fail closed.
-    @ObservationIgnored private var moduleStoreInvalidationEpoch: UInt64 = 0
+    /// Fail-closed monotonic epoch shared by notifications, readiness checks, and logical reads.
+    @ObservationIgnored private let moduleStoreInvalidationState = SearchIndexInvalidationEpochState()
 
     /// Main-thread generation that prevents a cancelled build from overwriting newer progress state.
     @ObservationIgnored private var indexingGeneration: UInt64 = 0
@@ -312,7 +173,7 @@ public final class SearchIndexService: @unchecked Sendable {
      - Important: This method is synchronous so notification return implies stale readiness is blocked.
      */
     private func invalidateReadinessAfterModuleStoreMutation() {
-        beginModuleStoreInvalidation()
+        moduleStoreInvalidationState.begin()
         var invalidationError: Error?
         let mutation = {
             guard let db = self.db else {
@@ -338,90 +199,13 @@ public final class SearchIndexService: @unchecked Sendable {
         }
 
         guard let invalidationError else {
-            completeModuleStoreInvalidation(succeeded: true)
+            moduleStoreInvalidationState.complete(succeeded: true)
             return
         }
-        completeModuleStoreInvalidation(succeeded: false)
+        moduleStoreInvalidationState.complete(succeeded: false)
         DispatchQueue.main.async { [weak self] in
             self?.lastFailureDescription = invalidationError.localizedDescription
         }
-    }
-
-    /**
-     Starts one store invalidation and permanently advances the in-memory read epoch.
-
-     The epoch changes before durable work enters the mutation queue. A logical reader that already
-     pinned the previous WAL snapshot can therefore detect the event even after durable invalidation
-     succeeds and the transient blocked bit clears.
-
-     - Side effects: Increments the lock-protected epoch and marks all readiness/read paths blocked.
-     - Failure modes: None; the epoch intentionally remains advanced if durable persistence later fails.
-     */
-    private func beginModuleStoreInvalidation() {
-        moduleStoreInvalidationLock.lock()
-        moduleStoreInvalidationEpoch &+= 1
-        moduleStoreInvalidationsPending += 1
-        moduleStoreInvalidationLock.unlock()
-    }
-
-    /**
-     Completes one overlapping durable invalidation without clearing another pending or failed event.
-
-     - Parameter succeeded: Whether this notification's generation update committed durably.
-     - Side effects: Decrements the pending count, permanently records failure when needed, and allows
-       readers only after every overlapping update succeeds.
-     - Failure modes: An unmatched completion cannot make the count negative; a failed completion keeps
-       the service fail-closed for the rest of its lifetime.
-     */
-    private func completeModuleStoreInvalidation(succeeded: Bool) {
-        moduleStoreInvalidationLock.lock()
-        if moduleStoreInvalidationsPending > 0 {
-            moduleStoreInvalidationsPending -= 1
-        }
-        if !succeeded {
-            moduleStoreInvalidationFailed = true
-        }
-        moduleStoreInvalidationLock.unlock()
-    }
-
-    /** Returns whether readiness checks must fail while durable invalidation is pending or failed. */
-    private func isModuleStoreInvalidationBlocked() -> Bool {
-        moduleStoreInvalidationLock.lock()
-        let blocked = moduleStoreInvalidationFailed || moduleStoreInvalidationsPending > 0
-        moduleStoreInvalidationLock.unlock()
-        return blocked
-    }
-
-    /**
-     Captures the monotonic store epoch that authorizes one newly admitted logical read.
-
-     - Returns: Current epoch when durable invalidation is settled, otherwise `nil` to fail closed.
-     - Side effects: Acquires the invalidation lock briefly without reading SQLite.
-     - Failure modes: Returns `nil` while persistence is pending or permanently failed.
-     */
-    private func captureModuleStoreReadEpoch() -> UInt64? {
-        moduleStoreInvalidationLock.lock()
-        defer { moduleStoreInvalidationLock.unlock() }
-        guard !moduleStoreInvalidationFailed,
-              moduleStoreInvalidationsPending == 0 else { return nil }
-        return moduleStoreInvalidationEpoch
-    }
-
-    /**
-     Validates that no module-store mutation overlapped an admitted logical read.
-
-     - Parameter expectedEpoch: Epoch captured before the read-only SQLite snapshot opened.
-     - Returns: `true` only when the epoch is unchanged and no durable invalidation remains blocked.
-     - Side effects: Acquires the invalidation lock briefly without changing readiness state.
-     - Failure modes: Returns false for any intervening, pending, or failed store mutation.
-     */
-    private func moduleStoreReadEpochIsCurrent(_ expectedEpoch: UInt64) -> Bool {
-        moduleStoreInvalidationLock.lock()
-        let current = !moduleStoreInvalidationFailed
-            && moduleStoreInvalidationsPending == 0
-            && moduleStoreInvalidationEpoch == expectedEpoch
-        moduleStoreInvalidationLock.unlock()
-        return current
     }
 
     /**
@@ -432,158 +216,13 @@ public final class SearchIndexService: @unchecked Sendable {
      authoritative and can be re-indexed.
      */
     private func openDatabase() {
-        var handle: OpaquePointer?
-        let openCode = sqlite3_open_v2(
-            dbPath,
-            &handle,
-            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
-            nil
-        )
-        guard openCode == SQLITE_OK, let handle else {
-            let message = handle.flatMap { sqlite3_errmsg($0) }.map(String.init(cString:))
-                ?? "SQLite error \(openCode)"
-            if let handle { sqlite3_close(handle) }
-            db = nil
-            lastFailureDescription = SearchIndexError.sqlite(
-                operation: "opening the database",
-                code: openCode,
-                message: message
-            ).localizedDescription
-            return
-        }
-
         do {
-            try Self.execute(db: handle, sql: "PRAGMA journal_mode=WAL", operation: "enabling WAL")
-            if Self.searchSchemaNeedsRebuild(db: handle) {
-                try Self.dropGeneratedSchema(db: handle)
-            }
-            try Self.createSchema(db: handle)
-            db = handle
+            db = try SearchIndexSQLiteStoreBootstrap.open(path: dbPath)
             lastFailureDescription = nil
         } catch {
-            sqlite3_close(handle)
             db = nil
             lastFailureDescription = error.localizedDescription
         }
-    }
-
-    /**
-     Detects any persisted schema that cannot represent the canonical analyzer contracts.
-
-     A legacy table missing even one required column is rebuilt. Metadata is checked separately so
-     a partially upgraded database cannot advertise stale indexes as complete.
-     */
-    private static func searchSchemaNeedsRebuild(db: OpaquePointer?) -> Bool {
-        let ftsColumns = tableColumns(db: db, tableName: "verse_fts")
-        let strongsColumns = tableColumns(db: db, tableName: "verse_strongs")
-        let metadataColumns = tableColumns(db: db, tableName: "indexed_modules")
-        let stateColumns = tableColumns(db: db, tableName: "search_index_state")
-        guard !ftsColumns.isEmpty
-                || !strongsColumns.isEmpty
-                || !metadataColumns.isEmpty
-                || !stateColumns.isEmpty else { return false }
-
-        let requiredFTS: Set<String> = [
-            "search_text", "verse_key", "plain_text", "module_name", "entry_order",
-            "osis_book", "display_book", "display_book_mode", "chapter", "verse", "book_order",
-            "canon_scope",
-        ]
-        let requiredMetadata: Set<String> = [
-            "module_name", "verse_count", "indexed_at", "schema_version", "language_code",
-            "analyzer_id", "strongs_complete", "source_version", "source_fingerprint",
-            "store_generation",
-        ]
-        let requiredStrongs: Set<String> = [
-            "module_name", "token", "verse_key", "entry_order", "highlight_ranges",
-        ]
-        let requiredState: Set<String> = ["id", "store_generation"]
-        return !requiredFTS.isSubset(of: ftsColumns)
-            || !requiredStrongs.isSubset(of: strongsColumns)
-            || !requiredMetadata.isSubset(of: metadataColumns)
-            || !requiredState.isSubset(of: stateColumns)
-    }
-
-    private static func tableColumns(db: OpaquePointer?, tableName: String) -> Set<String> {
-        var statement: OpaquePointer?
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(tableName))", -1, &statement, nil) == SQLITE_OK else {
-            return []
-        }
-        var columns = Set<String>()
-        while sqlite3_step(statement) == SQLITE_ROW,
-              let pointer = sqlite3_column_text(statement, 1) {
-            columns.insert(String(cString: pointer))
-        }
-        return columns
-    }
-
-    private static func dropGeneratedSchema(db: OpaquePointer?) throws {
-        try execute(db: db, sql: "DROP TABLE IF EXISTS verse_strongs", operation: "dropping Strong's index")
-        try execute(db: db, sql: "DROP TABLE IF EXISTS verse_fts", operation: "dropping text index")
-        try execute(db: db, sql: "DROP TABLE IF EXISTS indexed_modules", operation: "dropping index metadata")
-        try execute(db: db, sql: "DROP TABLE IF EXISTS search_index_state", operation: "dropping index state")
-    }
-
-    private static func createSchema(db: OpaquePointer?) throws {
-        try execute(db: db, sql: """
-            CREATE VIRTUAL TABLE IF NOT EXISTS verse_fts USING fts5(
-                search_text,
-                verse_key UNINDEXED,
-                plain_text UNINDEXED,
-                module_name UNINDEXED,
-                entry_order UNINDEXED,
-                osis_book UNINDEXED,
-                display_book UNINDEXED,
-                display_book_mode UNINDEXED,
-                chapter UNINDEXED,
-                verse UNINDEXED,
-                book_order UNINDEXED,
-                canon_scope UNINDEXED,
-                tokenize='ascii'
-            )
-        """, operation: "creating the text index")
-        try execute(db: db, sql: """
-            CREATE TABLE IF NOT EXISTS verse_strongs (
-                module_name TEXT NOT NULL,
-                token TEXT NOT NULL,
-                verse_key TEXT NOT NULL,
-                entry_order INTEGER NOT NULL,
-                highlight_ranges TEXT NOT NULL,
-                PRIMARY KEY (module_name, token, verse_key)
-            )
-        """, operation: "creating the Strong's index")
-        try execute(db: db, sql: """
-            CREATE INDEX IF NOT EXISTS idx_verse_strongs_module_token
-            ON verse_strongs (module_name, token, entry_order)
-        """, operation: "creating the Strong's lookup")
-        try execute(db: db, sql: """
-            CREATE TABLE IF NOT EXISTS search_index_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                store_generation INTEGER NOT NULL
-            )
-        """, operation: "creating search index state")
-        try execute(db: db, sql: """
-            INSERT OR IGNORE INTO search_index_state (id, store_generation) VALUES (1, 0)
-        """, operation: "initializing search index state")
-        try execute(db: db, sql: """
-            CREATE TABLE IF NOT EXISTS indexed_modules (
-                module_name TEXT PRIMARY KEY,
-                verse_count INTEGER NOT NULL,
-                indexed_at TEXT NOT NULL,
-                schema_version INTEGER NOT NULL,
-                language_code TEXT NOT NULL,
-                analyzer_id TEXT NOT NULL,
-                strongs_complete INTEGER NOT NULL DEFAULT 0,
-                source_version TEXT NOT NULL,
-                source_fingerprint TEXT NOT NULL,
-                store_generation INTEGER NOT NULL
-            )
-        """, operation: "creating index metadata")
-        try execute(db: db, sql: """
-            DELETE FROM indexed_modules
-            WHERE schema_version != \(currentSchemaVersion) OR verse_count <= 0 OR analyzer_id = ''
-               OR source_fingerprint = ''
-        """, operation: "invalidating stale indexes")
     }
 
     /** Resolves the default Documents-backed index path and creates its parent directory. */
@@ -676,7 +315,7 @@ public final class SearchIndexService: @unchecked Sendable {
         moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity?
     ) -> Bool {
-        guard !isModuleStoreInvalidationBlocked() else { return false }
+        guard !moduleStoreInvalidationState.isBlocked() else { return false }
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         let sql = """
@@ -700,7 +339,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 || expectedIdentity.fingerprint != sourceFingerprint) {
             return false
         }
-        guard !isModuleStoreInvalidationBlocked(),
+        guard !moduleStoreInvalidationState.isBlocked(),
               (try? currentStoreGeneration(db: db)) == storedGeneration else {
             return false
         }
@@ -775,7 +414,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 sqlite3_bind_text(statement, 2, moduleName, -1, sqliteTransient)
                 sqlite3_bind_int(statement, 3, Int32(Self.currentSchemaVersion))
                 guard sqlite3_step(statement) == SQLITE_ROW else { return false }
-                guard !isModuleStoreInvalidationBlocked() else { return false }
+                guard !moduleStoreInvalidationState.isBlocked() else { return false }
                 return sqlite3_column_int(statement, 0) != 0
                     || sqlite3_column_int(statement, 1) != 0
             }
@@ -863,14 +502,16 @@ public final class SearchIndexService: @unchecked Sendable {
         isReady: (Value) -> Bool
     ) -> [Value] {
         guard !values.isEmpty else { return [] }
-        guard let aggregateEpoch = captureModuleStoreReadEpoch() else { return values }
+        guard let aggregateEpoch = moduleStoreInvalidationState.captureReadEpoch() else {
+            return values
+        }
         var missing: [Value] = []
         missing.reserveCapacity(values.count)
         for value in values {
             if !isReady(value) { missing.append(value) }
             aggregateReadinessCheckpoint?(moduleName(value))
         }
-        guard moduleStoreReadEpochIsCurrent(aggregateEpoch) else { return values }
+        guard moduleStoreInvalidationState.isCurrent(aggregateEpoch) else { return values }
         return missing
     }
 
@@ -892,7 +533,7 @@ public final class SearchIndexService: @unchecked Sendable {
     private func captureIndexCreationAuthorization(
         for source: any BibleSearchIndexSource
     ) throws -> SearchIndexSourceAuthorization {
-        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+        guard let invalidationEpoch = moduleStoreInvalidationState.captureReadEpoch() else {
             throw SearchIndexError.indexUnavailable(
                 moduleName: source.searchIndexModuleInfo.name
             )
@@ -928,7 +569,7 @@ public final class SearchIndexService: @unchecked Sendable {
         source: any BibleSearchIndexSource,
         authorization: SearchIndexSourceAuthorization
     )? {
-        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+        guard let invalidationEpoch = moduleStoreInvalidationState.captureReadEpoch() else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
         guard let source = resolve() else { return nil }
@@ -978,7 +619,7 @@ public final class SearchIndexService: @unchecked Sendable {
         authorization: SearchIndexSourceAuthorization
     )]? {
         guard !moduleNames.isEmpty else { return [] }
-        guard let invalidationEpoch = captureModuleStoreReadEpoch() else {
+        guard let invalidationEpoch = moduleStoreInvalidationState.captureReadEpoch() else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
         }
         guard let resolved = resolve() else { return nil }
@@ -1006,7 +647,7 @@ public final class SearchIndexService: @unchecked Sendable {
             )
             authorized.append((expectedName, resolvedItem.source, authorization))
         }
-        guard moduleStoreReadEpochIsCurrent(invalidationEpoch) else {
+        guard moduleStoreInvalidationState.isCurrent(invalidationEpoch) else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
         }
         return authorized
@@ -1034,7 +675,7 @@ public final class SearchIndexService: @unchecked Sendable {
               !sourceIdentity.fingerprint.isEmpty else {
             throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
         }
-        guard moduleStoreReadEpochIsCurrent(expectedInvalidationEpoch) else {
+        guard moduleStoreInvalidationState.isCurrent(expectedInvalidationEpoch) else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
         let storeGeneration = try withReadSnapshot(
@@ -1043,7 +684,7 @@ public final class SearchIndexService: @unchecked Sendable {
         ) { readDatabase in
             try currentStoreGeneration(db: readDatabase)
         }
-        guard moduleStoreReadEpochIsCurrent(expectedInvalidationEpoch) else {
+        guard moduleStoreInvalidationState.isCurrent(expectedInvalidationEpoch) else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
         return SearchIndexSourceAuthorization(
@@ -1143,7 +784,6 @@ public final class SearchIndexService: @unchecked Sendable {
                             )
                             continuation.resume()
                         } catch {
-                            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
                             continuation.resume(throwing: error)
                         }
                     }
@@ -1211,7 +851,7 @@ public final class SearchIndexService: @unchecked Sendable {
               authorization.sourceIdentity == sourceIdentity,
               SwordJavaStringIdentity.equals(sourceIdentity.moduleName, moduleName),
               !sourceIdentity.fingerprint.isEmpty,
-              moduleStoreReadEpochIsCurrent(authorization.invalidationEpoch) else {
+              moduleStoreInvalidationState.isCurrent(authorization.invalidationEpoch) else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
         if let db,
@@ -1251,175 +891,42 @@ public final class SearchIndexService: @unchecked Sendable {
         cancellationProbe: SearchIndexCancellationProbe,
         generation: UInt64
     ) throws {
-        let moduleName = source.searchIndexModuleInfo.name
-        guard SwordJavaStringIdentity.equals(sourceIdentity.moduleName, moduleName),
-              !sourceIdentity.fingerprint.isEmpty else {
-            throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
-        }
-        try cancellationProbe.checkCancellation()
-        try Self.execute(db: db, sql: "BEGIN IMMEDIATE TRANSACTION", operation: "starting \(moduleName) index")
-        let storeGeneration = try currentStoreGeneration(db: db)
-        try validateIndexCreationAuthorization(
-            authorization,
-            sourceIdentity: sourceIdentity,
-            moduleName: moduleName,
-            db: db
-        )
-        try deleteIndexData(db: db, moduleName: moduleName)
-
-        var verseStatement: OpaquePointer?
-        var strongsStatement: OpaquePointer?
-        defer {
-            sqlite3_finalize(verseStatement)
-            sqlite3_finalize(strongsStatement)
-        }
-
-        let verseSQL = """
-            INSERT INTO verse_fts (
-                search_text, verse_key, plain_text, module_name, entry_order, osis_book,
-                display_book, display_book_mode, chapter, verse, book_order, canon_scope
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        try prepare(db: db, sql: verseSQL, statement: &verseStatement, operation: "preparing verse insertion")
-        try prepare(
+        try SearchIndexPublicationTransaction.publish(
             db: db,
-            sql: """
-                INSERT OR IGNORE INTO verse_strongs (
-                    module_name, token, verse_key, entry_order, highlight_ranges
-                ) VALUES (?, ?, ?, ?, ?)
-            """,
-            statement: &strongsStatement,
-            operation: "preparing Strong's insertion"
-        )
-
-        var insertedVerseCount = 0
-        // Drained per entry: one Bible streams tens of thousands of verses through regex and
-        // analyzer calls inside a single dispatch block, and undrained autoreleased temporaries
-        // grow until iOS terminates the app mid-build.
-        try source.forEachSearchIndexEntry { entry in
-            try autoreleasepool {
-                try cancellationProbe.checkCancellation()
-                let indexText = entry.indexText
-                let previewText = entry.previewText
-                let analyzed = indexText.isEmpty
-                    ? ""
-                    : try SearchTextAnalyzer.analyzedText(indexText, profile: analyzer)
-                let canonSection = SearchCanonicalBookCatalog.section(of: entry.osisBookId)
-                let rawTokens = StrongsTokenNormalizer.canonicalTokens(
-                    rawEntry: entry.sourceMarkup,
-                    renderedTextProvider: { entry.taggedText },
-                    isNewTestamentBook: canonSection == .newTestament
+            source: source,
+            sourceIdentity: sourceIdentity,
+            analyzer: analyzer,
+            languageCode: languageCode,
+            cancellationProbe: cancellationProbe,
+            currentStoreGeneration: { [self] database in
+                try currentStoreGeneration(db: database)
+            },
+            validateAuthorization: { [self] database in
+                try validateIndexCreationAuthorization(
+                    authorization,
+                    sourceIdentity: sourceIdentity,
+                    moduleName: source.searchIndexModuleInfo.name,
+                    db: database
                 )
-                let taggedTokens = StrongsTokenNormalizer.canonicalTokens(taggedText: entry.taggedText)
-                let highlightRangesByToken = Self.strongHighlightRangesByToken(entry)
-                let strongsTokens = Self.orderedUnique(
-                    rawTokens + taggedTokens + highlightRangesByToken.keys.sorted()
+            },
+            deleteIndexData: { [self] database, moduleName in
+                try deleteIndexData(db: database, moduleName: moduleName)
+            },
+            indexIsReady: { [self] database, moduleName, identity in
+                indexIsReady(
+                    db: database,
+                    moduleName: moduleName,
+                    expectedIdentity: identity
                 )
-                guard source.searchIndexIncludesEmptyIndexText
-                        || !analyzed.isEmpty
-                        || !strongsTokens.isEmpty else {
-                    return true
+            },
+            progress: { [weak self] progress, key in
+                DispatchQueue.main.async {
+                    guard let self, self.indexingGeneration == generation else { return }
+                    self.indexProgress = progress
+                    self.indexingKey = key
                 }
-                guard let verseStatement, let strongsStatement else {
-                    throw SearchIndexError.databaseUnavailable(operation: "indexing \(moduleName)")
-                }
-
-                sqlite3_reset(verseStatement)
-                sqlite3_clear_bindings(verseStatement)
-                bind(analyzed, to: verseStatement, at: 1)
-                bind(entry.displayKey, to: verseStatement, at: 2)
-                bind(previewText, to: verseStatement, at: 3)
-                bind(moduleName, to: verseStatement, at: 4)
-                sqlite3_bind_int64(verseStatement, 5, sqlite3_int64(entry.entryOrder))
-                bind(entry.osisBookId, to: verseStatement, at: 6)
-                bind(entry.displayBook, to: verseStatement, at: 7)
-                bind(entry.bookNamePresentation.rawValue, to: verseStatement, at: 8)
-                sqlite3_bind_int(verseStatement, 9, Int32(entry.chapter))
-                sqlite3_bind_int(verseStatement, 10, Int32(entry.verse))
-                sqlite3_bind_int64(
-                    verseStatement,
-                    11,
-                    sqlite3_int64(SearchCanonicalBookCatalog.order(of: entry.osisBookId))
-                )
-                bind(canonSection.rawValue, to: verseStatement, at: 12)
-                try stepDone(db: db, statement: verseStatement, operation: "inserting \(entry.displayKey)")
-
-                for token in strongsTokens {
-                    sqlite3_reset(strongsStatement)
-                    sqlite3_clear_bindings(strongsStatement)
-                    bind(moduleName, to: strongsStatement, at: 1)
-                    bind(token, to: strongsStatement, at: 2)
-                    bind(entry.displayKey, to: strongsStatement, at: 3)
-                    sqlite3_bind_int64(strongsStatement, 4, sqlite3_int64(entry.entryOrder))
-                    bind(
-                        Self.encodeStrongHighlightRanges(highlightRangesByToken[token] ?? []),
-                        to: strongsStatement,
-                        at: 5
-                    )
-                    try stepDone(db: db, statement: strongsStatement, operation: "inserting Strong's token")
-                }
-
-                insertedVerseCount += 1
-                if insertedVerseCount.isMultiple(of: 200) {
-                    let total = max(source.searchIndexProgressTotal, 1)
-                    let progress = min(Double(entry.sourcePosition) / Double(total), 0.99)
-                    DispatchQueue.main.async {
-                        guard self.indexingGeneration == generation else { return }
-                        self.indexProgress = progress
-                        self.indexingKey = entry.displayKey
-                    }
-                }
-                return true
             }
-        }
-
-        try cancellationProbe.checkCancellation()
-        guard insertedVerseCount > 0 else {
-            throw SearchIndexError.indexContainsNoVerses(moduleName: moduleName)
-        }
-
-        var metadataStatement: OpaquePointer?
-        defer { sqlite3_finalize(metadataStatement) }
-        try prepare(
-            db: db,
-            sql: """
-                INSERT INTO indexed_modules (
-                    module_name, verse_count, indexed_at, schema_version, language_code, analyzer_id,
-                    strongs_complete, source_version, source_fingerprint, store_generation
-                ) VALUES (?, ?, datetime('now'), ?, ?, ?, 1, ?, ?, ?)
-            """,
-            statement: &metadataStatement,
-            operation: "preparing index completion metadata"
         )
-        guard let metadataStatement else {
-            throw SearchIndexError.databaseUnavailable(operation: "recording \(moduleName) completion")
-        }
-        bind(moduleName, to: metadataStatement, at: 1)
-        sqlite3_bind_int(metadataStatement, 2, Int32(insertedVerseCount))
-        sqlite3_bind_int(metadataStatement, 3, Int32(Self.currentSchemaVersion))
-        bind(languageCode, to: metadataStatement, at: 4)
-        bind(analyzer.identifier, to: metadataStatement, at: 5)
-        bind(sourceIdentity.version, to: metadataStatement, at: 6)
-        bind(sourceIdentity.fingerprint, to: metadataStatement, at: 7)
-        sqlite3_bind_int64(metadataStatement, 8, storeGeneration)
-        try cancellationProbe.checkCancellation()
-        try stepDone(db: db, statement: metadataStatement, operation: "recording \(moduleName) completion")
-        guard indexIsReady(
-            db: db,
-            moduleName: moduleName,
-            expectedIdentity: sourceIdentity
-        ),
-              indexedVerseCount(db: db, moduleName: moduleName) == insertedVerseCount else {
-            throw SearchIndexError.indexVerificationFailed(moduleName: moduleName)
-        }
-        try validateIndexCreationAuthorization(
-            authorization,
-            sourceIdentity: sourceIdentity,
-            moduleName: moduleName,
-            db: db
-        )
-        try cancellationProbe.checkCancellation()
-        try Self.execute(db: db, sql: "COMMIT", operation: "committing \(moduleName) index")
     }
 
     /**
@@ -1527,22 +1034,13 @@ public final class SearchIndexService: @unchecked Sendable {
         db: OpaquePointer,
         moduleName: String
     ) throws {
-        try Self.execute(
+        try SearchIndexPublicationTransaction.deleteCommittedIndex(
             db: db,
-            sql: "BEGIN IMMEDIATE TRANSACTION",
-            operation: "starting \(moduleName) index deletion"
+            moduleName: moduleName,
+            deleteIndexData: { [unowned self] database, owner in
+                try deleteIndexData(db: database, moduleName: owner)
+            }
         )
-        do {
-            try deleteIndexData(db: db, moduleName: moduleName)
-            try Self.execute(
-                db: db,
-                sql: "COMMIT",
-                operation: "committing \(moduleName) index deletion"
-            )
-        } catch {
-            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
-            throw error
-        }
     }
 
     /**
@@ -1751,7 +1249,8 @@ public final class SearchIndexService: @unchecked Sendable {
                 expectedIdentity: expectedIdentity
             )
             readAuthorizationCheckpoint?(moduleName)
-            let tokens = Self.orderedUnique(canonicalTokens).filter { !$0.isEmpty }
+            let tokens = SearchIndexQueryProjection.orderedUniqueTokens(canonicalTokens)
+                .filter { !$0.isEmpty }
             guard !tokens.isEmpty else { throw SearchIndexError.emptyQuery }
 
             let placeholders = Array(repeating: "?", count: tokens.count).joined(separator: ",")
@@ -1817,7 +1316,7 @@ public final class SearchIndexService: @unchecked Sendable {
         wordMode: SearchWordMode,
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedNames = Self.orderedUniqueModuleNames(moduleNames)
+        let orderedNames = SearchIndexQueryProjection.orderedUniqueModuleNames(moduleNames)
         return try collectGroupedResults(moduleNames: orderedNames) { moduleName in
             try search(query: query, moduleName: moduleName, wordMode: wordMode, scope: scope)
         }
@@ -1841,7 +1340,7 @@ public final class SearchIndexService: @unchecked Sendable {
         wordMode: SearchWordMode,
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedIdentities = Self.orderedUniqueIdentities(sourceIdentities)
+        let orderedIdentities = SearchIndexQueryProjection.orderedUniqueIdentities(sourceIdentities)
         let identitiesByName = Dictionary(
             uniqueKeysWithValues: orderedIdentities.map {
                 (SwordJavaExactStringIdentity($0.moduleName), $0)
@@ -1866,7 +1365,7 @@ public final class SearchIndexService: @unchecked Sendable {
         moduleNames: [String],
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedNames = Self.orderedUniqueModuleNames(moduleNames)
+        let orderedNames = SearchIndexQueryProjection.orderedUniqueModuleNames(moduleNames)
         return try collectGroupedResults(moduleNames: orderedNames) { moduleName in
             try searchStrongs(canonicalTokens: canonicalTokens, moduleName: moduleName, scope: scope)
         }
@@ -1888,7 +1387,7 @@ public final class SearchIndexService: @unchecked Sendable {
         sourceIdentities: [SearchIndexSourceIdentity],
         scope: SearchCanonicalScope = .wholeBible
     ) throws -> SearchGroupedResults {
-        let orderedIdentities = Self.orderedUniqueIdentities(sourceIdentities)
+        let orderedIdentities = SearchIndexQueryProjection.orderedUniqueIdentities(sourceIdentities)
         let identitiesByName = Dictionary(
             uniqueKeysWithValues: orderedIdentities.map {
                 (SwordJavaExactStringIdentity($0.moduleName), $0)
@@ -1935,7 +1434,7 @@ public final class SearchIndexService: @unchecked Sendable {
                 moduleFailures: []
             )
         }
-        guard let aggregateEpoch = captureModuleStoreReadEpoch() else {
+        guard let aggregateEpoch = moduleStoreInvalidationState.captureReadEpoch() else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
         }
         var moduleResults: [SearchModuleResults] = []
@@ -1954,7 +1453,7 @@ public final class SearchIndexService: @unchecked Sendable {
             }
             aggregateSearchCheckpoint?(moduleName)
         }
-        guard moduleStoreReadEpochIsCurrent(aggregateEpoch) else {
+        guard moduleStoreInvalidationState.isCurrent(aggregateEpoch) else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleNames[0])
         }
         if moduleResults.isEmpty, let firstFailure {
@@ -2062,7 +1561,7 @@ public final class SearchIndexService: @unchecked Sendable {
             case .text(let plan, let analyzer):
                 highlightRanges = try plan.ranges(in: text, analyzer: analyzer)
             case .strong:
-                highlightRanges = Self.decodeStrongHighlightRanges(
+                highlightRanges = SearchIndexQueryProjection.decodeStrongHighlightRanges(
                     Self.columnText(statement, index: 9) ?? ""
                 )
             }
@@ -2125,7 +1624,7 @@ public final class SearchIndexService: @unchecked Sendable {
         for moduleName: String,
         expectedIdentity: SearchIndexSourceIdentity? = nil
     ) throws -> IndexMetadata {
-        guard !isModuleStoreInvalidationBlocked() else {
+        guard !moduleStoreInvalidationState.isBlocked() else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
         var statement: OpaquePointer?
@@ -2188,7 +1687,7 @@ public final class SearchIndexService: @unchecked Sendable {
         moduleName: String,
         db: OpaquePointer
     ) throws {
-        guard !isModuleStoreInvalidationBlocked(),
+        guard !moduleStoreInvalidationState.isBlocked(),
               try currentStoreGeneration(db: db) == expectedGeneration else {
             throw SearchIndexError.indexUnavailable(moduleName: moduleName)
         }
@@ -2243,75 +1742,13 @@ public final class SearchIndexService: @unchecked Sendable {
         operation: String,
         _ body: (OpaquePointer) throws -> Result
     ) throws -> Result {
-        guard !moduleMutationState.isMutating(moduleName),
-              let readEpoch = captureModuleStoreReadEpoch() else {
-            throw SearchIndexError.indexUnavailable(moduleName: moduleName)
-        }
-        let readDatabase = try openReadDatabase(operation: operation)
-        defer { sqlite3_close(readDatabase) }
-        var transactionIsOpen = false
-        try Self.execute(
-            db: readDatabase,
-            sql: "BEGIN DEFERRED TRANSACTION",
-            operation: "starting read snapshot for \(moduleName)"
-        )
-        transactionIsOpen = true
-        do {
-            let result = try body(readDatabase)
-            guard moduleStoreReadEpochIsCurrent(readEpoch) else {
-                throw SearchIndexError.indexUnavailable(moduleName: moduleName)
-            }
-            try Self.execute(
-                db: readDatabase,
-                sql: "COMMIT",
-                operation: "committing read snapshot for \(moduleName)"
-            )
-            transactionIsOpen = false
-            guard moduleStoreReadEpochIsCurrent(readEpoch) else {
-                throw SearchIndexError.indexUnavailable(moduleName: moduleName)
-            }
-            return result
-        } catch {
-            if transactionIsOpen {
-                sqlite3_exec(readDatabase, "ROLLBACK", nil, nil, nil)
-            }
-            throw error
-        }
+        try SearchIndexReadSnapshotCoordinator(
+            databasePath: dbPath,
+            writerIsAvailable: db != nil,
+            moduleMutationState: moduleMutationState,
+            invalidationState: moduleStoreInvalidationState
+        ).read(for: moduleName, operation: operation, body)
     }
-
-    /**
-     Opens one operation-owned read-only connection to the generated Search database.
-
-     - Parameter operation: Caller-facing diagnostic operation preserved for unavailable-database errors.
-     - Returns: Independent SQLite handle whose caller must close after its logical snapshot ends.
-     - Side effects: Opens the database file read-only with serialized SQLite call protection.
-     - Throws: `databaseUnavailable` when initialization never produced a writer, or a typed SQLite
-       open error when the existing database cannot be reopened read-only.
-     */
-    private func openReadDatabase(operation: String) throws -> OpaquePointer {
-        guard db != nil else {
-            throw SearchIndexError.databaseUnavailable(operation: operation)
-        }
-        var handle: OpaquePointer?
-        let openCode = sqlite3_open_v2(
-            dbPath,
-            &handle,
-            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
-            nil
-        )
-        guard openCode == SQLITE_OK, let handle else {
-            let message = handle.flatMap { sqlite3_errmsg($0) }.map(String.init(cString:))
-                ?? "SQLite error \(openCode)"
-            if let handle { sqlite3_close(handle) }
-            throw SearchIndexError.sqlite(
-                operation: "opening a read snapshot for \(operation)",
-                code: openCode,
-                message: message
-            )
-        }
-        return handle
-    }
-
     /**
      Reads the durable installed-module store generation used to authorize index metadata.
 
@@ -2389,126 +1826,4 @@ public final class SearchIndexService: @unchecked Sendable {
         sqlite3_column_text(statement, index).map { String(cString: $0) }
     }
 
-    /**
-     Maps structured Strong's lemma tokens to exact visible-preview ranges for one verse.
-
-     - Parameter entry: Backend-neutral row whose lemma spans came from the same source-filtered
-       projection as `previewText`.
-     - Returns: Canonical base/full Strong's tokens mapped to sorted unique valid ranges.
-     - Side effects: None.
-     - Failure modes: Invalid/out-of-bounds spans and malformed lemma tokens are omitted; raw/tagged
-       Strong's indexing remains available without a highlight rather than guessing visible text.
-     */
-    private static func strongHighlightRangesByToken(
-        _ entry: BibleSearchIndexEntry
-    ) -> [String: [SearchTextHighlightRange]] {
-        let previewLength = entry.previewText.utf16.count
-        var result: [String: [SearchTextHighlightRange]] = [:]
-        for span in entry.lemmaSpans {
-            let (upper, overflow) = span.location.addingReportingOverflow(span.length)
-            guard !overflow,
-                  span.location >= 0,
-                  span.length > 0,
-                  upper <= previewLength else { continue }
-            let range = SearchTextHighlightRange(location: span.location, length: span.length)
-            for token in StrongsTokenNormalizer.canonicalTokens(lemmaAttribute: span.lemma) {
-                if !result[token, default: []].contains(range) {
-                    result[token, default: []].append(range)
-                }
-            }
-        }
-        for token in Array(result.keys) {
-            result[token]?.sort {
-                $0.location == $1.location
-                    ? $0.length < $1.length
-                    : $0.location < $1.location
-            }
-        }
-        return result
-    }
-
-    /**
-     Encodes one Strong's token's visible ranges into deterministic SQLite text.
-
-     - Parameter ranges: Valid sorted UTF-16 ranges for one token/verse row.
-     - Returns: Comma-delimited `location:length` pairs; no ranges produce an empty string.
-     - Side effects: None.
-     - Failure modes: None; values are emitted as base-10 integers without locale formatting.
-     */
-    private static func encodeStrongHighlightRanges(
-        _ ranges: [SearchTextHighlightRange]
-    ) -> String {
-        ranges.map { "\($0.location):\($0.length)" }.joined(separator: ",")
-    }
-
-    /**
-     Decodes all Strong's token ranges selected by one grouped lexical query.
-
-     - Parameter encoded: Semicolon-separated token rows containing comma-separated range pairs.
-     - Returns: Sorted unique nonnegative ranges; final preview validation occurs in
-       `SearchModuleHit.snippetSegments`.
-     - Side effects: None.
-     - Failure modes: Malformed/overflowing pairs are ignored individually; storage corruption
-       cannot produce an out-of-bounds string slice.
-     */
-    private static func decodeStrongHighlightRanges(
-        _ encoded: String
-    ) -> [SearchTextHighlightRange] {
-        var result: [SearchTextHighlightRange] = []
-        for row in encoded.split(separator: ";", omittingEmptySubsequences: true) {
-            for pair in row.split(separator: ",", omittingEmptySubsequences: true) {
-                let fields = pair.split(separator: ":", omittingEmptySubsequences: false)
-                guard fields.count == 2,
-                      let location = Int(fields[0]),
-                      let length = Int(fields[1]),
-                      location >= 0,
-                      length > 0 else { continue }
-                let range = SearchTextHighlightRange(location: location, length: length)
-                if !result.contains(range) { result.append(range) }
-            }
-        }
-        return result.sorted {
-            $0.location == $1.location
-                ? $0.length < $1.length
-                : $0.location < $1.location
-        }
-    }
-
-    private static func orderedUnique(_ values: [String]) -> [String] {
-        var seen = Set<String>()
-        return values.filter { seen.insert($0).inserted }
-    }
-
-    /**
-     Keeps the first selected module for each exact Java UTF-16 initials value.
-
-     - Parameter values: Caller-ordered installed module names.
-     - Returns: First-occurrence order with only Java `String.equals` duplicates removed.
-     - Side effects: None.
-     - Failure modes: None; canonically equivalent Swift strings intentionally remain separate.
-     */
-    private static func orderedUniqueModuleNames(_ values: [String]) -> [String] {
-        var seen = Set<SwordJavaExactStringIdentity>()
-        return values.filter {
-            seen.insert(SwordJavaExactStringIdentity($0)).inserted
-        }
-    }
-
-    /**
-     Keeps the first exact source identity for each selected Java module name.
-
-     - Parameter values: Caller-ordered installed source generations.
-     - Returns: First source for each code-unit-identical module initials value.
-     - Side effects: None.
-     - Failure modes: None; different generations of the same exact initials keep the first, while
-       canonically equivalent Java-distinct initials both remain selected.
-     */
-    private static func orderedUniqueIdentities(
-        _ values: [SearchIndexSourceIdentity]
-    ) -> [SearchIndexSourceIdentity] {
-        var seen = Set<SwordJavaExactStringIdentity>()
-        return values.filter {
-            seen.insert(SwordJavaExactStringIdentity($0.moduleName)).inserted
-        }
-    }
 }

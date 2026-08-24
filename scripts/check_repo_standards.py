@@ -819,6 +819,10 @@ def find_unshared_addon_feature_discovery(
             "nativeModuleRegistrySnapshot",
         ),
         (
+            "Sources/SwordKit/Sources/SwordKit/SwordNativeModuleRegistry.swift",
+            "capture",
+        ),
+        (
             "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
             "androidCustomInstalledRegistrations",
         ),
@@ -1094,6 +1098,87 @@ def find_nonexact_module_identity_collections(
     return sorted(matches)
 
 
+def find_parity_orchestrator_regressions(
+    text: str,
+    relative_path: str = "",
+) -> list[int]:
+    """Return oversized-orchestrator lines that recreate extracted parity responsibilities.
+
+    The check is deliberately path-specific: each former orchestrator must retain calls to its
+    extracted service boundaries and may not directly reintroduce the low-level ownership,
+    transaction, or backend primitives moved by issue #402. Comments and strings are masked, and
+    the helper performs no filesystem access or mutation.
+    """
+    contracts: dict[str, tuple[tuple[str, ...], tuple[re.Pattern[str], ...]]] = {
+        "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift": (
+            (
+                "BibleReaderDocumentAuthorizationService",
+                "BibleReaderBookmarkCommitPreflightService",
+                "BibleReaderRestoreDispatchService",
+            ),
+            (
+                re.compile(r"\bBibleReaderInstalledModuleResolver\s*\("),
+                re.compile(r"\bresolveDocumentOwner\s*\("),
+            ),
+        ),
+        "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift": (
+            (
+                "SearchIndexSQLiteStoreBootstrap",
+                "SearchIndexPublicationTransaction",
+                "SearchIndexReadSnapshotCoordinator",
+                "SearchIndexInvalidationEpochState",
+                "SearchIndexQueryProjection",
+            ),
+            (
+                re.compile(r"\bsqlite3_open_v2\s*\("),
+            ),
+        ),
+        "Sources/SwordKit/Sources/SwordKit/SwordManager.swift": (
+            (
+                "SwordNativeModuleRegistry",
+                "SwordInstalledBookSetProjection",
+                "SwordModuleHandleAuthorizationCache",
+                "SwordInstalledMyBibleInventory",
+                "SwordInstalledAddonInventory",
+            ),
+            (
+                re.compile(r"\bSet\s*<\s*NativeSwordBookHashIdentity\s*>"),
+                re.compile(r"\badmittedFontProviders\s*\("),
+                re.compile(r"\baddonConfigIsAdmitted\s*\("),
+            ),
+        ),
+        "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderStrongsDocumentBuilder.swift": (
+            (
+                "BibleReaderStrongsKeyFamilyResolver",
+                "BibleReaderStrongsBackendLookupService",
+                "BibleReaderMultiFragmentDocumentBuilder",
+            ),
+            (
+                re.compile(r"\brawDictionaryOSISFragment\s*\("),
+                re.compile(r"\brawGenBookOSISFragment\s*\("),
+                re.compile(r"\bAndroidJSwordRawLDKeyResolution\s*\.\s*resolve\s*\("),
+            ),
+        ),
+    }
+    contract = contracts.get(relative_path)
+    if contract is None:
+        return []
+
+    required_boundaries, forbidden_patterns = contract
+    masked_source = _mask_swift_comments_and_strings(text)
+    matches = {
+        text.count("\n", 0, match.start()) + 1
+        for pattern in forbidden_patterns
+        for match in pattern.finditer(masked_source)
+    }
+    if any(
+        re.search(rf"\b{re.escape(boundary)}\b", masked_source) is None
+        for boundary in required_boundaries
+    ):
+        matches.add(1)
+    return sorted(matches)
+
+
 def find_ios_bundle_version_reads(
     text: str,
     relative_path: str = "",
@@ -1125,12 +1210,14 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
     The guards keep the `ContentView` legacy root sidebar regression out of the app-host bundle,
     prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
     bypass Android-compatible global ownership admission, keep prompt/font/WebView/picker add-on
-    discovery on SwordKit's shared installed BookSet projection, and preserve Java-exact module
-    identity through settings, Search, Downloads, reader collections, and row IDs. Missing
-    fixed-path files fail closed, and the publisher/add-on scans follow every non-test Swift file
-    under `Sources` and `AndBible` across moves while narrowing infrastructure exceptions to audited
-    functions. iOS marketing/build metadata access remains confined to its display-only owner so
-    Android manifests and admission cannot reuse unrelated bundle version values.
+    discovery on SwordKit's shared installed BookSet projection, preserve Java-exact module identity
+    through settings, Search, Downloads, reader collections, and row IDs, and prevent the four
+    extracted parity orchestrators from reclaiming low-level ownership, transaction, or backend
+    responsibilities. Missing fixed-path files fail closed, and the publisher/add-on scans follow
+    every non-test Swift file under `Sources` and `AndBible` across moves while narrowing
+    infrastructure exceptions to audited functions. iOS marketing/build metadata access remains
+    confined to its display-only owner so Android manifests and admission cannot reuse unrelated
+    bundle version values.
     """
     content_view_path = repo_root / "AndBible/ContentView.swift"
     relative_path = "AndBible/ContentView.swift"
@@ -1203,6 +1290,17 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
                     ),
                 )
                 for line in find_nonexact_module_identity_collections(source, str(relative))
+            )
+            issues.extend(
+                SourceGuardIssue(
+                    path=str(relative),
+                    line=line,
+                    message=(
+                        "Extracted parity orchestrator directly recreates ownership, transaction, "
+                        "or backend logic instead of using its shared service boundary."
+                    ),
+                )
+                for line in find_parity_orchestrator_regressions(source, str(relative))
             )
             issues.extend(
                 SourceGuardIssue(

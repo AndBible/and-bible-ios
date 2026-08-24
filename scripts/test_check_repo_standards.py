@@ -17,6 +17,7 @@ from check_repo_standards import (
     find_multiline_slash_docblocks,
     find_ios_bundle_version_reads,
     find_nonexact_module_identity_collections,
+    find_parity_orchestrator_regressions,
     find_unshared_addon_feature_discovery,
     find_unsafe_direct_document_publishers,
     validate_commit_message,
@@ -783,6 +784,103 @@ class RepoStandardsTests(unittest.TestCase):
             find_nonexact_module_identity_collections(
                 "// Set<String> and missing exact identity are comments only",
                 "Sources/Unrelated.swift",
+            ),
+            [],
+        )
+
+    def test_parity_orchestrator_guard_requires_extracted_boundaries(self) -> None:
+        """Missing any required issue-402 service marks the exact orchestrator at line one."""
+        path = "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift"
+        text = "\n".join(
+            [
+                "let store = SearchIndexSQLiteStoreBootstrap.self",
+                "let publication = SearchIndexPublicationTransaction.self",
+                "let snapshots = SearchIndexReadSnapshotCoordinator.self",
+                "let epochs = SearchIndexInvalidationEpochState()",
+            ]
+        )
+        self.assertEqual(find_parity_orchestrator_regressions(text, path), [1])
+
+    def test_parity_orchestrator_guard_rejects_returned_low_level_logic(self) -> None:
+        """Forbidden primitives are rejected even while every required service remains referenced."""
+        fixtures = [
+            (
+                "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift",
+                "\n".join(
+                    [
+                        "let a = BibleReaderDocumentAuthorizationService.self",
+                        "let b = BibleReaderBookmarkCommitPreflightService.self",
+                        "let c = BibleReaderRestoreDispatchService.self",
+                        "let resolver = BibleReaderInstalledModuleResolver()",
+                    ]
+                ),
+                [4],
+            ),
+            (
+                "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift",
+                "\n".join(
+                    [
+                        "let a = SearchIndexSQLiteStoreBootstrap.self",
+                        "let b = SearchIndexPublicationTransaction.self",
+                        "let c = SearchIndexReadSnapshotCoordinator.self",
+                        "let d = SearchIndexInvalidationEpochState()",
+                        "let e = SearchIndexQueryProjection.self",
+                        "sqlite3_open_v2(path, &db, 0, nil)",
+                    ]
+                ),
+                [6],
+            ),
+            (
+                "Sources/SwordKit/Sources/SwordKit/SwordManager.swift",
+                "\n".join(
+                    [
+                        "let a = SwordNativeModuleRegistry.self",
+                        "let b = SwordInstalledBookSetProjection.self",
+                        "let c = SwordModuleHandleAuthorizationCache()",
+                        "let d = SwordInstalledMyBibleInventory.self",
+                        "let e = SwordInstalledAddonInventory.self",
+                        "var owners: Set<NativeSwordBookHashIdentity> = []",
+                    ]
+                ),
+                [6],
+            ),
+            (
+                "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderStrongsDocumentBuilder.swift",
+                "\n".join(
+                    [
+                        "let a = BibleReaderStrongsKeyFamilyResolver.self",
+                        "let b = BibleReaderStrongsBackendLookupService.self",
+                        "let c = BibleReaderMultiFragmentDocumentBuilder.self",
+                        "let result = module.rawDictionaryOSISFragment(forIndex: 0, storedKey: key)",
+                    ]
+                ),
+                [4],
+            ),
+        ]
+        for path, text, expected in fixtures:
+            with self.subTest(path=path):
+                self.assertEqual(find_parity_orchestrator_regressions(text, path), expected)
+
+    def test_parity_orchestrator_guard_accepts_service_only_delegation(self) -> None:
+        """Unrelated files and complete boundary-only orchestrator snippets remain accepted."""
+        controller_path = (
+            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift"
+        )
+        controller = "\n".join(
+            [
+                "let a = BibleReaderDocumentAuthorizationService.self",
+                "let b = BibleReaderBookmarkCommitPreflightService.self",
+                "let c = BibleReaderRestoreDispatchService.self",
+            ]
+        )
+        self.assertEqual(
+            find_parity_orchestrator_regressions(controller, controller_path),
+            [],
+        )
+        self.assertEqual(
+            find_parity_orchestrator_regressions(
+                "sqlite3_open_v2(path, &db, 0, nil)",
+                "Sources/BibleCore/Sources/BibleCore/Services/OtherStore.swift",
             ),
             [],
         )
