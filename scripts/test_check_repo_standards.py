@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_repo_standards import (
     find_legacy_root_sidebar_shell,
     find_multiline_slash_docblocks,
+    find_ios_bundle_version_reads,
     find_unshared_addon_feature_discovery,
     find_unsafe_direct_document_publishers,
     validate_commit_message,
@@ -23,7 +24,12 @@ from check_repo_standards import (
 
 
 class RepoStandardsTests(unittest.TestCase):
-    """Covers the locked commit message shape and Swift docblock style checks."""
+    """Covers commit, docblock, and production-source guard contracts.
+
+    Tests use in-memory snippets plus context-managed temporary repository fixtures where a
+    path-sensitive scan is required. Failures mean the guardrails can reject valid source or permit
+    a known architecture/parity regression. Temporary fixtures are removed by their context owners.
+    """
 
     def test_valid_commit_message_passes(self) -> None:
         message = "\n".join(
@@ -113,6 +119,28 @@ class RepoStandardsTests(unittest.TestCase):
             ]
         )
         self.assertEqual(find_multiline_slash_docblocks(text), [1])
+
+    def test_find_ios_bundle_version_reads_enforces_display_only_owner(self) -> None:
+        forbidden = "\n".join(
+            [
+                'let local = bundle.infoDictionary?["CFBundleVersion"]',
+                'let release = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString")',
+            ]
+        )
+        self.assertEqual(
+            find_ios_bundle_version_reads(
+                forbidden,
+                "Sources/BibleCore/Sources/BibleCore/Services/AndroidBackupManifestCodec.swift",
+            ),
+            [1, 2],
+        )
+        self.assertEqual(
+            find_ios_bundle_version_reads(
+                forbidden,
+                "Sources/BibleUI/Sources/BibleUI/Shared/AndBibleAppVersionMetadata.swift",
+            ),
+            [],
+        )
 
     def test_find_multiline_slash_docblocks_allows_single_line_comment(self) -> None:
         text = "\n".join(

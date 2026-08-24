@@ -1383,27 +1383,42 @@ public final class SwordManager: @unchecked Sendable {
      admitted only from `And Bible` books whose minimum version is compatible, then traversed in
      the installed TreeSet order that defines Android's duplicate-plan ownership.
 
-     - Parameters:
-       - modulePath: SWORD module root containing `mods.d` and module payloads.
-       - applicationVersionNumber: Android version-code compatibility implemented by this iOS build.
-         Nil uses the pinned current-stable compatibility level; tests may inject an exact boundary.
+     - Parameter modulePath: SWORD module root containing `mods.d` and module payloads.
      - Returns: Readable admitted providers in first-plan TreeSet order, with a later TreeSet book
        replacing an earlier provider that declares the same plan code.
      - Side effects: Reads local config files and checks provider file metadata.
      - Failure modes: Missing configs, unreadable files, and escaped paths are skipped.
      */
     public static func readingPlanProviders(
-        modulePath: String = SwordManager.defaultModulePath(),
-        applicationVersionNumber: Int? = nil
+        modulePath: String = SwordManager.defaultModulePath()
+    ) -> [SwordReadingPlanProvider] {
+        readingPlanProviders(
+            modulePath: modulePath,
+            applicationVersionNumber: AndBibleAndroidCompatibility.currentVersionCode
+        )
+    }
+
+    /**
+     Reads Android add-on reading-plan providers at an explicit compatibility boundary for tests.
+
+     - Parameters:
+       - modulePath: Isolated SWORD root containing provider configs and payloads.
+       - applicationVersionNumber: Exact Android version code used for admission.
+     - Returns: Providers resolved with the same installed BookSet and duplicate-plan rules as the
+       production overload.
+     - Side effects: Reads local config files and checks provider file metadata.
+     - Failure modes: Missing configs, unreadable files, and escaped paths are skipped.
+     */
+    static func readingPlanProviders(
+        modulePath: String,
+        applicationVersionNumber: Int
     ) -> [SwordReadingPlanProvider] {
         var providersByCode: [String: SwordReadingPlanProvider] = [:]
         var orderedCodes: [String] = []
-        let compatibleVersion = applicationVersionNumber
-            ?? androidCompatibilityVersionNumber
 
         guard let manager = SwordManager(modulePath: modulePath) else { return [] }
         let candidates = manager.admittedAddonCandidates(
-            applicationVersionNumber: compatibleVersion
+            applicationVersionNumber: applicationVersionNumber
         )
         for candidate in candidates {
             let config = candidate.config
@@ -1461,7 +1476,7 @@ public final class SwordManager: @unchecked Sendable {
         SwordRuntime.sync {
             if let admittedAddonModulesCache { return admittedAddonModulesCache }
             let modules = admittedAddonModules(
-                applicationVersionNumber: Self.androidCompatibilityVersionNumber
+                applicationVersionNumber: AndBibleAndroidCompatibility.currentVersionCode
             )
             admittedAddonModulesCache = modules
             return modules
@@ -1758,16 +1773,6 @@ public final class SwordManager: @unchecked Sendable {
         }
         return .location(location)
     }
-
-    /**
-     Android current-stable version code whose add-on feature contract this iOS build implements.
-
-     Pinned And Bible commit `00b4ea24` declares version code 1115. This deliberately does not read
-     `CFBundleVersion`: iOS local builds use `1`, while release automation uses dotted UTC stamps, so
-     neither value represents Android add-on compatibility. Advancing this constant requires parity
-     review of add-on features introduced after the pinned Android version.
-     */
-    private static let androidCompatibilityVersionNumber = 1115
 
     /**
      Replays installed TreeSet ownership before applying Android's add-on feature filter.

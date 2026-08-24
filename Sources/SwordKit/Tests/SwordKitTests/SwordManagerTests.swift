@@ -6,6 +6,20 @@ import SQLite3
 
 final class SwordManagerTests: XCTestCase {
     /**
+     Verifies the shared authority stays pinned to the Android current-stable version code.
+
+     - Setup: Reads the public compatibility authority used by add-on admission and backup
+       manifests without constructing a manager or reading bundle metadata.
+     - Expected result: The value equals Android commit 00b4ea24 version code 1115.
+     - Side effects: None.
+     - Failure meaning: iOS has silently changed the compatibility boundary without the required
+       Android parity review.
+     */
+    func testAndroidCompatibilityAuthorityPinsCurrentStableVersionCode() {
+        XCTAssertEqual(AndBibleAndroidCompatibility.currentVersionCode, 1115)
+    }
+
+    /**
      Verifies the public exact-string key follows Java UTF-16 identity rather than Swift equality.
 
      - Setup: Constructs keys for canonically equivalent composed/decomposed spellings and one exact
@@ -1816,8 +1830,8 @@ final class SwordManagerTests: XCTestCase {
 
      - Setup: Writes readable providers for a missing-minimum add-on, future add-on, non-add-on,
        malformed-minimum add-on, and unsupported-driver add-on.
-     - Expected result: At compatibility version 1112 only the supported `And Bible` config whose
-       missing minimum defaults to zero is admitted.
+     - Expected result: At the shared current-stable compatibility code only the supported
+       `And Bible` config whose missing minimum defaults to zero is admitted.
      - Side effects: Creates and removes one isolated SWORD config/provider tree.
      - Failure meaning: iOS exposes plans Android filters out or rejects Android-compatible add-ons.
      */
@@ -1833,7 +1847,12 @@ final class SwordManagerTests: XCTestCase {
 
         let definitions: [(String, String, String, String?)] = [
             ("ADMITTED", "And Bible", "RawGenBook", nil),
-            ("FUTURE", "And Bible", "RawGenBook", "1113"),
+            (
+                "FUTURE",
+                "And Bible",
+                "RawGenBook",
+                String(AndBibleAndroidCompatibility.currentVersionCode + 1)
+            ),
             ("WRONGCATEGORY", "Generic Books", "RawGenBook", nil),
             ("MALFORMED", "And Bible", "RawGenBook", "not-a-number"),
             ("UNSUPPORTED", "And Bible", "UnknownDriver", nil),
@@ -1872,10 +1891,7 @@ final class SwordManagerTests: XCTestCase {
             )
         }
 
-        let providers = SwordManager.readingPlanProviders(
-            modulePath: moduleRoot.path,
-            applicationVersionNumber: 1112
-        )
+        let providers = SwordManager.readingPlanProviders(modulePath: moduleRoot.path)
 
         XCTAssertEqual(providers.map(\.planCode), ["admitted"])
         XCTAssertEqual(providers.first?.name, "ADMITTED provider")
