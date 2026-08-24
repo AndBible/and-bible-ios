@@ -1043,6 +1043,23 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Verifies restored Android MyBible configuration retains the Words-of-Christ capability.
+
+     - Setup: Projects Android's generated `Feature=WordsOfChrist` value through the shared SWORD
+       feature parser.
+     - Expected result: The reader-facing red-letter feature is present without inventing unrelated
+       Strong's or morphology flags.
+     - Side effects: None.
+     - Failure meaning: Android backup-restored MyBible Bibles lose the same capability that direct
+       package discovery reads from their payload.
+     */
+    func testWordsOfChristConfigFeatureMapsToRedLetterWords() {
+        let features = ModuleFeatures.fromConfigValues(["WordsOfChrist"])
+
+        XCTAssertEqual(features.rawValue, ModuleFeatures.redLetterWords.rawValue)
+    }
+
+    /**
      Verifies installed module rows retain Android `CommonUtils.showAbout` metadata from SWORD config.
 
      JSword reloads `SwordBookMetaData` before opening About and exposes fields such as `About`,
@@ -2993,6 +3010,135 @@ final class SwordManagerTests: XCTestCase {
     }
 
     /**
+     Verifies installed MyBible version and capability metadata comes only from Android's payload
+     evidence.
+
+     - Setup: Writes four package-owned databases: a Strong's Bible with `<J>` content, a Strong's
+       dictionary, a Words-of-Christ-info Bible, and a Bible with unsupported near-match flag
+       values. Every sidecar advertises a deliberately conflicting version.
+     - Expected result: Every installed row reports version `0.0`; exact Strong's flags remain
+       independent, Words-of-Christ is Bible-only and maps only to red-letter support, near-match
+       values stay disabled, and a fresh manager reproduces the same metadata.
+     - Side effects: Creates, opens read-only, and removes four isolated SQLite package fixtures.
+     - Failure meaning: Manifest provenance overrides Android's generated configuration, feature
+       inference depends on category, or cached inventory disagrees with a reopened manager.
+     */
+    func testInstalledMyBibleVersionAndFeaturesMatchAndroidPayloadEvidence() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let myBibleRoot = root.appendingPathComponent("mybible", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        /** Immutable payload evidence and exact feature oracle for one package fixture. */
+        struct Definition {
+            /// ASCII directory/payload stem whose Android initials remain deterministic.
+            let directory: String
+
+            /// Exact content-table family materialized in SQLite.
+            let category: ModuleCategory
+
+            /// Additional Android `info` rows that independently drive capabilities.
+            let infoValues: [(String, String)]
+
+            /// Optional Bible verse text used to exercise the `<J>` fallback.
+            let verseText: String?
+
+            /// Exact `ModuleFeatures` expected from the payload.
+            let expectedFeatures: ModuleFeatures
+        }
+        let definitions = [
+            Definition(
+                directory: "strong-bible",
+                category: .bible,
+                infoValues: [("strong_numbers", "true")],
+                verseText: "In the <J>beginning</J>",
+                expectedFeatures: [.strongsNumbers, .redLetterWords]
+            ),
+            Definition(
+                directory: "strong-dictionary",
+                category: .dictionary,
+                infoValues: [("is_strong", "true"), ("is_red_letter", "1")],
+                verseText: nil,
+                expectedFeatures: [.greekDef, .hebrewDef]
+            ),
+            Definition(
+                directory: "words-bible",
+                category: .bible,
+                infoValues: [("words_of_christ", "TrUe")],
+                verseText: "Plain verse",
+                expectedFeatures: [.redLetterWords]
+            ),
+            Definition(
+                directory: "near-match-bible",
+                category: .bible,
+                infoValues: [("is_strong", "TRUE"), ("strong_numbers", "1")],
+                verseText: "Plain verse",
+                expectedFeatures: []
+            ),
+        ]
+
+        for definition in definitions {
+            let directory = myBibleRoot.appendingPathComponent(
+                definition.directory,
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let payloadName = "\(definition.directory).SQLite3"
+            let sidecar = InstalledMyBibleModule(
+                name: "Remote-\(definition.directory)",
+                description: "Manifest metadata",
+                category: definition.category.rawValue,
+                language: "zz",
+                version: "9999.0",
+                sourceName: "Fixture",
+                packageFileName: "\(payloadName).zip",
+                downloadURL: "https://example.invalid/\(payloadName).zip",
+                installedAt: Date(timeIntervalSince1970: 0)
+            )
+            try JSONEncoder().encode(sidecar).write(
+                to: directory.appendingPathComponent("module.json"),
+                options: .atomic
+            )
+            try makeInstalledMyBibleDatabase(
+                at: directory.appendingPathComponent(payloadName),
+                description: definition.directory,
+                language: "en",
+                category: definition.category,
+                infoValues: definition.infoValues,
+                verseText: definition.verseText
+            )
+        }
+
+        let expected = Dictionary(uniqueKeysWithValues: definitions.map {
+            ("MyBible-\($0.directory.replacingOccurrences(of: "-", with: "_"))", $0)
+        })
+        let firstManager = try XCTUnwrap(SwordManager(modulePath: root.path))
+        let firstRows = firstManager.installedModules().filter { expected[$0.name] != nil }
+        XCTAssertEqual(firstRows.count, definitions.count)
+        for row in firstRows {
+            let definition = try XCTUnwrap(expected[row.name])
+            XCTAssertEqual(row.version, "0.0", row.name)
+            XCTAssertEqual(row.features.rawValue, definition.expectedFeatures.rawValue, row.name)
+        }
+
+        let reopenedManager = try XCTUnwrap(SwordManager(modulePath: root.path))
+        let reopened = Dictionary(uniqueKeysWithValues: reopenedManager.installedModules()
+            .filter { expected[$0.name] != nil }
+            .map { ($0.name, ($0.version, $0.features.rawValue)) })
+        XCTAssertEqual(
+            reopened.mapValues { $0.0 },
+            Dictionary(uniqueKeysWithValues: expected.keys.map { ($0, "0.0") })
+        )
+        XCTAssertEqual(
+            reopened.mapValues { $0.1 },
+            Dictionary(uniqueKeysWithValues: expected.map { ($0.key, $0.value.expectedFeatures.rawValue) })
+        )
+    }
+
+    /**
      Verifies stale MyBible sidecar metadata does not produce an installed-book row.
 
      Android's MyBible import only adds a book when the SQLite payload can be opened. iOS should not
@@ -3227,6 +3373,8 @@ final class SwordManagerTests: XCTestCase {
        - description: Value stored under `info.description`.
        - language: Value stored under `info.language`.
        - category: Bible, commentary, or dictionary content table to materialize.
+       - infoValues: Additional exact `info` rows used by feature-projection tests.
+       - verseText: Optional single Bible verse used to exercise content-derived capabilities.
      - Side effects: Creates and writes one SQLite database at `databaseURL`.
      - Failure modes: Throws for unsupported categories or SQLite open/write failures.
      */
@@ -3234,7 +3382,9 @@ final class SwordManagerTests: XCTestCase {
         at databaseURL: URL,
         description: String,
         language: String,
-        category: ModuleCategory
+        category: ModuleCategory,
+        infoValues: [(String, String)] = [],
+        verseText: String? = nil
     ) throws {
         let contentTable: String
         switch category {
@@ -3260,14 +3410,36 @@ final class SwordManagerTests: XCTestCase {
         }
         defer { sqlite3_close(database) }
 
-        let escapedDescription = description.replacingOccurrences(of: "'", with: "''")
-        let escapedLanguage = language.replacingOccurrences(of: "'", with: "''")
-        let sql = """
-        CREATE TABLE info (name TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO info (name, value) VALUES ('description', '\(escapedDescription)');
-        INSERT INTO info (name, value) VALUES ('language', '\(escapedLanguage)');
-        CREATE TABLE \(contentTable) (fixture_id INTEGER);
-        """
+        /**
+         Escapes one trusted fixture value for the generated SQLite statement batch.
+
+         - Parameter value: Exact test metadata or verse content to encode as a SQL string literal.
+         - Returns: The same value with apostrophes doubled for SQLite literal syntax.
+         - Side effects: None.
+         - Failure modes: None; fixture values are valid Swift strings and no SQL is executed here.
+         */
+        func sqlLiteral(_ value: String) -> String {
+            value.replacingOccurrences(of: "'", with: "''")
+        }
+        var statements = [
+            "CREATE TABLE info (name TEXT PRIMARY KEY, value TEXT)",
+            "INSERT INTO info (name, value) VALUES ('description', '\(sqlLiteral(description))')",
+            "INSERT INTO info (name, value) VALUES ('language', '\(sqlLiteral(language))')",
+        ]
+        statements.append(contentsOf: infoValues.map {
+            "INSERT INTO info (name, value) VALUES ('\(sqlLiteral($0.0))', '\(sqlLiteral($0.1))')"
+        })
+        if category == .bible {
+            statements.append("CREATE TABLE verses (fixture_id INTEGER, text TEXT)")
+            if let verseText {
+                statements.append(
+                    "INSERT INTO verses (fixture_id, text) VALUES (1, '\(sqlLiteral(verseText))')"
+                )
+            }
+        } else {
+            statements.append("CREATE TABLE \(contentTable) (fixture_id INTEGER)")
+        }
+        let sql = statements.joined(separator: ";\n") + ";"
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw SwordManagerMyBibleFixtureError.writeFailed
         }

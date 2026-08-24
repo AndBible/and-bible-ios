@@ -33,10 +33,11 @@ struct InstalledMyBibleBookRegistration: Sendable {
  Reads Android-compatible installed-book metadata from one MyBible sidecar module directory.
 
  Android's `SqliteVerseBackendState` derives identity from the actual database filename, reads
- `description` and `language` from the database `info` table, and classifies the payload by exact
- table names. The sidecar remains authoritative only for repository/version fields that the database
- does not carry. This reader deliberately performs no registration or collision handling; it emits
- ordered payload-owned values for `SwordManager` to admit against the combined installed registry.
+ `description`, `language`, and feature evidence from the database, classifies the payload by exact
+ table names, and emits the generated version `0.0`. The sidecar remains authoritative only for
+ repository/install provenance. This reader deliberately performs no registration or collision
+ handling; it emits ordered payload-owned values for `SwordManager` to admit against the combined
+ installed registry.
 
  Every SQLite handle is opened read-only, used on the calling thread, and closed before the call
  returns. The type owns no shared mutable state and is safe to call concurrently for different or
@@ -44,7 +45,7 @@ struct InstalledMyBibleBookRegistration: Sendable {
  */
 enum InstalledMyBibleBookReader {
     /**
-     Metadata read from the two Android `info` values and exact table-name classification.
+     Metadata read from Android's `info` values, content evidence, and exact table classification.
 
      This intermediate value prevents sidecar fields from accidentally replacing database-owned
      metadata before the final `ModuleInfo` is constructed. It has no behavior or side effects after
@@ -59,6 +60,9 @@ enum InstalledMyBibleBookReader {
 
         /// Category selected by exact table-name priority: verses, commentaries, then dictionary.
         let category: ModuleCategory
+
+        /// Independent Strong's-definition, Strong's-number, and Words-of-Christ capabilities.
+        let features: ModuleFeatures
     }
 
     /**
@@ -92,7 +96,7 @@ enum InstalledMyBibleBookReader {
 
      - Parameters:
        - payloadURL: Immediate SQLite/MyBible file whose basename and database own the book metadata.
-       - sidecar: Repository metadata supplying the installed version and source attribution.
+       - sidecar: Repository metadata supplying source attribution only.
      - Returns: A payload-owned registration, or `nil` when the file cannot prove the Android schema
        and metadata contract.
      - Side effects: Opens `payloadURL` with `SQLITE_OPEN_READONLY`, executes metadata-only queries,
@@ -132,7 +136,8 @@ enum InstalledMyBibleBookReader {
             category: metadata.category,
             language: metadata.language,
             moduleDriver: driver,
-            version: sidecar.version,
+            version: "0.0",
+            features: metadata.features,
             aboutMetadata: ModuleAboutMetadata(
                 versification: "KJVA",
                 osisId: initials,
@@ -148,11 +153,12 @@ enum InstalledMyBibleBookReader {
     }
 
     /**
-     Reads the Android-owned description, language, and content-table category from one database.
+     Reads Android-owned description, language, category, version-independent feature evidence.
 
      - Parameter database: Open read-only SQLite handle valid for the duration of this call.
      - Returns: Complete payload metadata when `info` is queryable and a recognized content table is
-       present; otherwise `nil`.
+       present; otherwise `nil`. Feature flags stay independent of category except that Android only
+       detects Words-of-Christ for Bible schemas.
      - Side effects: Prepares, steps, and finalizes read-only SQLite statements.
      - Failure modes: A missing/malformed `info` table, SQLite step error, or schema without `verses`,
        `commentaries`, or `dictionary` returns `nil`. Missing individual info rows use Android's
@@ -169,22 +175,112 @@ enum InstalledMyBibleBookReader {
             named: "language",
             defaultValue: "en",
             database: database
+        ), let strongsDefinitions = infoValue(
+            named: "is_strong",
+            defaultValue: "",
+            database: database
+        ), let strongsNumbers = infoValue(
+            named: "strong_numbers",
+            defaultValue: "",
+            database: database
         ), let tableNames = tableNames(in: database),
            let category = moduleCategory(for: tableNames) else {
             return nil
         }
+        var features: ModuleFeatures = []
+        if strongsDefinitions == "true" {
+            features.formUnion([.greekDef, .hebrewDef])
+        }
+        if strongsNumbers == "true" {
+            features.insert(.strongsNumbers)
+        }
+        if wordsOfChristAvailable(in: database, category: category) {
+            features.insert(.redLetterWords)
+        }
         return DatabaseMetadata(
             description: description,
             language: language,
-            category: category
+            category: category,
+            features: features
         )
+    }
+
+    /**
+     Detects Android's Words-of-Christ feature from exact info aliases or verse markup.
+
+     - Parameters:
+       - database: Open read-only SQLite handle.
+       - category: Payload category already proven from exact table names.
+     - Returns: `true` only for a Bible with a truthy Android metadata alias or at least one verse
+       containing a case-insensitive `<J>` marker.
+     - Side effects: Prepares, steps, and finalizes at most two read-only SQLite statements.
+     - Failure modes: Non-Bible categories and any prepare/step failure return `false`, matching
+       Android's caught `SQLiteException` path without rejecting otherwise readable metadata.
+     */
+    private static func wordsOfChristAvailable(
+        in database: OpaquePointer,
+        category: ModuleCategory
+    ) -> Bool {
+        guard category == .bible else { return false }
+
+        let flagSQL = """
+        SELECT value FROM info
+        WHERE name IN ('is_words_of_christ', 'words_of_christ', 'is_red_letter', 'red_letter')
+        """
+        var flagStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, flagSQL, -1, &flagStatement, nil) == SQLITE_OK,
+              let flagStatement else {
+            return false
+        }
+        var flagQuerySucceeded = false
+        while true {
+            switch sqlite3_step(flagStatement) {
+            case SQLITE_ROW:
+                let value = sqlite3_column_type(flagStatement, 0) == SQLITE_NULL
+                    ? nil
+                    : sqlite3_column_text(flagStatement, 0).map { String(cString: $0) }
+                if parseMyBibleBoolean(value) {
+                    sqlite3_finalize(flagStatement)
+                    return true
+                }
+            case SQLITE_DONE:
+                flagQuerySucceeded = true
+                sqlite3_finalize(flagStatement)
+                break
+            default:
+                sqlite3_finalize(flagStatement)
+                return false
+            }
+            if flagQuerySucceeded { break }
+        }
+
+        let verseSQL = "SELECT 1 FROM verses WHERE instr(lower(text), '<j>') > 0 LIMIT 1"
+        var verseStatement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, verseSQL, -1, &verseStatement, nil) == SQLITE_OK,
+              let verseStatement else {
+            return false
+        }
+        defer { sqlite3_finalize(verseStatement) }
+        return sqlite3_step(verseStatement) == SQLITE_ROW
+    }
+
+    /**
+     Parses the boolean forms Android accepts for Words-of-Christ aliases.
+
+     - Parameter value: Nullable SQLite text from one supported info row.
+     - Returns: `true` for case-insensitive `true` or exact `1`; `false` otherwise.
+     - Side effects: None.
+     - Failure modes: None; missing and unsupported values are false.
+     */
+    private static func parseMyBibleBoolean(_ value: String?) -> Bool {
+        value?.caseInsensitiveCompare("true") == .orderedSame || value == "1"
     }
 
     /**
      Reads the first exact-name value from Android's MyBible `info` table.
 
      - Parameters:
-       - name: Trusted fixed metadata key (`description` or `language`).
+       - name: Trusted exact metadata key for description, language, or a feature flag.
        - defaultValue: Android fallback returned for a missing row or SQL `NULL` value.
        - database: Open read-only SQLite handle.
      - Returns: Exact UTF-8 text, the supplied fallback for no value, or `nil` when preparation or
