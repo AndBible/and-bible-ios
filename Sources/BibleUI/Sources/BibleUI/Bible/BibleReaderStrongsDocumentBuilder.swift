@@ -608,59 +608,21 @@ struct BibleReaderStrongsDocumentBuilder {
         return escapedMessage.replacingOccurrences(of: sentinel, with: link)
     }
 
-    /**
-     Returns Strong's key strings in Android's typed family order.
-
-     - Parameter strongsNumber: Decoded external Strong's key, including any trailing decoration.
-     - Returns: Raw, five-digit, five-digit-plus-carriage-return, and category values. Duplicate
-       strings remain present because Android caches and reorders the typed family, not the value.
-     - Side effects: None.
-     - Failure modes: Invalid grammar retains Android's literal null-base family outputs rather than
-       inventing valid numeric aliases.
-    */
+    /** Returns Strong's key strings in Android's typed family order. */
     static func strongsLookupKeyOptions(for strongsNumber: String) -> [String] {
-        strongsLookupKeyCandidates(for: strongsNumber).map(\.value)
+        BibleReaderStrongsKeyFamilyResolver.values(for: strongsNumber)
     }
 
-    /**
-     Builds Android's four typed Strong's lookup families.
-
-     Android's `LinkControl.getStrongsKey` parses an optional uppercase `G`/`H`, greedily consumes
-     leading zeroes, accepts decorations after the digits, and tries raw, five-digit, five-digit plus
-     carriage return, then category-plus-unpadded keys. No libsword-only aliases are added because
-     doing so could turn an Android miss into iOS content or select a distinct logical record.
-
-     - Parameter strongsNumber: Decoded external Strong's key before normalization.
-     - Returns: Ordered typed candidates with duplicate values retained under distinct families.
-     - Side effects: None.
-     - Failure modes: Values outside Android's anchored grammar retain Android's raw, empty,
-       carriage-return, and category-plus-`null` typed family values.
-     */
+    /** Builds Android's four typed Strong's lookup families. */
     static func strongsLookupKeyCandidates(
         for strongsNumber: String
     ) -> [AndroidStrongsKeyCandidate] {
-        let categoryPrefix = isHebrewStrongsNumber(strongsNumber) ? "H" : "G"
-        return AndroidStrongsKeyResolution.candidates(
-            for: strongsNumber,
-            categoryPrefix: categoryPrefix
-        )
+        BibleReaderStrongsKeyFamilyResolver.candidates(for: strongsNumber)
     }
 
-    /**
-     Mirrors Android's external Strong's URI category rule.
-
-     Android reads the raw first UTF-16 `Char` without trimming or case folding and treats only code
-     unit `0x0047` (`G`) as Greek. This differs from Swift grapheme clustering when `G` is followed
-     by a combining mark. `H`-prefixed, prefixless numeric, lowercase `g`, leading-space, and legacy
-     non-`G` values all route to the Hebrew key family.
-
-     - Parameter strongsNumber: External Strong's value before dictionary-key normalization.
-     - Returns: `false` only when the raw first UTF-16 code unit is uppercase `G` (`0x0047`).
-     - Side effects: None.
-     - Failure modes: Empty or malformed values deterministically classify as Hebrew.
-     */
+    /** Mirrors Android's raw first-UTF-16-unit Strong's route classification. */
     static func isHebrewStrongsNumber(_ strongsNumber: String) -> Bool {
-        strongsNumber.utf16.first != 0x0047
+        BibleReaderStrongsKeyFamilyResolver.isHebrew(strongsNumber)
     }
 
     /**
@@ -748,222 +710,44 @@ struct BibleReaderStrongsDocumentBuilder {
     }
 
     /**
-     Tries each Android key candidate through the selected SWORD book's JSword key contract.
-
-     RawLD backends normalize case and optional Strong's padding before exact index comparison.
-     JSword derives padding from the first binary-search midpoint, so iOS resolves the selected
-     source-index key before asking libsword to read that exact stored record.
-     Body/headword text is deliberately not used as a second ownership test: Android accepts the
-     key returned by `Book.getKey` and renders `BookData` even when entry markup names another key.
+     Resolves candidates through the extracted Android/JSword backend boundary.
 
      - Parameters:
-       - module: Readable SWORD module queried through serialized cursor access.
-       - keyOptions: Ordered keys; Strong's callers pass one typed family per invocation and
-         Robinson callers pass exactly the raw code.
-     - Returns: First JSword-owned record, preserving its exact stored key, raw body, and rendering.
-     - Side effects: Enumerates and caches RawLD keys, then moves the module cursor to accepted keys.
-     - Failure modes: Empty/unresolved keys, unrelated nearest-key results, backend enumeration
-       failures, and unsupported non-RawLD normalization fail the affected candidate closed.
+       - module: Globally authorized readable SWORD module.
+       - keyOptions: Ordered typed Strong's keys or one raw Robinson code.
+     - Returns: First exact backend-owned record, or \`nil\` for a fail-closed miss.
+     - Side effects: Delegates cursor/index reads to \`BibleReaderStrongsBackendLookupService\`.
+     - Failure modes: Backend errors and unrelated nearest keys return \`nil\`.
      */
-    static func lookupInModule(_ module: SwordModule, keyOptions: [String]) -> DictionaryLookupResult? {
-        strongsDocumentBuilderLogger.info("lookupInModule: \(module.info.name), keyOptions=\(keyOptions)")
-
-        let driver = module.info.moduleDriver
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        if driver == "rawgenbook" {
-            return lookupInGenBook(module, keyOptions: keyOptions)
-        }
-        let usesRawLDKeyContract = ["rawld", "rawld4", "zld"].contains(driver)
-        let rawLDConfiguration = AndroidJSwordRawLDKeyResolution.Configuration(
-            moduleInitials: module.info.name,
-            category: module.info.category,
-            features: module.info.features,
-            caseSensitiveKeys: AndroidJSwordRawLDKeyResolution.javaBoolean(
-                module.configEntry("CaseSensitiveKeys")
-            ),
-            // SwordBookMetaData.DEFAULTS supplies true when this property is absent.
-            strongsPadding: module.configEntry("StrongsPadding").map(
-                AndroidJSwordRawLDKeyResolution.javaBoolean
-            ) ?? true
-        )
-
-        let rawLDStoredSlots: [SwordRawDictionaryIndexSlot]?
-        if usesRawLDKeyContract {
-            rawLDStoredSlots = try? module.loadRawDictionaryIndexSlots()
-        } else {
-            rawLDStoredSlots = nil
-        }
-        for key in keyOptions {
-            let selectedStoredKey: String?
-            let selectedStoredIndex: Int?
-            if usesRawLDKeyContract {
-                guard let rawLDStoredSlots else { return nil }
-                let resolution = AndroidJSwordRawLDKeyResolution.resolve(
-                    requestedKey: key,
-                    storedSlots: rawLDStoredSlots,
-                    configuration: rawLDConfiguration
-                )
-                selectedStoredKey = resolution?.storedKey
-                selectedStoredIndex = resolution?.index
-            } else {
-                selectedStoredKey = key
-                selectedStoredIndex = nil
-            }
-            guard let selectedStoredKey else { continue }
-
-            if usesRawLDKeyContract {
-                guard let selectedStoredIndex else { continue }
-                let fragment: SwordRawOSISFragment
-                do {
-                    fragment = try module.rawDictionaryOSISFragment(
-                        forIndex: selectedStoredIndex,
-                        storedKey: selectedStoredKey
-                    )
-                } catch SwordRawOSISFragmentError.missingCommentaryVerse(
-                    let key,
-                    let keyName,
-                    let osisRef
-                ) {
-                    return DictionaryLookupResult(
-                        actualKey: keyName,
-                        osisID: key,
-                        osisRef: osisRef,
-                        rawEntry: "",
-                        renderedText: "",
-                        payloadFailure: .keyNotInDocument
-                    )
-                } catch {
-                    continue
-                }
-                strongsDocumentBuilderLogger.info(
-                    "lookupInModule: tried key='\(key)', actualKey='\(fragment.keyName)', accepted=true, xmlLen=\(fragment.xml.count)"
-                )
-                return DictionaryLookupResult(
-                    actualKey: fragment.keyName,
-                    osisID: fragment.key,
-                    osisRef: fragment.osisRef,
-                    rawEntry: fragment.originalXML,
-                    renderedText: fragment.originalXML,
-                    payloadReadyXML: fragment.xml
-                )
-            }
-
-            let inspection = module.setKeyAndInspect(selectedStoredKey)
-            let accepted = inspection.actualKey.utf16.elementsEqual(key.utf16)
-
-            strongsDocumentBuilderLogger.info(
-                "lookupInModule: tried key='\(key)', actualKey='\(inspection.actualKey)', accepted=\(accepted), renderLen=\(inspection.renderedText.count)"
-            )
-            guard accepted else { continue }
-            return DictionaryLookupResult(
-                actualKey: selectedStoredKey,
-                rawEntry: inspection.rawEntry,
-                renderedText: inspection.renderedText
-            )
-        }
-        return nil
-    }
-
-    /**
-     Resolves one candidate through pinned `SwordGenBook.getKey` and reads the selected TreeKey.
-
-     - Parameters:
-       - module: Readable RawGenBook whose global TreeKey list backs JSword's local key map.
-       - keyOptions: Ordered Strong's typed families or the one raw Robinson code.
-     - Returns: First resolved entry with leaf `Key.name` and distinct full-path OSIS identity.
-     - Side effects: Enumerates/caches the module key list and performs one cursor-restoring raw OSIS
-       read for the selected exact full path.
-     - Failure modes: Key-list errors, unmatched candidates, and malformed/unreadable selected OSIS
-       fail closed without substituting a nearest tree node.
-     */
-    private static func lookupInGenBook(
+    static func lookupInModule(
         _ module: SwordModule,
         keyOptions: [String]
     ) -> DictionaryLookupResult? {
-        guard let sourceKeys = try? module.loadAllKeys() else { return nil }
-        for key in keyOptions {
-            guard let resolution = AndroidJSwordGenBookKeyResolution.resolve(
-                candidate: key,
-                sourceKeys: sourceKeys
-            ) else {
-                continue
-            }
-            let fragment: SwordRawOSISFragment
-            do {
-                fragment = try module.rawGenBookOSISFragment(
-                    forKey: resolution.sourceKey,
-                    treeKeyCardinality: resolution.subtreeCardinality
-                )
-            } catch SwordRawOSISFragmentError.missingCommentaryVerse(
-                let sourceKey,
-                let keyName,
-                let osisRef
-            ) {
-                return DictionaryLookupResult(
-                    actualKey: keyName,
-                    osisID: resolution.osisRef.isEmpty ? sourceKey : resolution.osisRef,
-                    osisRef: resolution.osisRef.isEmpty ? osisRef : resolution.osisRef,
-                    rawEntry: "",
-                    renderedText: "",
-                    payloadFailure: .keyNotInDocument
-                )
-            } catch {
-                continue
-            }
-            return DictionaryLookupResult(
-                actualKey: fragment.keyName,
-                osisID: resolution.osisRef,
-                osisRef: resolution.osisRef,
-                rawEntry: fragment.originalXML,
-                renderedText: fragment.originalXML,
-                payloadReadyXML: fragment.xml
-            )
-        }
-        return nil
+        BibleReaderStrongsBackendLookupService.lookupInModule(module, keyOptions: keyOptions)
     }
 
     /**
-     Tries Android's Strong's key variants against a restored MyBible dictionary.
-
-     MyBible dictionary topics are exact keys, so unlike SWORD there is no nearest-entry cursor to
-     reject. Android exposes the driver as a `SwordDictionary`: an exact row, including an empty
-     definition, receives the hidden generated key title before one OSIS/BVA processing pass.
+     Resolves candidates through the extracted restored-MyBible backend boundary.
 
      - Parameters:
        - reader: Validated read-only MyBible dictionary backend.
-       - keyOptions: Ordered Android Strong/Robinson candidates; the first exact topic wins.
-       - moduleInitials: Actual installed initials used by source-specific OSIS compatibility rules.
-     - Returns: Actual topic identity plus payload-ready OSIS, or `nil` when no topic/processable
-       entry exists.
-     - Side effects: Opens short-lived SQLite reads and runs one OSIS parser/anchor pass per exact row.
-     - Failure modes: Missing topics and malformed OSIS continue to the next candidate; all misses
-       return `nil`. An exact empty definition remains a successful hidden-title-only fragment.
+       - keyOptions: Ordered Android Strong's or Robinson candidates.
+       - moduleInitials: Installed initials used by OSIS compatibility rules.
+     - Returns: First exact topic projection, or \`nil\` when no row is processable.
+     - Side effects: Delegates SQLite and OSIS reads to the backend lookup service.
+     - Failure modes: Missing topics and malformed payloads fail the affected candidate closed.
      */
     static func lookupInMyBibleDictionary(
         _ reader: MyBibleReader,
         keyOptions: [String],
         moduleInitials: String? = nil
     ) -> DictionaryLookupResult? {
-        for key in keyOptions {
-            guard let entry = reader.getDictionaryEntry(key: key),
-                  let processed = try? SwordOSISFragmentProcessor.processDictionarySource(
-                    sourceXML: entry,
-                    keyName: key,
-                    moduleInitials: moduleInitials
-                  ) else {
-                continue
-            }
-            return DictionaryLookupResult(
-                actualKey: key,
-                rawEntry: processed.originalXML,
-                renderedText: processed.originalXML,
-                payloadReadyXML: processed.xml
-            )
-        }
-        return nil
+        BibleReaderStrongsBackendLookupService.lookupInMyBibleDictionary(
+            reader,
+            keyOptions: keyOptions,
+            moduleInitials: moduleInitials
+        )
     }
-
     /**
      Parsed SWORD-style module config with lowercased keys and duplicate values preserved.
      */
@@ -1631,87 +1415,5 @@ struct BibleReaderStrongsDocumentBuilder {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
-    }
-}
-
-/**
- Encodes Vue multi-fragment document payloads used by Strong's and dictionary results.
- */
-enum BibleReaderMultiFragmentDocumentBuilder {
-    /// Fragment tuple used by existing controller and builder call sites.
-    typealias Fragment = (
-        xml: String,
-        key: String,
-        keyName: String,
-        osisRef: String,
-        bookCategory: String,
-        bookInitials: String,
-        bookAbbreviation: String,
-        v11n: String?,
-        language: String,
-        direction: String,
-        features: OsisFeatures,
-        hasStrongs: Bool,
-        isNativeHtml: Bool
-    )
-
-    /**
-     Builds a typed `MultiFragmentDocumentPayload` JSON string for Vue.
-     */
-    static func buildJSON(
-        fragments: [Fragment],
-        contentType: String? = nil,
-        stateJSON: String? = nil
-    ) -> String? {
-        let id = "strongs-multi-\(UUID().uuidString)"
-        let osisFragments = fragments.map { frag in
-            OsisFragment(
-                xml: frag.xml.replacingOccurrences(of: "\r", with: ""),
-                key: frag.key,
-                keyName: frag.keyName,
-                v11n: frag.v11n,
-                bookCategory: frag.bookCategory,
-                bookInitials: frag.bookInitials,
-                bookAbbreviation: frag.bookAbbreviation,
-                osisRef: frag.osisRef,
-                isNewTestament: false,
-                features: frag.features,
-                hasStrongs: frag.hasStrongs,
-                ordinalRange: nil,
-                language: frag.language,
-                direction: frag.direction,
-                isNativeHtml: frag.isNativeHtml
-            )
-        }
-
-        let payload = MultiFragmentDocumentPayload(
-            id: id,
-            type: "multi",
-            osisFragments: osisFragments,
-            compare: false,
-            contentType: contentType,
-            state: bridgeJSONValue(from: stateJSON)
-        )
-        guard let data = try? bridgeEncoder.encode(payload),
-              let json = String(data: data, encoding: .utf8) else {
-            strongsDocumentBuilderLogger.error("Failed to encode multi-fragment bridge document")
-            return nil
-        }
-        return json
-    }
-
-    /**
-     Parses an optional raw JSON state blob into a typed bridge JSON value.
-     */
-    private static func bridgeJSONValue(from json: String?) -> BridgeJSONValue? {
-        guard let json,
-              let data = json.data(using: .utf8) else { return nil }
-        do {
-            let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-            return BridgeJSONValue(object)
-        } catch {
-            strongsDocumentBuilderLogger.error("Failed to parse saved bridge state JSON: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
     }
 }
