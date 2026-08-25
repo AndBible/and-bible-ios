@@ -112,7 +112,8 @@ extension AndBibleUITests {
 
      * - Side effects:
      *   - opens Reading Progress from the production navigation drawer
-     *   - returns to the reader through the destination's explicit back control
+     *   - returns to the reader through the destination's explicit back control, retrying once if
+     *     a hosted simulator synthesizes the tap without changing destination state
      * - Failure modes:
      *   - fails if the route is absent from the drawer, becomes a generic sheet/modal, or cannot return
      *   - fails if the destination loses its reader-stack ownership while visible
@@ -133,6 +134,16 @@ extension AndBibleUITests {
             requireElement("readingProgressAppBarBackButton", in: app, timeout: 10),
             timeout: 10
         )
+        if !waitForUITestCondition(
+            "Wait for Reading Progress back navigation",
+            timeout: 3,
+            condition: { !destination.exists }
+        ) {
+            tapElementReliably(
+                requireElement("readingProgressAppBarBackButton", in: app, timeout: 10),
+                timeout: 10
+            )
+        }
         waitForElementToDisappear(destination, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),

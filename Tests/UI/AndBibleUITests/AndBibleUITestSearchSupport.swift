@@ -884,7 +884,7 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval
     ) {
-        let identifier = "searchTranslationRow::\(moduleName)"
+        let identifier = searchTranslationRowAccessibilityIdentifier(moduleName: moduleName)
         let deadline = Date().addingTimeInterval(timeout)
 
         repeat {
@@ -939,6 +939,24 @@ extension AndBibleUITests {
         } while Date() < deadline
 
         XCTFail("Expected Search translation row '\(moduleName)' to exist within \(timeout) seconds.")
+    }
+
+    /**
+     Builds the Java-exact accessibility identifier used by one Search translation row.
+
+     - Parameter moduleName: Raw module abbreviation whose canonical Unicode variants must remain
+       independently addressable.
+     - Returns: Search row identifier containing the module name's hyphen-delimited, uppercase
+       UTF-16 code units, or the literal `empty` segment for an empty name.
+     - Side effects: None.
+     - Failure modes: None; Swift strings always expose a deterministic UTF-16 representation.
+     */
+    func searchTranslationRowAccessibilityIdentifier(moduleName: String) -> String {
+        let codeUnits = Array(moduleName.utf16)
+        let segment = codeUnits.isEmpty
+            ? "empty"
+            : codeUnits.map { String(format: "%04X", $0) }.joined(separator: "-")
+        return "searchTranslationRow::\(segment)"
     }
 
     /// Returns list roots for the Search translation picker.
