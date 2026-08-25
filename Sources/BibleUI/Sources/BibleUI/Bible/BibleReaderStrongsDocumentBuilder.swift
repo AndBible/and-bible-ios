@@ -1176,12 +1176,12 @@ struct BibleReaderStrongsDocumentBuilder {
             } ?? false)
         strongsDocumentBuilderLogger.info("findAllLexiconModules: \(candidates.count) installed lexicon candidates, isHebrew=\(isHebrew)")
         var result: [LexiconModule] = []
-        var seen = Set<String>()
+        var seen = SwordJavaExactStringSet()
 
         let selectionKey: AppPreferenceKey = isHebrew ? .strongsHebrewDictionary : .strongsGreekDictionary
         let selectedNames = selectedPreferenceValues(selectionKey)
         if !selectedNames.isEmpty {
-            for name in selectedNames where seen.insert(name).inserted {
+            for name in selectedNames where seen.insert(name) {
                 if let mod = explicitlySelectedLexiconModule(named: name) {
                     result.append(mod)
                 }
@@ -1190,7 +1190,7 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         for mod in candidates {
-            if seen.insert(mod.name).inserted {
+            if seen.insert(mod.name) {
                 result.append(mod)
             }
         }
@@ -1426,11 +1426,11 @@ struct BibleReaderStrongsDocumentBuilder {
             } ?? false)
 
         var result: [LexiconModule] = []
-        var seen = Set<String>()
+        var seen = SwordJavaExactStringSet()
 
         let selectedNames = selectedPreferenceValues(.robinsonGreekMorphology)
         if !selectedNames.isEmpty {
-            for name in selectedNames where seen.insert(name).inserted {
+            for name in selectedNames where seen.insert(name) {
                 if let mod = explicitlySelectedLexiconModule(named: name) {
                     result.append(mod)
                 }
@@ -1439,7 +1439,7 @@ struct BibleReaderStrongsDocumentBuilder {
         }
 
         for mod in candidates {
-            if seen.insert(mod.name).inserted {
+            if seen.insert(mod.name) {
                 result.append(mod)
             }
         }

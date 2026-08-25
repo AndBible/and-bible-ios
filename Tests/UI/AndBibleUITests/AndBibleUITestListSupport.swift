@@ -1036,11 +1036,14 @@ extension AndBibleUITests {
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      *
-     * Exact production identifiers stay ahead of localized-title fallbacks. Title-matched text
-     * fields are intentionally excluded: while Settings search is focused, its value can equal a
-     * row title and XCTest would otherwise return the search editor instead of the navigation row.
-     * Broad `otherElements.containing(staticText:)` fallbacks are also avoided because the
-     * Android-style flat settings conversion makes them resolve to the full scroll surface.
+     * Exact production identifiers stay ahead of localized-title fallbacks. Navigation-button
+     * queries precede unrelated element types, while identifiers ending in `Toggle` retain switch
+     * priority; this avoids exhausting a hosted-runner timeout on known-wrong type queries. Title-
+     * matched text fields are intentionally excluded: while Settings search is focused, its value
+     * can equal a row title and XCTest would otherwise return the search editor instead of the
+     * navigation row. Broad `otherElements.containing(staticText:)` fallbacks are also avoided
+     * because the Android-style flat settings conversion makes them resolve to the full scroll
+     * surface.
      */
     func requireSettingsNavigationControl(
         _ identifier: String,
@@ -1053,34 +1056,61 @@ extension AndBibleUITests {
         let visibleTitle = settingsNavigationTitle(for: identifier)
         let deadline = Date().addingTimeInterval(timeout)
         func candidateElements() -> [XCUIElement] {
-            var candidates = [
+            let prefersToggle = identifier.hasSuffix("Toggle")
+            var candidates = prefersToggle ? [
                 settingsForm.switches[identifier].firstMatch,
-                settingsForm.textFields[identifier].firstMatch,
-                settingsForm.links[identifier].firstMatch,
-                settingsForm.buttons[identifier].firstMatch,
-                settingsForm.cells[identifier].firstMatch,
-                settingsForm.otherElements[identifier].firstMatch,
                 app.switches[identifier].firstMatch,
-                app.textFields[identifier].firstMatch,
-                app.links[identifier].firstMatch,
+                settingsForm.buttons[identifier].firstMatch,
                 app.buttons[identifier].firstMatch,
+            ] : [
+                settingsForm.buttons[identifier].firstMatch,
+                app.buttons[identifier].firstMatch,
+                settingsForm.links[identifier].firstMatch,
+                app.links[identifier].firstMatch,
+                settingsForm.cells[identifier].firstMatch,
                 app.cells[identifier].firstMatch,
+                settingsForm.otherElements[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
+                settingsForm.switches[identifier].firstMatch,
+                app.switches[identifier].firstMatch,
+                settingsForm.textFields[identifier].firstMatch,
+                app.textFields[identifier].firstMatch,
             ]
 
-            if let visibleTitle {
+            if prefersToggle {
                 candidates.append(contentsOf: [
+                    settingsForm.links[identifier].firstMatch,
+                    app.links[identifier].firstMatch,
+                    settingsForm.cells[identifier].firstMatch,
+                    app.cells[identifier].firstMatch,
+                    settingsForm.otherElements[identifier].firstMatch,
+                    app.otherElements[identifier].firstMatch,
+                    settingsForm.textFields[identifier].firstMatch,
+                    app.textFields[identifier].firstMatch,
+                ])
+            }
+
+            if let visibleTitle {
+                let titleCandidates = prefersToggle ? [
                     settingsForm.switches[visibleTitle].firstMatch,
-                    settingsForm.links[visibleTitle].firstMatch,
-                    settingsForm.buttons[visibleTitle].firstMatch,
-                    settingsForm.cells[visibleTitle].firstMatch,
-                    settingsForm.otherElements[visibleTitle].firstMatch,
-                    settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
                     app.switches[visibleTitle].firstMatch,
-                    app.links[visibleTitle].firstMatch,
+                    settingsForm.buttons[visibleTitle].firstMatch,
                     app.buttons[visibleTitle].firstMatch,
+                ] : [
+                    settingsForm.buttons[visibleTitle].firstMatch,
+                    app.buttons[visibleTitle].firstMatch,
+                    settingsForm.links[visibleTitle].firstMatch,
+                    app.links[visibleTitle].firstMatch,
+                    settingsForm.cells[visibleTitle].firstMatch,
                     app.cells[visibleTitle].firstMatch,
+                    settingsForm.otherElements[visibleTitle].firstMatch,
                     app.otherElements[visibleTitle].firstMatch,
+                    settingsForm.switches[visibleTitle].firstMatch,
+                    app.switches[visibleTitle].firstMatch,
+                ]
+                candidates.append(contentsOf: titleCandidates)
+                candidates.append(contentsOf: [
+                    settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
                     app.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
                 ])
             }

@@ -265,8 +265,25 @@ struct ModuleBrowserModuleDetailRow: Identifiable, Equatable {
  - empty optional fields are omitted rather than shown as placeholders
  */
 struct ModuleBrowserModuleDetails: Identifiable {
-    /// Stable dialog identity scoped to the source row that opened the dialog.
-    let id: String
+    /**
+     Java-exact identity for the installed or remote owner shown by the About dialog.
+
+     Cases keep remote repositories, installed SWORD/custom documents, and EPUB generations in
+     separate domains while preserving every raw UTF-16 identity component.
+     */
+    enum ID: Hashable {
+        /// Remote catalog owner scoped by repository and module initials.
+        case remote(RemoteModuleIdentity)
+
+        /// Installed SWORD/custom owner keyed by exact module initials.
+        case installed(SwordJavaExactStringIdentity)
+
+        /// Installed EPUB owner keyed by its stable identifier.
+        case epub(SwordJavaExactStringIdentity)
+    }
+
+    /// Stable Java-exact dialog identity scoped to the owner that opened the dialog.
+    let id: ID
 
     /// SWORD module initials used as the fallback heading and OSIS identity.
     let moduleName: String
@@ -401,7 +418,7 @@ struct ModuleBrowserModuleDetails: Identifiable {
      - Failure modes: Missing installed metadata leaves installed-only rows absent.
      */
     init(module: RemoteModuleInfo, installedModule: ModuleInfo?) {
-        id = module.id
+        id = .remote(module.id)
         moduleName = module.name
         moduleDescription = module.description
         aboutMetadata = installedModule?.aboutMetadata.withFallbacks(
@@ -430,7 +447,7 @@ struct ModuleBrowserModuleDetails: Identifiable {
      - Failure modes: Empty installed metadata fields are omitted by `androidAboutRows`.
      */
     init(installedModule: ModuleInfo) {
-        id = installedModule.id
+        id = .installed(SwordJavaExactStringIdentity(installedModule.name))
         moduleName = installedModule.name
         moduleDescription = installedModule.description
         aboutMetadata = installedModule.aboutMetadata
@@ -454,7 +471,7 @@ struct ModuleBrowserModuleDetails: Identifiable {
        immutable index opened, so the shared About renderer can omit no required identity.
      */
     init(epub: EpubInfo) {
-        id = "epub:\(epub.identifier)"
+        id = .epub(SwordJavaExactStringIdentity(epub.identifier))
         moduleName = epub.initials
         moduleDescription = epub.title
         aboutMetadata = ModuleAboutMetadata(
@@ -860,7 +877,7 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
      Cases intentionally stay narrow: About is a dialog and Unlock is hidden until iOS has a real
      cipher-key coordinator.
      */
-    enum Kind {
+    enum Kind: Hashable {
         /// Remove the installed module from local SWORD storage.
         case uninstall
 
@@ -877,8 +894,24 @@ struct ModuleBrowserRowActionConfirmation: Identifiable {
     /// Human-readable module title used in confirmation copy.
     let moduleDescription: String
 
-    /// Stable alert identity.
-    var id: String { "\(kind)-\(moduleName)" }
+    /**
+     Java-exact identity for one destructive module confirmation.
+
+     - Inputs: Confirmation kind and exact module initials.
+     - Returns: Hashable owner identity that does not normalize or case-fold initials.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    struct ID: Hashable {
+        /// Destructive operation awaiting confirmation.
+        let kind: Kind
+
+        /// Raw UTF-16 module owner awaiting the operation.
+        let module: SwordJavaExactStringIdentity
+    }
+
+    /// Stable Java-exact alert identity.
+    var id: ID { ID(kind: kind, module: SwordJavaExactStringIdentity(moduleName)) }
 
     /**
      Best available user-facing module label for confirmation copy.

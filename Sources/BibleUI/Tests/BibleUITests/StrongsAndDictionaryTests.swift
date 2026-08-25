@@ -73,7 +73,8 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
      SwiftUI list order, both of which make subsequent primary-first ordering ambiguous.
 
      - Setup: Uses intentionally unsorted installed Bible module metadata.
-     - Expected result: Abbreviations are returned in Android's sorted order.
+     - Expected result: Abbreviations are returned in Android's sorted order and the repeated exact
+       `KJV` initials are emitted once because persisted Search selection is initials-keyed.
      - Failure meaning: Search may present or commit multi-translation choices in an iOS-specific
        order instead of Android's deterministic dialog order.
      - Side effects: none.
@@ -83,10 +84,11 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             ModuleInfo(name: "WEB", description: "World English Bible", category: .bible, language: "en"),
             ModuleInfo(name: "KJV", description: "King James Version", category: .bible, language: "en"),
             ModuleInfo(name: "ASV", description: "American Standard Version", category: .bible, language: "en"),
+            ModuleInfo(name: "KJV", description: "Exact duplicate", category: .bible, language: "en"),
         ]
 
         XCTAssertEqual(
-            SearchView.androidSortedTranslationModules(modules).map(\.name),
+            SearchTranslationSelectionPolicy.androidSortedModules(modules).map(\.name),
             ["ASV", "KJV", "WEB"]
         )
     }
@@ -113,7 +115,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         ]
 
         XCTAssertEqual(
-            SearchView.androidOrderedSelectedSearchModuleNames(
+            SearchTranslationSelectionPolicy.orderedSelection(
                 selectedModuleNames: ["WEB", "KJV", "ASV"],
                 primaryModuleName: "KJV",
                 installedModules: modules
@@ -144,7 +146,7 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         ]
 
         XCTAssertEqual(
-            SearchView.androidCommittedTranslationSelection(
+            SearchTranslationSelectionPolicy.committedSelection(
                 previousModuleNames: ["KJV", "WEB"],
                 draftModuleNames: [],
                 primaryModuleName: "KJV",
@@ -204,6 +206,40 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(emptyOK.orderedModuleNames, ["KJV", "WEB"])
         XCTAssertFalse(emptyOK.draftState.isPresented)
         XCTAssertTrue(emptyOK.draftState.pendingSelection.isEmpty)
+    }
+
+    /**
+     Verifies Search selection, ordering, and draft toggles preserve Java-distinct module names.
+
+     The NFC/NFD and case pairs model four books retained by Android's BookSet. Failure means one
+     picker row can hide, toggle, or become the primary selection for a different exact owner.
+     */
+    func testSearchTranslationSelectionPreservesJavaExactModuleIdentity() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let modules = [composed, decomposed, "FOO", "foo"].map {
+            ModuleInfo(name: $0, description: $0, category: .bible, language: "en")
+        }
+        let selected = SwordJavaExactStringSet([composed, decomposed, "FOO", "foo", composed])
+
+        let ordered = SearchTranslationSelectionPolicy.orderedSelection(
+            selectedModuleNames: selected,
+            primaryModuleName: decomposed,
+            installedModules: modules
+        )
+        XCTAssertEqual(ordered.count, 4)
+        XCTAssertEqual(SwordJavaExactStringIdentity(ordered[0]), SwordJavaExactStringIdentity(decomposed))
+        XCTAssertEqual(Set(ordered.map(SwordJavaExactStringIdentity.init)).count, 4)
+
+        let draft = SearchTranslationPickerDraftState.opened(
+            selectedModuleNames: selected,
+            primaryModuleName: decomposed,
+            installedModules: modules
+        ).toggled(composed)
+        XCTAssertFalse(draft.pendingSelection.contains(composed))
+        XCTAssertTrue(draft.pendingSelection.contains(decomposed))
+        XCTAssertTrue(draft.pendingSelection.contains("FOO"))
+        XCTAssertTrue(draft.pendingSelection.contains("foo"))
     }
 
     /**
@@ -1801,6 +1837,35 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
             BibleReaderWordLookupDocumentBuilder.normalizeQuery("faith."),
             "faith"
         )
+    }
+
+    /**
+     Verifies disabling one Java-exact dictionary does not disable its canonical or case sibling.
+
+     The fixture performs no backend reads. Failure means Android-visible plain dictionaries share
+     inverse-selection state after the settings value reaches the reader.
+     */
+    func testWordLookupDisabledSelectionUsesJavaExactModuleIdentity() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let disabled: SwordJavaExactStringSet = [composed, "FOO"]
+
+        XCTAssertFalse(BibleReaderWordLookupDocumentBuilder.isEligibleWordLookupDictionary(
+            ModuleInfo(name: composed, description: "NFC", category: .dictionary, language: "en"),
+            disabledDictionaryNames: disabled
+        ))
+        XCTAssertTrue(BibleReaderWordLookupDocumentBuilder.isEligibleWordLookupDictionary(
+            ModuleInfo(name: decomposed, description: "NFD", category: .dictionary, language: "en"),
+            disabledDictionaryNames: disabled
+        ))
+        XCTAssertFalse(BibleReaderWordLookupDocumentBuilder.isEligibleWordLookupDictionary(
+            ModuleInfo(name: "FOO", description: "Upper", category: .dictionary, language: "en"),
+            disabledDictionaryNames: disabled
+        ))
+        XCTAssertTrue(BibleReaderWordLookupDocumentBuilder.isEligibleWordLookupDictionary(
+            ModuleInfo(name: "foo", description: "Lower", category: .dictionary, language: "en"),
+            disabledDictionaryNames: disabled
+        ))
     }
 
     func testRenderedContentStateDefaultsToNeutralToken() {

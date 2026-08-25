@@ -393,8 +393,16 @@ public struct BookInfo: Sendable, Identifiable, Equatable {
     }
 }
 
-/// Metadata about a SWORD module (installed or remote).
-public struct ModuleInfo: Sendable, Identifiable {
+/**
+ Metadata about one installed or remote SWORD-compatible module.
+
+ The value deliberately has no raw-`String` `Identifiable` conformance: callers at module-identity
+ boundaries must use `SwordJavaExactStringIdentity` or a repository-scoped typed identity so Swift
+ canonical Unicode equality cannot merge books that Java keeps distinct. Construction retains
+ metadata only, performs no I/O, and does not fail; unsupported metadata remains diagnosable through
+ `isSupported` rather than being discarded here.
+ */
+public struct ModuleInfo: Sendable {
     /// Case-insensitive SWORD/Android `ModDrv` names registered by Android at application startup.
     private static let androidSupportedModuleDrivers: Set<String> = [
         "rawtext", "ztext", "ztext4",
@@ -411,7 +419,7 @@ public struct ModuleInfo: Sendable, Identifiable {
         "rawcom", "rawcom4", "zcom", "zcom4", "hrefcom", "rawfiles",
     ]
 
-    /// Module abbreviation (e.g., "KJV", "ESV").
+    /// Exact module initials (for example `KJV` or `ESV`), not a normalized Swift row identifier.
     public let name: String
 
     /// Full module description (e.g., "King James Version").
@@ -443,9 +451,6 @@ public struct ModuleInfo: Sendable, Identifiable {
 
     /// Android-compatible module About metadata.
     public let aboutMetadata: ModuleAboutMetadata
-
-    /// Unique identifier (uses module name).
-    public var id: String { name }
 
     /**
      Reports whether pinned JSword represents this driver as `SwordBook` rather than dictionary or

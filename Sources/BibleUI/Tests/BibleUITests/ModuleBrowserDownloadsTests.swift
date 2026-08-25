@@ -1165,6 +1165,52 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
+     Verifies Downloads rows and installed-owner lookup retain Java-distinct module identities.
+
+     The fixture pairs NFC/NFD and case-variant initials under one repository with different local
+     versions, then verifies repository-name variants remain separate queue identities. Failure
+     means SwiftUI can reuse a row or status lookup from a canonical sibling that Android keeps as
+     a separate book.
+     */
+    func testModuleBrowserRetainsJavaExactRowsAndInstalledOwners() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let composedSource = "Sourc\u{00E9}"
+        let decomposedSource = "Source\u{0301}"
+        let installed = [
+            ModuleInfo(name: composed, description: "NFC", category: .bible, language: "en", version: "1.0"),
+            ModuleInfo(name: decomposed, description: "NFD", category: .bible, language: "en", version: "2.0"),
+            ModuleInfo(name: "FOO", description: "Upper", category: .bible, language: "en", version: "3.0"),
+            ModuleInfo(name: "foo", description: "Lower", category: .bible, language: "en", version: "4.0"),
+        ]
+        let remote = [
+            RemoteModuleInfo(name: composed, description: "NFC", category: .bible, language: "en", sourceName: "Repo", version: "1.0"),
+            RemoteModuleInfo(name: decomposed, description: "NFD", category: .bible, language: "en", sourceName: "Repo", version: "2.0"),
+            RemoteModuleInfo(name: "FOO", description: "Upper", category: .bible, language: "en", sourceName: "Repo", version: "3.0"),
+            RemoteModuleInfo(name: "foo", description: "Lower", category: .bible, language: "en", sourceName: "Repo", version: "4.0"),
+        ]
+
+        let lookup = ModuleBrowserView.installedModuleLookup(from: installed)
+        XCTAssertEqual(lookup.count, 4)
+        XCTAssertEqual(Set(remote.map(\.id)).count, 4)
+        XCTAssertEqual(Set(remote.map(\.installIdentity)).count, 4)
+        XCTAssertEqual(Set([
+            RemoteModuleIdentity(repository: composedSource, initials: "SAME"),
+            RemoteModuleIdentity(repository: decomposedSource, initials: "SAME"),
+        ]).count, 2)
+        for module in remote {
+            XCTAssertEqual(
+                ModuleBrowserView.displayStatus(
+                    for: module,
+                    installedModules: installed,
+                    downloadActivities: [:]
+                ),
+                .installed
+            )
+        }
+    }
+
+    /**
      Verifies same-repository malformed versions stay updateable while blank versions compare as 1.0.
 
      Android constructs both values with JSword `Version`; a constructor failure deliberately
@@ -1311,7 +1357,14 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             failedSourceNames: ["CrossWire"]
         )
 
-        XCTAssertEqual(merged.map(\.id), ["AndBible:ASV", "CrossWire:KJV", "CrossWire:MHC"])
+        XCTAssertEqual(
+            merged.map(\.id),
+            [
+                RemoteModuleIdentity(repository: "AndBible", initials: "ASV"),
+                RemoteModuleIdentity(repository: "CrossWire", initials: "KJV"),
+                RemoteModuleIdentity(repository: "CrossWire", initials: "MHC"),
+            ]
+        )
     }
 
     /**

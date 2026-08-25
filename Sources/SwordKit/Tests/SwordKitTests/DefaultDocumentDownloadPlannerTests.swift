@@ -135,6 +135,50 @@ final class DefaultDocumentDownloadPlannerTests: XCTestCase {
     }
 
     /**
+     Verifies startup defaults preserve Java-distinct module and repository identities.
+
+     The installed NFC spelling must not hide the NFD sibling, case variants remain independent,
+     and a repository-qualified request binds only its exact UTF-16 source. Failure means Swift
+     canonical equality can skip or redirect a default that Android would install.
+     */
+    func testSelectionPreservesJavaExactModuleAndRepositoryIdentity() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let composedSource = "Sourc\u{00E9}"
+        let decomposedSource = "Source\u{0301}"
+        let configuration = ModuleDownloadConfiguration(
+            bibles: ["en": [
+                composed,
+                decomposed,
+                "FOO",
+                "foo",
+                "Exact::\(decomposedSource)",
+                decomposed,
+            ]]
+        )
+        let availableModules = [
+            remoteModule(composed, category: .bible, sourceName: "CrossWire"),
+            remoteModule(decomposed, category: .bible, sourceName: "CrossWire"),
+            remoteModule("FOO", category: .bible, sourceName: "CrossWire"),
+            remoteModule("foo", category: .bible, sourceName: "CrossWire"),
+            remoteModule("Exact", category: .bible, sourceName: composedSource),
+            remoteModule("Exact", category: .bible, sourceName: decomposedSource),
+        ]
+
+        let selected = DefaultDocumentDownloadPlanner.selectedModules(
+            from: configuration,
+            availableModules: availableModules,
+            installedModules: [installedModule(composed, category: .bible)]
+        )
+
+        XCTAssertEqual(
+            selected.map { SwordJavaExactStringIdentity($0.name) },
+            [decomposed, "FOO", "foo", "Exact"].map(SwordJavaExactStringIdentity.init)
+        )
+        XCTAssertTrue(SwordJavaStringIdentity.equals(selected.last?.sourceName ?? "", decomposedSource))
+    }
+
+    /**
      Creates a remote catalog fixture with only the fields the planner consumes.
 
      The helper is deterministic and has no side effects; keeping the fixture

@@ -93,7 +93,7 @@ public struct SettingsView: View {
     @State private var activeMultiSelectDialog: SettingsMultiSelectDialogPresentation?
 
     /// Staged identities edited by the active multi-select preference chooser.
-    @State private var multiSelectDraft: Set<String> = []
+    @State private var multiSelectDraft: Set<SwordJavaExactStringIdentity> = []
 
     /// Controls the staged Android `EditTextPreference` dialog for the calculator PIN.
     @State private var showsCalculatorPinDialog = false
@@ -111,16 +111,16 @@ public struct SettingsView: View {
     @State private var wordLookupDictionaries: [ModuleInfo] = []
 
     /// Explicitly enabled Greek Strong's dictionaries. Empty means "all enabled".
-    @State private var selectedStrongsGreekDictionaryNames: Set<String> = []
+    @State private var selectedStrongsGreekDictionaryNames: SwordJavaExactStringSet = []
 
     /// Explicitly enabled Hebrew Strong's dictionaries. Empty means "all enabled".
-    @State private var selectedStrongsHebrewDictionaryNames: Set<String> = []
+    @State private var selectedStrongsHebrewDictionaryNames: SwordJavaExactStringSet = []
 
     /// Explicitly enabled Robinson morphology dictionaries. Empty means "all enabled".
-    @State private var selectedRobinsonMorphologyDictionaryNames: Set<String> = []
+    @State private var selectedRobinsonMorphologyDictionaryNames: SwordJavaExactStringSet = []
 
     /// Explicitly disabled general word-lookup dictionaries.
-    @State private var disabledWordLookupDictionaryNames: Set<String> = []
+    @State private var disabledWordLookupDictionaryNames: SwordJavaExactStringSet = []
 
     /// Persisted discrete-mode security preference mirrored through AppStorage.
     @AppStorage(AppPreferenceKey.discreteMode.rawValue)
@@ -334,10 +334,10 @@ public struct SettingsView: View {
         let title: String
 
         /// Android-ordered checkbox rows.
-        let rows: [AndroidMultiselectDialogRow<String>]
+        let rows: [AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>]
 
         /// Owner commit invoked only after OK with enabled identities in visible order.
-        let onConfirm: (Set<String>) -> Void
+        let onConfirm: (SwordJavaExactStringSet) -> Void
     }
 
     /**
@@ -693,22 +693,22 @@ public struct SettingsView: View {
             .onChange(of: selectedStrongsGreekDictionaryNames) { _, newValue in
                 guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
-                store.setStringSet(.strongsGreekDictionary, values: Array(newValue))
+                store.setStringSet(.strongsGreekDictionary, values: newValue.values)
             }
             .onChange(of: selectedStrongsHebrewDictionaryNames) { _, newValue in
                 guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
-                store.setStringSet(.strongsHebrewDictionary, values: Array(newValue))
+                store.setStringSet(.strongsHebrewDictionary, values: newValue.values)
             }
             .onChange(of: selectedRobinsonMorphologyDictionaryNames) { _, newValue in
                 guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
-                store.setStringSet(.robinsonGreekMorphology, values: Array(newValue))
+                store.setStringSet(.robinsonGreekMorphology, values: newValue.values)
             }
             .onChange(of: disabledWordLookupDictionaryNames) { _, newValue in
                 guard hasLoadedPreferences else { return }
                 let store = SettingsStore(modelContext: modelContext)
-                store.setStringSet(.disabledWordLookupDictionaries, values: Array(newValue))
+                store.setStringSet(.disabledWordLookupDictionaries, values: newValue.values)
             }
             .onChange(of: disabledBibleBookmarkModalButtons) { _, newValue in
                 guard hasLoadedPreferences else { return }
@@ -855,7 +855,7 @@ public struct SettingsView: View {
                     ),
                     accessibilityIdentifier: "settingsWordLookupDictionariesLink"
                 ) {
-                    let allNames = Set(wordLookupDictionaries.map(\.name))
+                    let allNames = SwordJavaExactStringSet(wordLookupDictionaries.map(\.name))
                     presentMultiSelectDialog(
                         id: "settingsWordLookupDictionaries",
                         title: title,
@@ -1148,13 +1148,13 @@ public struct SettingsView: View {
                         title: title,
                         rows: Self.experimentalFeatureOptions.map { option in
                             AndroidMultiselectDialogRow(
-                                id: option.value,
+                                id: SwordJavaExactStringIdentity(option.value),
                                 title: Self.localizedExperimentalFeatureTitle(option),
                                 accessibilityIdentifier: "settingsExperimentalFeatureChoice::\(option.value)"
                             )
                         },
-                        selectedValues: enabledExperimentalFeatures
-                    ) { enabledExperimentalFeatures = $0 }
+                        selectedValues: SwordJavaExactStringSet(enabledExperimentalFeatures)
+                    ) { enabledExperimentalFeatures = Set($0.values) }
                 }
             }
             #if DEBUG
@@ -1704,7 +1704,9 @@ public struct SettingsView: View {
                     accessibilityPrefix: presentation.id,
                     onCancel: dismissMultiSelectDialog,
                     onConfirm: { selectedValues in
-                        presentation.onConfirm(Set(selectedValues))
+                        presentation.onConfirm(
+                            SwordJavaExactStringSet(selectedValues.map(Self.stringValue))
+                        )
                         dismissMultiSelectDialog()
                     }
                 )
@@ -2324,11 +2326,11 @@ public struct SettingsView: View {
     private func presentMultiSelectDialog(
         id: String,
         title: String,
-        rows: [AndroidMultiselectDialogRow<String>],
-        selectedValues: Set<String>,
-        onConfirm: @escaping (Set<String>) -> Void
+        rows: [AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>],
+        selectedValues: SwordJavaExactStringSet,
+        onConfirm: @escaping (SwordJavaExactStringSet) -> Void
     ) {
-        multiSelectDraft = selectedValues
+        multiSelectDraft = Set(selectedValues.map(SwordJavaExactStringIdentity.init))
         activeMultiSelectDialog = SettingsMultiSelectDialogPresentation(
             id: id,
             title: title,
@@ -2342,16 +2344,17 @@ public struct SettingsView: View {
 
      - Parameters: Dialog identity/title, installed dictionaries, stored names, and owner commit.
      - Side effects: Stages the effective enabled set and normalizes an all-selected result to empty.
-     - Failure modes: Duplicate module names collapse to one persisted identity, matching Set storage.
+     - Failure modes: Exact duplicate module names collapse to one persisted identity; Java-distinct
+       NFC/NFD and case variants remain separate, matching Android `Set<String>` identity.
      */
     private func presentDictionarySelectionDialog(
         id: String,
         title: String,
         dictionaries: [ModuleInfo],
-        selectedNames: Set<String>,
-        onConfirm: @escaping (Set<String>) -> Void
+        selectedNames: SwordJavaExactStringSet,
+        onConfirm: @escaping (SwordJavaExactStringSet) -> Void
     ) {
-        let allNames = Set(dictionaries.map(\.name))
+        let allNames = SwordJavaExactStringSet(dictionaries.map(\.name))
         presentMultiSelectDialog(
             id: id,
             title: title,
@@ -2362,18 +2365,57 @@ public struct SettingsView: View {
         }
     }
 
-    /** Creates Android-ordered shared checkbox rows from installed dictionary metadata. */
+    /**
+     Creates Android-ordered shared checkbox rows from installed dictionary metadata.
+
+     - Parameters:
+       - dictionaries: Installed rows already projected in Android order.
+       - prefix: Stable preference identifier used to namespace accessibility rows.
+     - Returns: One Java-exact checkbox identity per input dictionary.
+     - Side effects: None.
+     - Failure modes: Empty input returns no rows; exact duplicate initials are omitted because the
+       persisted preference cannot represent two copies of one Java string.
+     */
     private func dictionaryDialogRows(
         _ dictionaries: [ModuleInfo],
         prefix: String
-    ) -> [AndroidMultiselectDialogRow<String>] {
-        dictionaries.map { dictionary in
+    ) -> [AndroidMultiselectDialogRow<SwordJavaExactStringIdentity>] {
+        Self.javaExactDistinctDictionaryModules(dictionaries).map { dictionary in
             AndroidMultiselectDialogRow(
-                id: dictionary.name,
+                id: SwordJavaExactStringIdentity(dictionary.name),
                 title: dictionary.name,
                 accessibilityIdentifier: "\(prefix)Choice::\(dictionary.name)"
             )
         }
+    }
+
+    /**
+     Removes exact duplicate dictionary initials while retaining Java-distinct spellings and order.
+
+     - Parameter dictionaries: Installed dictionary metadata in Android BookSet order.
+     - Returns: First row for each exact UTF-16 initials identity; NFC/NFD and case variants remain.
+     - Side effects: None.
+     - Failure modes: None; empty input returns an empty array.
+     */
+    nonisolated static func javaExactDistinctDictionaryModules(
+        _ dictionaries: [ModuleInfo]
+    ) -> [ModuleInfo] {
+        var seen = SwordJavaExactStringSet()
+        return dictionaries.filter { seen.insert($0.name) }
+    }
+
+    /**
+     Reconstructs the raw Swift string retained by one Java-exact Settings row identity.
+
+     - Parameter identity: Exact identity created from a module name or fixed preference token.
+     - Returns: Raw string containing the same UTF-16 code units.
+     - Side effects: None.
+     - Failure modes: None; the identity originates from a valid Swift string.
+     */
+    nonisolated private static func stringValue(
+        _ identity: SwordJavaExactStringIdentity
+    ) -> String {
+        String(decoding: identity.utf16CodeUnits, as: UTF16.self)
     }
 
     /**
@@ -2395,14 +2437,14 @@ public struct SettingsView: View {
             title: title,
             rows: options.map { option in
                 AndroidMultiselectDialogRow(
-                    id: option.value,
+                    id: SwordJavaExactStringIdentity(option.value),
                     title: Self.localizedBookmarkModalActionTitle(option),
                     accessibilityIdentifier: "\(id)Choice::\(option.value)"
                 )
             },
-            selectedValues: allValues.subtracting(disabledValues)
+            selectedValues: SwordJavaExactStringSet(allValues.subtracting(disabledValues))
         ) { enabledValues in
-            onConfirm(allValues.subtracting(enabledValues))
+            onConfirm(allValues.subtracting(enabledValues.values))
         }
     }
 
@@ -2528,10 +2570,18 @@ public struct SettingsView: View {
         hasLoadedPreferences = false
 
         let store = SettingsStore(modelContext: modelContext)
-        selectedStrongsGreekDictionaryNames = Set(store.getStringSet(.strongsGreekDictionary))
-        selectedStrongsHebrewDictionaryNames = Set(store.getStringSet(.strongsHebrewDictionary))
-        selectedRobinsonMorphologyDictionaryNames = Set(store.getStringSet(.robinsonGreekMorphology))
-        disabledWordLookupDictionaryNames = Set(store.getStringSet(.disabledWordLookupDictionaries))
+        selectedStrongsGreekDictionaryNames = SwordJavaExactStringSet(
+            store.getStringSet(.strongsGreekDictionary)
+        )
+        selectedStrongsHebrewDictionaryNames = SwordJavaExactStringSet(
+            store.getStringSet(.strongsHebrewDictionary)
+        )
+        selectedRobinsonMorphologyDictionaryNames = SwordJavaExactStringSet(
+            store.getStringSet(.robinsonGreekMorphology)
+        )
+        disabledWordLookupDictionaryNames = SwordJavaExactStringSet(
+            store.getStringSet(.disabledWordLookupDictionaries)
+        )
         disabledBibleBookmarkModalButtons = Set(store.getStringSet(.disableBibleBookmarkModalButtons))
         disabledGenBookmarkModalButtons = Set(store.getStringSet(.disableGenBookmarkModalButtons))
         sanitizeDictionaryPreferences(store: store)
@@ -2737,12 +2787,17 @@ public struct SettingsView: View {
        - selectedNames: Explicitly selected module names, where an empty set means "all".
        - available: Installed modules currently available for the preference.
      - Returns: User-visible summary text for the current selection.
+     - Side effects: Resolves localized summary strings only; no preference is mutated.
+     - Failure modes: Empty availability returns Android's localized `None` summary.
      */
-    private func selectionSummary(selectedNames: Set<String>, available: [ModuleInfo]) -> String {
+    private func selectionSummary(
+        selectedNames: SwordJavaExactStringSet,
+        available: [ModuleInfo]
+    ) -> String {
         guard !available.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
         }
-        let availableNames = Set(available.map(\.name))
+        let availableNames = SwordJavaExactStringSet(available.map(\.name))
         let effectiveSelected = selectedNames.isEmpty ? availableNames : selectedNames.intersection(availableNames)
         if effectiveSelected.count >= availableNames.count {
             return String(localized: "all", defaultValue: "All")
@@ -2757,13 +2812,18 @@ public struct SettingsView: View {
        - disabledNames: Explicitly disabled module names.
        - available: Installed modules currently available for the preference.
      - Returns: User-visible summary text for the enabled dictionary count.
+     - Side effects: Resolves localized summary strings only; no preference is mutated.
+     - Failure modes: Empty availability returns Android's localized `None` summary.
      */
-    private func inverseSelectionSummary(disabledNames: Set<String>, available: [ModuleInfo]) -> String {
+    private func inverseSelectionSummary(
+        disabledNames: SwordJavaExactStringSet,
+        available: [ModuleInfo]
+    ) -> String {
         guard !available.isEmpty else {
             return String(localized: "prefs_swipe_mode_none", defaultValue: "None")
         }
-        let availableNames = Set(available.map(\.name))
-        let enabledCount = availableNames.subtracting(disabledNames).count
+        let availableNames = SwordJavaExactStringSet(available.map(\.name))
+        let enabledCount = availableNames.subtracting(disabledNames.values).count
         if enabledCount >= availableNames.count {
             return String(localized: "all", defaultValue: "All")
         }
@@ -2849,16 +2909,16 @@ public struct SettingsView: View {
      */
     struct DictionaryPreferenceSanitizationState: Equatable {
         /// Explicit Greek Strong's dictionary names, including temporarily unavailable modules.
-        let strongsGreek: Set<String>
+        let strongsGreek: SwordJavaExactStringSet
 
         /// Explicit Hebrew Strong's dictionary names, including temporarily unavailable modules.
-        let strongsHebrew: Set<String>
+        let strongsHebrew: SwordJavaExactStringSet
 
         /// Explicit Robinson morphology names, including temporarily unavailable modules.
-        let robinsonMorphology: Set<String>
+        let robinsonMorphology: SwordJavaExactStringSet
 
         /// Installed word-lookup dictionaries the user has disabled.
-        let disabledWordLookup: Set<String>
+        let disabledWordLookup: SwordJavaExactStringSet
     }
 
     /**
@@ -2879,14 +2939,14 @@ public struct SettingsView: View {
      */
     static func sanitizeDictionaryPreferences(
         _ state: DictionaryPreferenceSanitizationState,
-        availableWordLookupNames: Set<String>,
+        availableWordLookupNames: SwordJavaExactStringSet,
         store: SettingsStore
     ) -> DictionaryPreferenceSanitizationState {
         let sanitizedDisabled = state.disabledWordLookup.intersection(availableWordLookupNames)
         if sanitizedDisabled != state.disabledWordLookup {
             store.setStringSet(
                 .disabledWordLookupDictionaries,
-                values: Array(sanitizedDisabled)
+                values: sanitizedDisabled.values
             )
         }
         return DictionaryPreferenceSanitizationState(
@@ -2913,7 +2973,7 @@ public struct SettingsView: View {
                 robinsonMorphology: selectedRobinsonMorphologyDictionaryNames,
                 disabledWordLookup: disabledWordLookupDictionaryNames
             ),
-            availableWordLookupNames: Set(wordLookupDictionaries.map(\.name)),
+            availableWordLookupNames: SwordJavaExactStringSet(wordLookupDictionaries.map(\.name)),
             store: store
         )
         selectedStrongsGreekDictionaryNames = sanitized.strongsGreek

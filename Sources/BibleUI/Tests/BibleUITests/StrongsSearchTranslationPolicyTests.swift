@@ -86,6 +86,42 @@ final class StrongsSearchTranslationPolicyTests: XCTestCase {
     }
 
     /**
+     Verifies Strong's fallback and remembered order distinguish Java-exact Unicode spellings.
+
+     The active NFD initials must resolve to the NFD candidate rather than its Swift-canonically
+     equal NFC sibling, and both remain selected. Failure routes Find All through the wrong book.
+     */
+    func testFindAllUsesJavaExactCurrentAndSelectionIdentity() {
+        let composed = "Caf\u{00E9}"
+        let decomposed = "Cafe\u{0301}"
+        let candidates = [
+            module(named: composed, hasStrongs: true),
+            module(named: decomposed, hasStrongs: true),
+            module(named: "FOO", hasStrongs: true),
+            module(named: "foo", hasStrongs: true),
+        ]
+
+        let fallback = SearchTranslationSelectionPolicy.fallbackModuleName(
+            currentModuleName: decomposed,
+            candidateModules: candidates,
+            isStrongsFindAll: true,
+            isIndexed: { _ in false }
+        )
+        XCTAssertEqual(
+            SwordJavaExactStringIdentity(fallback ?? ""),
+            SwordJavaExactStringIdentity(decomposed)
+        )
+
+        let ordered = SearchTranslationSelectionPolicy.strongsOrderedSelection(
+            selectedModuleNames: [composed, decomposed, "FOO", "foo"],
+            rememberedOrder: [decomposed, composed, "foo", "FOO", decomposed],
+            candidateModules: candidates
+        )
+        XCTAssertEqual(ordered.count, 4)
+        XCTAssertEqual(Set(ordered.map(SwordJavaExactStringIdentity.init)).count, 4)
+    }
+
+    /**
      Creates metadata for one deterministic Bible candidate.
 
      - Parameters:

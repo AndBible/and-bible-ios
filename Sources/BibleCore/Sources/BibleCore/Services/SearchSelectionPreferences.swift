@@ -1,6 +1,7 @@
 // SearchSelectionPreferences.swift - Android-compatible persisted Search translation selection
 
 import Foundation
+import SwordKit
 
 /**
  Identifies the Android Search flow whose translation selection is being persisted.
@@ -75,13 +76,13 @@ public struct SearchSelectionPreferences {
         primaryModuleName: String?,
         context: SearchTranslationSelectionContext = .standard
     ) -> [String] {
-        let installed = Set(installedModuleNames)
+        let installed = SwordJavaExactStringSet(installedModuleNames)
         let rawValue = settingsStore.getString(context.preferenceKey)
-        var seen = Set<String>()
+        var seen = SwordJavaExactStringSet()
         var selected = rawValue
             .split(separator: ",", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && installed.contains($0) && seen.insert($0).inserted }
+            .filter { !$0.isEmpty && installed.contains($0) && seen.insert($0) }
 
         if selected.isEmpty,
            let primaryModuleName,
@@ -89,7 +90,9 @@ public struct SearchSelectionPreferences {
             selected = [primaryModuleName]
         } else if context.prefersPrimaryModuleFirst,
                   let primaryModuleName,
-                  let primaryIndex = selected.firstIndex(of: primaryModuleName),
+                  let primaryIndex = selected.firstIndex(where: {
+                      SwordJavaStringIdentity.equals($0, primaryModuleName)
+                  }),
                   primaryIndex != 0 {
             selected.remove(at: primaryIndex)
             selected.insert(primaryModuleName, at: 0)
@@ -111,10 +114,10 @@ public struct SearchSelectionPreferences {
         _ orderedModuleNames: [String],
         context: SearchTranslationSelectionContext = .standard
     ) {
-        var seen = Set<String>()
+        var seen = SwordJavaExactStringSet()
         let normalized = orderedModuleNames
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .filter { !$0.isEmpty && seen.insert($0) }
         guard !normalized.isEmpty else { return }
         settingsStore.setString(context.preferenceKey, value: normalized.joined(separator: ","))
     }

@@ -1024,6 +1024,12 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
     }
 
+    /**
+     Verifies direct `ModuleInfo` construction retains metadata without exposing a raw SwiftUI ID.
+
+     The fixture has no side effects. A failure means metadata fields or the required explicit
+     Java-exact owner projection changed.
+     */
     func testModuleInfoCreation() {
         let info = ModuleInfo(
             name: "KJV",
@@ -1034,7 +1040,7 @@ final class SwordManagerTests: XCTestCase {
             features: [.strongsNumbers, .redLetterWords]
         )
         XCTAssertEqual(info.name, "KJV")
-        XCTAssertEqual(info.id, "KJV")
+        XCTAssertEqual(SwordJavaExactStringIdentity(info.name), SwordJavaExactStringIdentity("KJV"))
         XCTAssertEqual(info.category, .bible)
         XCTAssertTrue(info.features.contains(.strongsNumbers))
         XCTAssertFalse(info.features.contains(.morphology))
