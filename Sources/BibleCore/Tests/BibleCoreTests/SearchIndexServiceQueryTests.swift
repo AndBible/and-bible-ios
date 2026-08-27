@@ -255,8 +255,19 @@ final class SearchIndexServiceQueryTests: XCTestCase {
     /**
      Verifies Strong's queries retain every selected module and group equivalent verses.
 
-     Failure means Search has regressed to choosing one Strong's-capable fallback module or has
-     dropped selected translations with zero matches from Android's result-count contract.
+     The selected list repeats both successful modules to model duplicated restored/picker input.
+     Android's append-based aggregation does not terminate on duplicate selection tokens, while the
+     iOS query boundary intentionally keeps the first exact module occurrence so one translation
+     cannot create duplicate result rows.
+
+     - Setup: Seeds two Strong's-capable modules plus one zero-hit module and queries a repeated
+       selected-module list.
+     - Expected result: Both name- and source-identity production overloads return one canonical
+       verse group retaining LSG then KJV, and each exact module has one count bucket in
+       first-selected order.
+     - Failure meaning: Find All can either drop a selected translation, duplicate its visible row,
+       or reach the grouped-result duplicate-key crash boundary reported in issue #416.
+     - Side effects: Creates and removes one temporary SQLite database.
      */
     func testIndexedStrongsSearchGroupsAcrossAllSelectedTranslations() async throws {
         let databaseURL = FileManager.default.temporaryDirectory
@@ -281,7 +292,18 @@ final class SearchIndexServiceQueryTests: XCTestCase {
 
         let grouped = try service.searchStrongsMultiple(
             canonicalTokens: ["H0430"],
-            moduleNames: ["LSG", "PLAIN", "KJV"]
+            moduleNames: ["LSG", "LSG", "PLAIN", "KJV", "KJV"]
+        )
+        let sourceFingerprint = String(repeating: "a", count: 64)
+        let groupedBySourceIdentity = try service.searchStrongsMultiple(
+            canonicalTokens: ["H0430"],
+            sourceIdentities: ["LSG", "LSG", "PLAIN", "KJV", "KJV"].map {
+                SearchIndexSourceIdentity(
+                    moduleName: $0,
+                    version: "",
+                    fingerprint: sourceFingerprint
+                )
+            }
         )
 
         XCTAssertEqual(grouped.groups.count, 1)
@@ -289,6 +311,88 @@ final class SearchIndexServiceQueryTests: XCTestCase {
         XCTAssertEqual(grouped.moduleCounts.map(\.moduleName), ["LSG", "PLAIN", "KJV"])
         XCTAssertEqual(grouped.moduleCounts.map(\.count), [1, 0, 1])
         XCTAssertEqual(grouped.totalHitCount, 2)
+        XCTAssertEqual(groupedBySourceIdentity, grouped)
+    }
+
+    /**
+     Verifies grouped Search remains total when a caller supplies duplicate exact module buckets.
+
+     Production text and Strong's services de-duplicate selected initials before querying, but the
+     public result contract previously rebuilt both success and failure maps with
+     `Dictionary(uniqueKeysWithValues:)`. Any restored, test, or future caller that repeated a
+     module therefore terminated the process instead of degrading like Android's append-based
+     aggregation.
+
+     - Setup: Supplies two KJV success buckets, two BAD failure buckets, a contradictory KJV failure,
+       and duplicate module-order entries. The ignored duplicate KJV result is marked truncated so
+       retained-first semantics are observable.
+     - Expected result: The first KJV bucket wins, WEB remains the second match, only the first BAD
+       failure remains, the KJV failure is suppressed by success, and truncation stays false.
+     - Failure meaning: Multi-translation Search can still trap, expose duplicate SwiftUI identities,
+       or publish contradictory success/failure state for one exact installed module.
+     - Side effects: None.
+     */
+    func testGroupedResultsCoalescesDuplicateExactModuleBucketsWithoutTrap() {
+        let verse = SearchVerseIdentity(
+            osisBookId: "Gen",
+            canonicalBookOrder: 0,
+            chapter: 1,
+            verse: 1
+        )
+        let firstKJVHit = SearchModuleHit(
+            moduleName: "KJV",
+            key: "Genesis 1:1",
+            displayBook: "Genesis",
+            snippet: "God created",
+            identity: verse
+        )
+        let duplicateKJVHit = SearchModuleHit(
+            moduleName: "KJV",
+            key: "Genesis 1:2",
+            displayBook: "Genesis",
+            snippet: "duplicate must not publish",
+            identity: SearchVerseIdentity(
+                osisBookId: "Gen",
+                canonicalBookOrder: 0,
+                chapter: 1,
+                verse: 2
+            )
+        )
+        let webHit = SearchModuleHit(
+            moduleName: "WEB",
+            key: "Genesis 1:1",
+            displayBook: "Genesis",
+            snippet: "God created",
+            identity: verse
+        )
+
+        let grouped = SearchGroupedResults(
+            moduleResults: [
+                SearchModuleResults(moduleName: "KJV", hits: [firstKJVHit]),
+                SearchModuleResults(
+                    moduleName: "KJV",
+                    hits: [duplicateKJVHit],
+                    isTruncated: true
+                ),
+                SearchModuleResults(moduleName: "WEB", hits: [webHit]),
+            ],
+            moduleOrder: ["KJV", "KJV", "WEB"],
+            moduleFailures: [
+                SearchModuleFailure(moduleName: "BAD", message: "first failure"),
+                SearchModuleFailure(moduleName: "BAD", message: "duplicate failure"),
+                SearchModuleFailure(moduleName: "KJV", message: "contradictory failure"),
+            ]
+        )
+
+        XCTAssertEqual(grouped.groups.count, 1)
+        XCTAssertEqual(grouped.groups[0].matches.map(\.moduleName), ["KJV", "WEB"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.moduleName), ["KJV", "WEB"])
+        XCTAssertEqual(grouped.moduleCounts.map(\.count), [1, 1])
+        XCTAssertEqual(grouped.moduleFailures, [
+            SearchModuleFailure(moduleName: "BAD", message: "first failure"),
+        ])
+        XCTAssertEqual(grouped.totalHitCount, 2)
+        XCTAssertFalse(grouped.isTruncated)
     }
 
     /**

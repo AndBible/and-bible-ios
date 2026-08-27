@@ -191,21 +191,29 @@ struct BibleReaderExternalLinkRouter {
     }
 
     /**
-     Parses Android's "find all occurrences" pseudo-link and normalizes bare H/G numbers.
+     Parses Android's "find all occurrences" pseudo-link with its exact Strong's normalization.
+
+     Android lowercases the emitted dictionary key, then prefixes keys that do not already begin
+     with `g` or `h` using the first character of the feature type. The latter intentionally maps
+     the combined `hebrew-and-greek` feature to `h`, just as `type[0]` does on Android.
+
+     - Parameter link: Rendered `ab-find-all` URL carrying `type` and `name` query items.
+     - Returns: A normalized Find All route, or nil when the name is empty or a bare value has no
+       feature type from which to derive its prefix.
+     - Side effects: None.
+     - Failure modes: Malformed URLs, missing names, and missing prefix metadata fail closed.
      */
     private func findAllRoute(from link: String) -> Route? {
         guard let components = URLComponents(string: link) else { return nil }
         let items = components.queryItems ?? []
         let type = items.first(where: { $0.name == "type" })?.value
-        var name = items.first(where: { $0.name == "name" })?.value ?? ""
-        if !name.isEmpty && name.first?.isLetter != true {
-            if type == "hebrew" {
-                name = "H\(name)"
-            } else if type == "greek" {
-                name = "G\(name)"
-            }
+        var name = (items.first(where: { $0.name == "name" })?.value ?? "").lowercased()
+        guard !name.isEmpty else { return nil }
+        if !name.hasPrefix("g"), !name.hasPrefix("h") {
+            guard let typePrefix = type?.first else { return nil }
+            name = "\(typePrefix)\(name)"
         }
-        return name.isEmpty ? nil : .findAllOccurrences(name)
+        return .findAllOccurrences(name)
     }
 
     /**

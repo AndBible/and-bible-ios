@@ -3624,8 +3624,25 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(
             router.route(for: "ab-find-all://?type=hebrew&name=5775"),
-            .findAllOccurrences("H5775")
+            .findAllOccurrences("h5775")
         )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=greek&name=3056"),
+            .findAllOccurrences("g3056")
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew-and-greek&name=5775"),
+            .findAllOccurrences("h5775")
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew-and-greek&name=H05775"),
+            .findAllOccurrences("h05775")
+        )
+        XCTAssertEqual(
+            router.route(for: "ab-find-all://?type=hebrew&name=X5775"),
+            .findAllOccurrences("hx5775")
+        )
+        XCTAssertNil(router.route(for: "ab-find-all://?name=5775"))
         XCTAssertEqual(
             router.route(for: "download://?initials=KJV"),
             .downloads(searchText: "KJV")
