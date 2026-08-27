@@ -38,7 +38,7 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-from appstore_metadata import FORBIDDEN_SUBSTRINGS as FORBIDDEN_PLATFORM_REFERENCE_TERMS
+from platform_reference_contract import FORBIDDEN_PLATFORM_REFERENCE_TERMS
 
 
 PARITY_KEYS = [

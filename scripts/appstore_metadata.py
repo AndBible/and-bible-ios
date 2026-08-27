@@ -24,6 +24,8 @@ from typing import Mapping
 
 import yaml
 
+from platform_reference_contract import FORBIDDEN_PLATFORM_REFERENCE_TERMS
+
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 MAX_EXPANSION_PASSES = 8
 
@@ -180,10 +182,6 @@ FIELD_LIMITS = {
     "release_notes": 4000,
 }
 
-# App Store Review Guideline 2.3.10: no other-platform names in metadata.
-FORBIDDEN_SUBSTRINGS = ("android", "google play", "play store")
-
-
 def _is_cjk_character(char: str) -> bool:
     """True for a Han ideograph, kana, or CJK punctuation character.
 
@@ -302,7 +300,7 @@ def validate_fields(apple_locale: str, fields: Mapping[str, str]) -> list[str]:
                 f"{apple_locale}/{field}: {len(value)} characters, limit {limit}"
             )
         lowered = value.lower()
-        for forbidden in FORBIDDEN_SUBSTRINGS:
+        for forbidden in FORBIDDEN_PLATFORM_REFERENCE_TERMS:
             if forbidden in lowered:
                 problems.append(
                     f"{apple_locale}/{field}: forbidden platform reference "
