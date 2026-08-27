@@ -391,11 +391,25 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         )
     }
 
-    /** Strong's normalization and SearchView readiness must select the same index facet. */
-    func testSearchIndexRequirementFollowsNormalizedQueryContract() {
+    /**
+     Verifies Search readiness uses Strong's indexes for normalized queries and explicit Find All.
+
+     - Setup: Classifies ordinary text, manual Strong's forms, and one malformed numeric Find All
+       seed through the production index-requirement helper.
+     - Expected result: Ordinary text requires text indexing; recognized Strong's input and every
+       explicit Find All presentation require Strong's indexing.
+     - Failure meaning: Search readiness can build or gate the wrong index facet before submission
+       routing has a chance to preserve Strong's-before-reference precedence.
+     - Side effects: None.
+     */
+    func testSearchIndexRequirementUsesStrongsForFindAllAndNormalizedQueries() {
         XCTAssertEqual(SearchView.indexRequirement(for: "faith hope"), .text)
         XCTAssertEqual(SearchView.indexRequirement(for: "H00430"), .strongs)
         XCTAssertEqual(SearchView.indexRequirement(for: "strong:H0430"), .strongs)
+        XCTAssertEqual(
+            SearchView.indexRequirement(for: "3056", isStrongsFindAll: true),
+            .strongs
+        )
     }
 
     /**

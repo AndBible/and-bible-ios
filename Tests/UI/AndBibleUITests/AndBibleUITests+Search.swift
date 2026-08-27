@@ -1057,7 +1057,7 @@ extension AndBibleUITests {
         var initialWidth: CGFloat = 0
         XCTAssertTrue(
             waitForUITestCondition("initial reader text renders", timeout: 20) {
-                initialWidth = Self.widestTextLineWidth(in: webView)
+                initialWidth = self.widestTextLineWidth(in: webView)
                 return initialWidth > 100
             },
             "Expected measurable rendered reader text before editing margins."
@@ -1096,7 +1096,7 @@ extension AndBibleUITests {
 
         var narrowedWidth: CGFloat = 0
         let didNarrow = waitForUITestCondition("reader text narrows", timeout: 20) {
-            narrowedWidth = Self.widestTextLineWidth(in: webView)
+            narrowedWidth = self.widestTextLineWidth(in: webView)
             return narrowedWidth > 0 && narrowedWidth < initialWidth * 0.8
         }
         attachReaderScreenshot(named: "reader-after-margin-edit", of: app)
@@ -1153,7 +1153,7 @@ extension AndBibleUITests {
         var initialHeight: CGFloat = 0
         XCTAssertTrue(
             waitForUITestCondition("initial reader text renders", timeout: 20) {
-                initialHeight = Self.tallestTextLineHeight(in: webView)
+                initialHeight = self.tallestTextLineHeight(in: webView)
                 return initialHeight > 10
             },
             "Expected measurable rendered reader text before editing font size."
@@ -1188,7 +1188,7 @@ extension AndBibleUITests {
 
         var grownHeight: CGFloat = 0
         let didGrow = waitForUITestCondition("reader text grows", timeout: 20) {
-            grownHeight = Self.tallestTextLineHeight(in: webView)
+            grownHeight = self.tallestTextLineHeight(in: webView)
             return grownHeight > initialHeight * 1.5
         }
         XCTAssertTrue(
@@ -1232,25 +1232,37 @@ extension AndBibleUITests {
     }
 
     /**
-     Captures one coherent accessibility-tree sample of rendered reader text frames.
+     Captures one complete accessibility sample of rendered reader text frames.
+     *
+     * WebKit can omit its remote descendants from a root snapshot even while those descendants
+     remain queryable. Resolving the descendant query directly preserves that remote boundary, and
+     requiring the fixture's first 40 text runs prevents a temporarily truncated tree from becoming
+     evidence that reader geometry changed.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Up to the first 40 static-text frames from one hierarchical snapshot, or `nil`
-     *   when WebKit cannot provide that complete snapshot.
-     * - Side effects: Performs one throwable accessibility snapshot read without mutating app state.
-     * - Failure modes: Returns `nil` instead of exposing partial geometry when WebKit rebuilds or
-     *   invalidates its remote accessibility tree during capture, allowing polling callers to retry.
+     * - Returns: The first 40 static-text frames, or `nil` when WebKit cannot provide the complete
+     *   deterministic sample.
+     * - Side effects: Resolves the WebKit static-text query and captures 40 read-only snapshots.
+     * - Failure modes: Returns `nil` when fewer than 40 descendants are exposed or any snapshot
+     *   fails, changes type, or exposes unusable geometry. Every collected frame is discarded so
+     *   polling callers cannot accept a partial sample.
      */
-    private static func sampledStaticTextFrames(in webView: XCUIElement) -> [CGRect]? {
-        guard let rootSnapshot = try? webView.snapshot() else { return nil }
-        var pendingSnapshots: [any XCUIElementSnapshot] = [rootSnapshot]
-        var frames: [CGRect] = []
+    private func sampledStaticTextFrames(in webView: XCUIElement) -> [CGRect]? {
+        let requiredSampleCount = 40
+        let textElements = Array(
+            webView.staticTexts.allElementsBoundByAccessibilityElement.prefix(requiredSampleCount)
+        )
+        guard textElements.count == requiredSampleCount else { return nil }
 
-        while let snapshot = pendingSnapshots.popLast(), frames.count < 40 {
-            pendingSnapshots.append(contentsOf: snapshot.children.reversed())
-            if snapshot.elementType == .staticText {
-                frames.append(snapshot.frame)
+        var frames: [CGRect] = []
+        frames.reserveCapacity(textElements.count)
+        for textElement in textElements {
+            guard let snapshot = try? textElement.snapshot(),
+                  snapshot.elementType == .staticText,
+                  elementFrameIsUsable(snapshot.frame) else {
+                return nil
             }
+            frames.append(snapshot.frame)
         }
         return frames
     }
@@ -1259,12 +1271,12 @@ extension AndBibleUITests {
      Measures the tallest rendered text line inside an existing reader web view.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Height of the tallest static text run, or zero when no coherent sample is exposed.
-     * - Side effects: Captures one read-only hierarchical WebKit accessibility snapshot.
+     * - Returns: Height of the tallest static text run, or zero when no complete sample is exposed.
+     * - Side effects: Captures one complete read-only WebKit accessibility sample.
      * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
      *   partial measurements are never published as evidence that layout changed.
      */
-    private static func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
+    private func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
         guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
         return frames.map(\.height).max() ?? 0
     }
@@ -1273,12 +1285,12 @@ extension AndBibleUITests {
      Measures the widest rendered text line inside an existing reader web view.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Width of the widest static text run, or zero when no coherent sample is exposed.
-     * - Side effects: Captures one read-only hierarchical WebKit accessibility snapshot.
+     * - Returns: Width of the widest static text run, or zero when no complete sample is exposed.
+     * - Side effects: Captures one complete read-only WebKit accessibility sample.
      * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
      *   partial measurements are never published as evidence that layout changed.
      */
-    private static func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
+    private func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
         guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
         return frames.map(\.width).max() ?? 0
     }

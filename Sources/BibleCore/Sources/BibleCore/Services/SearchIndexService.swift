@@ -1181,7 +1181,16 @@ public final class SearchIndexService: @unchecked Sendable {
      Searches one module's canonical Strong's facet, requiring every supplied token.
 
      Scope predicates use persisted OSIS/canon fields from `verse_fts`; localized keys are display
-     data only. SQL failures and unavailable indexes are thrown explicitly.
+     data only.
+
+     - Parameters:
+       - canonicalTokens: Normalized Strong's identifiers required in every matching verse.
+       - moduleName: Exact generated-index owner.
+       - scope: Canonical OSIS/canon restriction.
+     - Returns: Bounded canonical matches, or an authorized zero-hit result when Android's analyzer
+       removed every malformed or out-of-range token.
+     - Side effects: Performs read-only metadata, lexical, and verse-row SQLite queries.
+     - Throws: Index/schema mismatch, SQLite failure, or module-store invalidation errors.
      */
     public func searchStrongs(
         canonicalTokens: [String],
@@ -1200,12 +1209,13 @@ public final class SearchIndexService: @unchecked Sendable {
      Searches Strong's tokens only when the index matches the installed source generation.
 
      - Parameters:
-       - canonicalTokens: Non-empty normalized Strong's identifiers, all of which must match.
+       - canonicalTokens: Normalized Strong's identifiers, all of which must match when retained.
        - sourceIdentity: Exact current source generation authorizing generated lexical rows.
        - scope: Canonical OSIS/canon restriction.
-     - Returns: Bounded, canonically ordered matching verses.
+     - Returns: Bounded canonical matches, or an authorized zero-hit result when Android's analyzer
+       removed every malformed or out-of-range token.
      - Side effects: Performs read-only metadata, lexical, and verse-row SQLite queries.
-     - Throws: Empty tokens, source/schema mismatch, SQLite failure, or a module-store generation change.
+     - Throws: Source/schema mismatch, SQLite failure, or a module-store generation change.
      */
     public func searchStrongs(
         canonicalTokens: [String],
@@ -1228,10 +1238,11 @@ public final class SearchIndexService: @unchecked Sendable {
        - moduleName: Exact generated-index owner.
        - expectedIdentity: Installed source generation required by production callers, when known.
        - scope: Canonical book/canon restriction.
-     - Returns: Bounded lexical matches from one committed index generation.
+     - Returns: Bounded lexical matches from one committed index generation, or an authorized
+       zero-hit result when normalization retained no valid token.
      - Side effects: Opens and closes an operation-owned read-only SQLite connection.
-     - Throws: Scheduled/active indexing, empty tokens, source mismatch, SQLite, or module-store
-       invalidation errors. Staged lexical/text rows are never exposed.
+     - Throws: Scheduled/active indexing, source mismatch, SQLite, or module-store invalidation
+       errors. Staged lexical/text rows are never exposed.
      */
     private func searchStrongs(
         canonicalTokens: [String],
@@ -1251,7 +1262,14 @@ public final class SearchIndexService: @unchecked Sendable {
             readAuthorizationCheckpoint?(moduleName)
             let tokens = SearchIndexQueryProjection.orderedUniqueTokens(canonicalTokens)
                 .filter { !$0.isEmpty }
-            guard !tokens.isEmpty else { throw SearchIndexError.emptyQuery }
+            guard !tokens.isEmpty else {
+                try validateCurrentStoreGeneration(
+                    metadata.storeGeneration,
+                    moduleName: moduleName,
+                    db: readDatabase
+                )
+                return SearchModuleResults(moduleName: moduleName, hits: [])
+            }
 
             let placeholders = Array(repeating: "?", count: tokens.count).joined(separator: ",")
             let scopeSQL = Self.scopeSQL(scope, tableAlias: "f")

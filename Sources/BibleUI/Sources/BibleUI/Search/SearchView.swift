@@ -142,7 +142,7 @@ public struct SearchView: View {
     /// Explicit Android Up command supplied by the owning reader destination.
     let onDismiss: (() -> Void)?
 
-    /// Reference resolver invoked before a submitted value is treated as full-text search syntax.
+    /// Reference resolver invoked only after submitted input fails Strong's-query recognition.
     let onOpenReference: ((String) -> Bool)?
 
     /// Primary Sword module whose search index and results drive the screen.
@@ -316,7 +316,7 @@ public struct SearchView: View {
          selection and preference key.
        - surfacePalette: Reader/workspace-owned activity and content palette.
        - initialQuery: Optional query to prefill and auto-run on appear.
-       - onOpenReference: Resolver invoked before full-text query compilation.
+       - onOpenReference: Resolver invoked for non-Strong input before full-text query compilation.
        - onNavigate: Callback returning true only when the selected hit was opened successfully.
        - onOpenResultsInWindow: Callback returning true after the complete grouped result set opens
          in Android's links window.
@@ -1836,7 +1836,10 @@ public struct SearchView: View {
             return
         }
 
-        let requirement = Self.indexRequirement(for: query)
+        let requirement = Self.indexRequirement(
+            for: query,
+            isStrongsFindAll: isStrongsFindAll
+        )
         if let missingModuleName = service.modulesNeedingIndex(
             from: selectedSources.map { $0.source.searchIndexSourceIdentity },
             requirement: requirement
@@ -1951,7 +1954,10 @@ public struct SearchView: View {
             )
             return
         }
-        let requirement = Self.indexRequirement(for: query)
+        let requirement = Self.indexRequirement(
+            for: query,
+            isStrongsFindAll: isStrongsFindAll
+        )
         let presentationIdentities = presentationSources.map {
             $0.source.searchIndexSourceIdentity
         }
@@ -2394,13 +2400,15 @@ public struct SearchView: View {
      detached task so UI updates remain responsive. Results are marshalled back to the main actor.
 
      Side effects:
-     - asks the reader reference parser to consume a recognized Bible reference before text search
+     - classifies Strong's syntax before asking the reader parser to consume a Bible reference
+     - fails closed when explicit Find All input is not a recognizable Strong's query
      - clears current results and marks the view as actively searching
      - snapshots search configuration and dispatches background work in a detached task
      - publishes result hits, summaries, and final loading state back on the main actor
 
      Failure modes:
      - if the trimmed query is empty, the method returns without starting a search
+     - malformed explicit Find All input becomes a visible invalid-query result without navigation
      - a missing index service or selected translation becomes an explicit search failure
      - Lucene/FTS syntax and analyzer failures remain visible rather than becoming empty results
      - zero-hit searches are treated as a valid outcome and update the UI with empty results rather than an error
@@ -2412,8 +2420,29 @@ public struct SearchView: View {
             clearPublishedSearchState()
             return
         }
-        if onOpenReference?(trimmedQuery) == true {
+
+        let submissionRoute = SearchSubmissionRouter.route(
+            query: trimmedQuery,
+            isStrongsFindAll: isStrongsFindAll,
+            openReference: onOpenReference
+        )
+        let strongsQueryOptions: NormalizedStrongsQueryOptions?
+        switch submissionRoute {
+        case .openedReference:
             closeSearch()
+            return
+        case let .indexedSearch(options):
+            strongsQueryOptions = options
+        case .invalidStrongsFindAll:
+            representedSearchQuery = trimmedQuery
+            presentationStage = .results
+            expandedResultGroupIDs.removeAll()
+            groupedResults = nil
+            resultSummary = ""
+            searchFailureMessage = SearchIndexError.invalidQuery(
+                reason: "Find All requires a valid Strong's number."
+            ).localizedDescription
+            isSearching = false
             return
         }
         representedSearchQuery = trimmedQuery
@@ -2450,10 +2479,9 @@ public struct SearchView: View {
             $0.source.searchIndexSourceIdentity
         }
         let osisBookId = currentOsisBookId
-        let strongsQueryOptions = StrongsSearchSupport.normalizedQueryOptions(for: currentQuery)
         let indexedScope = Self.indexedScope(for: currentScope, osisBookId: osisBookId)
 
-        let indexRequirement = Self.indexRequirement(for: currentQuery)
+        let indexRequirement: SearchIndexRequirement = strongsQueryOptions == nil ? .text : .strongs
         if let missingModuleName = currentSearchIndexService.modulesNeedingIndex(
             from: currentSourceIdentities,
             requirement: indexRequirement
@@ -2570,9 +2598,26 @@ public struct SearchView: View {
         return changedQuery.trimmingCharacters(in: .whitespacesAndNewlines) != representedQuery
     }
 
-    /** Selects the index facet required by the normalized Search query. */
-    nonisolated static func indexRequirement(for query: String) -> SearchIndexRequirement {
-        StrongsSearchSupport.normalizedQueryOptions(for: query) == nil ? .text : .strongs
+    /**
+     Selects the index facet required by one Search submission.
+
+     - Parameters:
+       - query: Current Search input, which may contain manual Strong's syntax or ordinary text.
+       - isStrongsFindAll: Whether the reader opened Android's explicit Find All workflow.
+     - Returns: The Strong's facet for every Find All presentation or recognized Strong's query;
+       otherwise the text facet.
+     - Side effects: None.
+     - Failure modes: Does not throw. Malformed Find All input remains on the Strong's facet so
+       index readiness cannot route it through unrelated full-text work before submission rejects it.
+     */
+    nonisolated static func indexRequirement(
+        for query: String,
+        isStrongsFindAll: Bool = false
+    ) -> SearchIndexRequirement {
+        if isStrongsFindAll {
+            return .strongs
+        }
+        return StrongsSearchSupport.normalizedQueryOptions(for: query) == nil ? .text : .strongs
     }
 
     /**
