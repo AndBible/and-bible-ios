@@ -1232,43 +1232,55 @@ extension AndBibleUITests {
     }
 
     /**
+     Captures one coherent accessibility-tree sample of rendered reader text frames.
+     *
+     * - Parameter webView: Reader web view element already confirmed to exist.
+     * - Returns: Up to the first 40 static-text frames from one hierarchical snapshot, or `nil`
+     *   when WebKit cannot provide that complete snapshot.
+     * - Side effects: Performs one throwable accessibility snapshot read without mutating app state.
+     * - Failure modes: Returns `nil` instead of exposing partial geometry when WebKit rebuilds or
+     *   invalidates its remote accessibility tree during capture, allowing polling callers to retry.
+     */
+    private static func sampledStaticTextFrames(in webView: XCUIElement) -> [CGRect]? {
+        guard let rootSnapshot = try? webView.snapshot() else { return nil }
+        var pendingSnapshots: [any XCUIElementSnapshot] = [rootSnapshot]
+        var frames: [CGRect] = []
+
+        while let snapshot = pendingSnapshots.popLast(), frames.count < 40 {
+            pendingSnapshots.append(contentsOf: snapshot.children.reversed())
+            if snapshot.elementType == .staticText {
+                frames.append(snapshot.frame)
+            }
+        }
+        return frames
+    }
+
+    /**
      Measures the tallest rendered text line inside an existing reader web view.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Height of the tallest static text run, or zero when none are exposed.
-     * - Side effects: none.
-     * - Failure modes: A missing or rebuilt text run ends the current scan while preserving the
-     *   measurements already collected. Each run is read from one throwable accessibility
-     *   snapshot so a WebKit rerender cannot turn a separate property lookup into a hard failure.
+     * - Returns: Height of the tallest static text run, or zero when no coherent sample is exposed.
+     * - Side effects: Captures one read-only hierarchical WebKit accessibility snapshot.
+     * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
+     *   partial measurements are never published as evidence that layout changed.
      */
     private static func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
-        var tallest: CGFloat = 0
-        for index in 0..<40 {
-            let element = webView.staticTexts.element(boundBy: index)
-            guard let snapshot = try? element.snapshot() else { break }
-            tallest = max(tallest, snapshot.frame.height)
-        }
-        return tallest
+        guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
+        return frames.map(\.height).max() ?? 0
     }
 
     /**
      Measures the widest rendered text line inside an existing reader web view.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Width of the widest static text run, or zero when none are exposed.
-     * - Side effects: none.
-     * - Failure modes: A missing or rebuilt text run ends the current scan while preserving the
-     *   measurements already collected. Each run is read from one throwable accessibility
-     *   snapshot so a WebKit rerender cannot turn a separate property lookup into a hard failure.
+     * - Returns: Width of the widest static text run, or zero when no coherent sample is exposed.
+     * - Side effects: Captures one read-only hierarchical WebKit accessibility snapshot.
+     * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
+     *   partial measurements are never published as evidence that layout changed.
      */
     private static func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
-        var widest: CGFloat = 0
-        for index in 0..<40 {
-            let element = webView.staticTexts.element(boundBy: index)
-            guard let snapshot = try? element.snapshot() else { break }
-            widest = max(widest, snapshot.frame.width)
-        }
-        return widest
+        guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
+        return frames.map(\.width).max() ?? 0
     }
 
 }
