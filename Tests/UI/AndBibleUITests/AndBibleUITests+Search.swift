@@ -1237,15 +1237,16 @@ extension AndBibleUITests {
      * - Parameter webView: Reader web view element already confirmed to exist.
      * - Returns: Height of the tallest static text run, or zero when none are exposed.
      * - Side effects: none.
-     * - Failure modes: Text runs that vanish mid-scan are skipped; each indexed query is resolved
-     *   immediately so a WebKit rerender cannot leave a cached remote accessibility element.
+     * - Failure modes: A missing or rebuilt text run ends the current scan while preserving the
+     *   measurements already collected. Each run is read from one throwable accessibility
+     *   snapshot so a WebKit rerender cannot turn a separate property lookup into a hard failure.
      */
     private static func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
         var tallest: CGFloat = 0
         for index in 0..<40 {
             let element = webView.staticTexts.element(boundBy: index)
-            guard element.exists else { break }
-            tallest = max(tallest, element.frame.height)
+            guard let snapshot = try? element.snapshot() else { break }
+            tallest = max(tallest, snapshot.frame.height)
         }
         return tallest
     }
@@ -1256,15 +1257,16 @@ extension AndBibleUITests {
      * - Parameter webView: Reader web view element already confirmed to exist.
      * - Returns: Width of the widest static text run, or zero when none are exposed.
      * - Side effects: none.
-     * - Failure modes: Text runs that vanish mid-scan are skipped; each indexed query is resolved
-     *   immediately so a WebKit rerender cannot leave a cached remote accessibility element.
+     * - Failure modes: A missing or rebuilt text run ends the current scan while preserving the
+     *   measurements already collected. Each run is read from one throwable accessibility
+     *   snapshot so a WebKit rerender cannot turn a separate property lookup into a hard failure.
      */
     private static func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
         var widest: CGFloat = 0
         for index in 0..<40 {
             let element = webView.staticTexts.element(boundBy: index)
-            guard element.exists else { break }
-            widest = max(widest, element.frame.width)
+            guard let snapshot = try? element.snapshot() else { break }
+            widest = max(widest, snapshot.frame.width)
         }
         return widest
     }
