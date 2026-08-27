@@ -233,6 +233,22 @@ shared with Android, or a platform constraint requires different wording. Shared
 Android-backed text must not be preserved as an iOS-specific translation simply
 because the old iOS file already contained it.
 
+When an otherwise shared Android translation names Android or an Android store,
+the iOS wording must be recorded in the guardrail's per-locale platform override
+table. Overrides remain Android-provenanced but are layered into catalog
+generation, snapshots, sync, and audit so a later refresh cannot restore
+platform-specific wording. Removing an unused Android-only surface requires
+adding its keys to the removed-production-key contract; the full shared sync
+then deletes them from both resource trees and CI rejects either resource or
+source-code reintroduction.
+
+The guardrail inspects parsed values for statically production-reachable keys
+and literal Swift localization fallbacks, not key names or comments, using the
+same forbidden platform terms as App Store metadata validation. Exact
+Android-database/module backup interoperability keys may use the literal word
+"Android" because it identifies a real file format. Google Play and Play Store
+remain forbidden even on those keys.
+
 ## 8. Contributor Workflow
 
 When Android-backed localization changes are needed, contributors should:
@@ -240,6 +256,8 @@ When Android-backed localization changes are needed, contributors should:
 - inspect the relevant Android string resources
 - update `ANDROID_SHARED_KEY_MAPPINGS` for any shared iOS key whose Android
   source key has a different name
+- add a per-locale platform override when Android's translation names Android
+  or its store but the shared behavior remains valid on iOS
 - run the settings localization guardrail against a current Android checkout
 - sync Android-sourced translations into both iOS localization trees
 - regenerate the settings localization snapshot
@@ -271,6 +289,7 @@ Android adds or removes strings.
 - `python3 -m unittest scripts.test_check_settings_localization_guardrails`
 - `python3 scripts/check_settings_localization_guardrails.py --android-root <android-app-res-root>`
 - `python3 scripts/check_settings_localization_guardrails.py --android-root /private/tmp/nonexistent-android-res`
+- verify the live guard reports no production platform-localization failures
 - `find AndBible Localizations -name Localizable.strings -print0 | xargs -0 plutil -lint`
 - `git diff --check`
 

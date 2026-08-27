@@ -505,10 +505,6 @@ ROUTE_CLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "Android app-owned",
         "Android Open Source License dialog renders bundled GPL text without a browser handoff.",
     ),
-    "rateReviewDialogOverlay": (
-        "Android app-owned plus iOS system boundary",
-        "Android explanatory Rate & Review dialog precedes the legitimate iOS review-controller handoff.",
-    ),
     "bugReportDialogOverlay": (
         "Android app-owned plus iOS system boundary",
         "Android diagnostic-report confirmation precedes the legitimate iOS share handoff.",
@@ -629,7 +625,6 @@ ROUTE_EVIDENCE: dict[str, tuple[str, str]] = {
     **route_keys(
         "helpDialogOverlay",
         "licenseDialogOverlay",
-        "rateReviewDialogOverlay",
         "bugReportDialogOverlay",
         "showReaderStrongsModeDialog",
         source=ANDROID_MAIN_MENU,
@@ -777,7 +772,6 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             "chapterReadHistoryDialogRequest",
             "helpDialogOverlay",
             "licenseDialogOverlay",
-            "rateReviewDialogOverlay",
             "bugReportDialogOverlay",
             "SearchView.translationPicker",
         ]:
@@ -1183,12 +1177,17 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("AndroidLicenseDialog", source)
         self.assertIn('Bundle.module.url(forResource: "LICENSE", withExtension: "txt")', license_dialog)
 
-    def test_rate_review_requires_an_android_dialog_before_system_review(self) -> None:
-        """Rate & Review must retain Android's support/cancel choice before the system handoff."""
+    def test_rate_review_uses_system_prompt_without_custom_interstitial(self) -> None:
+        """Rate & Review must invoke StoreKit directly and keep feedback actions separate.
+
+        Apple disallows custom review prompts, so the drawer action may dismiss presentation state
+        but must not route through an app-owned rating dialog. Support and bug reporting remain
+        separate drawer actions rather than being used to steer negative reviewers.
+        """
         source = READER_VIEW.read_text(encoding="utf-8")
         drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
         rate_body = swift_switch_case_body(drawer_handler, "rateApp")
-        rate_dialog = (
+        rate_dialog_path = (
             REPO_ROOT
             / "Sources"
             / "BibleUI"
@@ -1196,17 +1195,16 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             / "BibleUI"
             / "Shared"
             / "AndroidRateReviewDialog.swift"
-        ).read_text(encoding="utf-8")
+        )
 
-        self.assertIn("presentRateReviewDialog", rate_body)
-        self.assertNotIn("SKStoreReviewController", rate_body)
-        self.assertIn("rateReviewDialogOverlay", source)
-        self.assertIn("AndroidRateReviewDialog", source)
-        self.assertIn("proceedToSystemReview", source)
+        self.assertIn("requestSystemReview", rate_body)
+        self.assertNotIn("presentRateReviewDialog", source)
+        self.assertNotIn("rateReviewDialogOverlay", source)
+        self.assertNotIn("AndroidRateReviewDialog", source)
+        self.assertFalse(rate_dialog_path.exists())
         self.assertIn("SKStoreReviewController.requestReview", source)
-        self.assertIn("onContactSupport", rate_dialog)
-        self.assertIn("onReportBug", rate_dialog)
-        self.assertIn("onDismiss", rate_dialog)
+        self.assertIn("case .needHelp:", drawer_handler)
+        self.assertIn("case .reportBug:", drawer_handler)
 
     def test_bug_report_prepares_diagnostics_before_consent_gated_mail_handoff(self) -> None:
         """Manual reports prepare evidence before consent and never degrade to an unaddressed share."""

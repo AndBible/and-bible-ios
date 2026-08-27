@@ -315,7 +315,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "カスタムリポジトリを追加";
 "custom_repositories" = "カスタムリポジトリ";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ を削除しますか？";
@@ -609,7 +608,6 @@
 "prefs_navigate_to_verse_title" = "節へ移動";
 "prefs_night_mode_automatic" = "自動";
 "prefs_night_mode_manual" = "手動";
-"prefs_night_mode_summary" = "ナイトモードを自動的に切り替えるか（デバイスが対応している場合）、手動で切り替えるか、システム設定に従うか（Android 10以降）を設定します。手動切り替えはメイン画面の3点オプションメニューから行えます。";
 "prefs_night_mode_system" = "システム";
 "prefs_night_mode_title" = "ナイトモードの切り替え";
 "prefs_open_links_in_special_window_summary" = "特別なウィンドウでリンクを開き、相互参照とストロングスをすばやく表示します";
@@ -1318,7 +1316,6 @@
 "font_size_title" = "フォントサイズ";
 "help_reading_progress_text" = "聖書の読書と暗記の進捗を一目で確認できます。「既読にする」ボタンで章を手動で既読にするか、自動追跡を有効にします。暗記演習もこのビューに反映されます。";
 "history_for" = "履歴（%1$@：ウィンドウ %2$d）";
-"how_to_help" = "協力できることを確認してください";
 "id" = "識別子";
 "last_updated_at" = "最終更新日時";
 "line_spacing_title" = "行間";
@@ -1350,13 +1347,7 @@
 "prefs_line_spacing_pt" = "行間 %1.1fx";
 "prefs_text_size_sample_text" = "サンプルテキスト";
 "prefs_top_margin_title" = "上部余白";
-"proceed_google_play" = "Google Playへ進む";
 "progress_sync_title" = "読書進捗";
-"rate_message3" = "特定のテキストがアプリで利用できない場合は、%@ してください。";
-"rate_message4" = "このアプリの開発者は文書のメンテナンスに責任を負いません。";
-"rate_message5" = "肯定的で詳しいレビューは、AndBibleオープンソースプロジェクトにとって大変役立ちます。ありがとうございます！";
-"rate_message6" = "否定的なレビューを書く前に、以下の点をご検討ください：";
-"rate_title" = "アプリの評価とレビュー";
 "reading_progress_settings" = "進捗と暗記";
 "reading_progress_settings_summary" = "自動追跡、暗記、タイピング練習の設定";
 "reset_database_confirm" = "「%1$@」内のすべてのデータが完全に削除され、初期状態にリセットされます。この操作は元に戻せません。\n\nよろしいですか？";
@@ -1366,10 +1357,8 @@
 "reset_something" = "リセット: %1$@";
 "search_bible_section_group_prompt" = "検索範囲";
 "search_index_not_created" = "インデックスなし";
-"send_email" = "開発者にメールを送信";
 "start_offset" = "開始オフセット";
 "synchronizing" = "同期中…";
-"text_maintainers" = "テキストのメンテナーに問題を報告してください";
 "type_text_or_bible_reference" = "テキストまたは聖書の参照を入力";
 "unlock_info" = "暗号化モジュールの解除情報";
 "verse_end" = "節の終了";

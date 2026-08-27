@@ -315,7 +315,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "कस्टम भण्डार थप्नुहोस्";
 "custom_repositories" = "कस्टम भण्डारहरू";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ मेट्ने?";
@@ -609,7 +608,6 @@
 "prefs_navigate_to_verse_title" = "श्लोकमा जानुहोस्";
 "prefs_night_mode_automatic" = "स्वचालित";
 "prefs_night_mode_manual" = "म्यानुअल";
-"prefs_night_mode_summary" = "रात्रि मोडमा स्वचालित रूपमा स्विच गर्ने (यदि उपकरणले समर्थन गर्छ भने), म्यानुअल वा सिस्टम सेटिङ मार्फत (Android 10+)। म्यानुअल स्विचिङ मुख्य स्क्रिनको ३-बिन्दु विकल्प मेनुबाट गर्न सकिन्छ।";
 "prefs_night_mode_system" = "सिस्टम";
 "prefs_night_mode_title" = "रात्रि मोड स्विचिङ";
 "prefs_open_links_in_special_window_summary" = "अन्तरसन्दर्भ र Strong's छिटो हेर्नका लागि विशेष विन्डोमा लिङ्कहरू खोल्नुहोस्";
@@ -1317,7 +1315,6 @@
 "font_size_title" = "फन्ट आकार";
 "help_reading_progress_text" = "एक नजरमा आफ्नो बाइबल पठन र कण्ठस्थ प्रगति। \"पढेको रूपमा चिन्ह लगाउनुहोस्\" बटनले म्यानुअल रूपमा अध्यायहरू पढेको रूपमा चिन्ह लगाउनुहोस्, वा स्वचालित ट्र्याकिङ सक्षम गर्नुहोस्। कण्ठस्थ अभ्यासहरूले पनि यस दृश्यमा योगदान गर्छन्।";
 "history_for" = "इतिहास (%1$@: विन्डो %2$d)";
-"how_to_help" = "कृपया के मद्दत गर्न सकिन्छ पढ्नुहोस्";
 "id" = "पहिचानकर्ता";
 "last_updated_at" = "अन्तिम अपडेट मिति";
 "line_spacing_title" = "रेखा अन्तर";
@@ -1349,13 +1346,7 @@
 "prefs_line_spacing_pt" = "रेखा अन्तर %1.1fx";
 "prefs_text_size_sample_text" = "नमुना पाठ";
 "prefs_top_margin_title" = "माथिल्लो किनारा";
-"proceed_google_play" = "Google Play मा जानुहोस्";
 "progress_sync_title" = "पठन प्रगति";
-"rate_message3" = "यदि कुनै विशेष पाठ अनुप्रयोगमा उपलब्ध छैन भने, %@।";
-"rate_message4" = "यस अनुप्रयोगका विकासकर्ताहरू कागजातहरू मर्मत गर्न जिम्मेवार छैनन्।";
-"rate_message5" = "सकारात्मक र विस्तृत समीक्षाहरूले AndBible खुला स्रोत परियोजनालाई धेरै मद्दत गर्छन्। धन्यवाद!";
-"rate_message6" = "नकारात्मक समीक्षा लेख्नुअघि, कृपया निम्न कुराहरू विचार गर्नुहोस्:";
-"rate_title" = "अनुप्रयोग मूल्याङ्कन र समीक्षा";
 "reading_progress_settings" = "प्रगति र कण्ठस्थ";
 "reading_progress_settings_summary" = "स्वतः-ट्र्याकिङ, कण्ठस्थ, र टाइपिङ अभ्यास सेटिङहरू";
 "reset_database_confirm" = "यसले \"%1$@\" मा रहेका सबै डेटा स्थायी रूपमा मेट्नेछ र यसलाई प्रारम्भिक अवस्थामा रिसेट गर्नेछ। यो पूर्ववत् गर्न सकिँदैन।\n\nके तपाईं निश्चित हुनुहुन्छ?";
@@ -1365,10 +1356,8 @@
 "reset_something" = "रिसेट: %1$@";
 "search_bible_section_group_prompt" = "खोज स्थान";
 "search_index_not_created" = "कुनै अनुक्रमणिका छैन";
-"send_email" = "विकासकर्ताहरूलाई इमेल पठाउनुहोस्";
 "start_offset" = "सुरु अफसेट";
 "synchronizing" = "समन्वय गर्दैछ…";
-"text_maintainers" = "कृपया पाठ मर्मतकर्ताहरूलाई समस्याहरू रिपोर्ट गर्नुहोस्";
 "type_text_or_bible_reference" = "पाठ वा बाइबल सन्दर्भ टाइप गर्नुहोस्";
 "unlock_info" = "एन्क्रिप्टेड module अनलक जानकारी";
 "value_mm" = "%d मिमी";

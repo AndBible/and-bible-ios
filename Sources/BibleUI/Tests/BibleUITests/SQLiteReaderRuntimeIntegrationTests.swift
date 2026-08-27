@@ -959,7 +959,10 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        exact generic keys, and reconstruct their version-one checkpoints.
      - Failure meaning: TTS falls through to SWORD/current Bible, loses key identity, or reads a
        different source after pause.
+     - Determinism: Runs on the main actor because provider construction snapshots the live speech
+       service and installs UI-facing callbacks synchronously.
      */
+    @MainActor
     func testSQLiteSpeechProvidersUseSourceTextLanguageAndExactCheckpoints() throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
@@ -1264,7 +1267,10 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Failure meaning: Sparse Android SQLite modules can render later verses but speech refuses to
        start from the same visible canonical position.
      - Side effects: Creates and mutates one caller-owned temporary SQLite fixture.
+     - Determinism: Runs on the main actor because session construction snapshots live service
+       settings and installs generation-scoped UI callbacks synchronously.
      */
+    @MainActor
     func testSQLiteSpeechAdvancesFromMissingVerseToNextRealSourceRow() throws {
         let modulePath = try makeTemporarySwordFixturePath()
         let relativePath = "mysword/sparse.bbl.mybible"

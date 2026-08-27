@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Dodajanje shrambe po meri";
 "custom_repositories" = "Shrambe po meri";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Izbriši %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "Usmeri do vrstice";
 "prefs_night_mode_automatic" = "Avtomatsko";
 "prefs_night_mode_manual" = "Ročno";
-"prefs_night_mode_summary" = "Ali naj samodejno preklopi v nočni način (če naprava podpira), ročno ali prek sistemskih nastavitev (Android 10+). Ročno preklapljanje lahko izvedete v meniju s tremi pikami na glavnem zaslonu.";
 "prefs_night_mode_system" = "Sistemsko";
 "prefs_night_mode_title" = "Preklop na nočni način...";
 "prefs_open_links_in_special_window_summary" = "Povezave odprite v posebnem oknu za hitrejši prikaz navzkrižnih referenc in Strongovih števil";
@@ -1183,7 +1181,6 @@
 "font_size_title" = "Velikost besedila";
 "help_reading_progress_text" = "Vaš napredek pri branju Biblije in pomnjenju na prvi pogled. Poglavja označite kot prebrana ročno z gumbom \"Označi kot prebrano\" ali omogočite samodejno sledenje. Vaje pomnjenja se prav tako beležijo v tem pogledu.";
 "history_for" = "Zgodovina (%1$@: Okno %2$d)";
-"how_to_help" = "prosim preberite, s čim lahko pomagate";
 "id" = "Identifikator";
 "last_updated_at" = "Zadnja posodobitev ob";
 "line_spacing_title" = "Razmik med vrsticami";
@@ -1215,13 +1212,7 @@
 "prefs_line_spacing_pt" = "Razmik med vrsticami %1.1fx";
 "prefs_text_size_sample_text" = "Primer besedila";
 "prefs_top_margin_title" = "Levi rob";
-"proceed_google_play" = "Pojdi v Google Play";
 "progress_sync_title" = "Napredek branja";
-"rate_message3" = "Če določeno besedilo v aplikaciji ni na voljo, %@.";
-"rate_message4" = "Razvijalci te aplikacije niso odgovorni za vzdrževanje dokumentov.";
-"rate_message5" = "Pozitivni in podrobni pregledi veliko pomagajo AndBible odprtokodnemu projektu. Hvala!";
-"rate_message6" = "Pred pregledom negativne ocene upoštevajte naslednje:";
-"rate_title" = "Ocenite in preglejte aplikacijo";
 "reading_progress_settings" = "Napredek in pomnjenje";
 "reading_progress_settings_summary" = "Nastavitve samodejnega sledenja, pomnjenja in prakse tipkanja";
 "reset_database_confirm" = "To bo trajno izbrisalo vse podatke v \"%1$@\" in jih ponastavilo na začetno stanje. Tega ni mogoče razveljaviti.\n\nAli ste prepričani?";
@@ -1230,10 +1221,8 @@
 "reset_something" = "Ponastavi: %1$@";
 "search_bible_section_group_prompt" = "Kje naj išče:";
 "search_index_not_created" = "ni kazala";
-"send_email" = "pošlji e-pošto razvijalcem";
 "start_offset" = "Začetni odmik";
 "synchronizing" = "Sinhroniziranje...";
-"text_maintainers" = "prosimo, prijavite težave vzdrževalcem besedila";
 "type_text_or_bible_reference" = "Vnesite besedilo ali sklic na Biblijo";
 "unlock_info" = "Informacije o odklepanju šifriranega modula";
 "verse_end" = "Konec vrstice";

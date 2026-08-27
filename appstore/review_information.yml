@@ -9,6 +9,14 @@ notes: |
   is empty by design. Any module from the default CrossWire repository is enough
   to exercise the app.
 
+  To verify persistent background audio on a physical device, leave Discrete
+  mode off (the default), install KJV from the default CrossWire repository,
+  and open KJV in the Reader. Open the Reader menu and choose Speak; the current
+  chapter begins speaking and the Speak controls open. While speech is audible,
+  return to the Home Screen; speech continues in the background. Then lock the
+  device. Speech remains audible, and playback controls remain available on the
+  Lock Screen and in Control Center.
+
   Discrete mode (Settings > Discrete mode) replaces the launcher icon with a
   calculator and gates entry behind a PIN. It exists so that users in countries
   where possessing religious material is dangerous can keep the app

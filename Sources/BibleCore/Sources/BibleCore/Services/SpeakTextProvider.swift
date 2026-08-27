@@ -514,6 +514,8 @@ public protocol SpeakTextProviding: AnyObject {
     func didStart(command: SpeakCommand)
     func currentUnit(settings: SpeakSettings) -> SpeakStreamUnit?
     @discardableResult func advance(settings: SpeakSettings) -> Bool
+    func canRewind(_ amount: SpeakRewindAmount) -> Bool
+    func canForward(_ amount: SpeakRewindAmount) -> Bool
     @discardableResult func rewind(_ amount: SpeakRewindAmount) -> Bool
     @discardableResult func forward(_ amount: SpeakRewindAmount) -> Bool
 }
@@ -693,33 +695,43 @@ open class IndexedSpeakTextProvider: SpeakTextProviding {
         return true
     }
 
+    /**
+     Reports whether backward transport can change the current semantic position.
+
+     - Parameter amount: One-unit, smart, or no-op Android transport distance.
+     - Returns: `true` only when `rewind(_:)` can commit a different in-bounds position.
+     - Side effects: Computes the provider-specific target without mutating cursor or transition state.
+     - Failure modes: Empty providers, invalid bounds, and boundary targets return `false`.
+     */
+    open func canRewind(_ amount: SpeakRewindAmount) -> Bool {
+        guard let target = rewindTargetIndex(amount) else { return false }
+        return target != currentIndex
+    }
+
+    /**
+     Reports whether forward transport can change the current semantic position.
+
+     - Parameter amount: One-unit, smart, or no-op Android transport distance.
+     - Returns: `true` only when `forward(_:)` can commit a different in-bounds position.
+     - Side effects: Computes the provider-specific target without mutating cursor or transition state.
+     - Failure modes: Empty providers, invalid bounds, and boundary targets return `false`.
+     */
+    open func canForward(_ amount: SpeakRewindAmount) -> Bool {
+        guard let target = forwardTargetIndex(amount) else { return false }
+        return target != currentIndex
+    }
+
     /** Moves backward by one unit or the provider's smart distance. */
     @discardableResult
     open func rewind(_ amount: SpeakRewindAmount) -> Bool {
-        let target: Int
-        switch amount {
-        case .none:
-            target = currentIndex
-        case .oneUnit:
-            target = max(currentIndex - 1, lowerBound)
-        case .smart:
-            target = smartRewindIndex()
-        }
+        guard let target = rewindTargetIndex(amount) else { return false }
         return move(to: target)
     }
 
     /** Moves forward by one unit or the provider's smart distance. */
     @discardableResult
     open func forward(_ amount: SpeakRewindAmount) -> Bool {
-        let target: Int
-        switch amount {
-        case .none:
-            target = currentIndex
-        case .oneUnit:
-            target = min(currentIndex + 1, upperBound)
-        case .smart:
-            target = smartForwardIndex()
-        }
+        guard let target = forwardTargetIndex(amount) else { return false }
         return move(to: target)
     }
 
@@ -746,6 +758,46 @@ open class IndexedSpeakTextProvider: SpeakTextProviding {
 
     /** Default smart forward mirrors Android's ten-unit generic forward. */
     open func smartForwardIndex() -> Int { min(currentIndex + 10, upperBound) }
+
+    /**
+     Resolves backward transport without changing provider state.
+
+     - Parameter amount: Requested Android transport distance.
+     - Returns: In-bounds target index, or `nil` when the provider has no valid active range.
+     - Side effects: Calls provider-specific smart-target logic but does not move the cursor.
+     - Failure modes: Empty or invalid active ranges return `nil`.
+     */
+    private func rewindTargetIndex(_ amount: SpeakRewindAmount) -> Int? {
+        guard upperBound >= lowerBound else { return nil }
+        switch amount {
+        case .none:
+            return currentIndex
+        case .oneUnit:
+            return max(currentIndex - 1, lowerBound)
+        case .smart:
+            return smartRewindIndex()
+        }
+    }
+
+    /**
+     Resolves forward transport without changing provider state.
+
+     - Parameter amount: Requested Android transport distance.
+     - Returns: In-bounds target index, or `nil` when the provider has no valid active range.
+     - Side effects: Calls provider-specific smart-target logic but does not move the cursor.
+     - Failure modes: Empty or invalid active ranges return `nil`.
+     */
+    private func forwardTargetIndex(_ amount: SpeakRewindAmount) -> Int? {
+        guard upperBound >= lowerBound else { return nil }
+        switch amount {
+        case .none:
+            return currentIndex
+        case .oneUnit:
+            return min(currentIndex + 1, upperBound)
+        case .smart:
+            return smartForwardIndex()
+        }
+    }
 
     /** Applies one validated active range and clamps the current position into it. */
     @discardableResult

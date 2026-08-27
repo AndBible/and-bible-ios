@@ -233,6 +233,29 @@ grep -ril 'android' fastlane/metadata/ || echo "clean"       # no leaked platfor
 All four are safe to run repeatedly and touch nothing outside `fastlane/metadata/`
 (and only `make appstore-metadata`, not `--validate`/`--check`, writes there).
 
+Offline validation cannot prove what App Store Connect currently serves. After
+each metadata upload, open the submitted version's localization editor in App
+Store Connect and enumerate **every live localization**, not only the 34 locales
+managed by this repository. For each live locale that has a
+`fastlane/metadata/<locale>/subtitle.txt`, compare the served subtitle with that
+file exactly. A live locale without a generated directory is unmanaged by
+`deliver`; older localizations such as `en-GB`, `en-AU`, `en-CA`, `es-MX`, or
+`fr-CA` can survive an upload. Remove or disable an unmanaged live localization
+when it is unnecessary, or manually set a platform-neutral subtitle and read it
+back immediately. Do not add a fake generated locale merely to mirror live App
+Store Connect state. Any stale live value can still trigger Guideline 2.3.10.
+
+## Background-audio review evidence
+
+Any submission that retains `audio` in the app's `UIBackgroundModes` must make
+the feature reproducible for App Review. Keep the public reviewer steps in
+`appstore/review_information.yml` current, and attach a screen recording made
+on a physical device to the App Review Information notes. The recording must
+show an installed Bible module speaking, then show the Home Screen while speech
+continues. It must also show the Lock Screen or Control Center playback controls
+remaining usable.
+Simulator playback is useful during development but is not review evidence.
+
 ## First release checklist
 
 1. Create the app record in App Store Connect (bundle ID `org.andbible.ios`),
@@ -241,7 +264,10 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
 2. Confirm `https://andbible.org/privacy.html` is live — App Store Connect
    requires the privacy URL, and it's already set in `appstore/app_info.yml`.
 3. `make appstore-validate`
-4. `make appstore-deliver` — reads this carefully: it prints the number of
+4. If the build retains `audio` in `UIBackgroundModes`, confirm the generated
+   reviewer notes contain the current background-speech steps and attach a new
+   physical-device recording as described above.
+5. `make appstore-deliver` — reads this carefully: it prints the number of
    locales and the app-level files it's about to overwrite, then uploads
    immediately. There is no dry-run mode and `fastlane/Deliverfile` sets
    `force true`, which skips `deliver`'s interactive HTML-preview
@@ -250,20 +276,26 @@ All four are safe to run repeatedly and touch nothing outside `fastlane/metadata
    `release_notes` field is uploaded at all — see "Release notes are
    English-only, and optional" above for why that avoids App Store Connect's
    rejection of release notes on a first version.
-5. `make appstore-precheck` — Apple's own metadata rules against the live
-   listing, run **after** step 4, not before: `precheck` inspects whatever
+6. Enumerate every live localization in App Store Connect. Compare managed
+   locales with `fastlane/metadata/<locale>/subtitle.txt`; for every live locale
+   without that generated file, remove/disable it or manually set and read back
+   a platform-neutral subtitle. Do not create a generated locale solely to make
+   this checklist pass. This catches unmanaged server-side and manually entered
+   metadata drift that local validation and `deliver` cannot see.
+7. `make appstore-precheck` — Apple's own metadata rules against the live
+   listing, run **after** step 5, not before: `precheck` inspects whatever
    App Store Connect currently holds, so running it before the new text is
    uploaded would only tell you about the *old* listing. It's meaningful
    here, once the new text is live and before you submit for review. Note
    that `deliver` runs `precheck` itself at the end of a successful upload
-   (`run_precheck_before_submit` defaults to true), so step 4 usually covers
+   (`run_precheck_before_submit` defaults to true), so step 5 usually covers
    this already.
-6. Upload screenshots by hand (this pipeline deliberately never touches
+8. Upload screenshots by hand (this pipeline deliberately never touches
    them).
-7. Answer the age-rating questionnaire in the App Store Connect UI — required
+9. Answer the age-rating questionnaire in the App Store Connect UI — required
    before a submission can go out, and not something this pipeline owns (see
    "Age rating" above).
-8. Attach the build (`docs/howto/testflight-cli-upload.md`) and submit for
+10. Attach the build (`docs/howto/testflight-cli-upload.md`) and submit for
    review.
 
 ### Two harmless messages a first `deliver` prints

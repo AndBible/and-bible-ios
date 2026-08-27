@@ -9,9 +9,28 @@ import struct SwiftUI.Text
 
  These tests verify lightweight BibleUI reader shells can be built with their required injected
  dependencies without loading the app-host XCTest bundle. They protect the migration boundary for
- views that belong to BibleUI rather than app delegate or scene bootstrap behavior.
+ views that belong to BibleUI rather than app delegate or scene bootstrap behavior. Construction
+ runs on the main actor because both SwiftUI views and their shared speech service are UI-owned.
  */
+@MainActor
 final class ReaderShellConstructionTests: XCTestCase {
+    /**
+     Verifies the reader observes the application-owned speech service without constructing a copy.
+
+     The identity assertion protects active background playback and process-global media-command
+     ownership across SwiftUI reader reconstruction.
+
+     - Side effects: Constructs a speech service and reader value without rendering the view body.
+     - Failure modes: Fails if reader construction wraps, replaces, or independently owns speech.
+     */
+    func testBibleReaderUsesInjectedSpeechServiceIdentity() {
+        let speakService = SpeakService()
+
+        let view = BibleReaderView(speakService: speakService)
+
+        XCTAssertTrue(view.speakService === speakService)
+    }
+
     /**
      Verifies the reader speak mini-player accepts the shared speak service dependency.
 

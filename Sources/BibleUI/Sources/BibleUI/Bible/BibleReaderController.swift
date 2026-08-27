@@ -86,9 +86,13 @@ struct BibleReaderSpeechSelection: Equatable {
  Side effects:
  - mutates active reading state, emits bridge events, persists workspace/page state, and invokes
    native callback closures in response to user interaction and bridge events
+
+ The `BibleBridgeDelegate` conformance is main-actor isolated because WebKit delivers reader
+ actions to UI-owned controller state; pure controller helpers remain usable from their existing
+ nonisolated contexts.
  */
 @Observable
-public final class BibleReaderController: NSObject, BibleBridgeDelegate {
+public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelegate {
     /// Native/Vue bridge dedicated to this controller's reader window.
     let bridge: BibleBridge
 
@@ -1043,8 +1047,16 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     private let compareDocumentBuildOperation: (BibleReaderCompareDocumentBuilder.Request) -> String?
     /// TTS service
     var speakService: SpeakService?
-    /// Speech-specific collaborator that builds TTS payloads and owns word-highlight state.
-    private let speechCoordinator = BibleReaderSpeechCoordinator()
+    /**
+     Main-actor speech collaborator that builds TTS payloads and owns word-highlight state.
+
+     The lazy lifetime keeps construction on the first main-actor speech entry rather than the
+     controller's otherwise nonisolated initializer. Access mutates only the cached collaborator;
+     construction has no failure path.
+     */
+    @ObservationIgnored
+    @MainActor
+    private lazy var speechCoordinator = BibleReaderSpeechCoordinator()
     /// SWORD setup collaborator that owns manager option mapping and module-state projection.
     private let swordCoordinator = BibleReaderSwordCoordinator()
     /// Reader config/window-state collaborator that owns bridge payload projection and compare visibility state.
@@ -1079,6 +1091,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        route Vue callbacks and native emissions to different windows
      - if SWORD initialization is requested and `SwordManager` creation fails, the controller
        remains usable for placeholder/fallback rendering with empty installed-module caches.
+     - Precondition: Construct on the main actor. Delegate installation is synchronously checked
+       because `BibleBridgeDelegate` conformance owns WebKit-delivered UI actions there.
      */
     public init(
         bridge: BibleBridge,
@@ -1097,7 +1111,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.bookmarkService = bookmarkService
         self.compareDocumentBuildOperation = BibleReaderCompareDocumentBuilder.buildDocumentJSON
         super.init()
-        bridge.delegate = self
+        MainActor.assumeIsolated {
+            bridge.delegate = self
+        }
     observeAIDocMarkerEvents(aiDocMarkerEventCenter)
         if initializesSword {
             initializeSwordIfNeeded()
@@ -1118,6 +1134,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side Effects: Assigns the bridge delegate, retains the render session, subscribes to marker
        events, and projects the supplied SWORD manager into controller state.
      - Failure Modes: A render session paired with another bridge fails fast.
+     - Precondition: Construct on the main actor. Delegate installation is synchronously checked
+       because `BibleBridgeDelegate` conformance owns WebKit-delivered UI actions there.
      */
     init(
         bridge: BibleBridge,
@@ -1139,7 +1157,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         self.bookmarkService = bookmarkService
         self.compareDocumentBuildOperation = compareDocumentBuildOperation
         super.init()
-        bridge.delegate = self
+        MainActor.assumeIsolated {
+            bridge.delegate = self
+        }
     observeAIDocMarkerEvents(aiDocMarkerEventCenter)
         configureSwordManager(swordManagerOverride)
     }
@@ -1778,7 +1798,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      utterance prematurely, triggering auto-advance to the next chapter.
      To prevent this, Strong's and Morphology are temporarily disabled during
      text extraction and restored immediately after.
+
+     - Side effects: Rebinds bookmark persistence, constructs the exact active source provider,
+       updates Now Playing metadata, and starts speech when content is addressable.
+     - Failure modes: Unsupported pages, missing sources, and empty content leave playback
+       unchanged.
+     - Important: Runs on the main actor with `SpeakService` and reader UI state.
      */
+    @MainActor
     public func speakCurrentChapter() {
         guard isCurrentPageSpeakable else { return }
         guard let service = speakService else { return }
@@ -1835,8 +1862,11 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Side effects: Replaces active speech and installs generation-scoped reader callbacks.
      - Failure modes: Missing modules, wrong categories, unsupported versifications, and unmappable
        or unaddressable ordinals fail closed without using the active Bible.
+     - Important: Runs on the main actor so source selection and playback state change atomically
+       with the active reader pane.
      */
     @discardableResult
+    @MainActor
     private func startBibleSpeech(
         category: SpeakDocumentCategory,
         bookInitials: String,
@@ -1890,7 +1920,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
    - Returns: A complete session, or nil when source mapping or real verse addressability fails.
    - Side effects: Enumerates real SQLite verses; lazy text reads remain serialized by the handle.
    - Failure modes: Never falls back to SWORD or placeholder text.
+   - Important: Runs on the main actor because the session reads live speech settings and binds
+     callbacks to reader-owned WebView/navigation state.
    */
+  @MainActor
   private func sqliteBibleSpeechSession(
     module: BibleReaderSQLiteModuleHandle,
     category: SpeakDocumentCategory,
@@ -2275,7 +2308,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      The optional checkpoint selects reconstruction mode; otherwise `key` and local ordinal bounds
      represent Android's `BookAndKey`. An expected category is authoritative, except that Android's
      generated MyDocument modules arrive through the general-book DOM category and are reclassified.
+
+     - Parameters describe exact source identity, cursor bounds, optional persisted state, and the
+       main-actor speech service that will own the session.
+     - Returns: A source-owned reconstruction, or `nil` when ownership/category/cursor validation
+       fails.
+     - Side effects: Reads the authorized source and installs generation-scoped reader callbacks;
+       synthesis does not start here.
+     - Failure modes: Missing, shadowed, wrong-category, stale, or unaddressable sources fail closed
+       without substituting the visible Bible.
+     - Important: Runs on the main actor because callback construction reads live service settings
+       and captures reader UI synchronization.
      */
+    @MainActor
     private func genericSpeechSession(
         bookInitials: String,
         key: String?,
@@ -2446,7 +2491,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      Android-37 Java identity decides whether synchronization switches the active document first.
    - Failure modes: Missing, shadowed, wrong-category, malformed, and unreadable SQLite sources fail
      closed without falling through to SWORD or mutating an unrelated active document.
+   - Important: Runs on the main actor because source synchronization and service generation state
+     belong to the active reader UI.
    */
+  @MainActor
   private func sqliteGenericSpeechSession(
     bookInitials: String,
     key: String?,
@@ -2506,8 +2554,20 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     )
   }
 
-    /** Starts one exact generic session and publishes its source-owned Now Playing metadata. */
+    /**
+     Starts one exact generic session and publishes its source-owned Now Playing metadata.
+
+     - Parameters describe the installed source identity, exact key/ordinal cursor, optional
+       category constraint, and live service that owns playback.
+     - Returns: `true` when an authorized session was built and handed to the service; otherwise
+       `false` without changing playback.
+     - Side effects: Replaces active speech, publishes source metadata, and installs reader
+       synchronization callbacks.
+     - Failure modes: Missing, shadowed, wrong-category, and unaddressable sources fail closed.
+     - Important: Runs on the main actor with the service and active reader pane.
+     */
     @discardableResult
+    @MainActor
     private func startGenericSpeech(
         bookInitials: String,
         key: String?,
@@ -2534,7 +2594,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         return true
     }
 
-    /** Routes page-level Speak to the exact active EPUB, MyDocument, or SWORD general book. */
+    /**
+     Routes page-level Speak to the exact active EPUB, MyDocument, or SWORD general book.
+
+     - Parameter service: Main-actor speech service that will own a successful provider.
+     - Side effects: May replace playback and publish the active document's metadata.
+     - Failure modes: Missing or no-longer-authorized active documents leave playback unchanged.
+     - Important: Runs on the main actor with reader selection and service state.
+     */
+    @MainActor
     private func speakCurrentGeneralDocument(service: SpeakService) {
         guard let initials = activeGeneralBookModuleName else { return }
         _ = startGenericSpeech(
@@ -2582,7 +2650,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
        does not mutate reader selection, PageManager state, or the supplied speech service.
      - Failure modes: Bible/memorization checkpoints require an actual Bible backend. Generic
        checkpoints replay the combined installed/local ownership contract before any content read.
+     - Important: Runs on the main actor because reconstruction reads live service settings and
+       binds callbacks to the active reader pane.
      */
+    @MainActor
     func reconstructSpeechSession(
         from checkpoint: SpeakProviderCheckpoint,
         service: SpeakService
@@ -2629,7 +2700,19 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    /** Builds Android remote Play's default provider from the exact currently visible source. */
+    /**
+     Builds Android remote Play's default provider from the exact currently visible source.
+
+     - Parameter service: Main-actor service supplying live provider settings and generation state.
+     - Returns: A category-correct session for the visible source, or `nil` when that source is not
+       currently addressable.
+     - Side effects: Reads source content and may reset an out-of-range passage-repeat cursor; it
+       does not start synthesis.
+     - Failure modes: Missing, locked, stale, or unsupported source state fails closed without
+       falling back to another document.
+     - Important: Runs on the main actor so visible selection and service state form one snapshot.
+     */
+    @MainActor
     func defaultSpeechSession(service: SpeakService) -> SpeakSessionReconstruction? {
         switch currentCategory {
         case .bible:
@@ -2721,7 +2804,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         }
     }
 
-    /** Returns the visible Bible position used when settings change while playback is stopped. */
+    /**
+     Returns the visible Bible position used when settings change while playback is stopped.
+
+     - Parameter service: Main-actor service whose settings configure the temporary session.
+     - Returns: The current provider position for a visible Bible, or `nil` for other categories or
+       unaddressable sources.
+     - Side effects: Builds a temporary source session and may normalize passage-repeat state; no
+       synthesis begins.
+     - Failure modes: Missing or invalid active Bible state returns `nil` without fallback.
+     - Important: Runs on the main actor with visible reader and service state.
+     */
+    @MainActor
     func stoppedBibleSpeechPosition(service: SpeakService) -> SpeakStreamPosition? {
         guard currentCategory == .bible else { return nil }
         return defaultSpeechSession(service: service)?.provider.currentPosition
@@ -6737,7 +6831,15 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      The asynchronous DOM query captures the current service generation before suspension. A newer
      transport request invalidates the result, preventing an old selection from replacing it after
      JavaScript returns.
+
+     - Side effects: Queries the WebView asynchronously and may start category-correct speech for
+       the selected source.
+     - Failure modes: Missing/empty selections, replaced services, stale generations, or invalid
+       source metadata leave playback unchanged.
+     - Important: The launch and completion checks run on the main actor so service identity and
+       reader selection cannot race UI ownership changes.
      */
+    @MainActor
     func speakSelection() {
         guard let service = speakService else { return }
         let expectedGeneration = service.currentSessionGeneration
@@ -7360,7 +7462,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Starts TTS playback for the selected verse range.
+
+     - Parameters describe the bridge source, exact Bible initials/versification, and inclusive
+       source ordinals supplied by the reader client.
+     - Side effects: Rebinds bookmark persistence and starts a strict Bible provider when valid.
+     - Failure modes: Missing services, sources, or addressable ordinals leave playback unchanged.
+     - Important: Runs on the main actor with bridge, reader, and speech-service state.
      */
+  @MainActor
   public func bridge(
     _ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int,
     endOrdinal: Int
@@ -7377,7 +7486,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         )
     }
 
-    /** Starts Android's generic speech provider without routing through Bible coordinates. */
+    /**
+     Starts Android's generic speech provider without routing through Bible coordinates.
+
+     - Parameters describe the bridge source, exact module/key identity, and optional inclusive
+       content ordinals supplied by the reader client.
+     - Side effects: Rebinds bookmark persistence and starts a category-authorized provider.
+     - Failure modes: Missing services, negative start ordinals, or invalid source identity leave
+       playback unchanged.
+     - Important: Runs on the main actor with bridge, reader, and speech-service state.
+     */
+    @MainActor
     public func bridge(
         _ bridge: BibleBridge,
         speakGeneric bookInitials: String,
@@ -7400,7 +7519,14 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
 
     /**
      Starts repeated TTS playback for the selected memorization range.
+
+     - Parameters describe the bridge source, exact Bible initials/versification, and inclusive
+       memorization ordinals supplied by the reader client.
+     - Side effects: Rebinds bookmark persistence and starts a bounded repeating provider.
+     - Failure modes: Missing services, sources, or addressable ranges leave playback unchanged.
+     - Important: Runs on the main actor with bridge, reader, and speech-service state.
      */
+  @MainActor
   public func bridge(
     _ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String,
     startOrdinal: Int, endOrdinal: Int

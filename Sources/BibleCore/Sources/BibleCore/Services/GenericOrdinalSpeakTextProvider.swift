@@ -318,31 +318,44 @@ public final class GenericOrdinalSpeakTextProvider: SpeakTextProviding {
         return true
     }
 
+    /**
+     Reports whether backward transport can change the exact generic cursor.
+
+     - Parameter amount: One-ordinal, smart, or no-op Android transport distance.
+     - Returns: `true` when `rewind(_:)` can commit a different point within configured bounds.
+     - Side effects: May fill the bounded lazy key cache while resolving neighboring ordinals, but
+       never mutates the provider cursor, transition origin, or last-title marker.
+     - Failure modes: Missing content, invalid cursors, and semantic boundaries return `false`.
+     */
+    public func canRewind(_ amount: SpeakRewindAmount) -> Bool {
+        guard let current, let target = rewindTarget(from: current, amount: amount) else {
+            return false
+        }
+        return target != current
+    }
+
+    /**
+     Reports whether forward transport can change the exact generic cursor.
+
+     - Parameter amount: One-ordinal, smart, or no-op Android transport distance.
+     - Returns: `true` when `forward(_:)` can commit a different point within configured bounds.
+     - Side effects: May fill the bounded lazy key cache while resolving neighboring ordinals, but
+       never mutates the provider cursor, transition origin, or last-title marker.
+     - Failure modes: Missing content, invalid cursors, and semantic boundaries return `false`.
+     */
+    public func canForward(_ amount: SpeakRewindAmount) -> Bool {
+        guard let current, let target = forwardTarget(from: current, amount: amount) else {
+            return false
+        }
+        return target != current
+    }
+
     /** Moves backward by one exact ordinal or Android's title-aware smart distance. */
     @discardableResult
     public func rewind(_ amount: SpeakRewindAmount) -> Bool {
-        guard let current else { return false }
-        let target: Point?
-        switch amount {
-        case .none:
-            target = current
-        case .oneUnit:
-            target = previousPoint(before: current, wrapping: configuredLower == nil)
-        case .smart:
-            if let lastTitle, lastTitle != current, withinBounds(lastTitle) {
-                target = lastTitle
-            } else if let content = content(at: current.keyIndex),
-                      current.ordinal <= content.ordinalRange.lowerBound {
-                let previous = previousPoint(
-                    before: current,
-                    wrapping: configuredLower == nil
-                )
-                target = previous.flatMap { withinBounds($0) ? $0 : nil }
-            } else {
-                target = moved(from: current, distance: -10)
-            }
-        }
-        guard let target, target != current else { return false }
+        guard let current,
+              let target = rewindTarget(from: current, amount: amount),
+              target != current else { return false }
         move(to: target, from: nil)
         if let lastTitle, target < lastTitle { self.lastTitle = nil }
         return true
@@ -351,20 +364,64 @@ public final class GenericOrdinalSpeakTextProvider: SpeakTextProviding {
     /** Moves forward by one exact ordinal or Android's ten-unit smart distance. */
     @discardableResult
     public func forward(_ amount: SpeakRewindAmount) -> Bool {
-        guard let current else { return false }
-        let target: Point?
-        switch amount {
-        case .none:
-            target = current
-        case .oneUnit:
-            target = nextPoint(after: current, wrapping: configuredUpper == nil)
-        case .smart:
-            target = moved(from: current, distance: 10)
-        }
-        guard let target, target != current else { return false }
+        guard let current,
+              let target = forwardTarget(from: current, amount: amount),
+              target != current else { return false }
         move(to: target, from: nil)
         lastTitle = nil
         return true
+    }
+
+    /**
+     Resolves a backward target without committing provider transport.
+
+     - Parameters:
+       - current: Exact generic point from which movement is requested.
+       - amount: Android one-unit, smart, or no-op movement distance.
+     - Returns: Candidate point within provider bounds, or `nil` at an unavailable boundary.
+     - Side effects: May lazily cache source content needed to cross a key boundary.
+     - Failure modes: Missing/malformed lazy content or an unavailable prior point returns `nil`.
+     */
+    private func rewindTarget(from current: Point, amount: SpeakRewindAmount) -> Point? {
+        switch amount {
+        case .none:
+            return current
+        case .oneUnit:
+            return previousPoint(before: current, wrapping: configuredLower == nil)
+                .flatMap { withinBounds($0) ? $0 : nil }
+        case .smart:
+            if let lastTitle, lastTitle != current, withinBounds(lastTitle) {
+                return lastTitle
+            }
+            if let content = content(at: current.keyIndex),
+               current.ordinal <= content.ordinalRange.lowerBound {
+                return previousPoint(before: current, wrapping: configuredLower == nil)
+                    .flatMap { withinBounds($0) ? $0 : nil }
+            }
+            return moved(from: current, distance: -10)
+        }
+    }
+
+    /**
+     Resolves a forward target without committing provider transport.
+
+     - Parameters:
+       - current: Exact generic point from which movement is requested.
+       - amount: Android one-unit, smart, or no-op movement distance.
+     - Returns: Candidate point within provider bounds, or `nil` at an unavailable boundary.
+     - Side effects: May lazily cache source content needed to cross a key boundary.
+     - Failure modes: Missing/malformed lazy content or an unavailable next point returns `nil`.
+     */
+    private func forwardTarget(from current: Point, amount: SpeakRewindAmount) -> Point? {
+        switch amount {
+        case .none:
+            return current
+        case .oneUnit:
+            return nextPoint(after: current, wrapping: configuredUpper == nil)
+                .flatMap { withinBounds($0) ? $0 : nil }
+        case .smart:
+            return moved(from: current, distance: 10)
+        }
     }
 
     /** Finds a bounded number of exact provider-unit steps in either direction. */

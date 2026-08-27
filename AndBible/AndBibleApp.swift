@@ -298,7 +298,8 @@ struct AndBibleApp: App {
 
     /// Core services shared across the app.
     @State private var windowManager: WindowManager
-    private let speakService = SpeakService()
+    /// Application-scoped speech owner initialized after one-shot UI-test preferences are applied.
+    @StateObject private var speakService: SpeakService
     @State private var syncService: SyncService
     @State private var searchIndexService = SearchIndexService()
     @State private var remoteSyncLifecycleService: RemoteSyncLifecycleService
@@ -629,6 +630,7 @@ struct AndBibleApp: App {
         #if DEBUG
         Self.applyPendingUITestPreferencesIfNeeded()
         #endif
+        self._speakService = StateObject(wrappedValue: SpeakService())
         self._isUnlocked = State(
             initialValue: !UserDefaults.standard.bool(forKey: AppPreferenceKey.showCalculator.rawValue)
         )
@@ -721,7 +723,10 @@ struct AndBibleApp: App {
                 }
             }
         } else {
-            ContentView(readerContentIdentity: contentIdentity)
+            ContentView(
+                readerContentIdentity: contentIdentity,
+                speakService: speakService
+            )
                 .environment(windowManager)
                 .environment(syncService)
                 .environment(searchIndexService)

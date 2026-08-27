@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Voeg Pasgemaakte Bewaarplek by";
 "custom_repositories" = "Pasgemaakte bewaarplekke";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Skrap %@?";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "Gaan na vers";
 "prefs_night_mode_automatic" = "Outomaties";
 "prefs_night_mode_manual" = "handleiding";
-"prefs_night_mode_summary" = "Of jy nou outomaties na nagmodus oorskakel (as toestel dit ondersteun), handmatig of via stelselinstelling (Android 10). Handleidingwisseling kan gedoen word uit die 3-dot opsies kieslys op die hoofskerm.";
 "prefs_night_mode_system" = "Stelsel";
 "prefs_night_mode_title" = "Nag mode skakel";
 "prefs_open_links_in_special_window_summary" = "Open skakels in spesiale venster, vir vinniger vertoning van kruisverwysings en Srongs";
@@ -1199,7 +1197,6 @@
 "font_size_title" = "Skrif grootte";
 "help_reading_progress_text" = "Jou Bybel-lees- en memoriseringsvordering in een oogopslag. Merk hoofstukke handmatig as gelees met die \"Merk as gelees\"-knoppie, of aktiveer outomatiese opsporing. Memoriseer-oefeninge dra ook by tot hierdie aansig.";
 "history_for" = "Geskiedenis (%1$@:Venster %2$d)";
-"how_to_help" = "lees asseblief wat jy kan doen om te help";
 "id" = "Identifiseerder";
 "last_updated_at" = "Laas opgedateer op";
 "line_spacing_title" = "Lyn spasiëring";
@@ -1231,13 +1228,7 @@
 "prefs_line_spacing_pt" = "Lyn spasiëring %1.1fx";
 "prefs_text_size_sample_text" = "Teks voorbeeld";
 "prefs_top_margin_title" = "Boonste kantlyn";
-"proceed_google_play" = "Gaan voort na Google Play";
 "progress_sync_title" = "Leesvordering";
-"rate_message3" = "Indien spesifieke teks nie in die toepassing beskikbaar is nie, %@";
-"rate_message4" = "Die ontwikkelaars van hierdie program is nie verantwoordelik vir die handhawing van dokumente nie.";
-"rate_message5" = "Positiewe en gedetailleerde resensies help AndBible Oop Bron Projek baie. Dankie!";
-"rate_message6" = "Voordat u negatiewe oorsig hersien, oorweeg asseblief die volgende";
-"rate_title" = "Gradering en hersiening van program";
 "reading_progress_settings" = "Vordering & memorisering";
 "reading_progress_settings_summary" = "Outomatiese-opvolg, memorisering, en tikoefeningsinstellings";
 "reset_database_confirm" = "Dit sal alle data in \"%1$@\" permanent uitvee en dit na die aanvanklike toestand herstel. Dit kan nie ongedaan gemaak word nie.\n\nIs jy seker?";
@@ -1247,10 +1238,8 @@
 "reset_something" = "Herstel: %1$@";
 "search_bible_section_group_prompt" = "Soek Waar";
 "search_index_not_created" = "geen indeks";
-"send_email" = "stuur e-pos aan ontwikkelaars";
 "start_offset" = "Begin Verskuiwing";
 "synchronizing" = "Sinchroniseer...";
-"text_maintainers" = "rapporteer asseblief kwessies aan tekshandhaar";
 "type_text_or_bible_reference" = "Tik teks of Bybel verwysing";
 "unlock_info" = "Geënkripteerde module ontsluitings inligting";
 "value_mm" = "%dmm";
