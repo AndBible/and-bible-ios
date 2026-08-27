@@ -465,19 +465,23 @@ public struct SearchGroupedResults: Sendable, Equatable {
        - moduleOrder: Caller-selected module order used for matches, counts, and failures.
        - moduleFailures: Modules whose individual query execution failed.
      - Side effects: None.
-     - Failure modes: Duplicate Java-exact module results or failures keep dictionary construction's
-       precondition; service callers de-duplicate selected names before constructing this value.
+     - Failure modes: None. Duplicate Java-exact result or failure buckets retain their first value,
+       and a successful bucket suppresses a contradictory failure for the same module. Production
+       service callers also de-duplicate before querying, while this boundary remains total for
+       restored state, test seams, and future callers.
      */
     public init(
         moduleResults: [SearchModuleResults],
         moduleOrder: [String],
         moduleFailures: [SearchModuleFailure] = []
     ) {
-        let resultsByModule = Dictionary(
-            uniqueKeysWithValues: moduleResults.map {
-                (SwordJavaExactStringIdentity($0.moduleName), $0)
+        var resultsByModule: [SwordJavaExactStringIdentity: SearchModuleResults] = [:]
+        for result in moduleResults {
+            let identity = SwordJavaExactStringIdentity(result.moduleName)
+            if resultsByModule[identity] == nil {
+                resultsByModule[identity] = result
             }
-        )
+        }
         let selectedKeys = Set(moduleOrder.map { SwordJavaExactStringIdentity($0) })
         let unexpectedNames = resultsByModule.values
             .map(\.moduleName)
@@ -488,11 +492,13 @@ public struct SearchGroupedResults: Sendable, Equatable {
                 resultsByModule[SwordJavaExactStringIdentity($0)] != nil
             } + unexpectedNames
         )
-        let failuresByModule = Dictionary(
-            uniqueKeysWithValues: moduleFailures.map {
-                (SwordJavaExactStringIdentity($0.moduleName), $0)
+        var failuresByModule: [SwordJavaExactStringIdentity: SearchModuleFailure] = [:]
+        for failure in moduleFailures {
+            let identity = SwordJavaExactStringIdentity(failure.moduleName)
+            if resultsByModule[identity] == nil, failuresByModule[identity] == nil {
+                failuresByModule[identity] = failure
             }
-        )
+        }
         let unexpectedFailureNames = failuresByModule.values
             .map(\.moduleName)
             .filter { !selectedKeys.contains(SwordJavaExactStringIdentity($0)) }
@@ -523,7 +529,7 @@ public struct SearchGroupedResults: Sendable, Equatable {
             failuresByModule[SwordJavaExactStringIdentity($0)]
         }
         totalHitCount = moduleCounts.reduce(0) { $0 + $1.count }
-        isTruncated = moduleResults.contains(where: \.isTruncated)
+        isTruncated = resultsByModule.values.contains(where: \.isTruncated)
     }
 
     /**
