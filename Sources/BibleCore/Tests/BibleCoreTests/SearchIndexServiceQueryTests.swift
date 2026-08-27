@@ -195,7 +195,8 @@ final class SearchIndexServiceQueryTests: XCTestCase {
 
      - Setup: Seeds cleaned verse-text rows plus explicit Strong's token rows for KJV.
      - Expected result: H0430 hits return only the tokenized verses, ordered by canonical entry order,
-       with cleaned snippets and Strong's readiness set for the module.
+       with cleaned snippets and Strong's readiness set for the module; analyzer-empty input returns
+       an authorized zero-hit single-module and grouped result rather than an error.
      - Failure meaning: The indexed Strong's facet no longer behaves like Android's JSword field, or
        the fixture metadata no longer exercises the readiness gate Search uses before querying.
      - Side effects: Creates and removes one temporary SQLite database.
@@ -250,6 +251,29 @@ final class SearchIndexServiceQueryTests: XCTestCase {
             hits.map { $0.snippetSegments.filter(\.isEmphasized).map(\.text) },
             [["God"], ["God"]]
         )
+
+        let analyzerEmpty = try service.searchStrongs(
+            canonicalTokens: [],
+            moduleName: "KJV"
+        )
+        XCTAssertEqual(analyzerEmpty.moduleName, "KJV")
+        XCTAssertTrue(analyzerEmpty.hits.isEmpty)
+
+        let groupedAnalyzerEmpty = try service.searchStrongsMultiple(
+            canonicalTokens: [],
+            sourceIdentities: [
+                SearchIndexSourceIdentity(
+                    moduleName: "KJV",
+                    version: "",
+                    fingerprint: String(repeating: "a", count: 64)
+                ),
+            ]
+        )
+        XCTAssertEqual(groupedAnalyzerEmpty.moduleCounts, [
+            SearchModuleCount(moduleName: "KJV", count: 0),
+        ])
+        XCTAssertTrue(groupedAnalyzerEmpty.groups.isEmpty)
+        XCTAssertEqual(groupedAnalyzerEmpty.totalHitCount, 0)
     }
 
     /**
@@ -266,7 +290,7 @@ final class SearchIndexServiceQueryTests: XCTestCase {
        verse group retaining LSG then KJV, and each exact module has one count bucket in
        first-selected order.
      - Failure meaning: Find All can either drop a selected translation, duplicate its visible row,
-       or reach the grouped-result duplicate-key crash boundary reported in issue #416.
+       or reach the latent grouped-result duplicate-key boundary found while investigating #416.
      - Side effects: Creates and removes one temporary SQLite database.
      */
     func testIndexedStrongsSearchGroupsAcrossAllSelectedTranslations() async throws {

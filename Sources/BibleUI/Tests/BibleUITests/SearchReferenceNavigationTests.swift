@@ -4,23 +4,23 @@ import XCTest
 @testable import SwordKit
 
 /**
- Integration coverage for Search reference input routed through `BibleReaderController.navigateToRef`.
+ Integration coverage for Search submission precedence and reader reference navigation.
 
- The suite uses a temporary KJV SWORD fixture and recording bridge, matching the production callback
- that Search invokes before compiling FTS syntax. Temporary module files are removed by the shared
- fixture base. Failures mean valid ranges, passage lists, or active-module book aliases can fall
- through to unrelated full-text search.
+ The suite exercises the typed Strong/reference/text routing policy and uses a temporary KJV SWORD
+ fixture with a recording bridge for accepted references. Temporary module files are removed by
+ the shared fixture base. Failures mean Strong's identifiers can be coerced into Bible navigation,
+ or valid ranges, passage lists, and active-module aliases can fall through to full-text search.
  */
 final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
     /**
-     Verifies Search submits the complete input to the reader resolver before compiling text search.
+     Verifies production Search uses typed submission routing before asynchronous indexed search.
 
-     `SearchView.performSearch` and the owning reader callback are private SwiftUI wiring, so this
-     focused guard extracts only those function bodies. The callback must receive the trimmed input
-     unchanged and delegate to `navigateToRef`, whose range/list behavior is exercised below. A
-     failure means valid references can fall through to FTS despite the parser tests remaining green.
+     The behavior-level policy tests below prove Strong's precedence. This focused source guard
+     connects that policy to private SwiftUI wiring and confirms the owning callback still delegates
+     accepted references to `navigateToRef`. A failure means production bypasses the tested router
+     or valid references no longer reach the complete reader parser.
      */
-    func testSearchSubmissionUsesFullReaderReferenceResolverBeforeTextSearch() throws {
+    func testSearchSubmissionUsesTypedRouterBeforeIndexedSearch() throws {
         let searchSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
         )
@@ -28,11 +28,14 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
             named: "performSearch",
             from: searchSource
         )
-        let callbackRange = try XCTUnwrap(
-            searchFunction.range(of: "onOpenReference?(trimmedQuery) == true")
+        let routingRange = try XCTUnwrap(
+            searchFunction.range(of: "SearchSubmissionRouter.route(")
         )
         let textSearchRange = try XCTUnwrap(searchFunction.range(of: ".searchMultiple("))
-        XCTAssertLessThan(callbackRange.lowerBound, textSearchRange.lowerBound)
+        XCTAssertLessThan(routingRange.lowerBound, textSearchRange.lowerBound)
+        XCTAssertTrue(searchFunction.contains("isStrongsFindAll: isStrongsFindAll"))
+        XCTAssertTrue(searchFunction.contains("openReference: onOpenReference"))
+        XCTAssertTrue(searchFunction.contains("case .invalidStrongsFindAll:"))
 
         let readerSource = try BibleUITestSourceLocator.source(
             at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
@@ -42,6 +45,103 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
             from: readerSource
         )
         XCTAssertTrue(readerCallback.contains("controller.navigateToRef(query)"))
+    }
+
+    /**
+     Verifies recognized Strong's submissions outrank a permissive Bible reference callback.
+
+     - Setup: Routes manual and explicit Find All variants while a spy resolver would accept every
+       input, reproducing SWORD's ability to coerce `G3056` and `H5775` into Revelation 22.
+     - Expected result: Every Strong-shaped value remains indexed Strong's work and the resolver is
+       never invoked, including an out-of-range shaped value with no canonical tokens.
+     - Failure meaning: Search can dismiss itself through Bible navigation before multi-module
+       Strong's dispatch begins.
+     - Side effects: Mutates only the local resolver-call recording array.
+     */
+    func testStrongsSubmissionsBypassPermissiveReferenceResolution() {
+        let submissions: [(query: String, isFindAll: Bool, expectedTokens: [String])] = [
+            ("G3056", false, ["G3056"]),
+            ("h5775", true, ["H5775"]),
+            ("strong:g3056", false, ["G3056"]),
+            ("G10000", false, [])
+        ]
+        var referenceCalls: [String] = []
+
+        for submission in submissions {
+            let route = SearchSubmissionRouter.route(
+                query: submission.query,
+                isStrongsFindAll: submission.isFindAll,
+                openReference: { query in
+                    referenceCalls.append(query)
+                    return true
+                }
+            )
+            guard case let .indexedSearch(options?) = route else {
+                XCTFail("Expected indexed Strong's route for \(submission.query), got \(route)")
+                continue
+            }
+            XCTAssertEqual(options.canonicalStrongTokens, submission.expectedTokens)
+        }
+
+        XCTAssertTrue(referenceCalls.isEmpty)
+    }
+
+    /**
+     Verifies explicit Find All never falls through when its trusted link payload is malformed.
+
+     - Setup: Routes bare, prefix-only, unknown-prefix, and empty values in Find All mode while a
+       spy reference callback would accept them.
+     - Expected result: Every value fails closed as `invalidStrongsFindAll`, with no callback call.
+     - Failure meaning: Malformed bridge input can navigate the Bible or run unrelated text Search.
+     - Side effects: Mutates only the local resolver-call counter.
+     */
+    func testMalformedStrongsFindAllSubmissionsFailClosed() {
+        var referenceCallCount = 0
+        for query in ["3056", "g", "x3056", ""] {
+            let route = SearchSubmissionRouter.route(
+                query: query,
+                isStrongsFindAll: true,
+                openReference: { _ in
+                    referenceCallCount += 1
+                    return true
+                }
+            )
+            XCTAssertEqual(route, .invalidStrongsFindAll)
+        }
+        XCTAssertEqual(referenceCallCount, 0)
+    }
+
+    /**
+     Preserves Android's non-Strong reference-first behavior and ordinary text fallback.
+
+     - Setup: Routes one accepted Bible reference and one declined prose query outside Find All.
+     - Expected result: The reference opens after one exact callback, while prose becomes indexed
+       text Search with no Strong's options.
+     - Failure meaning: Fixing Strong's precedence can break ordinary reference or text submission.
+     - Side effects: Records callback inputs in a local array only.
+     */
+    func testNonStrongsSubmissionsPreserveReferenceThenTextPrecedence() {
+        var referenceCalls: [String] = []
+        let referenceRoute = SearchSubmissionRouter.route(
+            query: "Genesis 1:1",
+            isStrongsFindAll: false,
+            openReference: { query in
+                referenceCalls.append(query)
+                return true
+            }
+        )
+        XCTAssertEqual(referenceRoute, .openedReference)
+
+        let textRoute = SearchSubmissionRouter.route(
+            query: "faith hope",
+            isStrongsFindAll: false,
+            openReference: { query in
+                referenceCalls.append(query)
+                return false
+            }
+        )
+        XCTAssertEqual(textRoute, .indexedSearch(strongsQueryOptions: nil))
+        XCTAssertEqual(referenceCalls, ["Genesis 1:1", "faith hope"])
     }
 
     /**
