@@ -151,7 +151,7 @@ enum ApplicationSettingsPresentation {
             }
         }
 
-        /// Android/iOS localization key for the visible row summary.
+        /// Android/iOS localization key for the visible row summary, or `nil` for composed copy.
         var summaryLocalizationKey: String? {
             switch self {
             case .toolbarButtonActions:
@@ -159,7 +159,7 @@ enum ApplicationSettingsPresentation {
             case .bibleViewSwipeMode:
                 return "prefs_bible_view_swipe_mode_summary"
             case .nightModePref3:
-                return "prefs_night_mode_summary"
+                return nil
             case .localePref:
                 return "prefs_interface_locale_summary"
             case .notesContentType:
@@ -167,7 +167,7 @@ enum ApplicationSettingsPresentation {
             }
         }
 
-        /// English fallback summary copied from Android resources.
+        /// English fallback summary, including truthful iOS composition where required.
         var summaryDefault: String? {
             switch self {
             case .toolbarButtonActions:
@@ -175,7 +175,7 @@ enum ApplicationSettingsPresentation {
             case .bibleViewSwipeMode:
                 return "Swipe left / right gesture can be used to go to next page / chapter."
             case .nightModePref3:
-                return "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
+                return "System / Manual"
             case .localePref:
                 return "Select custom user interface language"
             case .notesContentType:
@@ -208,7 +208,17 @@ enum ApplicationSettingsPresentation {
             }
         }
 
-        /// Localized row summary used by Settings.
+        /**
+         Localized row summary used by Settings.
+
+         Night-mode copy composes Android's existing translated option labels instead of exposing
+         the Android-version-specific preference explanation on iOS. Other rows resolve their
+         shared summary resource directly.
+
+         - Returns: A localized summary, or `nil` when the row has no summary.
+         - Side effects: Reads localization resources through Foundation.
+         - Failure modes: Missing resources fall back to the English values supplied here.
+         */
         var summary: String? {
             switch self {
             case .toolbarButtonActions:
@@ -222,10 +232,9 @@ enum ApplicationSettingsPresentation {
                     defaultValue: "Swipe left / right gesture can be used to go to next page / chapter."
                 )
             case .nightModePref3:
-                return String(
-                    localized: "prefs_night_mode_summary",
-                    defaultValue: "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen."
-                )
+                let system = String(localized: "prefs_night_mode_system", defaultValue: "System")
+                let manual = String(localized: "prefs_night_mode_manual", defaultValue: "Manual")
+                return "\(system) / \(manual)"
             case .localePref:
                 return String(
                     localized: "prefs_interface_locale_summary",

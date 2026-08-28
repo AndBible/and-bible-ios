@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Adicionar repositórios personalizados";
 "custom_repositories" = "Repositórios personalizados";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Excluir %@?";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "Navegar para o versículo";
 "prefs_night_mode_automatic" = "Automático";
 "prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Para alternar para o modo noturno automaticamente (se o dispositivo for compatível), manualmente ou por meio da configuração do sistema (Android 10+). A comutação manual pode ser feita no menu de opções de 3 pontos na tela principal.";
 "prefs_night_mode_system" = "Sistema";
 "prefs_night_mode_title" = "Mudar para modo noturno";
 "prefs_open_links_in_special_window_summary" = "Abrir links numa janela especial para exibir rapidamente referências cruzadas e Strongs";
@@ -1197,7 +1195,6 @@
 "font_size_title" = "Tamanho da fonte";
 "help_reading_progress_text" = "Seu progresso de leitura e memorização da Bíblia em um só lugar. Marque capítulos como lidos manualmente com o botão \"Marcar como lido\", ou ative o rastreamento automático. Exercícios de memorização também alimentam esta visualização.";
 "history_for" = "Histórico(%1$@:Janela%2$d)";
-"how_to_help" = "por favor leia o que se pode fazer para nos ajudar";
 "id" = "Identificador";
 "last_updated_at" = "Última atualização em";
 "line_spacing_title" = "Espaçamento entre linhas";
@@ -1229,13 +1226,7 @@
 "prefs_line_spacing_pt" = "Espaçamento entre linhas %1.1fx";
 "prefs_text_size_sample_text" = "Texto de exemplo do tamanho do texto";
 "prefs_top_margin_title" = "Margem superior";
-"proceed_google_play" = "Continuar para o Google Play";
 "progress_sync_title" = "Progresso de leitura";
-"rate_message3" = "Se um texto em particular não está disponível no aplicativo, %@.";
-"rate_message4" = "Os desenvolvedores deste aplicativo não são responsáveis pela manutenção dos documentos.";
-"rate_message5" = "Avaliações positivas e detalhadas ajudam muito o Projeto Open Source AndBible. Obrigado!";
-"rate_message6" = "Antes de dar uma avaliação negativa, por favor considere o seguinte:";
-"rate_title" = "Notas e avaliações do aplicativo";
 "reading_progress_settings" = "Progresso e memorização";
 "reading_progress_settings_summary" = "Configurações de rastreamento automático, memorização e prática de digitação";
 "reset_database_confirm" = "Isso excluirá permanentemente todos os dados em \"%1$@\" e o redefinirá para o estado inicial. Isso não pode ser desfeito.\n\nTem certeza?";
@@ -1245,10 +1236,8 @@
 "reset_something" = "Redefinir: %1$@";
 "search_bible_section_group_prompt" = "Onde pesquisar";
 "search_index_not_created" = "sem índice";
-"send_email" = "enviar um e-mail para os desenvolvedores";
 "start_offset" = "Deslocamento Inicial";
 "synchronizing" = "Sincronizando...";
-"text_maintainers" = "por favor comunique qualquer problema à equipe que mantém os textos";
 "type_text_or_bible_reference" = "Digite um texto ou uma referência bíblica";
 "unlock_info" = "Informação sobre o desbloqueio do módulo";
 "verse_end" = "Fim do Versículo";

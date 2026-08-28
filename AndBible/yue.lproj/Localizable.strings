@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "新增自訂儲存庫";
 "custom_repositories" = "自訂儲存庫";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "刪除 %@";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "導航到經節";
 "prefs_night_mode_automatic" = "自動";
 "prefs_night_mode_manual" = "手動";
-"prefs_night_mode_summary" = "選擇以自動、手動或系統設定切換夜間模式。手動切換可以在主螢幕中的3點選單進行";
 "prefs_night_mode_system" = "系統";
 "prefs_night_mode_title" = "夜間模式切換";
 "prefs_open_links_in_special_window_summary" = "在特殊視窗開啟連結，以便快速查看交叉對照及Strong's編號";
@@ -752,7 +750,6 @@
 "font_size_pt" = "%d 點";
 "font_size_title" = "字型大小";
 "history_for" = "歷史 (%1$@: 視窗 %2$d)";
-"how_to_help" = "請閱讀你可以幫手的地方";
 "line_spacing_title" = "行距";
 "my_notes_description" = "書籤已附帶使用者的筆記";
 "pref_font_family_label" = "字型家族";
@@ -762,17 +759,9 @@
 "prefs_line_spacing_pt" = "行距%1.1fx";
 "prefs_text_size_sample_text" = "示範文字";
 "prefs_top_margin_title" = "頂邊界";
-"proceed_google_play" = "到 Google Play";
-"rate_message3" = "如果程式中欠缺某些文本，%@.";
-"rate_message4" = "此程式的開發者並不負責維護各文件。";
-"rate_message5" = "鼓勵及詳細的評論將有效地幫助 And Bible 開源計劃。謝謝你";
-"rate_message6" = "留下負面評論前，請先參看以下訊息：";
-"rate_title" = "評分及評論此app";
 "reset_generic" = "重設";
 "search_bible_section_group_prompt" = "搜尋範圍";
-"send_email" = "傳送電郵至開發者";
 "synchronizing" = "同步中...";
-"text_maintainers" = "請回報問題至文本的維護者";
 "type_text_or_bible_reference" = "輸入文字或聖經參考";
 "unlock_info" = "加密模組解鎖資訊";
 "warn_bad_document" = "警告：此文件 (部份) 質素低下。";

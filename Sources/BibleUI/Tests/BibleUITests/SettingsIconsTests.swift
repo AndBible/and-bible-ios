@@ -153,7 +153,7 @@ final class SettingsIconsTests: XCTestCase {
             [
                 "Action to take when pressing/long-pressing Bible or Commentary toolbar buttons",
                 "Swipe left / right gesture can be used to go to next page / chapter.",
-                "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen.",
+                "System / Manual",
                 "Select custom user interface language",
                 "Text format used when creating new bookmark notes and Study Pad entries",
             ]

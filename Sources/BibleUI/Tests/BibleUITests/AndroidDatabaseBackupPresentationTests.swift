@@ -9,7 +9,11 @@ import UniformTypeIdentifiers
 
  The database backup service and archive semantics belong in `BibleCoreTests`; this suite protects
  the BibleUI-only localized strings that the Backup & Restore screen presents around those services.
+
+ Tests run on the main actor because the live speech-runtime reload contract mutates UI-observable
+ `SpeakService` state synchronously.
  */
+@MainActor
 final class AndroidDatabaseBackupPresentationTests: XCTestCase {
     /** Verifies restored settings/workspaces immediately rebind and reload the live speech service. */
     func testAndroidBackupRestoreReloadsLiveSpeechRuntimeOnlyForRelevantSections() throws {

@@ -8,8 +8,10 @@ import Foundation
  Android keeps the current workspace change explicit in the activity layer: selecting a workspace
  loads the workspace and writes the current workspace preference, and deleting the current workspace
  repairs selection to a surviving workspace. This service provides the same contract for iOS so
- workspace UI callers do not have to remember separate in-memory and persisted updates.
+ workspace UI callers do not have to remember separate in-memory and persisted updates. Selection,
+ reader-window state, and the shared speech runtime remain confined to the main actor.
  */
+@MainActor
 public final class WorkspaceSelectionService {
     private let workspaceStore: WorkspaceStore
     private let settingsStore: SettingsStore

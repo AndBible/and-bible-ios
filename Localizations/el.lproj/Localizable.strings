@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Προσθήκη αποθετηρίου χρήστη";
 "custom_repositories" = "Αποθετήρια χρήστη";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Διαγραφή του %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "Πλοήγηση στον στίχο";
 "prefs_night_mode_automatic" = "Αυτόματα";
 "prefs_night_mode_manual" = "Χειροκίνητα";
-"prefs_night_mode_summary" = "Αυτόματη εναλλαγή σε λειτουργία νυκτός (αν το υποστηρίζει η συσκευή), χειροκίνητα ή μέσω ρύθμισης συστήματος (Android 10+). Χειροκίνητη εναλλαγή μπορεί να γίνει από το μενού με τις 3 τελείες στην αρχική οθόνη.";
 "prefs_night_mode_system" = "Σύστημα";
 "prefs_night_mode_title" = "Ενναλαγή λειτουργίας νυκτός";
 "prefs_open_links_in_special_window_summary" = "Άνοιξε τους συνδέσμους σε ξεχωριστό παράθυρο, για γρήγορη θέαση των παραπομπών και των Strongs";
@@ -1183,7 +1181,6 @@
 "font_size_title" = "Μέγεθος γραμματοσειράς";
 "help_reading_progress_text" = "Η πρόοδος ανάγνωσης και απομνημόνευσης της Βίβλου σας με μια ματιά. Επισημάνετε κεφάλαια ως αναγνωσμένα χειροκίνητα με το κουμπί \"Σήμανση ως αναγνωσμένο\" ή ενεργοποιήστε την αυτόματη παρακολούθηση. Οι ασκήσεις απομνημόνευσης τροφοδοτούν επίσης αυτήν την προβολή.";
 "history_for" = "Ιστορικό (%1$@: Παράθυρο %2$d)";
-"how_to_help" = "παρακαλώ διαβάστε πως μπορείτε να βοηθήσετε";
 "id" = "Αναγνωριστικό";
 "last_updated_at" = "Τελευταία ενημέρωση στις";
 "line_spacing_title" = "Απόσταση γραμμών";
@@ -1215,13 +1212,7 @@
 "prefs_line_spacing_pt" = "Απόσταση γραμμών %1.1fx";
 "prefs_text_size_sample_text" = "Δείγμα κειμένου";
 "prefs_top_margin_title" = "Επάνω περιθώριο";
-"proceed_google_play" = "προχωρήστε στο Google Play";
 "progress_sync_title" = "Πρόοδος Ανάγνωσης";
-"rate_message3" = "Αν συγκεκριμένο κείμενο δεν είναι διαθέσιμο στην εφαρμογή, %@.";
-"rate_message4" = "Η ομάδα ανάπτυξης της εφαρμογής δεν ευθύνονται για την συντήρηση εγγράφων";
-"rate_message5" = "Θετικές και λεπτομερείς αξιολογήσεις βοηθούν πολύ την Εφαρμογή Ανοιχτού Κώδικα AndBible. Ευχαριστούμε!";
-"rate_message6" = "Πριν υποβάλλετε αρνητική αξιολόγηση, λάβετε υπόψη τα ακόλουθα:";
-"rate_title" = "Βαθμολόγηση και αξιολόγηση εφαρμογής";
 "reading_progress_settings" = "Πρόοδος & απομνημόνευση";
 "reading_progress_settings_summary" = "Ρυθμίσεις αυτόματης παρακολούθησης, απομνημόνευσης και εξάσκησης πληκτρολόγησης";
 "reset_database_confirm" = "Αυτό θα διαγράψει μόνιμα όλα τα δεδομένα στο \"%1$@\" και θα το επαναφέρει στην αρχική κατάσταση. Αυτό δεν μπορεί να αναιρεθεί.\n\nΕίστε σίγουροι;";
@@ -1231,10 +1222,8 @@
 "reset_something" = "Επαναφορά: %1$@";
 "search_bible_section_group_prompt" = "Αναζήτηση που";
 "search_index_not_created" = "χωρίς ευρετήριο";
-"send_email" = "στείλτε email στους προγραμματιστές";
 "start_offset" = "Δείκτης έναρξης";
 "synchronizing" = "Συγχρονισμός...";
-"text_maintainers" = "παρακαλώ αναφέρετε προβλήματα στους συντηρητές κειμένων";
 "type_text_or_bible_reference" = "Γράψτε κείμενο ή βιβλική παραπομπή";
 "unlock_info" = "Πληροφορίες ξεκλειδώματος κρυπτογραφημένου προσθέτου";
 "verse_end" = "Εδάφιο τέλους";

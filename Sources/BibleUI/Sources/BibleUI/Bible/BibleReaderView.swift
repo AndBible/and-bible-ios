@@ -330,9 +330,6 @@ public struct BibleReaderView: View {
     /// Reader-owned Android Open Source License dialog, separate from browser handoff.
     @State private var isLicenseDialogPresented = false
 
-    /// Reader-owned Android Rate & Review dialog, shown before the system review controller.
-    @State private var isRateReviewDialogPresented = false
-
     /// Reader-owned state for manual evidence collection, consent, and addressed mail handoff.
     @State private var manualBugReportCoordinator = ManualBugReportCoordinator()
 
@@ -468,8 +465,8 @@ public struct BibleReaderView: View {
     /// Stored night-mode strategy (`system`, `manual`, or other Android-parity raw values).
     @State private var nightModeMode = AppPreferenceRegistry.stringDefault(for: .nightModePref3) ?? NightModeSetting.system.rawValue
 
-    /// Shared text-to-speech service used by all panes and speak-related overlays.
-    @StateObject private var speakService = SpeakService()
+    /// App-owned text-to-speech service observed by all panes and speak-related overlays.
+    @ObservedObject var speakService: SpeakService
 
     /// Guards heavyweight speech restoration and callback binding to the first reader appearance.
     @State private var speechLifecycleState = BibleReaderSpeechLifecycleState()
@@ -919,11 +916,20 @@ public struct BibleReaderView: View {
     /**
      Creates the reader coordinator view.
 
-     - Note: This initializer performs no work directly. The view resolves its dependencies from
-       the SwiftUI environment when rendered.
+     - Parameters:
+       - readerContentIdentity: Optional identity that recreates data-bound pane content after a
+         persistence-runtime replacement without replacing app-owned services.
+       - speakService: Application-scoped speech owner shared across every reader reconstruction.
+     - Side effects: Retains and observes the supplied service; runtime setup remains deferred to
+       reader appearance.
+     - Failure modes: none.
      */
-    public init(readerContentIdentity: UUID? = nil) {
+    public init(
+        readerContentIdentity: UUID? = nil,
+        speakService: SpeakService
+    ) {
         self.readerContentIdentity = readerContentIdentity
+        self._speakService = ObservedObject(wrappedValue: speakService)
     }
 
     /**
@@ -954,7 +960,6 @@ public struct BibleReaderView: View {
                 windowMenuTransferDialogOverlay
                 helpDialogOverlay
                 licenseDialogOverlay
-                rateReviewDialogOverlay
                 bugReportDialogOverlay
             }
             .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
@@ -1407,23 +1412,6 @@ public struct BibleReaderView: View {
             AndroidLicenseDialog(onDismiss: dismissLicenseDialog)
                 .transition(.opacity)
                 .zIndex(20)
-        }
-    }
-
-    /** Renders Android's explanatory Rate & Review dialog before the system store handoff. */
-    @ViewBuilder
-    private var rateReviewDialogOverlay: some View {
-        if isRateReviewDialogPresented {
-            AndroidRateReviewDialog(
-                onDismiss: dismissRateReviewDialog,
-                onProceed: proceedToSystemReview,
-                onContactSupport: { openExternalLink("mailto:help.andbible@gmail.com") },
-                onReportBug: { openExternalLink("https://github.com/AndBible/and-bible/issues") },
-                onContactMaintainers: { openExternalLink("https://github.com/AndBible/and-bible/issues") },
-                onLearnToContribute: { openExternalLink("https://github.com/AndBible/and-bible/wiki/How-to-contribute") }
-            )
-            .transition(.opacity)
-            .zIndex(20)
         }
     }
 
@@ -1881,7 +1869,7 @@ public struct BibleReaderView: View {
                 onOpenDailyReadingCommentary: openDailyReadingCommentary,
                 onOpenDailyReadingDictionary: openDailyReadingDictionary,
                 onToggleDailyReadingSpeechPause: toggleDailyReadingSpeechPause,
-                onStopDailyReadingSpeech: speakService.stop,
+                onStopDailyReadingSpeech: { _ = speakService.stop() },
                 planVersificationResolver: { planCode in
                     guard let controller = panePresentationController else {
                         throw ReadingPlanDefinitionError.unavailable(planCode: planCode)
@@ -2928,22 +2916,19 @@ public struct BibleReaderView: View {
         isLicenseDialogPresented = true
     }
 
-    /// Closes Android's explanatory Rate & Review dialog without starting a system handoff.
-    private func dismissRateReviewDialog() {
-        isRateReviewDialogPresented = false
-    }
+    /**
+     Requests Apple's platform-owned review prompt without a custom rating interstitial.
 
-    /// Shows Android's explanatory Rate & Review dialog before requesting an App Store review.
-    private func presentRateReviewDialog() {
-        isRateReviewDialogPresented = true
-    }
-
-    /** Dismisses the app dialog and then invokes the legitimate platform-owned review controller. */
-    private func proceedToSystemReview() {
-        dismissRateReviewDialog()
+     - Side effects: Asks StoreKit to present from the foreground-active window scene. Apple may
+       apply its own display-frequency policy and decline to show the prompt.
+     - Failure modes: Missing foreground scene support is a safe no-op; no app-owned fallback is
+       shown because custom review prompts are not permitted.
+     */
+    private func requestSystemReview() {
         #if os(iOS)
         if let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene }).first {
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) {
             SKStoreReviewController.requestReview(in: scene)
         }
         #endif
@@ -4934,7 +4919,7 @@ public struct BibleReaderView: View {
                 shareText = String(localized: "tell_friend_message")
             }
         case .rateApp:
-            dismissReaderNavigationDrawerAndPerform { presentRateReviewDialog() }
+            dismissReaderNavigationDrawerAndPerform { requestSystemReview() }
         case .reportBug:
             dismissReaderNavigationDrawerAndPerform { presentBugReportDialog() }
         }

@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Aldoni propran deponejon";
 "custom_repositories" = "Propraj deponejoj";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Ĉu forigi %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "Navigi al verso";
 "prefs_night_mode_automatic" = "Aŭtomate";
 "prefs_night_mode_manual" = "Permane";
-"prefs_night_mode_summary" = "Agordi ĉu aŭtomate (mal)ŝalti noktan reĝimon (se subtenata de aparato), ĉu permane, ĉu permesi al la operaciumo decidi (Android 10+). Vi povas permane ŝanĝi la reĝimon per la tripunkta menuo.";
 "prefs_night_mode_system" = "Laŭ operaciumo";
 "prefs_night_mode_title" = "Aktivigi noktan reĝimon";
 "prefs_open_links_in_special_window_summary" = "Malfermi ligilojn en aparta fenestro por pli rapide vidigi internajn referencojn kaj numeroj de Strong";
@@ -1186,7 +1184,6 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "font_size_title" = "Grando de tiparo";
 "help_reading_progress_text" = "Via progreso en legado kaj parkerigado de Biblio unuavide. Marku ĉapitrojn kiel legitajn permane per la butono \"Marki kiel legitan\", aŭ ebligu aŭtomatan spuradon. Parkerigaj ekzercoj ankaŭ aperos en tiu ĉi vido.";
 "history_for" = "Historio (%1$@: fenestro %2$d)";
-"how_to_help" = "legu kiel vi povas helpi pri aldoni la dokumenton";
 "id" = "Identigilo";
 "last_updated_at" = "Dato de modifo";
 "line_spacing_title" = "Interlinia distanco";
@@ -1218,13 +1215,7 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "prefs_line_spacing_pt" = "Interlinia distanco %1.1f×";
 "prefs_text_size_sample_text" = "Ekzempla teksto";
 "prefs_top_margin_title" = "Supra marĝeno";
-"proceed_google_play" = "Pluigi al vendejo Play";
 "progress_sync_title" = "Lega progreso";
-"rate_message3" = "• se iu konkreta teksto ne estas disponebla per la aplikaĵo, %@ –";
-"rate_message4" = "programistoj de la aplikaĵo ne respondumas pri prizorgi dokumentojn.";
-"rate_message5" = "Detalaj favoraj recenzoj multe helpas al la malfermkoda projekto AndBible. Dankon!";
-"rate_message6" = "Antaŭ ol skribi malfavoran recenzon, bonvolu konsideri:";
-"rate_title" = "Taksi kaj recenzi la aplikaĵon";
 "reading_progress_settings" = "Progreso kaj parkerigo";
 "reading_progress_settings_summary" = "Agordoj pri aŭtomata spurado, parkerigo kaj tajpaj ekzercoj";
 "reset_database_confirm" = "Tio ĉi neinversigeble forigos ĉiujn datumojn en \"%1$@\" kaj reagordos ilin al la komenca stato. Tio ĉi ne povas esti malfarita.\n\nĈu vi certas?";
@@ -1234,10 +1225,8 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 "reset_something" = "Reagordi: %1$@";
 "search_bible_section_group_prompt" = "Serĉi en:";
 "search_index_not_created" = "neniu indekso";
-"send_email" = "sendu retleteron al programistoj";
 "start_offset" = "Komenca deŝovo";
 "synchronizing" = "Samtempigado…";
-"text_maintainers" = "raportu ĝin al prizorganto de modulo";
 "type_text_or_bible_reference" = "Enigi tekston aŭ biblian referencon";
 "unlock_info" = "Informoj pri malfermi ĉifritan modulon";
 "verse_end" = "Fina verso";

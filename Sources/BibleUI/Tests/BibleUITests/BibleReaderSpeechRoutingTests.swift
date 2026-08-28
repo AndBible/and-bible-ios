@@ -7,7 +7,13 @@ import XCTest
 @testable import BibleCore
 @testable import BibleUI
 
-/** End-to-end contracts for reader entry-point routing into typed Android speech providers. */
+/**
+ End-to-end contracts for reader entry-point routing into typed Android speech providers.
+
+ The suite runs on the main actor so deterministic synthesizer doubles exercise the same service,
+ controller, and callback isolation contract as production UI playback.
+ */
+@MainActor
 final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
     /**
      Verifies explicit Bible identity, fail-closed missing modules, and bounded memorization repeat.

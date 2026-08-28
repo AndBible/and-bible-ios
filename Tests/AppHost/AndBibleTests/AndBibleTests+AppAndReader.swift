@@ -37,6 +37,55 @@ private func memorizeParityVerifiedKJVARange(
 }
 
 extension AndBibleTests {
+    /**
+     Verifies the app shell forwards its canonical speech owner into the reader unchanged.
+
+     The composition assertion protects background playback and remote-command registrations when
+     `readerContentIdentity` recreates the data-bound reader subtree.
+
+     - Side effects: Reads the app, content-shell, and package-reader source fixtures only.
+     - Failure modes: Fails if `ContentView` creates or substitutes a reader-owned speech service.
+     */
+    func testContentViewForwardsCanonicalSpeechServiceIdentity() throws {
+        let appSource = try memorizeParitySource(at: "AndBible/AndBibleApp.swift")
+        let contentSource = try memorizeParitySource(at: "AndBible/ContentView.swift")
+        let readerSource = try memorizeParitySource(
+            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
+        )
+
+        XCTAssertTrue(appSource.contains("speakService: speakService"))
+        XCTAssertTrue(contentSource.contains("let speakService: SpeakService"))
+        XCTAssertTrue(contentSource.contains("BibleReaderView("))
+        XCTAssertTrue(contentSource.contains("speakService: speakService"))
+        XCTAssertTrue(readerSource.contains("@ObservedObject var speakService: SpeakService"))
+        XCTAssertFalse(readerSource.contains("@StateObject private var speakService = SpeakService()"))
+    }
+
+    /**
+     Verifies the canonical speech owner resolves discrete mode after the Debug preference seed.
+
+     UI tests replace the persistent domain at the start of `AndBibleApp.init`. A stored-property
+     default would create `SpeakService` first and briefly register normal media commands with a
+     stale policy, so source ordering is part of the app-launch privacy contract.
+
+     - Side effects: Reads the app bootstrap source fixture only.
+     - Failure modes: Fails if speech returns to eager stored-property construction or moves before
+       the one-shot UI-test preference seed.
+     */
+    func testAppInitializesCanonicalSpeechServiceAfterUITestPreferenceSeed() throws {
+        let source = try memorizeParitySource(at: "AndBible/AndBibleApp.swift")
+        XCTAssertTrue(source.contains("@StateObject private var speakService: SpeakService"))
+        XCTAssertFalse(source.contains("@StateObject private var speakService = SpeakService()"))
+
+        let seed = try XCTUnwrap(
+            source.range(of: "Self.applyPendingUITestPreferencesIfNeeded()")
+        )
+        let speechInitialization = try XCTUnwrap(
+            source.range(of: "self._speakService = StateObject(wrappedValue: SpeakService())")
+        )
+        XCTAssertLessThan(seed.lowerBound, speechInitialization.lowerBound)
+    }
+
     #if os(iOS)
     /**
      Keeps app-host coverage for the scene delegate bootstrap that package tests cannot exercise.

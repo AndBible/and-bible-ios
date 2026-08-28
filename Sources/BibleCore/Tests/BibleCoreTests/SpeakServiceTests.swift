@@ -8,6 +8,7 @@ import XCTest
  These tests exercise only `SpeakService` and its injected `SpeechSynthesizing` dependency, so they
  belong in `BibleCoreTests` rather than the app-host or BibleUI package lane.
  */
+@MainActor
 final class SpeakServiceTests: XCTestCase {
     func testSpeakServiceMemorizationLoopRepeatsUntilStopped() {
         let synthesizer = FakeSpeechSynthesizer()

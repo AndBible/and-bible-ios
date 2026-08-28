@@ -81,7 +81,7 @@ struct AndroidSpeakTransportView: View {
                     asset: "SpeakStop",
                     label: String(localized: "stop", defaultValue: "Stop"),
                     identifier: "speakTransportStop",
-                    action: speakService.stop
+                    action: { _ = speakService.stop() }
                 )
                 transportButton(
                     asset: speakService.isSpeaking && !speakService.isPaused

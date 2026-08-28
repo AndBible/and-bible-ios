@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
 "custom_repositories" = "Custom repositories";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "ဖျက်ချင်ပါသလား %@။";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "အခန်းငယ်သို့ သွားပါ";
 "prefs_night_mode_automatic" = "အလိုအလျောက်";
 "prefs_night_mode_manual" = "ကိုယ်တိုင်";
-"prefs_night_mode_summary" = "ညအသွင်သို့ အလိုအလျောက်ပြောင်းလဲခြင်း (စက်မှထောက်ပံ့လျှင်), ကိုယ်တိုင်ပြောင်းလဲခြင်း သို့မဟုတ် စနစ် ဆက်တင် (Android 10+)မှ ပြောင်းလဲခြင်းများ။ ကိုယ်တိုင်ပြောင်းလဲခြင်းအား ဗဟိုမျက်နှာပြင်ရှိ အစက် 3 စက်ပါ ရွေးချယ်စရာ မီနူးတွင် ပြုလုပ်နိုင်ပါသည်။";
 "prefs_night_mode_system" = "စနစ်";
 "prefs_night_mode_title" = "ညအသွင်သို့ ပြောင်းလဲခြင်း";
 "prefs_open_links_in_special_window_summary" = "Strongs နှင့် ပြန်လှန်ကိုးကားချက်များကို ပိုမိုလျင်မြန်စွာ ပေါ်လာစေရန် အထူးဝင်းဒိုးတွင် လင့်ခ်များကို ဖွင့်ပါ။";
@@ -718,22 +716,14 @@
 "compare_description" = "ဘာသာပြန်များကို နှိုင်းယှဉ်ပါ";
 "document" = "မှတ်တမ်း";
 "font_size_title" = "ဖောင့်စာလုံး အရွယ်အစား";
-"how_to_help" = "ကျွန်တော်တို့အား အကူအညီပေးနိုင်ရန် ကျေးဇူးပြုပြီး ဖတ်ပေးပါ";
 "line_spacing_title" = "စာကြောင်းအကွာအဝေး";
 "my_notes_description" = "အသုံးပြုသူမှတည်းဖြတ်နိုင်သည့် စာညှပ်တွင် ဖိုင်တွဲထားသည့် မှတ်စုများ";
 "pref_font_family_label" = "စာလုံးဖောင့် မိသားစု";
 "prefs_line_spacing_pt" = "စာကြောင်းအကွာအဝေး %1.1f x";
 "prefs_text_size_sample_text" = "နမူနာ စာသား";
 "prefs_top_margin_title" = "အပေါ်မာဂျင်";
-"proceed_google_play" = "Google Play သို့ဆက်သွားပါ";
-"rate_message3" = "အက်ပ်တွင် အချို့စာသားများ မရှိလျှင်%@.";
-"rate_message4" = "မှတ်တမ်းများထိန်းသိမ်းရန် ဤအက်ပ်တီထွင်သူများတွင် တာဝန်မရှိပါ။";
-"rate_message6" = "အနုတ်သဘောမသုံးသပ်ခင် ကျေးဇူးပြုပြီး အောက်ပါအချက်ကိုထည့်သွင်းစဉ်းစားစေလိုပါသည်။";
-"rate_title" = "အက်ပ်အား နှုန်းသတ်မှတ်ခြင်းနှင့်သုံးသပ်ခြင်း";
 "reset_generic" = "ပြန်လည်သတ်မှတ်ပါ";
 "search_bible_section_group_prompt" = "ဘယ်နေရာတွင် ရှာဖွေပါ";
-"send_email" = "တီထွင်သူများထံ အီးမေးလ်ပို့ပါ";
-"text_maintainers" = "ပြဿနာများအတွက် စာသားထိန်းသိမ်းသူများထံသို့ ကျေးဇူးပြုပြီး သတင်းပို့ပါ";
 "unlock_info" = "စကားဝှက်ခံထားသည့်သင်ခန်းစာများ သော့ဖွင့်ခြင်း သတင်းအချက်အလက်";
 
 /* Android shared translations */

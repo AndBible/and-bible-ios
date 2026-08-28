@@ -69,13 +69,15 @@ public enum SpeakStartupFailure: Error, Equatable, LocalizedError, Sendable {
     case noSpeakableContent
     /// A reconstructed semantic cursor did not match freshly materialized commands.
     case invalidResumeCursor
+    /// The platform playback category or active audio session could not be established.
+    case audioSessionFailed
     /// No installed platform voice can speak the first audible command's language.
     case unsupportedLanguage(String)
 
     /// Stable user-facing fallback used by callers that need to surface startup failure immediately.
     public var errorDescription: String? {
         switch self {
-        case .preparationFailed:
+        case .preparationFailed, .audioSessionFailed:
             return String(localized: "error_occurred", defaultValue: "An error occurred.")
         case .noSpeakableContent:
             return String(localized: "error_no_content", defaultValue: "No content.")
@@ -121,6 +123,24 @@ private enum SpeakLoadResult {
     case started
     case exhausted
     case failed(SpeakStartupFailure)
+}
+
+/** Typed result from one provider movement and any playback work it triggers. */
+private enum SpeakProviderMovementResult {
+    /// No active provider exists for the requested transport command.
+    case unavailable
+    /// The provider rejected movement at its current semantic boundary.
+    case boundary
+    /// A paused provider moved without starting synthesis.
+    case movedWhilePaused
+    /// An active provider moved and produced this exact post-movement load result.
+    case loaded(SpeakLoadResult)
+    /// Provider preparation failed before movement could be attempted.
+    case preparationFailed
+    /// Platform speech cancellation failed before the preflighted provider movement could commit.
+    case cancellationFailed
+    /// A provider contradicted its preflight and rejected the serialized movement mutation.
+    case movementFailed
 }
 
 private struct AndroidSpeakOrdinalRange: Codable {
@@ -220,6 +240,44 @@ protocol SpeechSynthesizing: AnyObject {
 
 extension AVSpeechSynthesizer: SpeechSynthesizing {}
 
+/**
+ Configures the platform audio boundary required for persistent spoken playback.
+
+ Implementations must apply the playback category with spoken-audio mode and activate the session
+ as one ordered operation. Throwing prevents `SpeakService` from claiming active playback when the
+ operating system rejected either step.
+ */
+protocol SpeakAudioSessionConfiguring {
+    /**
+     Establishes the audio category and active session used by speech synthesis.
+
+     - Side effects: May replace the process audio-session category and activate audio output.
+     - Throws: Propagates any platform category or activation failure without swallowing it.
+     - Important: Callers serialize this operation on `SpeakService`'s main-actor state domain.
+     */
+    func configurePlaybackSession() throws
+}
+
+/** Production audio-session boundary used by the default `SpeakService` initializer. */
+private struct SystemSpeakAudioSessionConfigurator: SpeakAudioSessionConfiguring {
+    /**
+     Applies iOS playback/spoken-audio policy before activating the shared audio session.
+
+     - Side effects: On iOS, mutates and activates `AVAudioSession.sharedInstance()`; other package
+       platforms require no explicit session configuration.
+     - Throws: On iOS, rethrows category or activation errors from `AVAudioSession`.
+     - Note: Category configuration always precedes activation so callers never publish active
+       speech state before the complete platform boundary succeeds.
+     */
+    func configurePlaybackSession() throws {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio)
+        try session.setActive(true)
+        #endif
+    }
+}
+
 protocol SpeakTimerToken: AnyObject {
     func invalidate()
 }
@@ -228,15 +286,335 @@ protocol SpeakTimerScheduling {
     func scheduleRepeating(every interval: TimeInterval, _ action: @escaping () -> Void) -> SpeakTimerToken
 }
 
-/** Media-session commands whose queued delivery must remain bound to one speech generation. */
-enum SpeakRemoteCommand {
+/** Media-session commands whose delivery must remain bound to one speech generation. */
+enum SpeakRemoteCommand: CaseIterable, Hashable {
+    /// Starts or resumes an actionable speech source.
     case play
+    /// Pauses an actively speaking source.
     case pause
+    /// Alternates between the actionable play and pause states.
     case togglePlayPause
+    /// Stops and clears an active or paused source.
     case stop
+    /// Applies Android's smart forward movement to the active provider.
     case nextTrack
+    /// Applies Android's smart rewind movement to the active provider.
     case previousTrack
 }
+
+/** Completed semantic outcome mapped one-to-one onto MediaPlayer command statuses. */
+enum SpeakRemoteCommandOutcome: Equatable, Sendable {
+    /// The requested transport mutation completed successfully.
+    case success
+    /// No active or reconstructable Now Playing source exists for the command.
+    case noActionableNowPlayingItem
+    /// The active provider exists but has no content in the requested movement direction.
+    case noSuchContent
+    /// An available source failed while preparing or applying the requested mutation.
+    case commandFailed
+
+    /// Whether the command completed the requested mutation.
+    var wasSuccessful: Bool { self == .success }
+}
+
+/**
+ Owns the process-global media-command boundary used by one `SpeakService`.
+
+ Implementations return opaque target tokens for every registered handler so teardown can remove
+ only the service's registrations. Handlers synchronously return the completed transport outcome;
+ the production adapter preserves its exact success, missing-source, provider-boundary, or execution-
+ failure meaning when reporting status to MediaPlayer.
+ */
+protocol SpeakRemoteCommandCenterRouting: AnyObject {
+    /**
+     Registers one service-owned system media handler.
+
+     - Parameters:
+       - command: Semantic command to associate with the handler.
+       - handler: Synchronous callback that completes the service mutation and returns its typed
+         transport outcome.
+     - Returns: Opaque identity required to remove this exact handler later.
+     - Side effects: Adds one target to the process-global command center in production.
+     - Failure modes: Inactionable commands are reported to the system without mutating speech.
+     */
+    func addHandler(
+        for command: SpeakRemoteCommand,
+        handler: @escaping () -> SpeakRemoteCommandOutcome
+    ) -> AnyObject
+
+    /**
+     Removes one exact handler previously created by `addHandler`.
+
+     - Parameters:
+       - target: Opaque identity returned during registration.
+       - command: Semantic command whose target owns that identity.
+     - Side effects: Removes only `target`; unrelated handlers remain registered.
+     - Failure modes: An already-removed or unknown target is ignored by the platform.
+     */
+    func removeHandler(_ target: AnyObject, for command: SpeakRemoteCommand)
+}
+
+#if os(iOS)
+/**
+ Production adapter for `MPRemoteCommandCenter.shared()` with process-wide target ownership.
+
+ The shared instance reference-counts exact handler identities per command. Removing one service's
+ target disables a global command only after the final adapter-owned target disappears, so a
+ concurrently alive owner remains usable.
+ */
+private final class SystemSpeakRemoteCommandCenterRouter: SpeakRemoteCommandCenterRouting {
+    /// Single process owner for global command visibility and target counts.
+    static let shared = SystemSpeakRemoteCommandCenterRouter()
+
+    /// Protects target identities because MediaPlayer may deliver teardown and setup on different queues.
+    private let lock = NSLock()
+
+    /// Exact live target identities grouped by their shared system command.
+    private var targetIdentities: [SpeakRemoteCommand: Set<ObjectIdentifier>] = [:]
+
+    /// Prevents independent adapters from maintaining conflicting global enablement counts.
+    private init() {}
+
+    /**
+     Adds one block target and translates the completed service outcome into MediaPlayer status.
+
+     - Parameters:
+       - command: Semantic speech command represented by the target.
+       - handler: Synchronous service mutation and typed outcome callback.
+     - Returns: Opaque MediaPlayer target retained by `SpeakService` until teardown.
+     - Side effects: Registers one handler on the shared command center.
+     - Failure modes: A missing or inactionable service reports `noActionableNowPlayingItem`.
+     */
+    func addHandler(
+        for command: SpeakRemoteCommand,
+        handler: @escaping () -> SpeakRemoteCommandOutcome
+    ) -> AnyObject {
+        let mediaCommand = mediaCommand(for: command)
+        let target = mediaCommand.addTarget { _ in
+            switch handler() {
+            case .success:
+                return .success
+            case .noActionableNowPlayingItem:
+                return .noActionableNowPlayingItem
+            case .noSuchContent:
+                return .noSuchContent
+            case .commandFailed:
+                return .commandFailed
+            }
+        } as AnyObject
+        lock.lock()
+        targetIdentities[command, default: []].insert(ObjectIdentifier(target))
+        mediaCommand.isEnabled = true
+        lock.unlock()
+        return target
+    }
+
+    /**
+     Removes one exact target and disables its command only when no adapter-owned targets remain.
+
+     - Parameters:
+       - target: Opaque target returned by this adapter.
+       - command: Semantic command paired with the target.
+     - Side effects: Mutates the shared command center and the lock-protected ownership registry.
+     - Failure modes: Repeated removal does not decrement ownership or disable another live owner.
+     */
+    func removeHandler(_ target: AnyObject, for command: SpeakRemoteCommand) {
+        let mediaCommand = mediaCommand(for: command)
+        mediaCommand.removeTarget(target)
+        lock.lock()
+        let removed = targetIdentities[command]?.remove(ObjectIdentifier(target)) != nil
+        let shouldDisable = removed && targetIdentities[command]?.isEmpty == true
+        if shouldDisable {
+            targetIdentities[command] = nil
+            mediaCommand.isEnabled = false
+        }
+        lock.unlock()
+    }
+
+    /**
+     Resolves the shared MediaPlayer command for one speech action.
+
+     - Parameter command: Semantic command requested by `SpeakService`.
+     - Returns: Matching process-global `MPRemoteCommand` instance.
+     - Side effects: Accesses the shared command-center singleton.
+     - Failure modes: Exhaustive command mapping cannot fail.
+     */
+    private func mediaCommand(for command: SpeakRemoteCommand) -> MPRemoteCommand {
+        let center = MPRemoteCommandCenter.shared()
+        switch command {
+        case .play:
+            return center.playCommand
+        case .pause:
+            return center.pauseCommand
+        case .togglePlayPause:
+            return center.togglePlayPauseCommand
+        case .stop:
+            return center.stopCommand
+        case .nextTrack:
+            return center.nextTrackCommand
+        case .previousTrack:
+            return center.previousTrackCommand
+        }
+    }
+}
+
+/** One semantic command paired with the exact opaque MediaPlayer target owned by the service. */
+private struct SpeakRemoteCommandRegistration {
+    /// Command whose shared system target was registered.
+    let command: SpeakRemoteCommand
+
+    /// Exact opaque target returned for this service's handler.
+    let target: AnyObject
+}
+
+/** Lock-protected lifetime token shared by one exact remote-command registration set. */
+private final class SpeakRemoteCommandRegistrationEpoch: @unchecked Sendable {
+    /// Monotonic service-local generation captured by every handler in the set.
+    let value: UInt64
+    /// Protects invalidation against a command already delivered off the main actor.
+    private let lock = NSLock()
+    /// Whether the registration set may still execute a command.
+    private var active = true
+
+    /**
+     Creates one active registration generation.
+
+     - Parameter value: Monotonic service-local generation assigned during setup.
+     - Side effects: Allocates an active lock-protected lifetime token.
+     - Failure modes: none.
+     */
+    init(value: UInt64) {
+        self.value = value
+    }
+
+    /**
+     Invalidates this exact registration generation.
+
+     - Side effects: Marks the token inactive under lock; repeated calls are idempotent.
+     - Failure modes: none.
+     */
+    func invalidate() {
+        lock.lock()
+        active = false
+        lock.unlock()
+    }
+
+    /**
+     Reads whether teardown has left this exact generation executable.
+
+     - Returns: `true` until the owning registration set is torn down.
+     - Side effects: Acquires and releases the lifetime-token lock.
+     - Failure modes: none.
+     */
+    var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return active
+    }
+}
+
+/**
+ One-shot cross-thread handoff for a MediaPlayer command awaiting main-actor execution.
+
+ The state machine prevents a timed-out command from mutating speech later. Once the main actor has
+ claimed execution, the delivery queue waits for the real result because the main thread can no
+ longer be blocked waiting for that still-pending command.
+ */
+final class SpeakRemoteCommandHandoff: @unchecked Sendable {
+    /// Exact lifecycle of one delivered command.
+    private enum State {
+        /// Main-actor work has been scheduled but not started.
+        case pending
+        /// Main has claimed the command and is completing its mutation.
+        case executing
+        /// The completed typed result is ready for MediaPlayer.
+        case completed(SpeakRemoteCommandOutcome)
+        /// Delivery timed out before main claimed the command, so mutation is forbidden.
+        case cancelled
+    }
+
+    /// Protects state transitions shared by the MediaPlayer and main-actor threads.
+    private let lock = NSLock()
+    /// Retains completion when main finishes before or after the delivery thread begins waiting.
+    private let completion = DispatchSemaphore(value: 0)
+    /// Current one-shot state guarded by `lock`.
+    private var state: State = .pending
+
+    /**
+     Claims a pending command immediately before its main-actor mutation.
+
+     - Returns: `true` only for the first claim before cancellation.
+     - Side effects: Transitions `pending` to `executing` under the state lock.
+     - Failure modes: Completed, executing, or timed-out commands return `false` without mutation.
+     */
+    func claimExecution() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard case .pending = state else { return false }
+        state = .executing
+        return true
+    }
+
+    /**
+     Publishes the exact completed transport result.
+
+     - Parameter outcome: Result produced after the main-actor mutation finished.
+     - Side effects: Transitions `executing` to `completed` and releases the delivery waiter.
+     - Failure modes: A command not owned by the executing state is ignored without signaling.
+     */
+    func complete(with outcome: SpeakRemoteCommandOutcome) {
+        lock.lock()
+        guard case .executing = state else {
+            lock.unlock()
+            return
+        }
+        state = .completed(outcome)
+        lock.unlock()
+        completion.signal()
+    }
+
+    /**
+     Waits a bounded interval for main to claim or complete the command.
+
+     - Parameter timeout: Maximum pending interval before cancellation; negative values clamp to zero.
+     - Returns: Completed result, or `commandFailed` when main never claimed the pending command.
+     - Side effects: May cancel pending work. Once execution is claimed, waits for its exact result.
+     - Failure modes: An impossible terminal state after execution fails closed as `commandFailed`.
+     */
+    func waitForOutcome(timeout: TimeInterval) -> SpeakRemoteCommandOutcome {
+        let deadline = DispatchTime.now() + max(timeout, 0)
+        if completion.wait(timeout: deadline) == .success {
+            return completedOutcome()
+        }
+
+        lock.lock()
+        switch state {
+        case .pending:
+            state = .cancelled
+            lock.unlock()
+            return .commandFailed
+        case .executing:
+            lock.unlock()
+            completion.wait()
+            return completedOutcome()
+        case .completed(let outcome):
+            lock.unlock()
+            return outcome
+        case .cancelled:
+            lock.unlock()
+            return .commandFailed
+        }
+    }
+
+    /** Returns the completed result under lock, failing closed for every other state. */
+    private func completedOutcome() -> SpeakRemoteCommandOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+        guard case .completed(let outcome) = state else { return .commandFailed }
+        return outcome
+    }
+}
+#endif
 
 private final class FoundationSpeakTimerToken: SpeakTimerToken {
     private let timer: Timer
@@ -276,9 +654,10 @@ private struct FoundationSpeakTimerScheduler: SpeakTimerScheduling {
  - empty providers stop without invoking the speech engine
  - malformed OSIS is handled by `SpeakCommandBuilder` before commands reach this service
  - unsupported languages stop before synthesis and publish a user-observable failure status
- - platform speech-control failures leave state paused/stopped without corrupting provider position
+ - rejected platform speech cancellation preserves the live service and provider state
  */
-public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+@MainActor
+public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     private static let settingsKey = "SpeakSettings"
     private static let legacySpeedKey = "speak_speed"
     private static let pausedCheckpointKey = "SpeakProviderCheckpoint"
@@ -289,13 +668,22 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
     private static let persistBibleVerseKey = "SpeakBibleVerse"
     private static let persistGeneralBookKey = "SpeakGenBook"
     private static let persistGeneralKey = "SpeakGenKey"
+    /// Maximum time a system command may remain unclaimed before it is cancelled without mutation.
+    nonisolated private static let remoteCommandPendingHandoffTimeout: TimeInterval = 1.0
 
     private let synthesizer: SpeechSynthesizing
+    /// Injectable boundary that must succeed before the service publishes active playback.
+    private let audioSessionConfigurator: SpeakAudioSessionConfiguring
     private let timerScheduler: SpeakTimerScheduling
     private let voiceResolver: SpeechVoiceResolving
     private let deviceLocale: Locale
     private var systemPresentationPolicy: SpeakSystemPresentationPolicy
     private let observesRuntimeDiscreteMode: Bool
+
+    #if os(iOS)
+    /// Process-global media-command adapter whose opaque registrations are owned by this service.
+    nonisolated(unsafe) private let remoteCommandCenter: SpeakRemoteCommandCenterRouting
+    #endif
 
     /// Whether a provider session is active, including paused playback.
     @Published public private(set) var isSpeaking = false
@@ -446,10 +834,15 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
     #if os(iOS)
     private var remoteCommandHandlingEnabled = false
-    private var remoteCommandsRegistered = false
+    /// Next service-local registration generation assigned to a complete command set.
+    private var nextRemoteCommandRegistrationEpoch: UInt64 = 0
+    /// Exact global command targets registered by this service and no other owner.
+    nonisolated(unsafe) private var remoteCommandRegistrations: [SpeakRemoteCommandRegistration] = []
+    /// Exact lifetime token for the currently registered command set, including deinit teardown.
+    nonisolated(unsafe) private var remoteCommandRegistrationEpoch: SpeakRemoteCommandRegistrationEpoch?
 
     /// Whether this service currently owns system remote-command handlers.
-    var hasRegisteredRemoteCommands: Bool { remoteCommandsRegistered }
+    var hasRegisteredRemoteCommands: Bool { !remoteCommandRegistrations.isEmpty }
     #endif
 
     /** Creates a service backed by the platform speech synthesizer and timer. */
@@ -469,28 +862,39 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
 
      - Parameters:
        - synthesizer: Speech engine or deterministic test double.
+       - audioSessionConfigurator: Ordered playback-category and activation boundary. Tests inject
+         deterministic success or failure without touching the shared platform audio session.
        - timerScheduler: Repeating timer scheduler or controllable test clock.
        - voiceResolver: Installed-voice resolver that rejects unrelated language fallbacks.
        - deviceLocale: Immutable locale used for Android's regional voice preference.
        - systemPresentationPolicy: Initial runtime boundary for Now Playing and media commands.
+       - remoteCommandCenter: Optional iOS command adapter; production uses the shared MediaPlayer
+         center while tests can record exact target ownership without changing global handlers.
        - observesRuntimeDiscreteMode: Whether UserDefaults changes should re-resolve that boundary.
      - Side effects: Assigns the speech delegate and registers iOS audio and preference notifications.
-     - Failure modes: Construction cannot fail; unavailable voices are handled when synthesis starts.
+     - Failure modes: Construction cannot fail; audio-session and unavailable-voice failures are
+       returned when synthesis starts.
      */
     init(
         synthesizer: SpeechSynthesizing,
+        audioSessionConfigurator: SpeakAudioSessionConfiguring = SystemSpeakAudioSessionConfigurator(),
         timerScheduler: SpeakTimerScheduling = FoundationSpeakTimerScheduler(),
         voiceResolver: SpeechVoiceResolving = SystemSpeechVoiceResolver(),
         deviceLocale: Locale = .current,
         systemPresentationPolicy: SpeakSystemPresentationPolicy = .current,
+        remoteCommandCenter: SpeakRemoteCommandCenterRouting? = nil,
         observesRuntimeDiscreteMode: Bool = false
     ) {
         self.synthesizer = synthesizer
+        self.audioSessionConfigurator = audioSessionConfigurator
         self.timerScheduler = timerScheduler
         self.voiceResolver = voiceResolver
         self.deviceLocale = deviceLocale
         self.systemPresentationPolicy = systemPresentationPolicy
         self.observesRuntimeDiscreteMode = observesRuntimeDiscreteMode
+        #if os(iOS)
+        self.remoteCommandCenter = remoteCommandCenter ?? SystemSpeakRemoteCommandCenterRouter.shared
+        #endif
         super.init()
         self.synthesizer.delegate = self
         #if os(iOS)
@@ -693,7 +1097,14 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             return .queued(generation: currentSessionGeneration)
         }
 
-        stopInternal(persistPosition: true, clearProvider: true, notifyStopped: true)
+        guard stopInternal(
+            persistPosition: true,
+            clearProvider: true,
+            notifyStopped: true
+        ) else {
+            lastStartupFailure = .preparationFailed
+            return .failed(.preparationFailed)
+        }
         currentSessionGeneration &+= 1
         let generation = currentSessionGeneration
         activeCallbacks = callbacks ?? legacyCallbackSnapshot()
@@ -744,9 +1155,16 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
             return .failed(failure)
         }
 
+        do {
+            try audioSessionConfigurator.configurePlaybackSession()
+        } catch {
+            let failure = SpeakStartupFailure.audioSessionFailed
+            failStartup(failure)
+            return .failed(failure)
+        }
+
         isSpeaking = true
         isPaused = false
-        configureAudioSession()
         activateConfiguredSleepTimer()
         switch loadCurrentUnitAndSpeak() {
         case .started:
@@ -806,12 +1224,21 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
-    /** Persists the provider checkpoint, destroys the utterance, and enters Android pause state. */
-    public func pause() {
-        guard isSpeaking, !isPaused else { return }
+    /**
+     Persists the provider checkpoint, cancels the utterance, and enters Android pause state.
+
+     - Returns: `true` only when the platform accepted cancellation and pause state was committed.
+     - Side effects: On success, clears active utterance state, cancels the sleep timer, persists the
+       exact paused checkpoint, and republishes paused Now Playing metadata on iOS.
+     - Failure modes: Inactionable state or a rejected platform cancellation returns `false` without
+       changing the provider cursor, pause flags, timer, persistence, or speech metadata.
+     */
+    @discardableResult
+    public func pause() -> Bool {
+        guard isSpeaking, !isPaused else { return false }
         let checkpoint = currentProviderCheckpoint()
+        guard cancelCurrentUtteranceForReplacement() else { return false }
         pendingResumePlaybackCursor = checkpoint?.playbackCursor
-        cancelCurrentUtteranceForReplacement()
         currentUnit = nil
         commandIndex = 0
         pendingPause = 0
@@ -825,17 +1252,35 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #if os(iOS)
         updateNowPlayingInfo()
         #endif
+        return true
     }
 
-    /** Reconstructs speech from the provider checkpoint and restarts the configured timer duration. */
-    public func resume() {
+    /**
+     Reconstructs speech from the provider checkpoint and restarts the configured timer duration.
+
+     - Returns: `true` only after provider preparation and audio-session activation both succeed.
+     - Side effects: On success, clears paused persistence and submits the resumed utterance. Audio
+       configuration failure publishes `audioSessionFailed` while retaining the paused provider.
+     - Failure modes: Missing paused state, provider preparation failure, or audio-session failure
+       returns `false`; audio-session failure never clears the paused checkpoint or active provider.
+     */
+    @discardableResult
+    public func resume() -> Bool {
         if provider == nil { reconstructPersistedPauseIfPossible() }
-        guard isSpeaking, isPaused, let provider else { return }
+        guard isSpeaking, isPaused, let provider else { return false }
         guard provider.prepare(settings: effectiveSettings) else {
             stopInternal(persistPosition: false, clearProvider: true, notifyStopped: true)
-            return
+            return false
         }
-        configureAudioSession()
+        do {
+            try audioSessionConfigurator.configurePlaybackSession()
+        } catch {
+            publishStartupFailure(.audioSessionFailed)
+            #if os(iOS)
+            updateNowPlayingInfo()
+            #endif
+            return false
+        }
         isPaused = false
         bookmarkPersistedForPausedTransition = false
         clearPersistedPauseCheckpoint()
@@ -847,6 +1292,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #if os(iOS)
         updateNowPlayingInfo()
         #endif
+        return isSpeaking && !isPaused
     }
 
     /** Android Play behavior: resume pause state, reconstruct the last source, or start the default. */
@@ -872,29 +1318,50 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         }
     }
 
-    /** Stops immediately, persists provider position, and clears transient playback state. */
-    public func stop() {
+    /**
+     Stops immediately, persists provider position, and clears transient playback state.
+
+     - Returns: `true` when no session exists or the platform accepted active utterance cancellation.
+     - Side effects: On success, persists and clears the active provider, timer, callbacks, and media
+       metadata through `stopInternal`.
+     - Failure modes: A rejected platform cancellation returns `false` and leaves the live session
+       unchanged so callers cannot report or display a stop that did not occur.
+     */
+    @discardableResult
+    public func stop() -> Bool {
         stopInternal(persistPosition: true, clearProvider: true, notifyStopped: true)
     }
 
     /** Android previous transport: move exactly one provider unit. */
     public func previousUnit() {
-        moveProvider { $0.rewind(.oneUnit) }
+        moveProvider(
+            canMove: { $0.canRewind(.oneUnit) },
+            movement: { $0.rewind(.oneUnit) }
+        )
     }
 
     /** Android next transport: move exactly one provider unit. */
     public func nextUnit() {
-        moveProvider { $0.forward(.oneUnit) }
+        moveProvider(
+            canMove: { $0.canForward(.oneUnit) },
+            movement: { $0.forward(.oneUnit) }
+        )
     }
 
     /** Android rewind transport: provider-defined smart movement. */
     public func rewind() {
-        moveProvider { $0.rewind(.smart) }
+        moveProvider(
+            canMove: { $0.canRewind(.smart) },
+            movement: { $0.rewind(.smart) }
+        )
     }
 
     /** Android forward transport: provider-defined smart movement. */
     public func forward() {
-        moveProvider { $0.forward(.smart) }
+        moveProvider(
+            canMove: { $0.canForward(.smart) },
+            movement: { $0.forward(.smart) }
+        )
     }
 
     /// Compatibility alias now mapped to one provider unit instead of reader chapter navigation.
@@ -963,37 +1430,124 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
      - Parameters:
        - command: Android-equivalent media-session action.
        - expectedSessionGeneration: Generation captured when the platform delivered the event.
-     - Returns: `true` when the command was accepted; `false` when a replacement session made it stale.
+     - Returns: `true` only when the command performed an available action; `false` for a stale or
+       currently inactionable command.
      - Side effects: May start, pause, resume, stop, or smart-move the active provider.
-     - Failure modes: Stale events are ignored without mutating the replacement session.
+     - Failure modes: Stale events and commands without an active or reconstructable source are
+       ignored without mutating speech state.
      */
     @discardableResult
     func performRemoteCommand(
         _ command: SpeakRemoteCommand,
         expectedSessionGeneration: UInt64
     ) -> Bool {
-        guard currentSessionGeneration == expectedSessionGeneration else { return false }
+        performRemoteCommandOutcome(
+            command,
+            expectedSessionGeneration: expectedSessionGeneration
+        ).wasSuccessful
+    }
+
+    /**
+     Applies one remote command and preserves the reason an unavailable mutation was rejected.
+
+     - Parameters:
+       - command: Android-equivalent media-session action.
+       - expectedSessionGeneration: Generation that must still own the current speech state.
+     - Returns: Completed transport outcome suitable for exact MediaPlayer status mapping.
+     - Side effects: May reconstruct, start, pause, resume, stop, or smart-move speech.
+     - Failure modes: Stale/missing sources, provider boundaries, and execution failures remain
+       distinct non-success outcomes without mutating a replacement generation.
+     */
+    private func performRemoteCommandOutcome(
+        _ command: SpeakRemoteCommand,
+        expectedSessionGeneration: UInt64
+    ) -> SpeakRemoteCommandOutcome {
+        guard currentSessionGeneration == expectedSessionGeneration else {
+            return .noActionableNowPlayingItem
+        }
         switch command {
         case .play:
+            guard !isSpeaking || isPaused else { return .commandFailed }
+            let wasPaused = isPaused
+            lastStartupFailure = nil
+            if wasPaused {
+                return resume() ? .success : .commandFailed
+            }
             play()
+            if isSpeaking, !isPaused { return .success }
+            return remoteCommandStartupFailureOutcome ?? .noActionableNowPlayingItem
         case .pause:
-            pause()
+            guard isSpeaking, !isPaused else { return .noActionableNowPlayingItem }
+            return pause() ? .success : .commandFailed
         case .togglePlayPause:
             if isPaused {
-                resume()
+                return resume() ? .success : .commandFailed
             } else if isSpeaking {
-                pause()
+                return pause() ? .success : .commandFailed
             } else {
+                lastStartupFailure = nil
                 play()
+                if isSpeaking, !isPaused { return .success }
+                return remoteCommandStartupFailureOutcome ?? .noActionableNowPlayingItem
             }
         case .stop:
-            stop()
+            guard isSpeaking || isPaused || provider != nil else {
+                return .noActionableNowPlayingItem
+            }
+            return stop() ? .success : .commandFailed
         case .nextTrack:
-            forward()
+            guard isSpeaking, provider != nil else { return .noActionableNowPlayingItem }
+            return remoteCommandOutcome(
+                for: moveProvider(
+                    canMove: { $0.canForward(.smart) },
+                    movement: { $0.forward(.smart) }
+                )
+            )
         case .previousTrack:
-            rewind()
+            guard isSpeaking, provider != nil else { return .noActionableNowPlayingItem }
+            return remoteCommandOutcome(
+                for: moveProvider(
+                    canMove: { $0.canRewind(.smart) },
+                    movement: { $0.rewind(.smart) }
+                )
+            )
         }
-        return true
+    }
+
+    /**
+     Maps one completed provider movement onto MediaPlayer's exact semantic status.
+
+     - Parameter movement: Typed provider boundary, paused movement, or post-movement load result.
+     - Returns: System-command outcome matching the mutation that actually completed.
+     - Side effects: none; provider mutation and synthesis have completed before this mapping.
+     - Failure modes: Missing providers and preparation or synthesis failures remain non-successful
+       instead of being collapsed into a successful transport response.
+     */
+    private func remoteCommandOutcome(
+        for movement: SpeakProviderMovementResult
+    ) -> SpeakRemoteCommandOutcome {
+        switch movement {
+        case .movedWhilePaused, .loaded(.started):
+            return .success
+        case .boundary, .loaded(.exhausted):
+            return .noSuchContent
+        case .unavailable:
+            return .noActionableNowPlayingItem
+        case .preparationFailed, .cancellationFailed, .movementFailed, .loaded(.failed):
+            return .commandFailed
+        }
+    }
+
+    /** Maps the latest synchronous startup failure onto MediaPlayer's closest semantic status. */
+    private var remoteCommandStartupFailureOutcome: SpeakRemoteCommandOutcome? {
+        switch lastStartupFailure {
+        case .noSpeakableContent:
+            return .noSuchContent
+        case .preparationFailed, .invalidResumeCursor, .audioSessionFailed, .unsupportedLanguage:
+            return .commandFailed
+        case nil:
+            return nil
+        }
     }
 
     /** Stores or clears Android's repeated Bible range from two exact provider positions. */
@@ -1416,16 +1970,43 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         currentSubtitle = nil
     }
 
-    private func moveProvider(_ movement: (SpeakTextProviding) -> Bool) {
-        guard let provider, isSpeaking else { return }
+    /**
+     Applies one provider movement while preserving paused or active playback state.
+
+     - Parameters:
+       - canMove: Non-mutating provider preflight for the exact requested movement.
+       - movement: Matching provider mutation, executed only after cancellation succeeds.
+     - Returns: Typed boundary, paused movement, or exact post-movement synthesis result.
+     - Side effects: After a successful preflight, cancels the current utterance before committing
+       provider transport, may update speech metadata/checkpoints, and restarts active synthesis.
+     - Failure modes: Missing/inactive providers return `unavailable`; preparation failure stops the
+       invalid session. A provider boundary returns without cancellation or replay. Cancellation
+       failure leaves both service and provider positions unchanged. A preflight/mutation mismatch
+       fails closed without claiming a successful transport result.
+     */
+    @discardableResult
+    private func moveProvider(
+        canMove: (SpeakTextProviding) -> Bool,
+        movement: (SpeakTextProviding) -> Bool
+    ) -> SpeakProviderMovementResult {
+        guard let provider, isSpeaking else { return .unavailable }
         guard provider.prepare(settings: effectiveSettings) else {
             stopInternal(persistPosition: false, clearProvider: true, notifyStopped: true)
-            return
+            return .preparationFailed
         }
         let wasPaused = isPaused
-        cancelCurrentUtteranceForReplacement()
+        guard canMove(provider) else { return .boundary }
+        guard cancelCurrentUtteranceForReplacement() else { return .cancellationFailed }
+        guard movement(provider) else {
+            _ = stopInternal(
+                persistPosition: false,
+                clearProvider: true,
+                notifyStopped: true
+            )
+            return .movementFailed
+        }
+
         pendingResumePlaybackCursor = nil
-        _ = movement(provider)
         currentUnit = nil
         commandIndex = 0
         pendingPause = 0
@@ -1439,17 +2020,26 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
                 activeCallbacks?.onPositionChanged?(unit.position, currentSessionGeneration)
                 persistPausedCheckpoint()
             }
+            return .movedWhilePaused
         } else {
             isPaused = false
-            _ = loadCurrentUnitAndSpeak()
+            return .loaded(loadCurrentUnitAndSpeak())
         }
     }
 
+    /**
+     Rebuilds active synthesis after settings change while retaining the exact playback cursor.
+
+     - Side effects: After accepted platform cancellation, persists the captured checkpoint and
+       bookmark, reapplies provider settings, and submits replacement synthesis.
+     - Failure modes: Inactive/paused sessions and rejected cancellation leave playback unchanged;
+       provider preparation failure stops the now-cancelled invalid session.
+     */
     private func checkpointAndRestartActiveSession() {
         guard isSpeaking, !isPaused, let provider else { return }
         let checkpoint = currentProviderCheckpoint()
+        guard cancelCurrentUtteranceForReplacement() else { return }
         pendingResumePlaybackCursor = checkpoint?.playbackCursor
-        cancelCurrentUtteranceForReplacement()
         currentUnit = nil
         commandIndex = 0
         pendingPause = 0
@@ -1465,32 +2055,61 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         _ = loadCurrentUnitAndSpeak()
     }
 
-    private func cancelCurrentUtteranceForReplacement() {
-        if let currentUtterance {
-            ignoredCancelledUtterances.insert(ObjectIdentifier(currentUtterance))
+    /**
+     Cancels the current platform utterance before a replacement state transition.
+
+     - Returns: `true` when no utterance needs cancellation or the synthesizer accepted the stop.
+     - Side effects: On success, marks the utterance's expected cancellation and clears every
+       service-owned utterance cursor. A synchronous delegate cancellation is ignored by identity.
+     - Failure modes: A rejected `stopSpeaking` call removes the provisional ignore marker and
+       returns `false` without clearing any active utterance or progress state.
+     */
+    @discardableResult
+    private func cancelCurrentUtteranceForReplacement() -> Bool {
+        guard let activeUtterance = currentUtterance else { return true }
+        let utteranceIdentity = ObjectIdentifier(activeUtterance)
+        ignoredCancelledUtterances.insert(utteranceIdentity)
+        guard synthesizer.stopSpeaking(at: .immediate) else {
+            ignoredCancelledUtterances.remove(utteranceIdentity)
+            return false
         }
-        _ = synthesizer.stopSpeaking(at: .immediate)
         currentUtterance = nil
         currentUtteranceGeneration = nil
         activeCommandIndex = nil
         currentCommandText = ""
         currentCommandBaseOffset = 0
         currentCommandCharacterOffset = 0
+        return true
     }
 
+    /**
+     Clears one service session only after any active platform utterance accepts cancellation.
+
+     - Parameters:
+       - persistPosition: Whether to update the provider's Android Speak bookmark on success.
+       - clearProvider: Whether to release the provider after session cleanup.
+       - notifyStopped: Whether to invoke the generation-scoped stopped callback.
+     - Returns: `true` when cleanup completed or no platform utterance needed cancellation.
+     - Side effects: On success, persists checkpoints/bookmarks, clears timer and playback state,
+       advances the session generation, notifies callbacks, and removes Now Playing metadata.
+     - Failure modes: A rejected synthesizer stop returns `false` before persistence or local state
+       mutation, preserving the active session exactly as the platform continues playing it.
+     */
+    @discardableResult
     private func stopInternal(
         persistPosition: Bool,
         clearProvider: Bool,
         notifyStopped: Bool
-    ) {
+    ) -> Bool {
         let hadSession = isSpeaking || isPaused || provider != nil
         let stoppedGeneration = currentSessionGeneration
-        if hadSession { persistLastCheckpoint() }
+        let lastCheckpoint = hadSession ? currentProviderCheckpoint() : nil
+        guard cancelCurrentUtteranceForReplacement() else { return false }
+        if hadSession { persistLastCheckpoint(lastCheckpoint) }
         if persistPosition, hadSession, !bookmarkPersistedForPausedTransition {
             persistCurrentPosition()
         }
         userStopped = true
-        cancelCurrentUtteranceForReplacement()
         cancelSleepTimer(clearRemaining: true)
         isSpeaking = false
         isPaused = false
@@ -1515,6 +2134,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         #if os(iOS)
         clearNowPlayingInfo()
         #endif
+        return true
     }
 
     private func finishProviderNaturally() {
@@ -1547,8 +2167,18 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         persistAndroidLastPosition(checkpoint.current)
     }
 
-    private func persistLastCheckpoint() {
-        guard let checkpoint = currentProviderCheckpoint() else { return }
+    /**
+     Persists the last playable provider checkpoint captured before platform cancellation.
+
+     - Parameter suppliedCheckpoint: Optional pre-cancellation snapshot; when omitted, captures the
+       current provider state at call time.
+     - Side effects: Writes the semantic checkpoint and Android last-position compatibility fields.
+     - Failure modes: Missing provider state produces no persistence writes.
+     */
+    private func persistLastCheckpoint(
+        _ suppliedCheckpoint: SpeakProviderCheckpoint? = nil
+    ) {
+        guard let checkpoint = suppliedCheckpoint ?? currentProviderCheckpoint() else { return }
         persist(checkpoint, forKey: Self.lastCheckpointKey)
         persistAndroidLastPosition(checkpoint.current)
     }
@@ -1768,7 +2398,7 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         guard next <= 0 else { return }
 
         // Android pauses first, then clears only sleepTimer while preserving lastSleepTimer.
-        pause()
+        guard pause() else { return }
         var updated = settings
         updated.sleepTimer = 0
         applySettings(
@@ -1786,13 +2416,6 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         sleepTimerToken?.invalidate()
         sleepTimerToken = nil
         if clearRemaining { sleepTimerRemaining = nil }
-    }
-
-    private func configureAudioSession() {
-        #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        #endif
     }
 
     #if os(iOS)
@@ -1833,71 +2456,131 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         setupRemoteCommandCenter()
     }
 
+    /**
+     Registers one handler for every supported system media command.
+
+     Each opaque target is retained with its semantic command so teardown removes only this
+     service's handlers. Registration is idempotent for the service lifetime.
+
+     - Side effects: Enables and registers six commands through `remoteCommandCenter`.
+     - Failure modes: Discrete mode and an existing registration set leave the command center
+       unchanged.
+     */
     private func setupRemoteCommandCenter() {
         guard systemPresentationPolicy.exposesMediaSession,
-              !remoteCommandsRegistered else { return }
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.isEnabled = true
-        center.pauseCommand.isEnabled = true
-        center.togglePlayPauseCommand.isEnabled = true
-        center.stopCommand.isEnabled = true
-        center.nextTrackCommand.isEnabled = true
-        center.previousTrackCommand.isEnabled = true
+              remoteCommandRegistrations.isEmpty else { return }
 
-        center.playCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.play)
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.pause)
-            return .success
-        }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.togglePlayPause)
-            return .success
-        }
-        center.stopCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.stop)
-            return .success
-        }
-        center.nextTrackCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.nextTrack)
-            return .success
-        }
-        center.previousTrackCommand.addTarget { [weak self] _ in
-            self?.enqueueRemoteCommand(.previousTrack)
-            return .success
-        }
-        remoteCommandsRegistered = true
-    }
+        nextRemoteCommandRegistrationEpoch &+= 1
+        let epoch = SpeakRemoteCommandRegistrationEpoch(
+            value: nextRemoteCommandRegistrationEpoch
+        )
+        remoteCommandRegistrationEpoch = epoch
 
-    /** Captures media-event ownership before dispatching the command onto the service queue. */
-    private func enqueueRemoteCommand(_ command: SpeakRemoteCommand) {
-        let generation = currentSessionGeneration
-        DispatchQueue.main.async { [weak self] in
-            _ = self?.performRemoteCommand(
-                command,
-                expectedSessionGeneration: generation
+        for command in SpeakRemoteCommand.allCases {
+            let target = remoteCommandCenter.addHandler(for: command) { [weak self, epoch] in
+                self?.performSystemRemoteCommand(command, registrationEpoch: epoch)
+                    ?? .noActionableNowPlayingItem
+            }
+            remoteCommandRegistrations.append(
+                SpeakRemoteCommandRegistration(command: command, target: target)
             )
         }
     }
 
-    private func tearDownRemoteCommandCenter() {
-        guard remoteCommandsRegistered else { return }
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.removeTarget(nil)
-        center.pauseCommand.removeTarget(nil)
-        center.togglePlayPauseCommand.removeTarget(nil)
-        center.stopCommand.removeTarget(nil)
-        center.nextTrackCommand.removeTarget(nil)
-        center.previousTrackCommand.removeTarget(nil)
-        center.playCommand.isEnabled = false
-        center.pauseCommand.isEnabled = false
-        center.togglePlayPauseCommand.isEnabled = false
-        center.stopCommand.isEnabled = false
-        center.nextTrackCommand.isEnabled = false
-        center.previousTrackCommand.isEnabled = false
-        remoteCommandsRegistered = false
+    /**
+     Performs a system media event on the service's main-thread state domain.
+
+     MediaPlayer does not guarantee that command handlers run on the main thread. The callback must
+     nevertheless return the command's real outcome, not acceptance of deferred work, so off-main
+     delivery waits for a bounded, cancellable main-actor handoff. A main-thread callback executes
+     directly and therefore cannot deadlock by redispatching to its own actor.
+
+     - Parameters:
+       - command: Media command received from the process-global command center.
+       - registrationEpoch: Exact handler-set lifetime captured when the target was registered.
+     - Returns: The actual typed result from the command, after provider reconstruction, transport
+       mutation, or boundary rejection has completed.
+     - Side effects: May briefly block MediaPlayer's delivery queue while the main actor starts,
+       pauses, stops, or moves the current speech provider.
+     - Failure modes: Failed provider reconstruction, unavailable transport, or a provider boundary
+       returns its corresponding non-success outcome without reporting system success.
+     */
+    nonisolated private func performSystemRemoteCommand(
+        _ command: SpeakRemoteCommand,
+        registrationEpoch: SpeakRemoteCommandRegistrationEpoch
+    ) -> SpeakRemoteCommandOutcome {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated {
+                performCurrentSystemRemoteCommand(
+                    command,
+                    registrationEpoch: registrationEpoch
+                )
+            }
+        }
+        let handoff = SpeakRemoteCommandHandoff()
+        Task { @MainActor [weak self] in
+            guard handoff.claimExecution() else { return }
+            guard let self else {
+                handoff.complete(with: .noActionableNowPlayingItem)
+                return
+            }
+            handoff.complete(
+                with: self.performCurrentSystemRemoteCommand(
+                    command,
+                    registrationEpoch: registrationEpoch
+                )
+            )
+        }
+        return handoff.waitForOutcome(timeout: Self.remoteCommandPendingHandoffTimeout)
+    }
+
+    /**
+     Revalidates one retained system handler immediately before mutating speech state.
+
+     - Parameters:
+       - command: System media command whose opaque target was originally registered.
+       - registrationEpoch: Exact handler-set lifetime captured at registration.
+     - Returns: Completed command outcome, or `noActionableNowPlayingItem` after teardown.
+     - Side effects: May perform the requested command only while remote handling and the visible
+       media-session policy are both still active.
+     - Failure modes: A handler retained or already in flight across discrete-mode teardown is
+       rejected without touching speech state.
+     */
+    private func performCurrentSystemRemoteCommand(
+        _ command: SpeakRemoteCommand,
+        registrationEpoch: SpeakRemoteCommandRegistrationEpoch
+    ) -> SpeakRemoteCommandOutcome {
+        guard remoteCommandHandlingEnabled,
+              systemPresentationPolicy.exposesMediaSession,
+              registrationEpoch.isActive,
+              remoteCommandRegistrationEpoch === registrationEpoch else {
+            return .noActionableNowPlayingItem
+        }
+        return performRemoteCommandOutcome(
+            command,
+            expectedSessionGeneration: currentSessionGeneration
+        )
+    }
+
+    /**
+     Removes exactly the opaque command targets installed by this service.
+
+     - Side effects: Removes each exact target, allows the shared adapter to disable commands whose
+       final owner disappeared, then clears retained tokens.
+     - Failure modes: Repeated teardown is a no-op; handlers owned by other components are never
+       removed through a wildcard target.
+     */
+    nonisolated private func tearDownRemoteCommandCenter() {
+        remoteCommandRegistrationEpoch?.invalidate()
+        remoteCommandRegistrationEpoch = nil
+        guard !remoteCommandRegistrations.isEmpty else { return }
+        for registration in remoteCommandRegistrations {
+            remoteCommandCenter.removeHandler(
+                registration.target,
+                for: registration.command
+            )
+        }
+        remoteCommandRegistrations.removeAll()
     }
 
     private func setupAudioNotifications() {
@@ -1915,63 +2598,98 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
-    /** Re-resolves system speech exposure after an AppStorage-backed preference changes. */
-    @objc private func handleRuntimePreferencesChanged(_ notification: Notification) {
-        guard observesRuntimeDiscreteMode else { return }
-        let applyPolicy: () -> Void = { [weak self] in
-            self?.applySystemPresentationPolicy(.current)
-        }
-        if Thread.isMainThread {
-            applyPolicy()
-        } else {
-            DispatchQueue.main.async(execute: applyPolicy)
-        }
-    }
-
-    @objc private func handleInterruption(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        let generation = currentSessionGeneration
+    /** Bridges preference notifications onto a later, non-reentrant main-actor turn. */
+    @objc nonisolated private func handleRuntimePreferencesChanged(_ notification: Notification) {
+        _ = notification
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.currentSessionGeneration == generation else { return }
-            switch type {
-            case .began:
-                if self.isSpeaking && !self.isPaused {
-                    self.wasInterrupted = true
-                    self.pause()
-                }
-            case .ended:
-                let raw = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-                if AVAudioSession.InterruptionOptions(rawValue: raw).contains(.shouldResume),
-                   self.wasInterrupted {
-                    self.resume()
-                }
-                self.wasInterrupted = false
-            @unknown default:
-                break
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                guard self.observesRuntimeDiscreteMode else { return }
+                self.applySystemPresentationPolicy(.current)
             }
         }
     }
 
-    @objc private func handleRouteChange(_ notification: Notification) {
+    /** Parses an interruption off-domain, then applies it on a non-reentrant main-actor turn. */
+    @objc nonisolated private func handleInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        let rawOptions = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+        let shouldResume = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            .contains(.shouldResume)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                self.applyAudioInterruption(type: type, shouldResume: shouldResume)
+            }
+        }
+    }
+
+    /** Applies a parsed platform interruption to the speech session current when main handles it. */
+    private func applyAudioInterruption(
+        type: AVAudioSession.InterruptionType,
+        shouldResume: Bool
+    ) {
+        switch type {
+        case .began:
+            if isSpeaking && !isPaused {
+                wasInterrupted = pause()
+            }
+        case .ended:
+            if shouldResume, wasInterrupted { resume() }
+            wasInterrupted = false
+        @unknown default:
+            break
+        }
+    }
+
+    /** Parses route loss off-domain, then pauses on a non-reentrant main-actor turn. */
+    @objc nonisolated private func handleRouteChange(_ notification: Notification) {
         guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable else { return }
-        let generation = currentSessionGeneration
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.currentSessionGeneration == generation else { return }
-            if self.isSpeaking, !self.isPaused { self.pause() }
+            guard let self else { return }
+            MainActor.assumeIsolated { self.pauseAfterOutputRouteLoss() }
         }
+    }
+
+    /** Pauses active speech after headphones or another old output device becomes unavailable. */
+    private func pauseAfterOutputRouteLoss() {
+        if isSpeaking, !isPaused { _ = pause() }
     }
     #endif
 
-    /** Forwards AVFoundation word progress for the current provider command. */
-    public func speechSynthesizer(
+    /** Bridges AVFoundation word progress onto a non-reentrant main-actor turn. */
+    nonisolated public func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer,
         willSpeakRangeOfSpeechString characterRange: NSRange,
         utterance: AVSpeechUtterance
     ) {
-        guard currentUtterance === utterance,
+        let utteranceIdentity = ObjectIdentifier(utterance)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                applySpokenRange(characterRange, utteranceIdentity: utteranceIdentity)
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.applySpokenRange(
+                        characterRange,
+                        utteranceIdentity: utteranceIdentity
+                    )
+                }
+            }
+        }
+    }
+
+    /** Forwards one word range only when it still belongs to the active utterance generation. */
+    private func applySpokenRange(
+        _ characterRange: NSRange,
+        utteranceIdentity: ObjectIdentifier
+    ) {
+        guard currentUtterance.map(ObjectIdentifier.init) == utteranceIdentity,
               currentUtteranceGeneration == currentSessionGeneration,
               let range = Range(characterRange, in: currentText) else { return }
         currentCommandCharacterOffset = min(
@@ -1985,9 +2703,27 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         )
     }
 
-    /** Advances the provider command stream after one utterance finishes. */
-    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard currentUtterance === utterance,
+    /** Bridges AVFoundation completion onto a non-reentrant main-actor turn. */
+    nonisolated public func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didFinish utterance: AVSpeechUtterance
+    ) {
+        let utteranceIdentity = ObjectIdentifier(utterance)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { finishUtteranceIfCurrent(utteranceIdentity) }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.finishUtteranceIfCurrent(utteranceIdentity)
+                }
+            }
+        }
+    }
+
+    /** Advances the provider command stream only for the current completed utterance. */
+    private func finishUtteranceIfCurrent(_ utteranceIdentity: ObjectIdentifier) {
+        guard currentUtterance.map(ObjectIdentifier.init) == utteranceIdentity,
               currentUtteranceGeneration == currentSessionGeneration else { return }
         currentUtterance = nil
         currentUtteranceGeneration = nil
@@ -1999,11 +2735,28 @@ public final class SpeakService: NSObject, ObservableObject, AVSpeechSynthesizer
         _ = startNextAudibleCommand()
     }
 
-    /** Ignores replacement cancellations and stops only for unexpected platform cancellation. */
-    public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        let identity = ObjectIdentifier(utterance)
-        if ignoredCancelledUtterances.remove(identity) != nil { return }
-        guard currentUtterance === utterance else { return }
+    /** Bridges AVFoundation cancellation onto a non-reentrant main-actor turn. */
+    nonisolated public func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didCancel utterance: AVSpeechUtterance
+    ) {
+        let utteranceIdentity = ObjectIdentifier(utterance)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { cancelUtteranceIfCurrent(utteranceIdentity) }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.cancelUtteranceIfCurrent(utteranceIdentity)
+                }
+            }
+        }
+    }
+
+    /** Ignores replacement cancellations and stops only for an unexpected current cancellation. */
+    private func cancelUtteranceIfCurrent(_ utteranceIdentity: ObjectIdentifier) {
+        if ignoredCancelledUtterances.remove(utteranceIdentity) != nil { return }
+        guard currentUtterance.map(ObjectIdentifier.init) == utteranceIdentity else { return }
         currentUtterance = nil
         currentUtteranceGeneration = nil
         stopInternal(persistPosition: true, clearProvider: true, notifyStopped: true)

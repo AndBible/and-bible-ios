@@ -12,6 +12,8 @@ Checks:
 7. Product-feedback copy must cover every shipped locale with Android provenance or truthful iOS fallback.
 8. Every statically declared shipped localization key must participate in Android-source discovery.
 9. Shipped SwiftUI presentation code may not embed user-visible prose as an unlocalized literal.
+10. Production-reachable resource values must not name another app platform outside real
+    backup/import interoperability copy.
 
 Usage:
   python3 scripts/check_settings_localization_guardrails.py
@@ -35,6 +37,8 @@ from datetime import date
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+
+from platform_reference_contract import FORBIDDEN_PLATFORM_REFERENCE_TERMS
 
 
 PARITY_KEYS = [
@@ -68,7 +72,6 @@ PARITY_KEYS = [
     "prefs_volume_keys_scroll_title",
     "prefs_volume_keys_scroll_summary",
     "prefs_night_mode_title",
-    "prefs_night_mode_summary",
     "prefs_interface_locale_title",
     "prefs_interface_locale_summary",
     "prefs_e_ink_mode_title",
@@ -477,6 +480,69 @@ misleading on iOS is replaced explicitly.
 """
 
 
+IOS_PLATFORM_LOCALIZED_OVERRIDES = {
+    "id": {
+        "rate_application": "Nilai dan Ulas",
+    },
+    "nb": {
+        "task_kill_warning": (
+            "Vær klar over at disse tidkrevende jobbene kan bli avbrutt hvis du bytter til en "
+            "annen app før de er ferdige."
+        ),
+    },
+}
+"""Truthful per-locale iOS copy layered over Android translation provenance.
+
+Only values whose Android translation names Android or Google Play belong here. The override is
+part of catalog generation, snapshotting, syncing, and auditing, so a later Android translation
+refresh cannot restore the platform-specific wording.
+"""
+
+
+REMOVED_PRODUCTION_LOCALIZATION_KEYS = frozenset(
+    {
+        "custom_repositories_help_summary",
+        "how_to_help",
+        "prefs_night_mode_summary",
+        "proceed_google_play",
+        "rate_message1",
+        "rate_message2",
+        "rate_message3",
+        "rate_message4",
+        "rate_message5",
+        "rate_message6",
+        "rate_title",
+        "send_email",
+        "text_maintainers",
+    }
+)
+"""Dead or platform-specific resource keys that must not ship in either iOS resource tree.
+
+The shared sync removes these assignments from every locale, while the read-only guard rejects
+both resource rows and future Swift references. This prevents deleted Android-only UI from being
+silently restored by the next translation import.
+"""
+
+
+PLATFORM_REFERENCE_INTEROP_ALLOWLIST = frozenset(
+    {
+        "android_backup_applied",
+        "android_backup_applied_summary",
+        "android_backup_unsupported_category_%@",
+        "android_database_backup_exported_summary",
+        "android_database_backup_required",
+        "android_database_backup_wrong_restore_target",
+        "android_module_backup_exported_summary",
+    }
+)
+"""Production localization keys allowed to use the literal term `android` for interoperability.
+
+Each entry labels Android database or module backup data that iOS imports or exports. Store names
+remain forbidden for every key, including these entries. Internal key names are irrelevant to the
+audit; the exception applies only to the literal `android` term in rendered copy.
+"""
+
+
 ANDROID_SHARED_SAME_NAME_EXCLUSIONS = {
     "disable_sync",
     "hidden",
@@ -518,6 +584,40 @@ AI_LOCALIZATION_DEFAULT_RE = re.compile(
     r'defaultValue:\s*"((?:[^"\\]|\\.)*)"',
     re.DOTALL,
 )
+SHIPPED_SWIFT_LOCALIZATION_FALLBACK_CALL_SPECS = (
+    (
+        re.compile(r'\bString\s*(?P<open>\()(?=\s*localized\s*:)', re.DOTALL),
+        "localized",
+        "defaultValue",
+    ),
+    (
+        re.compile(
+            r'(?<![A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*\.)?localized\s*'
+            r'(?P<open>\()',
+            re.DOTALL,
+        ),
+        None,
+        "default",
+    ),
+    (
+        re.compile(r'\bNSLocalizedString\s*(?P<open>\()', re.DOTALL),
+        None,
+        "value",
+    ),
+    (
+        re.compile(r'\blocalizedString\s*(?P<open>\()', re.DOTALL),
+        "forKey",
+        "value",
+    ),
+)
+"""Literal fallback-call forms used by discoverable shipped Swift localization APIs.
+
+Each entry locates an outer call parenthesis and declares the key/fallback argument labels. A
+`None` key label means the first positional argument. Balanced argument parsing handles nested
+calls after a match; dynamic keys and fallback expressions remain outside this literal contract.
+"""
+
+
 ANDROID_RUNTIME_RESOURCE_KEY_PATTERNS = (
     re.compile(r'localizedDrawerString\(\s*"([^"]+)"'),
     re.compile(r'localizedAndroidOverflowString\(\s*androidKey:\s*"([^"]+)"'),
@@ -534,7 +634,7 @@ SHIPPED_SWIFT_LOCALIZATION_PATTERNS = (
     re.compile(r'localizedString\(\s*forKey:\s*"([^"]+)"', re.DOTALL),
     re.compile(
         r'\b(?:titleKey|bodyKey|labelKey|emphasizedTextKey|localizationKey|'
-        r'messageKey|summaryKey|descriptionKey|placeholderKey)\s*:\s*"([^"]+)"',
+        r'messageKey|summaryKey|descriptionKey|placeholderKey|formatKey)\s*:\s*"([^"]+)"',
         re.DOTALL,
     ),
 )
@@ -658,16 +758,19 @@ def discover_unlocalized_swift_ui_literals(repo_root: Path) -> list[str]:
     return failures
 
 
-def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | None:
-    """Parse one ordinary Swift string after its opening quote.
+def parse_swift_string_literal_details(
+    source: str,
+    start: int,
+) -> tuple[str, str, int] | None:
+    """Parse one ordinary Swift string and return its closing offset.
 
     - Parameters:
       - source: Complete Swift source text.
       - start: Offset immediately after the opening quote.
-    - Returns: Raw literal content plus only the text outside interpolations, or
-      ``None`` for an unterminated literal.
-    - Side effects: none.
-    - Failure modes: malformed source returns ``None`` rather than inventing a
+    - Returns: Raw content, text outside interpolations, and the offset immediately after the
+      closing quote; returns ``None`` for an unterminated literal.
+    - Side effects: None.
+    - Failure modes: Malformed source returns ``None`` rather than inventing a
       localization violation.
     """
     raw: list[str] = []
@@ -680,7 +783,7 @@ def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | Non
 
         if interpolation_depth == 0:
             if character == '"':
-                return "".join(raw), "".join(prose)
+                return "".join(raw), "".join(prose), index + 1
             if character == "\\" and index + 1 < len(source):
                 next_character = source[index + 1]
                 raw.extend((character, next_character))
@@ -693,19 +796,15 @@ def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | Non
             index += 1
             continue
 
-        raw.append(character)
         if character == '"':
-            index += 1
-            while index < len(source):
-                nested_character = source[index]
-                raw.append(nested_character)
-                index += 1
-                if nested_character == "\\" and index < len(source):
-                    raw.append(source[index])
-                    index += 1
-                elif nested_character == '"':
-                    break
+            nested = parse_swift_string_literal_details(source, index + 1)
+            if nested is None:
+                return None
+            _, _, nested_end = nested
+            raw.append(source[index:nested_end])
+            index = nested_end
             continue
+        raw.append(character)
         if character == "(":
             interpolation_depth += 1
         elif character == ")":
@@ -713,6 +812,179 @@ def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | Non
         index += 1
 
     return None
+
+
+def parse_swift_string_literal(source: str, start: int) -> tuple[str, str] | None:
+    """Parse one ordinary Swift string for visible-literal source auditing.
+
+    - Parameters:
+      - source: Complete Swift source text.
+      - start: Offset immediately after the opening quote.
+    - Returns: Raw literal content plus text outside interpolations, or ``None`` for malformed
+      source.
+    - Side effects: None.
+    - Failure modes: Delegates malformed/unterminated input handling to the detailed parser and
+      returns ``None``.
+    """
+    parsed = parse_swift_string_literal_details(source, start)
+    if parsed is None:
+        return None
+    raw, prose, _ = parsed
+    return raw, prose
+
+
+def parse_balanced_swift_call_arguments(source: str, open_index: int) -> list[str] | None:
+    """Split one Swift call into top-level argument source fragments.
+
+    Nested calls, collections, closures, ordinary string literals, interpolations, and comments
+    are skipped while finding top-level commas and the matching outer parenthesis. The parser is
+    intentionally limited to source structure needed by literal localization fallback calls.
+    Comments are emitted as a single whitespace character so adjacent argument labels and values
+    cannot merge and comment text cannot obstruct literal discovery.
+
+    - Parameters:
+      - source: Complete Swift source text containing the call.
+      - open_index: Offset of the call's opening parenthesis.
+    - Returns: Ordered top-level argument fragments, or ``None`` for malformed/unbalanced input.
+    - Side effects: None.
+    - Failure modes: Unsupported or unterminated syntax returns ``None`` so it cannot be mistaken
+      for a verified literal fallback.
+    """
+    if open_index >= len(source) or source[open_index] != "(":
+        return None
+
+    arguments: list[str] = []
+    current_argument: list[str] = []
+    expected_closers: list[str] = []
+    index = open_index + 1
+
+    while index < len(source):
+        if source.startswith("//", index):
+            current_argument.append(" ")
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            current_argument.append(" ")
+            comment_depth = 1
+            index += 2
+            while index < len(source) and comment_depth:
+                if source.startswith("/*", index):
+                    comment_depth += 1
+                    index += 2
+                elif source.startswith("*/", index):
+                    comment_depth -= 1
+                    index += 2
+                else:
+                    index += 1
+            if comment_depth:
+                return None
+            continue
+
+        character = source[index]
+        if character == '"':
+            parsed = parse_swift_string_literal_details(source, index + 1)
+            if parsed is None:
+                return None
+            _, _, string_end = parsed
+            current_argument.append(source[index:string_end])
+            index = string_end
+            continue
+        if character in "([{":
+            expected_closers.append({"(": ")", "[": "]", "{": "}"}[character])
+            current_argument.append(character)
+            index += 1
+            continue
+        if character in ")]}" and expected_closers:
+            if character != expected_closers[-1]:
+                return None
+            expected_closers.pop()
+            current_argument.append(character)
+            index += 1
+            continue
+        if character == ")":
+            final_argument = "".join(current_argument).strip()
+            if final_argument:
+                arguments.append(final_argument)
+            return arguments
+        if character == "," and not expected_closers:
+            arguments.append("".join(current_argument).strip())
+            current_argument = []
+            index += 1
+            continue
+        current_argument.append(character)
+        index += 1
+
+    return None
+
+
+def parse_literal_swift_string_expression(expression: str) -> str | None:
+    """Return raw content when an argument expression is exactly one ordinary Swift string.
+
+    - Parameter expression: Source fragment after an argument label or in a positional slot.
+    - Returns: Raw literal content, including interpolation source, or ``None`` for dynamic,
+      raw-string, concatenated, or malformed expressions.
+    - Side effects: None.
+    - Failure modes: Non-literal expressions are deliberately excluded rather than approximated.
+    """
+    stripped = expression.strip()
+    if not stripped.startswith('"'):
+        return None
+    parsed = parse_swift_string_literal_details(stripped, 1)
+    if parsed is None:
+        return None
+    raw, _, end = parsed
+    if stripped[end:].strip():
+        return None
+    return raw
+
+
+def discover_literal_swift_localization_defaults(source: str) -> dict[str, set[str]]:
+    """Discover literal key/fallback pairs from supported Swift localization calls.
+
+    Call-start regexes identify only the existing localization APIs; a balanced argument parser
+    then resolves literal key and fallback slots without assuming nested argument expressions are
+    parenthesis-free. Dynamic keys or fallback expressions remain outside the contract.
+
+    - Parameter source: Complete shipped Swift source text.
+    - Returns: Deterministic fallback values grouped by stable literal localization key.
+    - Side effects: None.
+    - Failure modes: Malformed or non-literal calls are skipped and remain subject to ordinary
+      compiler/runtime behavior rather than being falsely certified by this audit.
+    """
+    defaults: dict[str, set[str]] = {}
+    for pattern, key_label, fallback_label in SHIPPED_SWIFT_LOCALIZATION_FALLBACK_CALL_SPECS:
+        for match in pattern.finditer(source):
+            arguments = parse_balanced_swift_call_arguments(source, match.start("open"))
+            if arguments is None:
+                continue
+
+            positional: list[str] = []
+            named: dict[str, str] = {}
+            for argument in arguments:
+                labeled = re.match(
+                    r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)\Z",
+                    argument,
+                    re.DOTALL,
+                )
+                if labeled is None:
+                    positional.append(argument)
+                else:
+                    named[labeled.group(1)] = labeled.group(2)
+
+            key_expression = named.get(key_label) if key_label is not None else None
+            if key_label is None and positional:
+                key_expression = positional[0]
+            fallback_expression = named.get(fallback_label)
+            if key_expression is None or fallback_expression is None:
+                continue
+
+            key = parse_literal_swift_string_expression(key_expression)
+            fallback = parse_literal_swift_string_expression(fallback_expression)
+            if key is None or fallback is None or r"\(" in key:
+                continue
+            defaults.setdefault(key, set()).add(unescape_ios(fallback))
+    return defaults
 
 
 def discover_android_owned_swift_localization_keys(
@@ -729,6 +1001,8 @@ def discover_android_owned_swift_localization_keys(
     """
     source_keys: dict[str, str] = {}
     for ios_key in discover_shipped_swift_localization_keys(repo_root):
+        if ios_key in REMOVED_PRODUCTION_LOCALIZATION_KEYS:
+            continue
         android_key = ANDROID_SHARED_KEY_MAPPINGS.get(ios_key, ios_key)
         if android_key in android_base:
             source_keys[ios_key] = android_key
@@ -807,10 +1081,17 @@ def discover_ai_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
 def discover_shipped_swift_localization_defaults(repo_root: Path) -> dict[str, set[str]]:
     """Return every shipped literal localization fallback grouped by resource key.
 
-    Product code can render a ``defaultValue`` whenever a resource is unavailable, so
-    Android parity requires those fallbacks to match Android English just as strictly
-    as the bundled `.strings` value. Test sources are excluded, interpolation remains
-    outside this literal-only contract, and all file access is read-only.
+    Product code can render a fallback whenever a resource is unavailable, so Android parity and
+    platform-neutral copy apply just as strictly as they do to bundled `.strings` values. The
+    inventory covers `String(localized:defaultValue:)`, project `localized(_:default:)` helpers,
+    `NSLocalizedString` values, and `Bundle.localizedString` values. Test sources are excluded and
+    interpolation remains outside this literal-only contract.
+
+    - Parameter repo_root: iOS checkout containing the shipped `AndBible` and `Sources` trees.
+    - Returns: Deterministically discovered fallback values grouped by their literal resource key.
+    - Side effects: Reads shipped Swift source files without mutating them.
+    - Failure modes: File-system or UTF-8 decoding errors propagate to the caller rather than
+      silently lowering audit coverage.
     """
     defaults: dict[str, set[str]] = {}
     for relative_directory in SHIPPED_SWIFT_LOCALIZATION_DIRECTORIES:
@@ -821,8 +1102,8 @@ def discover_shipped_swift_localization_defaults(repo_root: Path) -> dict[str, s
             if "Tests" in source_path.parts:
                 continue
             source = source_path.read_text(encoding="utf-8")
-            for key, raw_default in AI_LOCALIZATION_DEFAULT_RE.findall(source):
-                defaults.setdefault(key, set()).add(unescape_ios(raw_default))
+            for key, values in discover_literal_swift_localization_defaults(source).items():
+                defaults.setdefault(key, set()).update(values)
     return defaults
 
 
@@ -859,7 +1140,11 @@ def missing_android_owned_localization_catalog_keys(
     }
     android_owned_source_keys.update(discover_ai_localization_keys(repo_root))
     android_owned_source_keys.update(discover_android_runtime_resource_keys(repo_root))
-    return sorted(android_owned_source_keys - catalog_keys)
+    return sorted(
+        android_owned_source_keys
+        - REMOVED_PRODUCTION_LOCALIZATION_KEYS
+        - catalog_keys
+    )
 
 
 def default_repo_root() -> Path:
@@ -1176,6 +1461,82 @@ def remove_ios_strings_keys(path: Path, keys: set[str]) -> tuple[bool, int]:
         return False, 0
     path.write_text(new_text, encoding="utf-8")
     return True, removed
+
+
+def forbidden_platform_terms_for_localization(key: str, value: str) -> list[str]:
+    """Return prohibited platform terms in one rendered localization value.
+
+    Exact backup/import interoperability keys may truthfully use the literal term `android`.
+    Google Play and Play Store remain prohibited for those keys because a file-format boundary
+    never requires store marketing. Matching is case-insensitive and deterministic.
+
+    - Parameters:
+      - key: Localization resource key that owns the rendered value.
+      - value: Parsed resource value or literal Swift fallback presented to a user.
+    - Returns: Forbidden shared-contract terms in their declared contract order.
+    - Side effects: None.
+    - Failure modes: None; empty inputs simply produce no matches.
+    """
+    allowed_terms = {"android"} if key in PLATFORM_REFERENCE_INTEROP_ALLOWLIST else set()
+    lowered = value.lower()
+    return [
+        term
+        for term in FORBIDDEN_PLATFORM_REFERENCE_TERMS
+        if term not in allowed_terms and term in lowered
+    ]
+
+
+def audit_production_platform_localizations(repo_root: Path) -> list[str]:
+    """Reject obsolete resources and other-platform wording in reachable iOS copy.
+
+    Reachability comes from statically declared Swift localization lookups, including indirect
+    presentation-model keys. Parsed `.strings` values and literal Swift fallbacks are inspected,
+    so a missing resource cannot expose platform-specific text while key names and comments remain
+    irrelevant. Exact Android database/module backup interoperability keys may use `android`, but
+    no key may name Google Play or Play Store. The audit is deterministic and read-only; missing
+    trees simply contribute no resource rows to this focused check.
+
+    - Parameter repo_root: iOS checkout containing product sources and both localization trees.
+    - Returns: Sorted, actionable contract failures; an empty list means the platform boundary is
+      clean.
+    - Side effects: Reads Swift and `.strings` files without mutating them.
+    - Failure modes: Malformed `.strings` rows are handled by the existing resource lint rather
+      than being guessed here.
+    """
+    failures: list[str] = []
+    referenced_keys = discover_shipped_swift_localization_keys(repo_root)
+    referenced_keys.update(discover_android_runtime_resource_keys(repo_root))
+
+    for key in sorted(referenced_keys & REMOVED_PRODUCTION_LOCALIZATION_KEYS):
+        failures.append(f"removed production localization key still referenced: {key}")
+
+    for key, values in sorted(discover_shipped_swift_localization_defaults(repo_root).items()):
+        forbidden_terms = {
+            term
+            for value in values
+            for term in forbidden_platform_terms_for_localization(key, value)
+        }
+        for forbidden in sorted(forbidden_terms):
+            failures.append(
+                "forbidden platform reference in production Swift fallback: "
+                f"{key}:{forbidden}"
+            )
+
+    for tree in ("AndBible", "Localizations"):
+        for path in sorted((repo_root / tree).glob("*.lproj/Localizable.strings")):
+            locale = path.parent.name.removesuffix(".lproj")
+            values = parse_ios_strings(path)
+            for key in sorted(REMOVED_PRODUCTION_LOCALIZATION_KEYS & set(values)):
+                failures.append(f"obsolete production localization key remains: {tree}:{locale}:{key}")
+            for key in sorted(referenced_keys & set(values)):
+                value = unescape_ios(values[key])
+                for forbidden in forbidden_platform_terms_for_localization(key, value):
+                    failures.append(
+                        "forbidden platform reference in production resource value: "
+                        f"{tree}:{locale}:{key}:{forbidden}"
+                    )
+
+    return sorted(failures)
 
 
 def sync_discrete_security_localizations(
@@ -1550,8 +1911,11 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     the structured sync can bootstrap every Android translation instead of
     relying on ad hoc locale edits. The returned mismatch list records current
     iOS English drift or absence, but those keys remain in scope so the sync and
-    audit paths can repair and enforce parity. Missing Android provenance for an
-    AI source key raises ``ValueError`` before any file can be written.
+    audit paths can repair and enforce parity. Explicitly retired production
+    keys are excluded from both the shared catalog and its generated Android
+    resource inventory, preventing snapshot regeneration from reviving them.
+    Missing Android provenance for an AI source key raises ``ValueError`` before
+    any file can be written.
     """
     ios_english = {
         key: unescape_ios(value)
@@ -1569,12 +1933,15 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
         key: key
         for key in set(ios_english) & set(android_base)
         if key not in ANDROID_SHARED_SAME_NAME_EXCLUSIONS
+        and key not in REMOVED_PRODUCTION_LOCALIZATION_KEYS
     }
     source_key_by_key.update(
         {
             ios_key: android_key
             for ios_key, android_key in ANDROID_SHARED_KEY_MAPPINGS.items()
-            if ios_key in ios_english and android_key in android_base
+            if ios_key in ios_english
+            and android_key in android_base
+            and ios_key not in REMOVED_PRODUCTION_LOCALIZATION_KEYS
         }
     )
     missing_android_sources: list[str] = []
@@ -1651,9 +2018,10 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
             for key, value in parse_android_strings(android_root / qualifier / "strings.xml").items()
         }
         locale_translations: dict[str, str] = {}
+        platform_overrides = IOS_PLATFORM_LOCALIZED_OVERRIDES.get(locale, {})
         for key in safe_keys:
             source_key = source_key_by_key[key]
-            locale_value = locale_strings.get(source_key)
+            locale_value = platform_overrides.get(key, locale_strings.get(source_key))
             if locale_value is None or locale_value == android_base[source_key]:
                 continue
             non_english_by_key[key].append(locale)
@@ -1667,7 +2035,9 @@ def build_android_shared_localization(repo_root: Path, android_root: Path) -> An
     return AndroidSharedLocalization(
         safe_keys=safe_keys,
         english_mismatch_keys=english_mismatch_keys,
-        android_resource_keys=sorted(android_base),
+        android_resource_keys=sorted(
+            set(android_base) - REMOVED_PRODUCTION_LOCALIZATION_KEYS
+        ),
         source_key_by_key=dict(sorted(source_key_by_key.items())),
         english_by_key=english_by_key,
         non_english_by_key=non_english_by_key,
@@ -1943,10 +2313,12 @@ def sync_android_shared_translations(
     The sync covers both `AndBible` and `Localizations` locale trees. Passing no
     key filter preserves the full shared-catalog behavior; a filter limits both
     English and translated writes to that set. Non-English resources are
-    rewritten only where Android has a translated value. It mutates only
-    existing iOS locale directories and returns deterministic write counts for
-    reporting and tests. A stale Android catalog raises ``ValueError`` before
-    writes begin, preventing a partial locale import.
+    rewritten only where Android has a translated value. The full sync also
+    removes keys classified as dead or platform-specific from every locale so
+    an upstream refresh cannot revive them. It mutates only existing iOS locale
+    directories and returns deterministic write counts for reporting and tests.
+    A stale Android catalog raises ``ValueError`` before writes begin, preventing
+    a partial locale import.
     """
     requested_keys = set(catalog.english_by_key) if included_keys is None else included_keys
     missing_catalog_keys = sorted(requested_keys - set(catalog.english_by_key))
@@ -1961,7 +2333,7 @@ def sync_android_shared_translations(
             + ", ".join(missing_catalog_keys)
         )
 
-    files_changed = 0
+    changed_paths: set[Path] = set()
     values_written = 0
     english_values = {
         key: value
@@ -1975,7 +2347,7 @@ def sync_android_shared_translations(
             continue
         changed, written = update_ios_strings_file(path, english_values)
         if changed:
-            files_changed += 1
+            changed_paths.add(path)
             values_written += written
 
     ios_locales = sorted(
@@ -1998,11 +2370,22 @@ def sync_android_shared_translations(
                 continue
             changed, written = update_ios_strings_file(path, expected_values)
             if changed:
-                files_changed += 1
+                changed_paths.add(path)
                 values_written += written
 
+    if included_keys is None:
+        for tree in ("AndBible", "Localizations"):
+            for path in sorted((repo_root / tree).glob("*.lproj/Localizable.strings")):
+                changed, removed = remove_ios_strings_keys(
+                    path,
+                    set(REMOVED_PRODUCTION_LOCALIZATION_KEYS),
+                )
+                if changed:
+                    changed_paths.add(path)
+                    values_written += removed
+
     return SharedLocalizationSyncResult(
-        files_changed=files_changed,
+        files_changed=len(changed_paths),
         values_written=values_written,
     )
 
@@ -2370,6 +2753,11 @@ def main() -> int:
         failures.append("Unlocalized shipped SwiftUI literals:")
         failures.extend(f"  - {item}" for item in unlocalized_swift_ui_literals)
 
+    platform_localization_failures = audit_production_platform_localizations(args.repo_root)
+    if platform_localization_failures:
+        failures.append("Production platform-localization failures:")
+        failures.extend(f"  - {item}" for item in platform_localization_failures)
+
     try:
         discrete_security_failures = audit_discrete_security_localizations(
             args.repo_root,
@@ -2470,6 +2858,7 @@ def main() -> int:
     print(f"- discrete security-copy locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     print(f"- product-feedback localization locales: {len(LOCALE_TO_ANDROID_VALUES)}")
     print(f"- unlocalized shipped SwiftUI literals: {len(unlocalized_swift_ui_literals)}")
+    print(f"- production platform-localization failures: {len(platform_localization_failures)}")
     if audit.shared_localization is not None:
         print(f"- android shared source keys: {len(audit.shared_localization.safe_keys)}")
         print(f"- android shared explicit mapped keys: {len(ANDROID_SHARED_KEY_MAPPINGS)}")

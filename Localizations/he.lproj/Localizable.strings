@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "הוספת מאגר מיוחד";
 "custom_repositories" = "מקורות מיוחדים";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "האם למחוק %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "עבור לפסוק";
 "prefs_night_mode_automatic" = "אוטומטי";
 "prefs_night_mode_manual" = "ידני";
-"prefs_night_mode_summary" = "האם להחליף למצב לילה אוטומטית (אם המכשיר תומך), ידנית, או לפי הגדרות המערכת (אנדרואיד 10 ומעלה). ניתן להחליף מצב ידנית מתפריט 3-הנקודות במסך הראשי.";
 "prefs_night_mode_system" = "מערכת";
 "prefs_night_mode_title" = "מעבר למצב לילה";
 "prefs_open_links_in_special_window_summary" = "פתיחת קישורים בחלון מיוחד, להצגה מהירה של מראי מקום מקבילים ו-STRONG";
@@ -1184,7 +1182,6 @@
 "font_size_title" = "גודל גופן";
 "help_reading_progress_text" = "התקדמות הקריאה והשינון של התנ\"ך שלך במבט אחד. סמן פרקים כנקראו ידנית עם כפתור \"סמן כנקרא\", או הפעל מעקב אוטומטי. תרגילי שינון נכללים גם בתצוגה זו.";
 "history_for" = "היסטוריה (%1$@: חלון %2$d)";
-"how_to_help" = "אנא קראו מה אתם יכולים לעשות כדי לעזור";
 "id" = "מזהה";
 "last_updated_at" = "עודכן לאחרונה ב-";
 "line_spacing_title" = "מרווח שורות";
@@ -1216,13 +1213,7 @@
 "prefs_line_spacing_pt" = "מרווח שורות %1.1fx";
 "prefs_text_size_sample_text" = "טקסט לדוגמה";
 "prefs_top_margin_title" = "שוליים עליונים";
-"proceed_google_play" = "להמשיך אל Google Play";
 "progress_sync_title" = "התקדמות קריאה";
-"rate_message3" = "אם טקסט מסויים אינו זמין ביישום, %@.";
-"rate_message4" = "המפתחים של יישום זה אינם אחראים על תחזוקת מסמכים/תנ\"כים.";
-"rate_message5" = "ביקורות חיוביות ומפורטות עוזרות מאוד לפרויקט הקוד הפתוח AndBible. תודה!";
-"rate_message6" = "בטרם תכתבו סקירה שלילית, אנא שקלו את הדברים הבאים:";
-"rate_title" = "דירוג וביקורת האפליקציה";
 "reading_progress_settings" = "התקדמות ושינון";
 "reading_progress_settings_summary" = "הגדרות מעקב אוטומטי, שינון ותרגול הקלדה";
 "reset_database_confirm" = "פעולה זו תמחק לצמיתות את כל הנתונים ב-\"%1$@\" ותאפס אותו למצב ראשוני. לא ניתן לבטל פעולה זו.\n\nהאם אתה בטוח?";
@@ -1232,10 +1223,8 @@
 "reset_something" = "איפוס: %1$@";
 "search_bible_section_group_prompt" = "תחום החיפוש";
 "search_index_not_created" = "אין אינדקס";
-"send_email" = "לשלוח אימייל אל המפתחים";
 "start_offset" = "הסטת התחלה";
 "synchronizing" = "מסנכרן...";
-"text_maintainers" = "אנא דווחו על בעיות אל המתחזקים של הטקסט/מסמך/תנ\"ך";
 "type_text_or_bible_reference" = "הקלד טקסט או מראה מקום";
 "unlock_info" = "מידע לפתיחת מסמך מוצפן";
 "value_mm" = "%d מ\"מ";
