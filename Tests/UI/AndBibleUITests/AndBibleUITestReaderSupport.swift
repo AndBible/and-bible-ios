@@ -531,8 +531,6 @@ extension AndBibleUITests {
             return "Label settings…"
         case "readerOpenHelpAction":
             return "Help & tips"
-        case "readerSponsorDevelopmentAction":
-            return "Buy development work"
         case "readerNeedHelpAction":
             return "Need Help"
         case "readerContributeAction":

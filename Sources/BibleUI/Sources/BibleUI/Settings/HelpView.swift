@@ -149,19 +149,6 @@ struct HelpView: View {
                 )
                 .font(.system(size: 17))
 
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    AndBibleIconView(name: "DrawerSponsorDevelopment", size: 20)
-                        .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
-                        .accessibilityHidden(true)
-                    Text(String(localized: "buy_development2", defaultValue: "Support project") + ":")
-                        .fontWeight(.semibold)
-                    AndroidDialogLink(
-                        String(localized: "buy_development", defaultValue: "Sponsor app development"),
-                        destination: URL(string: "https://shop.andbible.org")!
-                    )
-                }
-                .font(.system(size: 17))
-
                 if showsVersion {
                     Text(AndBibleAppVersionMetadata.current().helpFooterText)
                         .font(.footnote.italic())

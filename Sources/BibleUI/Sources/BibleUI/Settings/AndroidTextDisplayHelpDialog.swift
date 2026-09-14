@@ -49,17 +49,6 @@ struct AndroidTextDisplayHelpDialog: View {
                         scopeExplanation
 
                         resetExplanation
-
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            AndBibleIconView(name: "DrawerSponsorDevelopment", size: 22)
-                                .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
-                            Text(String(localized: "buy_development2", defaultValue: "Support project") + ":")
-                                .fontWeight(.semibold)
-                            AndroidDialogLink(
-                                String(localized: "buy_development", defaultValue: "Buy development work"),
-                                destination: URL(string: "https://shop.andbible.org")!
-                            )
-                        }
                     }
                     .font(.system(size: 17))
                     .frame(maxWidth: .infinity, alignment: .leading)
