@@ -32,6 +32,13 @@ APPLE_SUPPORTED_LOCALES = {
     "zh-Hant",
 }
 
+# The number of locales `appstore/locales.yml` maps and this repo therefore
+# renders into `fastlane/metadata/`. Defined once here and reused by every
+# test that needs to assert it actually inspected the whole rendered tree
+# (not an empty or partially-deleted one) rather than just hard-coding a
+# second copy of the number.
+EXPECTED_LOCALE_COUNT = 34
+
 
 class LocaleConfigTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -186,7 +193,7 @@ class RealLocaleMapTests(unittest.TestCase):
         self.config = meta.load_locale_config(REPO_ROOT / "appstore" / "locales.yml")
 
     def test_generates_thirty_four_locales(self) -> None:
-        self.assertEqual(len(self.config.mappings), 34)
+        self.assertEqual(len(self.config.mappings), EXPECTED_LOCALE_COUNT)
 
     def test_every_target_is_an_app_store_locale(self) -> None:
         for _, apple in self.config.mappings:
@@ -281,13 +288,24 @@ class RenderedPlatformNameTests(unittest.TestCase):
 
     def test_every_rendered_first_paragraph_names_our_platform(self) -> None:
         metadata_root = REPO_ROOT / "fastlane" / "metadata"
+        # Derive the line index from the template rather than hard-coding it,
+        # so a future reshuffle of description_template.txt can't silently
+        # misalign this assertion against the wrong line.
+        template_lines = (
+            (REPO_ROOT / "appstore" / "description_template.txt")
+            .read_text(encoding="utf-8")
+            .split("\n")
+        )
+        paragraph_1_1_index = template_lines.index("{{paragraph_1_1}}")
         missing: list[str] = []
+        inspected: list[str] = []
         for locale_dir in sorted(
             path for path in metadata_root.iterdir() if path.is_dir()
         ):
             locale = locale_dir.name
             if locale == "review_information":
                 continue
+            inspected.append(locale)
             if locale in LOCALES_WITH_NO_PLATFORM_REFERENCE:
                 continue
             description = locale_dir / "description.txt"
@@ -298,12 +316,23 @@ class RenderedPlatformNameTests(unittest.TestCase):
             lines = description.read_text(encoding="utf-8").split("\n")
             self.assertGreater(
                 len(lines),
-                2,
+                paragraph_1_1_index,
                 f"{locale}: description.txt is shorter than the template",
             )
-            paragraph_1_1 = lines[2]
+            paragraph_1_1 = lines[paragraph_1_1_index]
             if "iOS" not in paragraph_1_1:
                 missing.append(locale)
+        # A guard that iterates an empty (or partially rendered) directory
+        # passes vacuously - assert the whole rendered tree was actually
+        # inspected, not just an empty `missing` list.
+        self.assertEqual(
+            len(inspected),
+            EXPECTED_LOCALE_COUNT,
+            f"expected to inspect {EXPECTED_LOCALE_COUNT} locales under "
+            f"{metadata_root}, found {len(inspected)} instead - an empty or "
+            "partially-rendered metadata tree would otherwise pass this "
+            "guard vacuously",
+        )
         self.assertEqual(
             missing,
             [],
@@ -313,6 +342,22 @@ class RenderedPlatformNameTests(unittest.TestCase):
         )
 
 
+# Matches any "shop.<domain>" reference, not just the one shop domain Apple
+# actually rejected. The project has since grown a second shop domain
+# (`shop.tuomasairaksinen.fi`, see README.md), and a guard hard-coded to
+# `shop.andbible.org` would wave that one through - or any future shop link -
+# without ever noticing it's the same external-purchase route.
+SHOP_LINK_PATTERN = re.compile(r"shop\.[a-z0-9-]+\.[a-z]{2,}", re.IGNORECASE)
+
+# The Android description template's donation section: a heading plus a
+# paragraph linking to the shop (`{{buy_title}}`, `{{buy_1}}`, `{{buy_2}}`,
+# `{{buy_development_link}}`). Re-adding just these placeholders to
+# `appstore/description_template.txt` would restore the "Support by
+# sponsoring development time!" route while still passing a URL-only check,
+# since the URL itself only appears after rendering.
+BUY_TEMPLATE_KEY_PATTERN = re.compile(r"\{\{\s*buy_\w*\s*\}\}")
+
+
 class NoExternalPurchaseRouteTests(unittest.TestCase):
     """App Store Review Guideline 3.1.1 covers metadata as well as the app.
 
@@ -320,28 +365,62 @@ class NoExternalPurchaseRouteTests(unittest.TestCase):
     external purchase route sat in all 34 descriptions. The approved
     configuration of the developer's other iOS app mentions sponsorship
     in-app and nowhere in its store copy, and that is what this asserts.
+
+    This guards the ROUTE, not one URL: it matches any `shop.<domain>` link
+    (the project has two - `shop.andbible.org` and
+    `shop.tuomasairaksinen.fi`), and separately asserts the template's
+    `buy_*` placeholders - the heading and paragraph that route points to -
+    are not referenced at all, so restoring them can't slip past a
+    rendered-text-only check.
     """
 
-    def test_no_rendered_description_links_to_the_shop(self) -> None:
+    def test_no_rendered_description_links_to_a_shop_domain(self) -> None:
         metadata_root = REPO_ROOT / "fastlane" / "metadata"
         offenders: list[str] = []
+        inspected: list[str] = []
         for locale_dir in sorted(
             path for path in metadata_root.iterdir() if path.is_dir()
         ):
             if locale_dir.name == "review_information":
                 continue
+            inspected.append(locale_dir.name)
             description = locale_dir / "description.txt"
             self.assertTrue(
                 description.is_file(),
                 f"{locale_dir.name}: no description.txt in the committed tree",
             )
-            if "shop.andbible.org" in description.read_text(encoding="utf-8"):
+            if SHOP_LINK_PATTERN.search(description.read_text(encoding="utf-8")):
                 offenders.append(locale_dir.name)
+        # A guard that iterates an empty (or partially rendered) directory
+        # passes vacuously - assert the whole rendered tree was actually
+        # inspected, not just an empty `offenders` list.
+        self.assertEqual(
+            len(inspected),
+            EXPECTED_LOCALE_COUNT,
+            f"expected to inspect {EXPECTED_LOCALE_COUNT} locales under "
+            f"{metadata_root}, found {len(inspected)} instead - an empty or "
+            "partially-rendered metadata tree would otherwise pass this "
+            "guard vacuously",
+        )
         self.assertEqual(
             offenders,
             [],
             "these descriptions still carry an external purchase route "
             "(guideline 3.1.1 names metadata explicitly)",
+        )
+
+    def test_description_template_does_not_reference_buy_keys(self) -> None:
+        template = REPO_ROOT / "appstore" / "description_template.txt"
+        text = template.read_text(encoding="utf-8")
+        found = BUY_TEMPLATE_KEY_PATTERN.findall(text)
+        self.assertEqual(
+            found,
+            [],
+            "appstore/description_template.txt references buy_* keys - "
+            "re-adding the donation/sponsorship section would restore the "
+            "external purchase route Apple rejected 1.0 over (guideline "
+            "3.1.1); the Android source keeps these keys deliberately, do "
+            "not port them into the iOS template",
         )
 
 

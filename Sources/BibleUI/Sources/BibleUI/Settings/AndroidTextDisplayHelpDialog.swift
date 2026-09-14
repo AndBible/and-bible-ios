@@ -11,7 +11,7 @@ import SwiftUI
 
  Inputs: current text-display scope and owner dismissal callback
 
- Output: one scrollable AppCompat help dialog with tutorial and project-support links
+ Output: one scrollable AppCompat help dialog with a tutorial link
 
  Side effects: opens explicitly tapped links and invokes `onDismiss` after outside-tap or OK
 
