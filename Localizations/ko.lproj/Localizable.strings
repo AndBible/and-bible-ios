@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "사용자 지정 저장소 추가";
 "custom_repositories" = "사용자 지정 저장소";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ 을 (를) 삭제하시겠습니까?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "절로 이동";
 "prefs_night_mode_automatic" = "자동";
 "prefs_night_mode_manual" = "수동";
-"prefs_night_mode_summary" = "다크 모드로 자동으로 변경할지 (기기가 지원하는 경우), 수동으로 변경할지 아니면 기기의 세팅을 따를지 (안드로이드 10 이상). 수동 변경은 메인 화면의 점 3개 옵션 메뉴에서 할 수 있습니다.";
 "prefs_night_mode_system" = "시스템";
 "prefs_night_mode_title" = "다크 모드 변경";
 "prefs_open_links_in_special_window_summary" = "링크를 누르면 상호 참조와 스트롱 넘버를 빠르게 보여주기 위해 특수한 창에 엽니다";
@@ -1184,7 +1182,6 @@
 "font_size_title" = "글꼴 크기";
 "help_reading_progress_text" = "성경 읽기 및 암송 진도를 한눈에 확인합니다. \"읽음으로 표시\" 버튼으로 장을 수동으로 읽음 표시하거나, 자동 추적을 활성화하세요. 암송 연습도 이 보기에 반영됩니다.";
 "history_for" = "기록 (%1$@: 창 %2$d)";
-"how_to_help" = "도움을 줄 수 있는 방법을 읽어보세요";
 "id" = "식별자";
 "last_updated_at" = "마지막 업데이트";
 "line_spacing_title" = "줄 간격";
@@ -1216,13 +1213,7 @@
 "prefs_line_spacing_pt" = "줄 간격 %1.1fx";
 "prefs_text_size_sample_text" = "샘플 텍스트";
 "prefs_top_margin_title" = "상단 여백";
-"proceed_google_play" = "Google Play로 이동";
 "progress_sync_title" = "읽기 진행";
-"rate_message3" = "앱에서 특정 텍스트를 사용할 수 없는 경우, %@.";
-"rate_message4" = "이 앱의 개발자들은 문서 유지 관리에 대한 책임이 없습니다.";
-"rate_message5" = "긍정적이고 자세한 리뷰는 AndBible 오픈소스 프로젝트에 큰 도움이 됩니다. 감사합니다!";
-"rate_message6" = "혹시나 부정적인 리뷰를 작성하시려거든, 그 전에 다음 사항들을 확인해 주세요.";
-"rate_title" = "앱 평가 및 리뷰하기";
 "reading_progress_settings" = "진행 및 암송";
 "reading_progress_settings_summary" = "자동 추적, 암송 및 타이핑 연습 설정";
 "reset_database_confirm" = "\"%1$@\"의 모든 데이터가 영구적으로 삭제되고 초기 상태로 재설정됩니다. 이 작업은 취소할 수 없습니다.\n\n계속하시겠습니까?";
@@ -1232,10 +1223,8 @@
 "reset_something" = "재설정: %1$@";
 "search_bible_section_group_prompt" = "검색 위치";
 "search_index_not_created" = "색인 없음";
-"send_email" = "개발자에게 이메일 보내기";
 "start_offset" = "시작 오프셋";
 "synchronizing" = "동기화 중…";
-"text_maintainers" = "텍스트 유지 관리자에게 문제를 보고해 주세요";
 "type_text_or_bible_reference" = "텍스트 또는 성경 구절을 입력하세요";
 "unlock_info" = "암호화된 모듈 잠금 해제 정보";
 "verse_end" = "끝 구절";

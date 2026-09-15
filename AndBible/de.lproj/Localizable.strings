@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Benutzerdefinierte Quelle hinzufügen";
 "custom_repositories" = "Benutzerdefinierte Quellen";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ löschen?";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "Versauswahl";
 "prefs_night_mode_automatic" = "Automatisch";
 "prefs_night_mode_manual" = "Manuell";
-"prefs_night_mode_summary" = "Auswählen, ob der Nachtmodus automatisch eingeschaltet werden soll (sofern vom Gerät unterstützt), manuell, oder ob den Systemvorgaben gefolgt werden soll (ab Android 10). Manuelle Einstellung kann vom Optionen-Menü (3 Punkte) ausgewählt werden.";
 "prefs_night_mode_system" = "System";
 "prefs_night_mode_title" = "Nachtmodus an- und ausschalten";
 "prefs_open_links_in_special_window_summary" = "Verweise in eigenem Fenster öffnen - für die schnellere Anzeige von Querverweisen und Lexikoneinträgen";
@@ -1192,7 +1190,6 @@
 "font_size_title" = "Schriftgröße";
 "help_reading_progress_text" = "Ihr Bibellesefortschritt und Auswendiglernfortschritt auf einen Blick. Markieren Sie Kapitel manuell mit der Schaltfläche „Als gelesen markieren\" als gelesen oder aktivieren Sie die automatische Nachverfolgung. Auswendiglernen-Übungen fließen ebenfalls in diese Ansicht ein.";
 "history_for" = "Chronik (%1$@: Fenster %2$d)";
-"how_to_help" = "Bitte lies nach, was du tun kannst, um zu helfen";
 "last_updated_at" = "Zuletzt aktualisiert:";
 "line_spacing_title" = "Zeilenabstand";
 "memorize_calendar" = "Auswendiglern-Aktivität";
@@ -1223,13 +1220,7 @@
 "prefs_line_spacing_pt" = "Zeilenabstand %1.1fx";
 "prefs_text_size_sample_text" = "Beispieltext";
 "prefs_top_margin_title" = "Oberer Rand";
-"proceed_google_play" = "Weiter zu Google Play";
 "progress_sync_title" = "Lesefortschritt";
-"rate_message3" = "Wenn ein bestimmter Text nicht im Programm erhältlich ist, dann %@.";
-"rate_message4" = "Die Entwickler dieses Programms sind nicht für die Wartung der Dokumente zuständig.";
-"rate_message5" = "Positive und ausführliche Bewertungen helfen dem AndBible Open Source Projekt sehr. Herzlichen Dank!";
-"rate_message6" = "Vor dem Posten einer negativen Bewertung beachte bitte Folgendes:";
-"rate_title" = "Programm bewerten";
 "reading_progress_settings" = "Fortschritt & Auswendiglernen";
 "reading_progress_settings_summary" = "Einstellungen für automatische Verfolgung, Auswendiglernen und Tippübungen";
 "reset_database_confirm" = "Dies löscht dauerhaft alle Daten in \"%1$@\" und setzt sie auf den Ausgangszustand zurück. Dies kann nicht rückgängig gemacht werden.\n\nSind Sie sicher?";
@@ -1239,10 +1230,8 @@
 "reset_something" = "Zurücksetzen: %1$@";
 "search_bible_section_group_prompt" = "Suchbereich";
 "search_index_not_created" = "kein Index";
-"send_email" = "E-Mail an die Entwickler senden";
 "start_offset" = "Start-Offset";
 "synchronizing" = "Synchronisiere...";
-"text_maintainers" = "Bitte informiere die Textmaintainer über Probleme";
 "type_text_or_bible_reference" = "Text oder Querverweis einfügen";
 "unlock_info" = "Information zum Entschlüsseln des Moduls";
 "verse_end" = "Versende";

@@ -316,3 +316,12 @@ file describes ownership and completion criteria; it is not a canonical feature-
   faster test teardown cannot establish a faster app.
 - Guidance and documentation reflect the final ownership and known limits. Migration placement,
   compilation, or a partial passing selection alone cannot close this work.
+
+
+## Speech ownership checks after main integration
+
+The app-host source scans for canonical speech-service forwarding and initialization order are retired. They asserted private property-wrapper spellings and source order through a removed source loader; they did not execute app startup or background playback. Restoring that helper would reintroduce the source-reading app-host infrastructure this migration removed.
+
+`ReaderShellConstructionTests.testBibleReaderUsesInjectedSpeechServiceIdentity` checks the actual injected reader object identity. Core speech policy/service tests cover suppression of media identity and remote commands in discrete mode, and clearing existing ownership when the policy changes. App compilation checks the required `ContentView` dependency and the merged composition. These boundaries do not establish that the one-shot UI-test preferences precede canonical service initialization during real app startup, or that reader reconstruction preserves playback end to end. Those bootstrap and lifecycle outcomes remain explicit UI/app integration coverage work; the package construction test must not be presented as their replacement proof.
+
+The bookmark row structural guard retains shared interaction ownership and navigation closure checks. Tap/hold behavior is covered by actual UI journeys; the guard no longer freezes the gesture owner's private helper names or state transitions. The restored UI-product command test supplies an explicit Xcode-directory fixture so it is independent of the host's installed tools; missing-directory rejection remains separately tested.

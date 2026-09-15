@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "新增自定义存储库";
 "custom_repositories" = "自定义存储库";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "删除 %@";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "导航到经节";
 "prefs_night_mode_automatic" = "自动";
 "prefs_night_mode_manual" = "手动";
-"prefs_night_mode_summary" = "选择是否自动、手动或跟随系统设置（若支持）切换夜间模式。手动切换在应用右上角的菜单中。";
 "prefs_night_mode_system" = "跟随系统";
 "prefs_night_mode_title" = "夜间模式切换";
 "prefs_open_links_in_special_window_summary" = "在特殊窗口中打开链接，以便快速查看交叉引用及史特郎号码。";
@@ -1186,7 +1184,6 @@
 "font_size_title" = "字型大小";
 "help_reading_progress_text" = "一览您的圣经阅读和记忆进度。使用\"标记为已读\"按钮手动标记章节，或启用自动追踪。记忆练习也会反映在此视图中。";
 "history_for" = "历史（%1$@：窗口 %2$d）";
-"how_to_help" = "请阅读你可以帮忙的地方";
 "id" = "标识符";
 "last_updated_at" = "最后更新时间";
 "line_spacing_title" = "行距";
@@ -1218,13 +1215,7 @@
 "prefs_line_spacing_pt" = "行距%1.1fx";
 "prefs_text_size_sample_text" = "我能吞下玻璃而不伤身体";
 "prefs_top_margin_title" = "上边距";
-"proceed_google_play" = "到 Google Play";
 "progress_sync_title" = "阅读进度";
-"rate_message3" = "如果应用程序中缺少某些文本，%@.";
-"rate_message4" = "本应用程序的开发者并不负责维护各文件。";
-"rate_message5" = "积极且详细的评论可以更好地帮助 AndBible 开源工程。感谢！";
-"rate_message6" = "留下负面评论前，请先参看以下信息：";
-"rate_title" = "评分及评论此app";
 "reading_progress_settings" = "进度与记忆";
 "reading_progress_settings_summary" = "自动跟踪、记忆和打字练习设置";
 "reset_database_confirm" = "此操作将永久删除 \"%1$@\" 中的所有数据并将其重置为初始状态。此操作不可撤销。\n\n确定要继续吗？";
@@ -1234,10 +1225,8 @@
 "reset_something" = "重置：%1$@";
 "search_bible_section_group_prompt" = "搜寻范围";
 "search_index_not_created" = "无索引";
-"send_email" = "向开发者发邮件";
 "start_offset" = "起始偏移";
 "synchronizing" = "同步中...";
-"text_maintainers" = "请将问题反馈至文本的维护者";
 "type_text_or_bible_reference" = "输入文字或圣经参考";
 "unlock_info" = "加密模块解锁信息";
 "verse_end" = "经文结束";

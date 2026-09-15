@@ -36,8 +36,8 @@ struct BibleReaderSpeechContext {
     let parseVerseKey: (String) -> (String, Int, Int)?
     /// Resolves verse ordinals through the active module's versification.
     let verseOrdinal: (String, Int, Int) -> Int?
-    /// Evaluates JavaScript in the reader web view, usually on the main queue.
-    let evaluateJavaScript: (String) -> Void
+    /// Evaluates JavaScript in the reader web view on the UI-owning main actor.
+    let evaluateJavaScript: @MainActor (String) -> Void
     /// Navigates the visible Bible page when Android's speech synchronization setting is enabled.
     let synchronizePosition: @MainActor (_ book: String, _ chapter: Int, _ ordinal: Int) -> Void
 }
@@ -92,7 +92,12 @@ struct BibleReaderSpeechPage {
  - returns without starting speech when required module text cannot be resolved
  - may speak unhighlighted partial text if verse ordinal resolution stops before the chapter ends
  - restores temporarily disabled SWORD options with `defer` before returning from extraction paths
+
+ - Important: The coordinator is main-actor isolated because it mutates `SpeakService` playback
+   state and reader-owned highlight state. Provider callbacks explicitly hop back to the main
+   actor before consulting the service or applying WebView/navigation effects.
  */
+@MainActor
 final class BibleReaderSpeechCoordinator {
     /// Currently highlighted verse ordinal during TTS.
     private var currentHighlightedOrdinal: Int?
@@ -669,10 +674,17 @@ final class BibleReaderSpeechCoordinator {
 
      The marker uses Android's red speak-label visual so the live reading position matches the
      speak identity users know from Android's paused speak bookmark.
+
+     - Parameters:
+       - ordinal: Exact rendered verse ordinal that should own the marker.
+       - evaluateJavaScript: Main-actor WebView evaluation boundary.
+     - Side effects: Replaces the tracked highlight ordinal and evaluates one DOM mutation script.
+     - Failure modes: The script exits without DOM mutation when the ordinal is not rendered.
+     - Important: Runs on the main actor with coordinator and WebView state.
      */
     private func highlightVerseNow(
         _ ordinal: Int,
-        evaluateJavaScript: @escaping (String) -> Void
+        evaluateJavaScript: @escaping @MainActor (String) -> Void
     ) {
         currentHighlightedOrdinal = ordinal
         let js = """
@@ -691,10 +703,15 @@ final class BibleReaderSpeechCoordinator {
     /**
      Clears the spoken-position marker when playback stops.
 
-     - Parameter evaluateJavaScript: Closure used to remove the marker class in the reader client.
+     - Parameter evaluateJavaScript: Main-actor closure used to remove the marker class in the
+       reader client.
      - Side effects: Resets the current tracked ordinal and removes the marker class.
+     - Failure modes: The evaluated script is a no-op when the marker no longer exists.
+     - Important: Runs on the main actor with the coordinator's highlight state and WebView.
      */
-    private func clearSpeakHighlightNow(evaluateJavaScript: @escaping (String) -> Void) {
+    private func clearSpeakHighlightNow(
+        evaluateJavaScript: @escaping @MainActor (String) -> Void
+    ) {
         currentHighlightedOrdinal = nil
         evaluateJavaScript("""
         (function() {

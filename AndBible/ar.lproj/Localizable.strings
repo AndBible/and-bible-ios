@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "أضف مستودعات مخصصة";
 "custom_repositories" = "مستودعات مخصصة";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "حذف %@ ؟";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "الذهاب الى الآية";
 "prefs_night_mode_automatic" = "اوتوماتيك";
 "prefs_night_mode_manual" = "يدوي";
-"prefs_night_mode_summary" = "سواء كان التبديل إلى الوضع الليلي تلقائيًا (إذا كان الجهاز يدعم) أو يدوياً أو عبر إعدادات النظام (اندرويد 10+). يمكن التبديل يدوياً من قائمة الـ 3 نقاط على الشاشة الرئيسية.";
 "prefs_night_mode_system" = "نظام";
 "prefs_night_mode_title" = "تبديل الوضع الليلي";
 "prefs_open_links_in_special_window_summary" = "افتح الروابط في نافذة خاصة، لعرض أسرع للمراجع التبادلية و Strongs";
@@ -1204,7 +1202,6 @@
 "font_size_title" = "حجم الخط";
 "help_reading_progress_text" = "تقدمك في قراءة الكتاب المقدس والحفظ في لمحة واحدة. ضع علامة على الفصول كمقروءة يدويًا بزر \"وضع علامة كمقروء\"، أو مكّن التتبع التلقائي. تمارين الحفظ تُغذّي هذا العرض أيضًا.";
 "history_for" = "تاريخ (%1$@: نافذة %2$d)";
-"how_to_help" = "الرجاء قراءة ما يمكنك فعله للمساعدة";
 "id" = "المعرّف";
 "last_updated_at" = "آخر تحديث";
 "line_spacing_title" = "تباعد الأسطر";
@@ -1236,13 +1233,7 @@
 "prefs_line_spacing_pt" = "تباعد الأسطر %1.1fx";
 "prefs_text_size_sample_text" = "نموذج من الكتابة";
 "prefs_top_margin_title" = "الهامش العلوي";
-"proceed_google_play" = "انتقل إلى جوجل بلاي";
 "progress_sync_title" = "تقدم القراءة";
-"rate_message3" = "إذا كان هناك نص معين غير موجود في التطبيق، %@.";
-"rate_message4" = "مطورو هذا التطبيق غير مسؤولين عن العناية بالمستندات.";
-"rate_message5" = "المراجعات الإيجابية و المفصلة تساعد مشروع Andbible المفتوح المصدر كثيراً. شكراً لك!";
-"rate_message6" = "قبل تقديم مراجعة سلبية، يرجى مراعاة الآتي:";
-"rate_title" = "تقييم ومراجعة التطبيق";
 "reading_progress_settings" = "التقدم والحفظ";
 "reading_progress_settings_summary" = "إعدادات التتبع التلقائي والحفظ وممارسة الكتابة";
 "reset_database_confirm" = "سيؤدي هذا إلى حذف جميع البيانات في \"%1$@\" وإعادة تعيينها إلى الحالة الأولية. لا يمكن التراجع عن هذا الإجراء.\n\nهل أنت متأكد؟";
@@ -1252,10 +1243,8 @@
 "reset_something" = "إعادة تعيين: %1$@";
 "search_bible_section_group_prompt" = "أين";
 "search_index_not_created" = "لا يوجد فهرس";
-"send_email" = "إرسال بريد إلكتروني إلى المطورين";
 "start_offset" = "إزاحة البداية";
 "synchronizing" = "مزامنة...";
-"text_maintainers" = "الرجاء الإبلاغ عن المشكلات إلى المشرفين على النص";
 "type_text_or_bible_reference" = "أدخل نصاً أو مرجعاً من الكتاب المقدس";
 "unlock_info" = "معلومات فتح الوحدة المشفرة";
 "value_mm" = "%dمم";

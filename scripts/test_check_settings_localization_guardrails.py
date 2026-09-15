@@ -1326,43 +1326,374 @@ Text(String(localized: "localized_title"))
             with self.assertRaisesRegex(ValueError, "Invented iOS help"):
                 build_android_shared_localization(root, root / "android")
 
-    def test_platform_specific_fallback_is_not_forced_to_android_wording(self) -> None:
-        """Truthful iOS fallbacks remain valid while shipped resource values stay Android-backed."""
+    def test_platform_localized_overrides_replace_android_specific_translations(self) -> None:
+        """Keeps proven locale-specific platform wording neutral across future Android syncs.
+
+        The fixture supplies the Indonesian Google Play rating label and Norwegian Android task
+        warning from the pinned Android catalog. Catalog construction must overlay the reviewed iOS
+        wording, and the shared sync must write those overrides to both shipped resource trees.
+        A failure means refreshing Android translations can reintroduce App Review violations.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source_path = (
-                root
-                / "Sources"
-                / "BibleUI"
-                / "Sources"
-                / "BibleUI"
-                / "Shared"
-                / "Fixture.swift"
-            )
-            source_path.parent.mkdir(parents=True, exist_ok=True)
-            source_path.write_text(
-                'let text = String(localized: "proceed_google_play", '
-                'defaultValue: "Proceed to App Store")\n',
+            android_root = root / "android"
+            english = {
+                "rate_application": "Rate & Review",
+                "task_kill_warning": (
+                    "These long running tasks may terminate if you switch to another application "
+                    "before they finish."
+                ),
+            }
+            for tree in ("AndBible", "Localizations"):
+                for locale in ("en", "id", "nb"):
+                    path = root / tree / f"{locale}.lproj" / "Localizable.strings"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(
+                        "".join(
+                            f'"{key}" = "{value}";\n'
+                            for key, value in sorted(english.items())
+                        ),
+                        encoding="utf-8",
+                    )
+            (android_root / "values").mkdir(parents=True, exist_ok=True)
+            (android_root / "values" / "strings.xml").write_text(
+                "<resources>"
+                '<string name="rate_application">Rate &amp; Review</string>'
+                '<string name="task_kill_warning">These long running tasks may terminate if you '
+                "switch to another application before they finish.</string>"
+                "</resources>",
                 encoding="utf-8",
             )
+            (android_root / "values-id").mkdir(parents=True, exist_ok=True)
+            (android_root / "values-id" / "strings.xml").write_text(
+                "<resources><string name=\"rate_application\">"
+                "Nilai dan Ulas di Google Play</string></resources>",
+                encoding="utf-8",
+            )
+            (android_root / "values-nb").mkdir(parents=True, exist_ok=True)
+            (android_root / "values-nb" / "strings.xml").write_text(
+                '<resources><string name="task_kill_warning">'
+                "Vær klar over at Android kan avlutte disse tidkrevende jobbende hvis du skifter "
+                "til en annen applikasjon før jobben er utført.</string></resources>",
+                encoding="utf-8",
+            )
+
+            catalog = build_android_shared_localization(root, android_root)
+            sync_android_shared_translations(root, catalog)
+
+            self.assertEqual(
+                catalog.translations_by_locale["id"]["rate_application"],
+                "Nilai dan Ulas",
+            )
+            self.assertEqual(
+                catalog.translations_by_locale["nb"]["task_kill_warning"],
+                (
+                    "Vær klar over at disse tidkrevende jobbene kan bli avbrutt hvis du bytter "
+                    "til en annen app før de er ferdige."
+                ),
+            )
+            for tree in ("AndBible", "Localizations"):
+                indonesian = parse_ios_strings(root / tree / "id.lproj" / "Localizable.strings")
+                norwegian = parse_ios_strings(root / tree / "nb.lproj" / "Localizable.strings")
+                self.assertEqual(indonesian["rate_application"], "Nilai dan Ulas")
+                self.assertEqual(
+                    norwegian["task_kill_warning"],
+                    (
+                        "Vær klar over at disse tidkrevende jobbene kan bli avbrutt hvis du "
+                        "bytter til en annen app før de er ferdige."
+                    ),
+                )
+
+    def test_platform_reference_guard_checks_reachable_values_not_keys(self) -> None:
+        """Rejects store/platform prose without flagging identifiers or real backup interop.
+
+        The fixture gives one reachable key an Android-shaped identifier with neutral text, one
+        normal key a Google Play value, and one allowlisted backup key truthful Android file-format
+        copy. Both resource trees must report only the normal key's value. A failure means the guard
+        either scans incidental source text or permits production-visible platform marketing copy.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "Sources" / "BibleUI" / "Fixture.swift"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                "\n".join(
+                    [
+                        'let neutral = String(localized: "android_named_key")',
+                        'let rejected = String(localized: "review_destination")',
+                        'let backup = String(localized: "android_database_backup_required")',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            values = {
+                "android_named_key": "Neutral destination",
+                "review_destination": "Continue to Google Play",
+                "android_database_backup_required": (
+                    "Select an Android database backup file (.abdb.zip)."
+                ),
+            }
             for tree in ("AndBible", "Localizations"):
                 path = root / tree / "en.lproj" / "Localizable.strings"
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("", encoding="utf-8")
-            android_path = root / "android" / "values" / "strings.xml"
-            android_path.parent.mkdir(parents=True, exist_ok=True)
-            android_path.write_text(
-                '<resources><string name="proceed_google_play">'
-                "Proceed to Google Play"
-                "</string></resources>",
+                path.write_text(
+                    "".join(
+                        f'"{key}" = "{value}";\n'
+                        for key, value in sorted(values.items())
+                    ),
+                    encoding="utf-8",
+                )
+
+            failures = localization_guardrails.audit_production_platform_localizations(root)
+
+        self.assertEqual(
+            failures,
+            [
+                "forbidden platform reference in production resource value: "
+                "AndBible:en:review_destination:google play",
+                "forbidden platform reference in production resource value: "
+                "Localizations:en:review_destination:google play",
+            ],
+        )
+
+    def test_interop_allowlist_permits_only_android_in_rendered_copy(self) -> None:
+        """Keeps store names forbidden on keys that truthfully identify Android backup data.
+
+        Three exact interoperability keys use Android in both Swift fallbacks and resource values.
+        One has neutral backup copy, while the other two also name Google Play or Play Store. The
+        audit must permit only the literal Android term and report both store names in fallbacks and
+        both resource trees. A failure means the interop exception has broadened into a marketing
+        bypass. Temporary files are deleted automatically and no external state is changed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "Sources" / "BibleUI" / "Fixture.swift"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                "\n".join(
+                    [
+                        'let applied = String(localized: "android_backup_applied", '
+                        'defaultValue: "Android backup applied.")',
+                        'let database = String(localized: "android_database_backup_required", '
+                        'defaultValue: "Import an Android backup from Google Play.")',
+                        'let module = String(localized: "android_module_backup_exported_summary", '
+                        'defaultValue: "Export an Android backup to Play Store.")',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            values = {
+                "android_backup_applied": "Android backup applied.",
+                "android_database_backup_required": (
+                    "Import an Android backup from Google Play."
+                ),
+                "android_module_backup_exported_summary": (
+                    "Export an Android backup to Play Store."
+                ),
+            }
+            for tree in ("AndBible", "Localizations"):
+                path = root / tree / "en.lproj" / "Localizable.strings"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "".join(
+                        f'"{key}" = "{value}";\n'
+                        for key, value in sorted(values.items())
+                    ),
+                    encoding="utf-8",
+                )
+
+            failures = localization_guardrails.audit_production_platform_localizations(root)
+
+        self.assertEqual(
+            failures,
+            [
+                "forbidden platform reference in production Swift fallback: "
+                "android_database_backup_required:google play",
+                "forbidden platform reference in production Swift fallback: "
+                "android_module_backup_exported_summary:play store",
+                "forbidden platform reference in production resource value: "
+                "AndBible:en:android_database_backup_required:google play",
+                "forbidden platform reference in production resource value: "
+                "AndBible:en:android_module_backup_exported_summary:play store",
+                "forbidden platform reference in production resource value: "
+                "Localizations:en:android_database_backup_required:google play",
+                "forbidden platform reference in production resource value: "
+                "Localizations:en:android_module_backup_exported_summary:play store",
+            ],
+        )
+
+    def test_platform_reference_guard_checks_literal_swift_fallback_forms(self) -> None:
+        """Rejects platform-specific Swift fallbacks even when no resource row exists.
+
+        The fixture uses every literal fallback API covered by shipped-source discovery, including
+        `NSLocalizedString` with both a module bundle and a nested `Bundle(for:)` call before its
+        value argument, plus block and line comments immediately before a value label. No
+        `.strings` files exist, so each deterministic failure proves the audit checks executable
+        fallback copy rather than relying on resource presence. A failure means users can see
+        Google Play or Play Store when localization lookup falls back. Temporary files are deleted
+        and no external state changes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "Sources" / "BibleUI" / "Fixture.swift"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                '''
+let direct = String(
+    localized: "rate_application",
+    defaultValue: "Rate us on Google Play"
+)
+let helper = Self.localized("helper_rating", default: "Open Play Store")
+let bareHelper = localized("bare_rating", default: "Rate us on Google Play")
+let native = NSLocalizedString(
+    "native_rating",
+    bundle: .module,
+    value: "Rate us on Google Play",
+    comment: "Rating fallback"
+)
+let nestedNative = NSLocalizedString(
+    "nested_native_rating",
+    bundle: Bundle(for: Foo.self),
+    value: "Open Google Play",
+    comment: "Nested bundle fallback"
+)
+let blockComment = NSLocalizedString(
+    "block_comment_rating",
+    /* fallback */ value: "Open Google Play",
+    comment: "Block-comment fallback"
+)
+let lineComment = NSLocalizedString(
+    "line_comment_rating",
+    // fallback
+    value: "Open Play Store",
+    comment: "Line-comment fallback"
+)
+let bundle = Bundle.main.localizedString(
+    forKey: "bundle_rating",
+    value: "Open Play Store",
+    table: nil
+)
+''',
                 encoding="utf-8",
             )
 
-            catalog = build_android_shared_localization(root, root / "android")
+            failures = localization_guardrails.audit_production_platform_localizations(root)
 
         self.assertEqual(
-            catalog.english_by_key["proceed_google_play"],
-            "Proceed to Google Play",
+            failures,
+            [
+                "forbidden platform reference in production Swift fallback: "
+                "bare_rating:google play",
+                "forbidden platform reference in production Swift fallback: "
+                "block_comment_rating:google play",
+                "forbidden platform reference in production Swift fallback: "
+                "bundle_rating:play store",
+                "forbidden platform reference in production Swift fallback: "
+                "helper_rating:play store",
+                "forbidden platform reference in production Swift fallback: "
+                "line_comment_rating:play store",
+                "forbidden platform reference in production Swift fallback: "
+                "native_rating:google play",
+                "forbidden platform reference in production Swift fallback: "
+                "nested_native_rating:google play",
+                "forbidden platform reference in production Swift fallback: "
+                "rate_application:google play",
+            ],
+        )
+
+    def test_full_shared_sync_removes_obsolete_production_resources(self) -> None:
+        """Deletes dead platform-specific keys from both trees without touching live copy.
+
+        The full shared sync is the durable regeneration seam used for Android translation refreshes.
+        A failure means deleted review-dialog or night-mode resources can survive or reappear during
+        a later sync. The temporary fixture is removed automatically and has no external side effects.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tree in ("AndBible", "Localizations"):
+                path = root / tree / "en.lproj" / "Localizable.strings"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    '"keep" = "Keep";\n'
+                    '"prefs_night_mode_summary" = "Android-only summary";\n'
+                    '"rate_title" = "Old review title";\n',
+                    encoding="utf-8",
+                )
+            catalog = AndroidSharedLocalization([], [], [], {}, {}, {}, {})
+
+            result = sync_android_shared_translations(root, catalog)
+
+            for tree in ("AndBible", "Localizations"):
+                values = parse_ios_strings(root / tree / "en.lproj" / "Localizable.strings")
+                self.assertEqual(values, {"keep": "Keep"})
+
+        self.assertEqual(result.files_changed, 2)
+        self.assertEqual(result.values_written, 4)
+
+    def test_removed_production_keys_stay_out_of_generated_android_snapshot(self) -> None:
+        """Excludes retired iOS UI resources from every generated catalog inventory.
+
+        The pinned Android tree still owns some review-dialog and night-mode keys after iOS removes
+        those surfaces. This fixture proves catalog construction drops the retired keys before the
+        snapshot writer serializes them. A failure means regeneration can restore stale resource
+        names even when neither iOS localization tree contains their values. Temporary files are
+        deleted with the fixture and no external state is changed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_root = root / "android"
+            for tree in ("AndBible", "Localizations"):
+                path = root / tree / "en.lproj" / "Localizable.strings"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('"keep" = "Keep";\n', encoding="utf-8")
+            android_path = android_root / "values" / "strings.xml"
+            android_path.parent.mkdir(parents=True, exist_ok=True)
+            android_path.write_text(
+                "<resources>"
+                '<string name="keep">Keep</string>'
+                '<string name="prefs_night_mode_summary">Android-only summary</string>'
+                '<string name="rate_title">Old review title</string>'
+                "</resources>",
+                encoding="utf-8",
+            )
+            catalog = build_android_shared_localization(root, android_root)
+            snapshot_path = root / "snapshot.json"
+            write_android_non_english_snapshot(
+                snapshot_path,
+                {key: [] for key in PARITY_KEYS},
+                [],
+                catalog,
+            )
+            snapshot_text = snapshot_path.read_text(encoding="utf-8")
+
+        self.assertEqual(catalog.android_resource_keys, ["keep"])
+        self.assertNotIn("prefs_night_mode_summary", snapshot_text)
+        self.assertNotIn("rate_title", snapshot_text)
+
+    def test_removed_production_resource_reference_is_rejected(self) -> None:
+        """Rejects Swift references that revive a retired production resource contract.
+
+        The fixture declares one statically discoverable localization lookup after its resource key
+        has been retired. The value audit must report that reference even when no `.strings` file is
+        present. A failure means deleted Android-only UI can return without restoring audited locale
+        coverage. Temporary files are deleted automatically and no external state is changed.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "Sources" / "BibleUI" / "Fixture.swift"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                'let title = String(localized: "rate_title")\n',
+                encoding="utf-8",
+            )
+
+            failures = localization_guardrails.audit_production_platform_localizations(root)
+
+        self.assertEqual(
+            failures,
+            ["removed production localization key still referenced: rate_title"],
         )
 
     def test_non_ai_literal_key_is_cataloged_synced_and_audited(self) -> None:

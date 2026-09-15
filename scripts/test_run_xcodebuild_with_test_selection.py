@@ -1356,6 +1356,9 @@ class MainTests(unittest.TestCase):
     ) -> None:
         """Protect CI's restored-product path while preserving selection parsing and SIGSEGV handling."""
         with mock.patch(
+            "run_xcodebuild_with_test_selection.selected_ui_test_developer_dir",
+            return_value="/Applications/TestXcode.app/Contents/Developer",
+        ), mock.patch(
             "run_xcodebuild_with_test_selection.ui_test_fixture_service_session",
             return_value=contextlib.nullcontext(),
         ), mock.patch(

@@ -10,11 +10,11 @@ import SwordKit
  bridge evaluation, the live synchronize setting, and pane navigation state application.
  */
 struct BibleReaderSQLiteBibleSpeechContext {
-    /// Evaluates one DOM highlight/cleanup script in the pane's reader client.
-    let evaluateJavaScript: (String) -> Void
+    /// Evaluates one DOM highlight/cleanup script in the pane's reader client on the main actor.
+    let evaluateJavaScript: @MainActor (String) -> Void
 
-    /// Reports the live advanced synchronize setting after each spoken position.
-    let shouldSynchronize: () -> Bool
+    /// Reports the live advanced synchronize setting from main-actor-owned speech state.
+    let shouldSynchronize: @MainActor () -> Bool
 
     /// Applies one source-owned visible Bible position to controller/navigation state.
     let synchronize: @MainActor (
@@ -69,7 +69,10 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
        pane synchronization only when enabled.
      - Failure modes: Invalid ranges/checkpoints and unreadable source rows fail without fallback.
      - Important: Every module read owns its SQLite connection and can overlap unrelated reads.
+       Session construction itself remains on the main actor because it reads shared speech
+       settings and installs UI-facing callbacks.
      */
+    @MainActor
     func bibleSession(
         module: BibleReaderSQLiteModuleHandle,
         category: SpeakDocumentCategory,
@@ -113,7 +116,10 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
        synchronization only when enabled.
      - Failure modes: Invalid, unmappable, or empty ranges fail without partial speech or SWORD
        fallback; duplicate and discontiguous ranges retain their original order.
+     - Important: Session construction runs on the main actor because it reads shared speech
+       settings and installs UI-facing callbacks.
      */
+    @MainActor
     func biblePassageListSession(
         module: BibleReaderSQLiteModuleHandle,
         ranges: [SpeakVerseRange],
@@ -145,7 +151,10 @@ struct BibleReaderSQLiteSpeechDispatchCoordinator {
        invokes exact-key synchronization after builder generation checks.
      - Failure modes: SWORD-shadowed identities, category mismatches, malformed keys, and missing
        content fail closed without trying another backend.
+     - Important: Session construction runs on the main actor because it binds callbacks to the
+       shared speech generation and active reader UI.
      */
+    @MainActor
     func genericSession(
         bookInitials: String,
         key: String?,

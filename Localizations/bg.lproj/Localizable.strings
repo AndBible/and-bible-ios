@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Добави персонализирано хранилище";
 "custom_repositories" = "Персонализирани хранилища";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Изтрий %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "Отвори стих";
 "prefs_night_mode_automatic" = "Автоматично";
 "prefs_night_mode_manual" = "Ръчно";
-"prefs_night_mode_summary" = "Дали да се превключва автоматично към нощен режим (ако устройството поддържа), ръчно или чрез системната настройка (Android 10+). Ръчното превключване може да се направи от менюто с 3 точки на главния екран.";
 "prefs_night_mode_system" = "Системно";
 "prefs_night_mode_title" = "Превключване на нощен режим";
 "prefs_open_links_in_special_window_summary" = "Отваряй връзки в специален прозорец за по-бързо показване на кръстосани препратки и Strong's";
@@ -1185,7 +1183,6 @@
 "font_size_title" = "Размер на шрифта";
 "help_reading_progress_text" = "Вашият напредък в четенето и наизустяването на Библията с един поглед. Маркирайте главите като прочетени ръчно с бутона \"Маркирай като прочетено\" или активирайте автоматичното проследяване. Упражненията за наизустяване също се отразяват в този изглед.";
 "history_for" = "История (%1$@: Прозорец %2$d)";
-"how_to_help" = "\n прочетете какво можете да направите, за да помогнете\n";
 "id" = "Идентификатор";
 "last_updated_at" = "Последно обновено на";
 "line_spacing_title" = "Разстояние между редове";
@@ -1217,13 +1214,7 @@
 "prefs_line_spacing_pt" = "Разстояние между редове %1.1fx";
 "prefs_text_size_sample_text" = "Примерен текст";
 "prefs_top_margin_title" = "Горно поле";
-"proceed_google_play" = "\n Продължи към Google Play\n";
 "progress_sync_title" = "Напредък в четенето";
-"rate_message3" = "\n Ако даден текст не е наличен в приложението, %@.\n";
-"rate_message4" = "\n Разработчиците на това приложение не отговарят за поддръжката на ресурсите.\n";
-"rate_message5" = "\n Положителните и подробни рецензии помагат много на проекта с отворен код AndBible. Благодаря!\n";
-"rate_message6" = "\n Преди да напишете отрицателна рецензия, моля, имайте предвид следното:\n";
-"rate_title" = "Оценяване и рецензиране на приложението";
 "reading_progress_settings" = "Напредък и наизустяване";
 "reading_progress_settings_summary" = "Настройки за автоматично проследяване, наизустяване и практика с въвеждане";
 "reset_database_confirm" = "Това ще изтрие окончателно всички данни в „%1$@\" и ще я върне в началното състояние. Това не може да бъде отменено.\n\nСигурни ли сте?";
@@ -1233,10 +1224,8 @@
 "reset_something" = "Изчистване: %1$@";
 "search_bible_section_group_prompt" = "Търси в";
 "search_index_not_created" = "няма индекс";
-"send_email" = "\n изпратете имейл до разработчиците\n";
 "start_offset" = "Начално отместване";
 "synchronizing" = "Синхронизиране…";
-"text_maintainers" = "\n моля, докладвайте проблеми на поддържащите текста\n";
 "type_text_or_bible_reference" = "Въведете текст или библейска препратка";
 "unlock_info" = "Информация за отключване на шифрован модул";
 "value_mm" = "%d мм";

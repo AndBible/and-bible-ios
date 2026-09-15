@@ -8,6 +8,7 @@ import XCTest
  `SpeakService` crosses the expensive reader reconstruction boundary. The in-memory settings store
  and bookmark manager have no file, network, audio, or persistent side effects.
  */
+@MainActor
 final class SpeakServiceSettingsApplicationPerformanceTests: XCTestCase {
     /**
      Verifies restore and workspace application never request a stopped reader position.

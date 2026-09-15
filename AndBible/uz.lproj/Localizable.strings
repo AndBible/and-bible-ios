@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Add custom repository";
 "custom_repositories" = "Custom repositories";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "O'chir %@";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "Oyatga borish";
 "prefs_night_mode_automatic" = "Avtomatik";
 "prefs_night_mode_manual" = "Manual";
-"prefs_night_mode_summary" = "Whether to switch to night mode automatically (if device supports), manually or via system setting (Android 10+). Manual switching can be done from the 3-dot options menu on the main screen. ";
 "prefs_night_mode_system" = "System";
 "prefs_night_mode_title" = "Night mode switching";
 "prefs_open_links_in_special_window_summary" = "Open links in special window, for quicker display of cross-references and Strongs";

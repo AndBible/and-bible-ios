@@ -315,7 +315,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "کسٹم ذخیرہ شامل کریں";
 "custom_repositories" = "کسٹم ذخائر";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ حذف کریں؟";
@@ -609,7 +608,6 @@
 "prefs_navigate_to_verse_title" = "آیت پر جائیں";
 "prefs_night_mode_automatic" = "خودکار";
 "prefs_night_mode_manual" = "دستی";
-"prefs_night_mode_summary" = "رات کا موڈ خودبخود (اگر ڈیوائس سپورٹ کرے)، دستی یا سسٹم ترتیب کے ذریعے سوئچ کریں (Android 10+)۔ دستی سوئچنگ مرکزی اسکرین پر 3 نقطوں کے مینو سے ہو سکتی ہے۔";
 "prefs_night_mode_system" = "سسٹم";
 "prefs_night_mode_title" = "رات کا موڈ سوئچنگ";
 "prefs_open_links_in_special_window_summary" = "لنکس کو خصوصی ونڈو میں کھولیں، کراس حوالہ جات اور Strongs کی تیز ڈسپلے کے لیے";
@@ -1319,7 +1317,6 @@
 "font_size_title" = "فونٹ سائز";
 "help_reading_progress_text" = "آپ کی بائبل مطالعہ اور حفظ پیشرفت ایک نظر میں۔ \"Mark as read\" بٹن سے ابواب کو دستی طور پر پڑھا ہوا نشان لگائیں، یا خودکار ٹریکنگ فعال کریں۔ حفظ کی مشقیں بھی اس نظریہ میں شامل ہوتی ہیں۔";
 "history_for" = "تاریخ (%1$@: ونڈو %2$d)";
-"how_to_help" = "براہ کرم پڑھیں کہ آپ کیسے مدد کر سکتے ہیں";
 "id" = "شناخت کنندہ";
 "last_updated_at" = "آخری اپ ڈیٹ";
 "line_spacing_title" = "لائن اسپیسنگ";
@@ -1351,13 +1348,7 @@
 "prefs_line_spacing_pt" = "لائن اسپیسنگ %1.1fx";
 "prefs_text_size_sample_text" = "نمونہ متن";
 "prefs_top_margin_title" = "اوپری حاشیہ";
-"proceed_google_play" = "Google Play پر جائیں";
 "progress_sync_title" = "پڑھنے کی پیشرفت";
-"rate_message3" = "اگر کوئی مخصوص متن ایپلیکیشن میں دستیاب نہ ہو تو %@۔";
-"rate_message4" = "اس ایپ کے ڈویلپرز دستاویزات برقرار رکھنے کے ذمہ دار نہیں ہیں۔";
-"rate_message5" = "مثبت اور تفصیلی جائزے AndBible اوپن سورس پروجیکٹ کی بہت مدد کرتے ہیں۔ شکریہ!";
-"rate_message6" = "منفی جائزہ لکھنے سے پہلے براہ کرم مندرجہ ذیل پر غور کریں:";
-"rate_title" = "ریٹنگ اور جائزہ";
 "reading_progress_settings" = "پیشرفت اور حفظ";
 "reading_progress_settings_summary" = "خودکار ٹریکنگ، حفظ، اور ٹائپنگ مشق کی ترتیبات";
 "reset_database_confirm" = "یہ \"%1$@\" میں تمام ڈیٹا مستقل طور پر حذف کر دے گا اور ابتدائی حالت میں ری سیٹ کر دے گا۔ یہ واپس نہیں کیا جا سکتا۔\n\nکیا آپ یقین میں ہیں؟";
@@ -1367,10 +1358,8 @@
 "reset_something" = "ری سیٹ: %1$@";
 "search_bible_section_group_prompt" = "کہاں تلاش کریں";
 "search_index_not_created" = "کوئی انڈیکس نہیں";
-"send_email" = "ڈویلپرز کو ای میل بھیجیں";
 "start_offset" = "شروع آف سیٹ";
 "synchronizing" = "ہم آہنگ ہو رہا ہے…";
-"text_maintainers" = "براہ کرم متن کے نگہبانوں کو مسائل رپورٹ کریں";
 "type_text_or_bible_reference" = "متن یا بائبل حوالہ ٹائپ کریں";
 "unlock_info" = "انکرپٹڈ ماڈیول کھولنے کی معلومات";
 "verse_end" = "آیت ختم";

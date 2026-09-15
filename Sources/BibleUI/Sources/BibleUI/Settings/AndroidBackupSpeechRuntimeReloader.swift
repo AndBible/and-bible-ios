@@ -15,7 +15,10 @@ enum AndroidBackupSpeechRuntimeReloader {
      - Returns: `true` only when a live service was rebound and reloaded.
      - Side effects: Rebinds `SpeakService.settingsStore` and immediately reapplies synthesis state.
      - Failure modes: Missing service and unrelated backup categories are deterministic no-ops.
+     - Important: Runs on the main actor because the live speech service owns UI-observable
+       playback and settings state there.
      */
+    @MainActor
     @discardableResult
     static func reloadIfNeeded(
         selections: [AndroidDatabaseBackupSelection],

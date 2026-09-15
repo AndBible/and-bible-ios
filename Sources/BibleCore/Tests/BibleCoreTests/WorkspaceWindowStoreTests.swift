@@ -11,6 +11,7 @@ import XCTest
  the package lane without booting the app. Failures indicate data-model, selection, synchronized
  window, or settings-inheritance regressions rather than app bootstrap failures.
  */
+@MainActor
 final class WorkspaceWindowStoreTests: XCTestCase {
     /**
      Verifies new and historical workspace settings use Android's enabled auto-pin default.

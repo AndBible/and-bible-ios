@@ -36,7 +36,10 @@ struct SQLiteReaderSpeechSessionBuilder {
      - Failure modes: Non-KJVA requests, malformed checkpoints, and empty bounds fail closed without
        synthetic verses or SWORD fallback. Like Android's `skipEmptyVerses`, a missing requested
        row advances to the next real source row.
+     - Important: Runs on the main actor because provider configuration reads the shared
+       `SpeakService` settings snapshot and installs UI-facing session callbacks.
      */
+    @MainActor
     func bibleSession(
         category: SpeakDocumentCategory,
         sourceVersification: String = JSwordKJVAVersification.name,
@@ -144,7 +147,10 @@ struct SQLiteReaderSpeechSessionBuilder {
      - Failure modes: Empty, malformed, partially unmappable, and wholly sparse ranges fail the
        complete request without flattening, widening, or falling back to SWORD.
      - Note: Passage order, gaps, overlaps, and duplicates are retained as semantic segments.
+     - Important: Runs on the main actor because provider configuration reads the shared
+       `SpeakService` settings snapshot and installs UI-facing session callbacks.
      */
+    @MainActor
     func biblePassageListSession(
         ranges: [SpeakVerseRange],
         service: SpeakService,
@@ -203,7 +209,10 @@ struct SQLiteReaderSpeechSessionBuilder {
        read owns its SQLite connection.
      - Failure modes: Category mismatch, case-mismatched dictionary keys, malformed commentary
        coordinates, missing content, and invalid checkpoints fail closed.
+     - Important: Runs on the main actor because provider callbacks consult the shared
+       `SpeakService` generation and synchronization settings.
      */
+    @MainActor
     func genericSession(
         category: SpeakDocumentCategory,
         key: String?,

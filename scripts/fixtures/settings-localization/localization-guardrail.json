@@ -346,7 +346,6 @@
     "prefs_interface_locale_title": [],
     "prefs_navigate_to_verse_summary": [],
     "prefs_navigate_to_verse_title": [],
-    "prefs_night_mode_summary": [],
     "prefs_night_mode_title": [
       "az",
       "ml",
@@ -388,14 +387,7 @@
       "ml",
       "uz"
     ],
-    "prefs_volume_keys_scroll_summary": [
-      "az",
-      "kk",
-      "ml",
-      "my",
-      "uz",
-      "yue"
-    ],
+    "prefs_volume_keys_scroll_summary": [],
     "prefs_volume_keys_scroll_title": [
       "az",
       "kk",
@@ -405,7 +397,7 @@
       "yue"
     ]
   },
-  "generated_on": "2026-07-17",
+  "generated_on": "2026-08-27",
   "locales": [
     "af",
     "ar",
@@ -493,7 +485,6 @@
     "prefs_volume_keys_scroll_title",
     "prefs_volume_keys_scroll_summary",
     "prefs_night_mode_title",
-    "prefs_night_mode_summary",
     "prefs_interface_locale_title",
     "prefs_interface_locale_summary",
     "prefs_e_ink_mode_title",

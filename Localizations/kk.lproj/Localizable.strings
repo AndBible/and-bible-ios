@@ -198,7 +198,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Пайдаланушы репозиторийін қосыңыз";
 "custom_repositories" = "Пайдаланушы репозиторийлері";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Жою %@?";
@@ -460,7 +459,6 @@
 "prefs_navigate_to_verse_title" = "Аятқа навигация жүргізу";
 "prefs_night_mode_automatic" = "Автоматты";
 "prefs_night_mode_manual" = "Қолмен жасау";
-"prefs_night_mode_summary" = "Түнгі режимге автоматты түрде (егер құрылғы қолдаса), не мануальді не жүйенің баптауы арқылы ауысу керек (Андроид 10+). Негізгі бейнеде мануальді ауыстыру 3-нүктелі опциялар мәзірінен жасауға болады.";
 "prefs_night_mode_system" = "Жүйе";
 "prefs_night_mode_title" = "Түнгі режиміне қосу";
 "prefs_open_links_in_special_window_summary" = "Айқас-сілтемелер мен Strongs-ті жылдам көрсету үшін, сілтемелерді арнайы терезеде ашыңыз.";
@@ -739,7 +737,6 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 "font_size_pt" = "%d шрифт өлшемі";
 "font_size_title" = "Шрифт көлемі";
 "history_for" = "Тарих (%1$@: Терезе %2$d)";
-"how_to_help" = "өтініш, көмектесу үшін не істей алатыныңызды оқып шығыңыз.";
 "line_spacing_title" = "Жол арасын кеңейту";
 "my_notes_description" = "Бетбелгілерге бекітілген пайдаланушы өңдейтін жазбалар";
 "pref_font_family_label" = "Шрифттер тобы";
@@ -749,17 +746,9 @@ Google Drive пайдаланған кезде, %@ кез келген жеке 
 "prefs_line_spacing_pt" = "Жол арасын кеңейту %1.1fх";
 "prefs_text_size_sample_text" = "Мысалы мәтін";
 "prefs_top_margin_title" = "Жоғарғы шекара";
-"proceed_google_play" = "Google Play -ге өтіңіз";
-"rate_message3" = "Егер нақты мәтін қолданбада болмаса, %@.";
-"rate_message4" = "Бұл қолданбаны әзірлеушілер құжаттардың жүргізілуіне жауапты емес.";
-"rate_message5" = "Оң және егжей-тегжейлі шолулар AndBible Open Source жобасына көп көмектеседі. Рақмет сізге!";
-"rate_message6" = "Теріс шолу жасамас бұрын, келесілерді ескеріңіз:";
-"rate_title" = "Бағалау және шолу қолданбасы";
 "reset_generic" = "Қайта бастау";
 "search_bible_section_group_prompt" = "Қайда Іздеу";
-"send_email" = "әзірлеушілерге электрондық хат жіберу";
 "synchronizing" = "Синхрондау...";
-"text_maintainers" = "Өтініш, мәтін жасаушыларға мәселелер туралы хабарлаңыз";
 "type_text_or_bible_reference" = "Мәтінді немесе Киелі кітап сілтемесін теріңіз";
 "unlock_info" = "Шифрланған модуль ақпаратты бұғаттан шығару";
 "warn_bad_document" = "Ескерту: Бұл құжат (кем дегенде ішінара) нашар техникалық сапа болуы мүмкін.";

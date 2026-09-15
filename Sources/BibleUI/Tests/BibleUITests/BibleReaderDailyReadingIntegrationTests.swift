@@ -9,8 +9,10 @@ import XCTest
  Production reader integration tests for Android Daily Reading actions.
 
  Tests use an isolated KJV fixture, an in-memory bridge, and a recording speech engine. They perform
- no network or shared persistence work and inherit deterministic fixture cleanup.
+ no network or shared persistence work and inherit deterministic fixture cleanup. The suite runs on
+ the main actor because production Daily Reading speech and reader navigation share UI-owned state.
  */
+@MainActor
 final class BibleReaderDailyReadingIntegrationTests: BibleUISwordFixtureTestCase {
     /**
      Verifies the controller commits one Read navigation with the complete mapped highlight range.

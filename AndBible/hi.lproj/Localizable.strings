@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "कस्टम रिपॉज़िटरी जोड़ें";
 "custom_repositories" = "कस्टम रिपॉज़िटरी";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "%@ किताब मिटाओ";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "छंद पर पहुंचे";
 "prefs_night_mode_automatic" = "ऑटोमैटिक";
 "prefs_night_mode_manual" = "मैनुअल";
-"prefs_night_mode_summary" = "स्वचालित रूप से (यदि डिवाइस समर्थन करता है) , मैन्युअल रूप से या सिस्टम सेटिंग (एंड्रॉइड 10+) के माध्यम से, नाइट मोड में स्विच करना है। मुख्य स्क्रीन पर 3-डॉट विकल्प मेनू से मैन्युअल स्विचिंग की जा सकती है।";
 "prefs_night_mode_system" = "सिस्टम";
 "prefs_night_mode_title" = "नाइट मोड स्विचिंग";
 "prefs_open_links_in_special_window_summary" = "विशेष विंडो में लिंक खोले, क्रॉस-रेफरेंस और स्ट्रॉन्ग के तेज प्रदर्शन के लिए";
@@ -1188,7 +1186,6 @@
 "font_size_title" = "फ़ॉन्ट आकार";
 "help_reading_progress_text" = "एक नज़र में आपकी बाइबिल पठन और याद करना प्रगति। \"पठित के रूप में चिह्नित करें\" बटन से अध्यायों को मैन्युअल रूप से पठित चिह्नित करें, या स्वचालित ट्रैकिंग सक्षम करें। याद करना अभ्यास भी इस दृश्य में फ़ीड होते हैं।";
 "history_for" = "इतिहास (%1$@: विंडो %2$d)";
-"how_to_help" = "कृपया पढ़ें कि आप मदद के लिए क्या कर सकते हैं";
 "id" = "पहचानकर्ता";
 "last_updated_at" = "अंतिम अपडेट";
 "line_spacing_title" = "पंक्ति रिक्ति";
@@ -1220,13 +1217,7 @@
 "prefs_line_spacing_pt" = "पंक्ति रिक्ति %1.1fx";
 "prefs_text_size_sample_text" = "नमूना वाक्य";
 "prefs_top_margin_title" = "ऊपरी किनारा";
-"proceed_google_play" = "गूगल प्ले पर जाएं";
 "progress_sync_title" = "पठन प्रगति";
-"rate_message3" = "यदि एप्लिकेशन में विशेष पाठ उपलब्ध नहीं है, %@।";
-"rate_message4" = "इस ऐप के डेवलपर्स दस्तावेज़ों को बनाए रखने के लिए ज़िम्मेदार नहीं हैं।";
-"rate_message5" = "सकारात्मक और विस्तृत समीक्षाएं AndBible ओपन सोर्स प्रोजेक्ट की बहुत मदद करती हैं। धन्यवाद!";
-"rate_message6" = "नकारात्मक रिव्यु देने से पहले, कृपया निम्नलिखित पर विचार करें:";
-"rate_title" = "रेटिंग और रिव्यु करने वाला ऐप";
 "reading_progress_settings" = "प्रगति और याद करना";
 "reading_progress_settings_summary" = "स्वत: ट्रैकिंग, याद करना, और टाइपिंग अभ्यास सेटिंग्स";
 "reset_database_confirm" = "यह \"%1$@\" में सभी डेटा स्थायी रूप से हटा देगा और इसे प्रारंभिक स्थिति में रीसेट कर देगा। यह वापस नहीं किया जा सकता।\n\nक्या आप सुनिश्चित हैं?";
@@ -1236,10 +1227,8 @@
 "reset_something" = "रीसेट: %1$@";
 "search_bible_section_group_prompt" = "खोज सीमा";
 "search_index_not_created" = "कोई सूचकांक नहीं";
-"send_email" = "डेवलपर्स को ईमेल भेजें";
 "start_offset" = "आरंभ ऑफ़सेट";
 "synchronizing" = "सिंक्रनाइज़ हो रहा है…";
-"text_maintainers" = "कृपया पाठ अनुरक्षकों को समस्याओं की रिपोर्ट करें";
 "type_text_or_bible_reference" = "टेक्स्ट या बाइबिल संदर्भ टाइप करें";
 "unlock_info" = "एन्क्रिप्टेड मॉड्यूल अनलॉक जानकारी";
 "verse_end" = "छंद अंत";

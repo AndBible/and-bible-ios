@@ -13,6 +13,7 @@ import XCTest
  historical sparse JSON and SwiftData transform boundary because a nested optional decode failure
  terminates the process instead of surfacing as an ordinary test assertion.
  */
+@MainActor
 final class SpeakParityTests: XCTestCase {
     /** Verifies the exact historical Android payload keeps compatible fields and default values. */
     func testPlaybackSettingsDecodesHistoricalPayloadWithoutVerseRange() throws {

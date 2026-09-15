@@ -201,7 +201,6 @@
 "reset_sources_message" = "This will delete all custom sources and restore the default repository list.";
 "add_custom_repository" = "Pridať vlastný repozitár";
 "custom_repositories" = "Vlastné repozitáre";
-"custom_repositories_help_summary" = "Custom repositories use Android-compatible HTTPS manifests or direct SWORD catalog URLs.";
 "custom_repository" = "Custom repository";
 "default_repositories" = "Default repositories";
 "delete_custom_repository_message_format" = "Vymazať %@?";
@@ -495,7 +494,6 @@
 "prefs_navigate_to_verse_title" = "Prejsť na verš";
 "prefs_night_mode_automatic" = "Automaticky";
 "prefs_night_mode_manual" = "Manuálne";
-"prefs_night_mode_summary" = "Či sa má prepnúť do nočného režimu automaticky (ak to zariadenie podporuje), manuálne alebo prostredníctvom nastavenia systému (Android 10+). Manuálne prepínanie je možné vykonať z ponuky 3 bodov na hlavnej obrazovke.";
 "prefs_night_mode_system" = "Podľa systému";
 "prefs_night_mode_title" = "Prepínanie nočného režimu";
 "prefs_open_links_in_special_window_summary" = "Otvorí odkazy v špeciálnom okne pre rýchlejšie zobrazenie krížových referencií a Strongových čísel";
@@ -1196,7 +1194,6 @@
 "font_size_title" = "Veľkosť písmen";
 "help_reading_progress_text" = "Váš pokrok pri čítaní Biblie a memorovaní na prvý pohľad. Kapitoly môžete manuálne označiť ako prečítané tlačidlom \"Označiť ako prečítané\" alebo povoliť automatické sledovanie. Cvičenia memorovania sa tiež zahrnujú do tohto zobrazenia.";
 "history_for" = "História (%1$@: Okno %2$d)";
-"how_to_help" = "prosím prečítajte si, ako môžete pomôcť";
 "id" = "Identifikátor";
 "last_updated_at" = "Naposledy aktualizované";
 "line_spacing_title" = "Riadkovanie";
@@ -1228,13 +1225,7 @@
 "prefs_line_spacing_pt" = "Riadkovanie %1.1fx";
 "prefs_text_size_sample_text" = "Ukážkový text";
 "prefs_top_margin_title" = "Horný okraj";
-"proceed_google_play" = "Prejsť do Google Play";
 "progress_sync_title" = "Pokrok v čítaní";
-"rate_message3" = "Ak konkrétny text nie je dostupný v aplikácií, %@.";
-"rate_message4" = "Vývojári tejto aplikácie nie sú zodpovední za údržbu dokumentov.";
-"rate_message5" = "Pozitívne a podrobné recenzie veľmi pomáhajú AndBible - projektu s otvoreným kódom. Ďakujeme!";
-"rate_message6" = "Pred zaslaním negatívnej recenzie prosím zvážte nasledovné:";
-"rate_title" = "Hodnotenie a recenzovanie aplikácie";
 "reading_progress_settings" = "Pokrok a memorovanie";
 "reading_progress_settings_summary" = "Automatické sledovanie, memorovanie a nastavenia praxe písania";
 "reset_database_confirm" = "Toto natrvalo vymaže všetky údaje v \"%1$@\" a resetuje ich do počiatočného stavu. Toto nie je možné vrátiť späť.\n\nSte si istí?";
@@ -1243,10 +1234,8 @@
 "reset_generic" = "Resetovať";
 "search_bible_section_group_prompt" = "Kde hľadať";
 "search_index_not_created" = "žiadny index";
-"send_email" = "poslať e-mail vývojárom";
 "start_offset" = "Začiatočný posun";
 "synchronizing" = "Synchronizujem…";
-"text_maintainers" = "prosím nahlasujte problémy správcom dokumentov";
 "type_text_or_bible_reference" = "Napíšte text alebo biblický odkaz";
 "unlock_info" = "Info k odomknutiu šifrovaného modulu";
 "verse_end" = "Koniec verša";

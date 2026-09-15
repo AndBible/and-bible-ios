@@ -13,10 +13,36 @@ import SwiftData
 final class FakeSpeechSynthesizer: SpeechSynthesizing {
     weak var delegate: AVSpeechSynthesizerDelegate?
 
+    /// Configurable platform response returned from every stop request.
+    var stopSpeakingResult: Bool
+    /// Configurable platform response returned from every pause request.
+    var pauseSpeakingResult: Bool
+    /// Configurable platform response returned from every continue request.
+    var continueSpeakingResult: Bool
     private(set) var spokenUtterances: [AVSpeechUtterance] = []
     private(set) var stopBoundaries: [AVSpeechBoundary] = []
     private(set) var pauseBoundaries: [AVSpeechBoundary] = []
     private(set) var continueCount = 0
+
+    /**
+     Creates a deterministic speech engine with independently configurable transport outcomes.
+
+     - Parameters:
+       - stopSpeakingResult: Result returned after recording each stop request.
+       - pauseSpeakingResult: Result returned after recording each pause request.
+       - continueSpeakingResult: Result returned after recording each continue request.
+     - Side effects: Initializes only in-memory result controls and empty call logs.
+     - Failure modes: Construction cannot fail; `false` values intentionally model platform rejection.
+     */
+    init(
+        stopSpeakingResult: Bool = true,
+        pauseSpeakingResult: Bool = true,
+        continueSpeakingResult: Bool = true
+    ) {
+        self.stopSpeakingResult = stopSpeakingResult
+        self.pauseSpeakingResult = pauseSpeakingResult
+        self.continueSpeakingResult = continueSpeakingResult
+    }
 
     /**
      Records one utterance requested by the service.
@@ -33,38 +59,82 @@ final class FakeSpeechSynthesizer: SpeechSynthesizing {
      Records a stop request.
 
      - Parameter boundary: Boundary passed through from `SpeakService.stop()`.
-     - Returns: Always `true`, matching a successful platform stop request.
+     - Returns: The configured platform stop result.
      - Side effects: Appends the boundary to `stopBoundaries`.
-     - Failure modes: This fake cannot fail.
+     - Failure modes: Returns `false` when the test intentionally models rejected cancellation.
      */
     func stopSpeaking(at boundary: AVSpeechBoundary) -> Bool {
         stopBoundaries.append(boundary)
-        return true
+        return stopSpeakingResult
     }
 
     /**
      Records a pause request.
 
      - Parameter boundary: Boundary passed through from `SpeakService.pause()`.
-     - Returns: Always `true`, matching a successful platform pause request.
+     - Returns: The configured platform pause result.
      - Side effects: Appends the boundary to `pauseBoundaries`.
-     - Failure modes: This fake cannot fail.
+     - Failure modes: Returns `false` when the test intentionally models rejected pausing.
      */
     func pauseSpeaking(at boundary: AVSpeechBoundary) -> Bool {
         pauseBoundaries.append(boundary)
-        return true
+        return pauseSpeakingResult
     }
 
     /**
      Records a resume request.
 
-     - Returns: Always `true`, matching a successful platform continue request.
+     - Returns: The configured platform continue result.
      - Side effects: Increments `continueCount`.
-     - Failure modes: This fake cannot fail.
+     - Failure modes: Returns `false` when the test intentionally models rejected continuation.
      */
     func continueSpeaking() -> Bool {
         continueCount += 1
-        return true
+        return continueSpeakingResult
+    }
+}
+
+/** Deterministic failure used by the injectable test audio-session boundary. */
+enum FakeSpeakAudioSessionError: Error {
+    /// The test requested category/activation failure before speech state may become active.
+    case configurationRejected
+}
+
+/**
+ Test audio-session boundary that records calls and can reject playback activation.
+
+ Package tests inject this fixture to prove `SpeakService` never relies on the mutable simulator
+ audio session and never publishes active/resumed state when iOS category or activation fails.
+ */
+final class FakeSpeakAudioSessionConfigurator: SpeakAudioSessionConfiguring {
+    /// Whether every configuration attempt should throw the deterministic rejection error.
+    var shouldFail: Bool
+    /// Number of ordered playback configuration attempts made by the service.
+    private(set) var configureCallCount = 0
+
+    /**
+     Creates a configurable in-memory audio-session boundary.
+
+     - Parameter shouldFail: Whether `configurePlaybackSession()` must throw.
+     - Side effects: Initializes an empty call count without touching platform audio state.
+     - Failure modes: Construction cannot fail.
+     */
+    init(shouldFail: Bool = false) {
+        self.shouldFail = shouldFail
+    }
+
+    /**
+     Records one configuration attempt and returns or throws the configured result.
+
+     - Side effects: Increments `configureCallCount`; never touches `AVAudioSession`.
+     - Throws: `FakeSpeakAudioSessionError.configurationRejected` when `shouldFail` is true.
+     - Important: Result changes are deterministic and synchronous on the test's main actor.
+     */
+    func configurePlaybackSession() throws {
+        configureCallCount += 1
+        if shouldFail {
+            throw FakeSpeakAudioSessionError.configurationRejected
+        }
     }
 }
 

@@ -20,10 +20,13 @@ enum BibleReaderSpeechSessionBinding {
        bookmark persistence owner whenever a callback resolves a controller.
      - Failure modes: Missing active controllers or deallocated services fail closed; no source is
        reconstructed from a stale pane or legacy provider-only callback.
+     - Important: Installation and every controller lookup are main-actor isolated so callback
+       ownership stays aligned with `SpeakService` and the active reader UI.
      */
+    @MainActor
     static func install(
         on service: SpeakService,
-        activeController: @escaping () -> BibleReaderController?
+        activeController: @escaping @MainActor () -> BibleReaderController?
     ) {
         service.onRequestProviderReconstruction = nil
         service.onRequestDefaultProvider = nil
