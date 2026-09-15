@@ -63,6 +63,67 @@ xcrun xcresulttool export metrics \
 
 Record source revision and dirty diff, Xcode/build settings, runtime/device/host, fixture scenario, fixture tool hash, installed module hashes, production resource hashes, sample counts and raw result bundle with the report. Keep measurements and changing budgets in CI artifacts or the owning work item. Set matched-run budgets before evaluating optimized results.
 
+## Measure a real commentary scroll locally
+
+The opt-in `AndBibleCommentaryPerformance` scheme measures one real commentary workflow without adding the external module to the repository. Obtain `CalvinCommentaries.zip` from CrossWire's [module page](https://www.crosswire.org/sword/modules/ModInfo.jsp?modName=CalvinCommentaries) or [raw ZIP mirror](https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/CalvinCommentaries.zip). Its configuration declares version 1.1 and `DistributionLicense=Public Domain`. The preparation script accepts only the reviewed 20,897,508-byte archive with SHA-256 `df66fc8c03537499ad006d069481d2c95b600887cdbd6ce75ec5d264b573192a`; it performs no download.
+
+From a clean PR checkout, create a new composite SWORD fixture outside the source tree:
+
+```bash
+python3 scripts/prepare_calvin_commentary_fixture.py \
+  --archive /absolute/path/to/CalvinCommentaries.zip \
+  --output /tmp/andbible-calvin-sword \
+  --record /tmp/andbible-calvin-sword.json
+```
+
+Build the fixture tool and the dedicated Release test products. Use a dedicated automation simulator because the fixture service stops the app and replaces its test data. Do not target a simulator used for manual review.
+
+```bash
+swift build --product UITestFixtureTool
+xcodebuild -project AndBible.xcodeproj -scheme AndBibleCommentaryPerformance \
+  -configuration Release \
+  -destination 'platform=iOS Simulator,id=SIMULATOR_UUID' \
+  -derivedDataPath /tmp/andbible-calvin-performance \
+  -enableCodeCoverage NO -parallel-testing-enabled NO \
+  CODE_SIGNING_ALLOWED=NO build-for-testing
+```
+
+Run exactly the commentary method through the existing fixture-service wrapper:
+
+```bash
+export UITEST_SIMULATOR_ID='SIMULATOR_UUID'
+export UITEST_BUNDLE_ID='org.andbible.ios'
+export UITEST_FIXTURE_TOOL_PATH="$(pwd)/.build/debug/UITestFixtureTool"
+export UITEST_FIXTURE_MANIFEST_PATH="$(pwd)/Tests/UI/Fixtures/ui_test_fixture_manifest.json"
+export UITEST_SWORD_FIXTURE_PATH='/tmp/andbible-calvin-sword'
+python3 scripts/run_xcodebuild_with_test_selection.py \
+  --project AndBible.xcodeproj \
+  --scheme AndBibleCommentaryPerformance \
+  --configuration Release \
+  --destination "platform=iOS Simulator,id=${UITEST_SIMULATOR_ID}" \
+  --derived-data-path /tmp/andbible-calvin-performance \
+  --result-bundle-path /tmp/andbible-calvin-performance.xcresult \
+  --test-selection-args='-only-testing:AndBibleUITests/AndBibleUITests/testPerformanceCalvinCommentaryScrollAndReturnToScripture' \
+  --action test-without-building
+```
+
+The endpoint first requires the visible KJV module title and real Genesis title/body. One commentary-toolbar action must then reach the visible `Calvin's Collected Commentaries` title and the `BY JOHN CALVIN` text inside the WebView. After the measured scroll, one Bible-toolbar action must return to the same visible KJV title/body. Hidden diagnostic state cannot satisfy these checks, and the test retains screenshots immediately before and after scrolling.
+
+Export the structured measurements and attachments:
+
+```bash
+xcrun xcresulttool get test-results metrics \
+  --path /tmp/andbible-calvin-performance.xcresult --compact \
+  > /tmp/andbible-calvin-performance-metrics.json
+xcrun xcresulttool export attachments \
+  --path /tmp/andbible-calvin-performance.xcresult \
+  --output-path /tmp/andbible-calvin-performance-attachments
+```
+
+The test requests the public scrolling-and-deceleration metric together with clock, app CPU, and app memory. Record every returned metric identity, unit, and sample instead of assuming that the requested set produced data. The JSON attachment records how many times XCTest invoked the measurement closure, including any framework warmup. A passing functional route with absent scrolling data is not a successful scroll measurement. In the initial local runs, the scrolling export contained duration only (`com.apple.dt.XCTMetric_OSSignpost-Scroll_DraggingAndDeceleration.duration`), not frame-rate or hitch data. Do not interpret that duration as proof of smooth scrolling.
+
+These are simulator observations without an acceptance budget. App CPU and memory do not cover the separate WebContent process, and scrolling metrics do not identify a main-thread stack. Use an Instruments Time Profiler or Animation Hitches trace of the same exact method when attribution is needed, and report traced timing separately because tracing changes the workload.
+
 ## What the measurements establish
 
 Clock time includes XCTest action and accessibility observation overhead. “Process launch” terminates the app but does not purge OS filesystem caches. CPU and memory metrics cover the app process; they do not cover WebContent. A five-sample nearest-rank p95 is simply the observed maximum and cannot establish tail latency. Compare distributions across independent matched runs, not a single best iteration.

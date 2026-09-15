@@ -41,6 +41,7 @@ private enum FixtureScenario: String, CaseIterable {
     case baselineThreeWindows = "baseline-three-windows"
     case commentaryModule = "commentary-module"
     case commentaryModuleThreeWindows = "commentary-module-three-windows"
+    case calvinCommentaryPerformance = "calvin-commentary-performance"
     case searchIndexed = "search-indexed"
     case searchCompletePreview = "search-complete-preview"
     case searchCompletePreviewMulti = "search-complete-preview-multi"
@@ -361,11 +362,13 @@ private struct FixtureTool {
             swordURL.appendingPathComponent("mods.d/uitestdlrec.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestdlwarn.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestlocked.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/calvincommentaries.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/000uitestlocka.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/001uitestlockb.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/aatestreadable.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/000uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
+            swordURL.appendingPathComponent("modules/comments/zcom/calvincommentaries", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/aatestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/aatestweb", isDirectory: true),
@@ -485,6 +488,9 @@ private final class FixtureContext {
         case .commentaryModuleThreeWindows:
             try ensureVisibleBibleWindowCount(3, baseline: baseline)
             try seedUITestCommentaryModule()
+        case .calvinCommentaryPerformance:
+            try seedCalvinCommentaryPerformanceModule()
+            settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
         case .searchIndexed:
             try seedKJVFixtureSearchIndex()
         case .searchCompletePreview:
@@ -1724,6 +1730,49 @@ private final class FixtureContext {
                 try Data().write(to: url)
             }
         }
+    }
+
+    /**
+     Installs the exact public-domain Calvin commentary supplied by the local measurement fixture.
+
+     The explicit SWORD fixture input must contain both the ordinary KJV fixture and the retained
+     CalvinCommentaries 1.1 module. This method copies only that commentary's configuration and
+     compressed data into the simulator-owned app container, then invalidates module discovery.
+
+     - Side effects: Writes one commentary module beneath the requested simulator container.
+     - Failure modes: Propagates missing input or filesystem errors without synthesizing content.
+     */
+    private func seedCalvinCommentaryPerformanceModule() throws {
+        let sourceSwordURL = try swordFixtureResourceURL()
+        let destinationSwordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let sourceConfigurationURL = sourceSwordURL
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("calvincommentaries.conf", isDirectory: false)
+        let sourceDataURL = sourceSwordURL
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("comments", isDirectory: true)
+            .appendingPathComponent("zcom", isDirectory: true)
+            .appendingPathComponent("calvincommentaries", isDirectory: true)
+        let destinationModsDURL = destinationSwordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let destinationDataURL = destinationSwordURL
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("comments", isDirectory: true)
+            .appendingPathComponent("zcom", isDirectory: true)
+            .appendingPathComponent("calvincommentaries", isDirectory: true)
+
+        guard fileManager.fileExists(atPath: sourceConfigurationURL.path),
+              fileManager.fileExists(atPath: sourceDataURL.path) else {
+            throw FixtureToolError.missingSwordFixtureResources(sourceSwordURL.path)
+        }
+        try fileManager.createDirectory(at: destinationModsDURL, withIntermediateDirectories: true)
+        let destinationConfigurationURL = destinationModsDURL
+            .appendingPathComponent("calvincommentaries.conf", isDirectory: false)
+        if fileManager.fileExists(atPath: destinationConfigurationURL.path) {
+            try fileManager.removeItem(at: destinationConfigurationURL)
+        }
+        try fileManager.copyItem(at: sourceConfigurationURL, to: destinationConfigurationURL)
+        try copyDirectoryContents(from: sourceDataURL, to: destinationDataURL, replacingExisting: true)
+        try removeCachedSwordModuleConfig(in: destinationModsDURL)
     }
 
     /// Removes SWORD's module cache so newly seeded UI-test modules are discovered on app launch.

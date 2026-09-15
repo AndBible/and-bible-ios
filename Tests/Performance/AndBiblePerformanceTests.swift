@@ -4,12 +4,106 @@ import XCTest
 /**
  Release-only measurements of production reader launch, return, and destination navigation.
 
- The dedicated AndBiblePerformance scheme selects these methods. Fixture preparation occurs
+ Dedicated Release performance schemes select these methods. Fixture preparation occurs
  before measurement; detailed accessibility exports are disabled. The endpoint requires visible
  scripture and its module-derived source marker with usable geometry. XCTest wall time includes UI
  automation overhead and must not be presented as a pure app-thread or physical-frame measurement.
  */
 extension AndBibleUITests {
+    /**
+     Measures real Calvin commentary scrolling between visible KJV endpoints.
+
+     Fixture installation, launch, module switches, and visible source/body readiness remain outside
+     the scrolling metric. Each module button is activated exactly once. Each measurement invocation
+     swipes Calvin's large Genesis 1:1 entry; its count includes any XCTest warmup. Screenshots and
+     OCR occur only before or after the measurement cycle.
+     The attached route timings are diagnostic samples and carry no release budget.
+     */
+    func testPerformanceCalvinCommentaryScrollAndReturnToScripture() {
+        let app = makeApp(
+            fixtureScenario: "calvin-commentary-performance",
+            enablesDetailedAccessibilityExports: false
+        )
+        app.launch()
+        waitForVisiblePerformanceScripture(in: app)
+        waitForVisiblePerformanceModuleSubtitle("King James Version (1769) with Strongs Numbers and Morphology  and CatchWords", in: app)
+
+        let commentaryButton = app.otherElements["readerDocumentHeader"]
+            .buttons["readerCommentaryToolbarButton"]
+            .firstMatch
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(commentaryButton, timeout: 10),
+            "Expected one visible commentary toolbar action."
+        )
+        let commentarySwitchStarted = ProcessInfo.processInfo.systemUptime
+        commentaryButton.tap()
+        waitForVisiblePerformanceModuleSubtitle("Calvin's Collected Commentaries", in: app)
+        waitForVisibleReaderText(containing: "BY JOHN CALVIN", in: app, timeout: 30)
+        let commentaryReady = ProcessInfo.processInfo.systemUptime
+
+        let commentaryReadyScreenshot = XCTAttachment(screenshot: app.screenshot())
+        commentaryReadyScreenshot.name = "Calvin Genesis 1:1 visible before measured scroll"
+        commentaryReadyScreenshot.lifetime = .keepAlways
+        add(commentaryReadyScreenshot)
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(
+            webView.exists && elementFrameIsUsable(webView.frame) && app.frame.contains(webView.frame),
+            "Expected the real Calvin document in the visible reader WebView."
+        )
+        var scrollInvocationCount = 0
+        let scrollOptions = XCTMeasureOptions()
+        scrollOptions.iterationCount = 1
+        measure(
+            metrics: [
+                XCTOSSignpostMetric.scrollingAndDecelerationMetric,
+                XCTClockMetric(),
+                XCTCPUMetric(application: app),
+                XCTMemoryMetric(application: app),
+            ],
+            options: scrollOptions
+        ) {
+            scrollInvocationCount += 1
+            webView.swipeUp()
+        }
+
+        let scrolledScreenshot = XCTAttachment(screenshot: app.screenshot())
+        scrolledScreenshot.name = "Calvin Genesis 1:1 after measured scroll"
+        scrolledScreenshot.lifetime = .keepAlways
+        add(scrolledScreenshot)
+
+        let bibleButton = app.otherElements["readerDocumentHeader"]
+            .buttons["readerBibleToolbarButton"]
+            .firstMatch
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(bibleButton, timeout: 10),
+            "Expected one visible Bible toolbar action after the commentary scroll."
+        )
+        let bibleReturnStarted = ProcessInfo.processInfo.systemUptime
+        bibleButton.tap()
+        waitForVisiblePerformanceModuleSubtitle("King James Version (1769) with Strongs Numbers and Morphology  and CatchWords", in: app)
+        waitForVisiblePerformanceScripture(in: app)
+        let bibleReady = ProcessInfo.processInfo.systemUptime
+
+        let timingPayload: [String: Any] = [
+            "commentary_switch_to_visible_body_seconds": commentaryReady - commentarySwitchStarted,
+            "bible_return_to_visible_body_seconds": bibleReady - bibleReturnStarted,
+            "module": "CalvinCommentaries",
+            "scroll_invocation_count_including_warmup": scrollInvocationCount,
+            "reference": "Gen.1.1",
+            "scroll_metric": "XCTOSSignpostMetric.scrollingAndDecelerationMetric",
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: timingPayload, options: [.prettyPrinted, .sortedKeys])
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = "Calvin commentary route timings"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        } catch {
+            XCTFail("Could not encode commentary route timing evidence: \(error)")
+        }
+    }
+
     /**
      Measures a fresh process reaching the visible seeded KJV document.
 
@@ -203,5 +297,31 @@ extension AndBibleUITests {
         let ready = XCTNSPredicateExpectation(predicate: predicate, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed,
                        "Expected visible scripture from the seeded KJV source in the reader viewport")
+    }
+
+    /**
+     Awaits one exact module subtitle inside the visible reader header without changing app state.
+
+     This source marker complements WebView body verification so shared Genesis text cannot satisfy
+     a commentary or Bible endpoint under the wrong installed module.
+     */
+    private func waitForVisiblePerformanceModuleSubtitle(
+        _ subtitle: String,
+        in app: XCUIApplication
+    ) {
+        let header = app.otherElements["readerDocumentHeader"].firstMatch
+        let source = header.staticTexts.matching(
+            NSPredicate(format: "label == %@", subtitle)
+        ).firstMatch
+        let predicate = NSPredicate { _, _ in
+            header.exists && self.elementFrameIsUsable(header.frame)
+                && source.exists && self.elementFrameIsUsable(source.frame)
+                && header.frame.intersects(source.frame) && app.frame.intersects(source.frame)
+        }
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)], timeout: 30),
+            .completed,
+            "Expected visible reader module subtitle '\(subtitle)'."
+        )
     }
 }
