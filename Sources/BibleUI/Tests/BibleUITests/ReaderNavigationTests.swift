@@ -3638,7 +3638,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      misrepresent missing content as successfully loaded module data.
      */
     @MainActor
-    func testCommentaryMissingEntryEmitsNoContentErrorDocument() throws {
+    func testCommentaryMissingEntryEmitsNoContentErrorDocument() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawCommentaryModule(in: modulePath)
@@ -3654,13 +3654,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.switchCategory(to: .commentary)
         let baselineScriptCount = recordedScripts().count
         controller.loadCurrentContent()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineScriptCount
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(
-                from: Array(recordedScripts().dropFirst(baselineScriptCount)),
-                event: "add_documents"
-            ) as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
 
         XCTAssertEqual(payload["type"] as? String, "error")

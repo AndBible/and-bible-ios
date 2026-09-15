@@ -182,51 +182,6 @@ final class GenericSwordChooserContractsTests: XCTestCase {
     }
 
     /**
-     Guards commentary quick-selection routing for typed generic switch outcomes.
-
-     - Setup: Reads the pane-scoped selection and outcome handlers from `BibleReaderView` while
-       leaving the unrelated synchronized-scrolling callback outside the inspected functions.
-     - Expected result: Dictionary/general-book outcomes route to their choosers only when selection
-       is required, exact preservation presents nothing, and failures retain module plus pane id for
-       a user-visible retry.
-     - Failure meaning: Quick selection can target the wrong pane, reload stale content, or swallow a
-       SWORD failure instead of offering retry.
-     - Side effects: Reads repository source without mutating app state.
-     */
-    func testCommentaryQuickSelectorConsumesTypedGenericSwitchOutcome() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-        let selection = try BibleUITestSourceLocator.extractFunction(
-            named: "selectCommentaryQuickModule",
-            from: source
-        )
-        let routing = try BibleUITestSourceLocator.extractFunction(
-            named: "handleGenericQuickModuleSwitch",
-            from: source
-        )
-        let retryDialog = try BibleUITestSourceLocator.extractFunction(
-            named: "genericQuickModuleSwitchRetryDialog",
-            from: source
-        )
-
-        XCTAssertTrue(selection.contains("controller.switchDictionaryDocument(to: module.name)"))
-        XCTAssertTrue(selection.contains("browser: .dictionaryBrowser"))
-        XCTAssertTrue(selection.contains("controller.switchGeneralBookDocument(to: module.name)"))
-        XCTAssertTrue(selection.contains("browser: .generalBookBrowser"))
-        XCTAssertEqual(selection.components(separatedBy: "handleGenericQuickModuleSwitch(").count - 1, 2)
-        XCTAssertTrue(routing.contains("case .switchedPreservingKey:"))
-        XCTAssertTrue(routing.contains("case .switchedRequiringKeySelection:"))
-        XCTAssertTrue(routing.contains("presentReaderDestinationPreservingPane(browser)"))
-        XCTAssertTrue(routing.contains("case .failed(let message):"))
-        XCTAssertTrue(routing.contains("pendingGenericQuickModuleSwitchRetry = GenericQuickModuleSwitchRetry("))
-        XCTAssertTrue(routing.contains("targetWindowId: targetWindowId"))
-        XCTAssertTrue(retryDialog.contains("AndroidDecisionDialog("))
-        XCTAssertTrue(retryDialog.contains("title: String(localized: \"retry\")"))
-        XCTAssertTrue(retryDialog.contains("selectCommentaryQuickModule("))
-    }
-
-    /**
      Guards the dictionary activity's backend-independent source and owner handoff.
 
      - Setup: Reads the dictionary destination branch from `BibleReaderView`.

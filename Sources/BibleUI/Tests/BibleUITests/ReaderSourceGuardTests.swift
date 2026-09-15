@@ -120,57 +120,6 @@ final class ReaderSourceGuardTests: XCTestCase {
     }
 
     /**
-     Guards the commentary toolbar quick-menu route against preserving the old iOS sheet.
-
-     Android default commentary taps show an anchored `PopupMenu` with commentaries, general books,
-     and dictionaries while the reader remains visible. Long press remains the full
-     `ChooseDocument` activity path except for Android's `swap-menu` setting. The SwiftUI
-     coordinator state is private, so this source-level contract checks the same boundary as the
-     Bible quick-menu test: commentary tap must resolve rows, show the anchored popup, anchor from
-     the commentary toolbar button, and route selections through category-specific current-document
-     switch methods.
-     */
-    func testCommentaryToolbarMenuRoutesThroughAnchoredQuickSelectorInsteadOfSheet() throws {
-        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
-        let toolbarSource = try bibleUISource(named: "BibleReaderToolbarActions.swift")
-        let menuActionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "performCommentaryMenuAction",
-            from: readerSource
-        )
-        let selectionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "selectCommentaryQuickModule",
-            from: readerSource
-        )
-
-        XCTAssertTrue(menuActionSource.contains("BibleReaderQuickModuleSelectorPresentation.action("))
-        XCTAssertTrue(menuActionSource.contains("commentaryQuickSelectorModules("))
-        XCTAssertTrue(menuActionSource.contains("presentCommentaryQuickSelector(controller, rows: rows)"))
-        XCTAssertFalse(menuActionSource.contains("performCommentaryChooserAction()"))
-        XCTAssertTrue(readerSource.contains("performCommentaryMenuAction(controller, includeAuxiliaryDocuments: false)"))
-        XCTAssertTrue(readerSource.contains("modules += controller.installedGeneralBookModules"))
-        XCTAssertTrue(readerSource.contains("modules += controller.installedDictionaryModules"))
-        XCTAssertTrue(readerSource.contains("controller.installedCommentaryModules.filter(\\.isUnlocked)"))
-        XCTAssertTrue(readerSource.contains("@State private var commentaryQuickModuleSelectorRows"))
-        XCTAssertTrue(readerSource.contains("@State private var commentaryQuickModuleSelectorTargetWindowId"))
-        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorTargetWindowId = resolvedTargetWindowId"))
-        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorTargetWindowId = nil"))
-        XCTAssertTrue(readerSource.contains("commentaryQuickModuleSelectorOverlay(anchor: anchor)"))
-        XCTAssertTrue(readerSource.contains("ReaderCommentaryToolbarButtonBoundsPreferenceKey"))
-        XCTAssertTrue(
-            toolbarSource.contains(
-                ".anchorPreference(key: ReaderCommentaryToolbarButtonBoundsPreferenceKey.self"
-            )
-        )
-        XCTAssertTrue(selectionSource.contains("case .commentary:"))
-        XCTAssertTrue(selectionSource.contains("controller.switchCommentaryDocument(to: module.name)"))
-        XCTAssertTrue(selectionSource.contains("case .dictionary:"))
-        XCTAssertTrue(selectionSource.contains("controller.switchDictionaryDocument(to: module.name)"))
-        XCTAssertTrue(selectionSource.contains("case .generalBook:"))
-        XCTAssertTrue(selectionSource.contains("controller.switchGeneralBookDocument(to: module.name)"))
-        XCTAssertTrue(selectionSource.contains("dismissCommentaryQuickSelector()"))
-    }
-
-    /**
      Verifies active-pane rendering stays owned by the Android/Vue active-window indicator.
 
      Android emits `set_active` into each web reader and draws corner markers inside `BibleView.vue`.

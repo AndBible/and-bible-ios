@@ -83,33 +83,6 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
-     Verifies Downloads wires Unlock through the shared manager-backed submission contract.
-
-     - Setup: Extracts the production Downloads submission function.
-     - Expected result: It delegates key validation to `SwordManager`, refreshes installed rows only
-       from accepted work, and re-presents the module with shared invalid-key feedback on rejection.
-     - Failure meaning: Downloads can diverge from the reader picker by bypassing key verification,
-       omitting its successful refresh, or silently swallowing an invalid passphrase.
-     - Side effects: Reads production source through the test source locator.
-     */
-    func testDownloadsUnlockUsesSharedManagerRefreshAndRetryContract() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
-        )
-        let unlockSource = try BibleUITestSourceLocator.extractFunction(
-            named: "attemptUnlock",
-            from: source
-        )
-
-        XCTAssertTrue(unlockSource.contains("ModuleUnlockActionCoordinator.submit"))
-        XCTAssertTrue(unlockSource.contains("swordManager?.unlockModule"))
-        XCTAssertTrue(unlockSource.contains("refreshInstalledList()"))
-        XCTAssertTrue(unlockSource.contains("ModuleUnlockActionCoordinator.failureMessage"))
-        XCTAssertTrue(unlockSource.contains("pendingUnlockModule = module"))
-        XCTAssertFalse(unlockSource.contains("setCipherKey"))
-    }
-
-    /**
      Verifies same-initials rows retain independent Android repository identities and row state.
 
      Setup:

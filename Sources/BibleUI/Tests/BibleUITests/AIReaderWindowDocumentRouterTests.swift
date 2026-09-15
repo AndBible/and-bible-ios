@@ -472,7 +472,12 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         })
     }
 
-    /** An older candidate EPUB cannot activate after a newer AI EPUB route supersedes it. */
+    /**
+     An older candidate EPUB cannot activate after a newer AI EPUB route supersedes it.
+
+     The test releases and drains its injected preparation worker before returning so no blocked
+     source-capture work can escape into the next package test.
+     */
     func testSupersededEpubCandidateCannotActivateOverNewerRoute() async throws {
         let firstArchive = try makeDefaultLibraryEpubArchiveFixture(
             title: "AI Router EPUB A \(UUID().uuidString)"
@@ -494,8 +499,15 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         let secondReader = try XCTUnwrap(EpubReader(identifier: secondIdentifier))
         let firstCaptureEntered = expectation(description: "first EPUB candidate capture entered")
         let releaseFirstCapture = DispatchSemaphore(value: 0)
+        defer { releaseFirstCapture.signal() }
         let blockedFirstCapture = AIReaderLockedValue(false)
+        let worker = DispatchQueue(
+            label: "org.andbible.tests.ai-router-epub-supersession",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
         let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
             phaseObserver: { phase, _, key in
                 guard phase == .sourceCapture, key.family.rawValue == "epub" else { return }
                 let shouldBlock = blockedFirstCapture.withValue { blocked -> Bool in
@@ -553,7 +565,9 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         }
         let firstError = await firstRoute.value
         releaseFirstCapture.signal()
-        let secondResult = try await secondRoute.value
+        let secondOutcome = await secondRoute.result
+        await drainPreparationWorker(worker)
+        let secondResult = try secondOutcome.get()
 
         XCTAssertEqual(firstError?.code, "NAVIGATION_FAILED")
         XCTAssertEqual(secondResult.documentInitials, secondReader.initials)
@@ -564,7 +578,12 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(window.pageManager?.generalBookKey, "2")
     }
 
-    /** A cancelled installed-entry route settles and cannot report its uncommitted key. */
+    /**
+     A cancelled installed-entry route settles and cannot report its uncommitted key.
+
+     The test releases and drains its injected preparation worker after cancellation; the drain
+     establishes test-fixture lifetime, not that this case caused another test's readiness failure.
+     */
     func testCancelledDictionaryPreparationReturnsFailureWithoutPublishingSelection() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try writeAIReaderRawLDModule(
@@ -578,7 +597,14 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         )
         let captureEntered = expectation(description: "dictionary source capture entered")
         let releaseCapture = DispatchSemaphore(value: 0)
+        defer { releaseCapture.signal() }
+        let worker = DispatchQueue(
+            label: "org.andbible.tests.ai-router-dictionary-cancellation",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
         let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
             phaseObserver: { phase, _, key in
                 guard phase == .sourceCapture,
                       key.contentIdentity == BibleReaderPreparationExactText("TARGET") else { return }
@@ -634,6 +660,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         coordinator.cancelAll()
         let error = await route.value
         releaseCapture.signal()
+        await drainPreparationWorker(worker)
 
         XCTAssertEqual(error?.code, "NAVIGATION_FAILED")
         XCTAssertNil(controller.currentDictionaryKey)
@@ -641,7 +668,12 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(scripts().dropFirst(boundary).contains { $0.contains("add_documents") })
     }
 
-    /** A superseded local-page route settles without selecting over the newer AI request. */
+    /**
+     A superseded local-page route settles without selecting over the newer AI request.
+
+     The test releases and drains its injected preparation worker before returning so the blocked
+     source-capture observer cannot outlive this test case.
+     */
     func testSupersededMyDocumentRouteCannotOverwriteNewerPageSelection() async throws {
         let myDocumentContainer = try makeMyDocumentModelContainer()
         let myDocumentContext = myDocumentContainer.mainContext
@@ -663,8 +695,15 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
 
         let firstCaptureEntered = expectation(description: "first local page capture entered")
         let releaseFirstCapture = DispatchSemaphore(value: 0)
+        defer { releaseFirstCapture.signal() }
         let blockedFirstCapture = AIReaderLockedValue(false)
+        let worker = DispatchQueue(
+            label: "org.andbible.tests.ai-router-my-document-supersession",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
         let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
             phaseObserver: { phase, _, key in
                 guard phase == .sourceCapture, key.family.rawValue == "my-document" else { return }
                 let shouldBlock = blockedFirstCapture.withValue { blocked -> Bool in
@@ -720,13 +759,28 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         }
         let firstError = await firstRoute.value
         releaseFirstCapture.signal()
-        let secondResult = try await secondRoute.value
+        let secondOutcome = await secondRoute.result
+        await drainPreparationWorker(worker)
+        let secondResult = try secondOutcome.get()
 
         XCTAssertEqual(firstError?.code, "NAVIGATION_FAILED")
         XCTAssertEqual(secondResult.documentInitials, "RouterSupersede")
         XCTAssertEqual(secondResult.currentKey, "second")
         XCTAssertEqual(controller.currentGeneralBookKey, "second")
         XCTAssertEqual(window.pageManager?.generalBookKey, "second")
+    }
+
+    /**
+     Waits until every preparation block submitted before the barrier has returned.
+
+     - Parameter worker: Concurrent queue injected into the preparation coordinator by the test.
+     - Side effects: Enqueues one barrier after the test has released its capture semaphore.
+     - Failure modes: Records an XCTest failure if prior submitted work does not return promptly.
+     */
+    private func drainPreparationWorker(_ worker: DispatchQueue) async {
+        let drained = expectation(description: "AI route preparation worker drained")
+        worker.async(flags: .barrier) { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 3)
     }
 }
 

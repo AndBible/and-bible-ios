@@ -735,7 +735,8 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
      Prevents persisted auxiliary selections from reactivating relocked native content handles.
 
      - Setup: Installs locked commentary, dictionary, general-book, and map rows, attaches a page
-       manager that persisted every row and its category-owned key, then restores the pane.
+       manager with a complete KJV Bible owner plus every locked auxiliary row and category-owned
+       key, then restores the pane.
      - Expected result: Each requested identity remains available for a later unlock retry, but all
        four native content handles stay nil; only non-sensitive general-book/map keys remain staged.
      - Failure meaning: The post-configuration restore path has bypassed the shared readable-source
@@ -763,6 +764,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
+        pageManager.bibleDocument = "KJV"
         pageManager.commentaryDocument = "LockedComm"
         pageManager.dictionaryDocument = "LockedDict"
         pageManager.dictionaryKey = "locked-dictionary-key"
