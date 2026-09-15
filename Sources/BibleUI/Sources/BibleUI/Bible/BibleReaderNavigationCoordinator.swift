@@ -350,15 +350,18 @@ final class BibleReaderNavigationCoordinator {
                 context: context
             )
         } else if let reference = context.verseReference(previousPosition.book, ordinal) {
-            var position = previousPosition
-            position = BibleReaderNavigationPosition(
-                book: position.book,
+            let position = BibleReaderNavigationPosition(
+                book: previousPosition.book,
                 chapter: reference.chapter,
                 verse: reference.verse
             )
-            context.setCurrentPosition(position)
-            if let pageManager = context.pageManager() {
-                write(position: position, to: pageManager, bookList: context.bookList())
+            let pageManager = context.pageManager()
+            _ = applyVisibleBiblePosition(
+                position,
+                pageManager: pageManager,
+                context: context
+            )
+            if pageManager != nil {
                 persistVisibleVerseState(immediate: false, persistState: context.persistState)
             }
         }
@@ -397,18 +400,21 @@ final class BibleReaderNavigationCoordinator {
             verse: reference.verse
         )
         lastScrollTarget = .ordinal(reference.ordinal)
-        guard position != previousPosition else { return false }
-
-        context.setCurrentPosition(position)
-        if let pageManager = context.pageManager() {
-            write(position: position, to: pageManager, bookList: context.bookList())
+        let pageManager = context.pageManager()
+        let changes = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        if pageManager != nil,
+           changes.positionChanged || changes.pageManagerChanged {
             persistVisibleVerseState(
                 immediate: position.book != previousPosition.book
                     || position.chapter != previousPosition.chapter,
                 persistState: context.persistState
             )
         }
-        return true
+        return changes.positionChanged
     }
 
     /**
@@ -435,13 +441,17 @@ final class BibleReaderNavigationCoordinator {
         context: BibleReaderNavigationContext
     ) {
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: verse)
-        context.setCurrentPosition(position)
         originalNavigationOrdinalRange = nil
         lastScrollTarget = .ordinal(ordinal)
         shouldRestoreScroll = true
 
-        if let pageManager = context.pageManager() {
-            write(position: position, to: pageManager, bookList: context.bookList())
+        let pageManager = context.pageManager()
+        _ = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        if pageManager != nil {
             persistVisibleVerseState(immediate: false, persistState: context.persistState)
         }
     }
@@ -558,45 +568,48 @@ final class BibleReaderNavigationCoordinator {
         ordinal: Int,
         context: BibleReaderNavigationContext
     ) {
-        var position = context.currentPosition()
+        let previousPosition = context.currentPosition()
         guard let chapter = Int(chapterText) else {
             return
         }
 
-        if chapter != position.chapter {
+        var position = previousPosition
+        let isImmediateTransition: Bool
+        if chapter != previousPosition.chapter {
             position = BibleReaderNavigationPosition(
-                book: context.bookNameForOsisId(osisId) ?? position.book,
+                book: context.bookNameForOsisId(osisId) ?? previousPosition.book,
                 chapter: chapter,
-                verse: position.verse
+                verse: previousPosition.verse
             )
-            if let pageManager = context.pageManager() {
-                position = positionByResolvingVerse(
-                    from: position,
-                    ordinal: ordinal,
-                    context: context
-                )
-                write(position: position, to: pageManager, bookList: context.bookList())
-                persistVisibleVerseState(immediate: true, persistState: context.persistState)
-            }
-            context.setCurrentPosition(position)
-        } else if let name = context.bookNameForOsisId(osisId), name != position.book {
-            position = BibleReaderNavigationPosition(book: name, chapter: position.chapter, verse: position.verse)
-            if let pageManager = context.pageManager() {
-                position = positionByResolvingVerse(
-                    from: position,
-                    ordinal: ordinal,
-                    context: context
-                )
-                write(position: position, to: pageManager, bookList: context.bookList())
-                persistVisibleVerseState(immediate: true, persistState: context.persistState)
-            }
-            context.setCurrentPosition(position)
-        } else if let pageManager = context.pageManager() {
-            position = positionByResolvingVerse(from: position, ordinal: ordinal, context: context)
-            context.setCurrentPosition(position)
-            pageManager.bibleVerseNo = position.verse
-            persistVisibleVerseState(immediate: false, persistState: context.persistState)
+            isImmediateTransition = true
+        } else if let name = context.bookNameForOsisId(osisId), name != previousPosition.book {
+            position = BibleReaderNavigationPosition(
+                book: name,
+                chapter: previousPosition.chapter,
+                verse: previousPosition.verse
+            )
+            isImmediateTransition = true
+        } else {
+            isImmediateTransition = false
         }
+
+        guard let pageManager = context.pageManager() else {
+            if isImmediateTransition {
+                context.setCurrentPosition(position)
+            }
+            return
+        }
+
+        position = positionByResolvingVerse(from: position, ordinal: ordinal, context: context)
+        _ = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        persistVisibleVerseState(
+            immediate: isImmediateTransition,
+            persistState: context.persistState
+        )
     }
 
     /**
@@ -623,6 +636,51 @@ final class BibleReaderNavigationCoordinator {
             chapter: position.chapter,
             verse: reference.verse
         )
+    }
+
+    /**
+     Applies one resolved Bible position without assigning fields that already match.
+
+     - Parameters:
+       - position: Resolved visible Bible position.
+       - pageManager: Durable page state for the active window, when one exists.
+       - context: Controller-owned observed position and active book catalog.
+     - Returns: Independent flags for controller-coordinate and PageManager mutation.
+     - Side effects: Publishes the controller position before mutating only the PageManager fields
+       whose values differ, so immediate persistence observes one coherent target.
+     - Failure modes: A missing PageManager still permits the controller position to advance but
+       produces no durable mutation flag. An unresolved book index preserves the retained index while
+       chapter and verse repairs remain available.
+     */
+    private func applyVisibleBiblePosition(
+        _ position: BibleReaderNavigationPosition,
+        pageManager: PageManager?,
+        context: BibleReaderNavigationContext
+    ) -> (positionChanged: Bool, pageManagerChanged: Bool) {
+        let positionChanged = context.currentPosition() != position
+        if positionChanged {
+            context.setCurrentPosition(position)
+        }
+
+        guard let pageManager else {
+            return (positionChanged, false)
+        }
+        let resolvedBookIndex = context.bookList().firstIndex { $0.name == position.book }
+        var pageManagerChanged = false
+        if let resolvedBookIndex,
+           pageManager.bibleBibleBook != resolvedBookIndex {
+            pageManager.bibleBibleBook = resolvedBookIndex
+            pageManagerChanged = true
+        }
+        if pageManager.bibleChapterNo != position.chapter {
+            pageManager.bibleChapterNo = position.chapter
+            pageManagerChanged = true
+        }
+        if pageManager.bibleVerseNo != position.verse {
+            pageManager.bibleVerseNo = position.verse
+            pageManagerChanged = true
+        }
+        return (positionChanged, pageManagerChanged)
     }
 
     /**

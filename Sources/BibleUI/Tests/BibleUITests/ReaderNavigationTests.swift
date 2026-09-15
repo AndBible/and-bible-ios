@@ -7355,6 +7355,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         /// Current visible Bible position.
         var position: BibleReaderNavigationPosition
 
+        /// Number of observable controller-position publications.
+        var positionWriteCount = 0
+
         /// Recorded history keys supplied by explicit navigation.
         var history: [String] = []
 
@@ -7386,9 +7389,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager: PageManager,
         clientReady: Bool = true,
         isShowingAndroidMultiDocument: Bool = false,
-        acceptsLoadedScroll: Bool = false
+        acceptsLoadedScroll: Bool = false,
+        onPersistState: (() -> Void)? = nil,
+        bookListOverride: [BibleReaderNavigationBook]? = nil
     ) -> BibleReaderNavigationContext {
-        let books = [
+        let books = bookListOverride ?? [
             BibleReaderNavigationBook(name: "Genesis", osisId: "Gen", chapterCount: 50),
             BibleReaderNavigationBook(name: "Exodus", osisId: "Exod", chapterCount: 40),
         ]
@@ -7403,7 +7408,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         return BibleReaderNavigationContext(
             currentPosition: { state.position },
-            setCurrentPosition: { state.position = $0 },
+            setCurrentPosition: {
+                state.position = $0
+                state.positionWriteCount += 1
+            },
             pageManager: { pageManager },
             bookList: { books },
             isShowingAndroidMultiDocument: { isShowingAndroidMultiDocument },
@@ -7442,6 +7450,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             },
             persistState: {
                 state.persistCount += 1
+                onPersistState?()
             },
             scrollToLoadedPosition: { position, highlight in
                 guard acceptsLoadedScroll else { return false }
@@ -7633,6 +7642,228 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(state.history, [])
         XCTAssertEqual(state.loadCount, 0)
         XCTAssertEqual(ordinalResolutionCount, 0)
+    }
+
+    /**
+     Leaves a saved PageManager clean when all visible-position routes report its exact state.
+
+     Keyed Bible, ordinal fallback, synchronized, and source-qualified commentary references still
+     retain the existing persistence debounce behavior, but they must not reassign equal SwiftData
+     fields or dirty the caller's context merely because telemetry repeated.
+     */
+    @MainActor
+    func testReaderNavigationCoordinatorDuplicateTelemetryLeavesSavedPageManagerClean() throws {
+        let container = try makeWorkspaceModelContainer()
+        let modelContext = ModelContext(container)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        modelContext.insert(window)
+        modelContext.insert(pageManager)
+        window.pageManager = pageManager
+        pageManager.window = window
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 5
+        try modelContext.save()
+        XCTAssertFalse(modelContext.hasChanges)
+
+        let coordinator = BibleReaderNavigationCoordinator()
+        let position = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
+        let state = NavigationCoordinatorStateBox(position: position)
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            onPersistState: {
+                XCTAssertFalse(modelContext.hasChanges)
+            }
+        )
+
+        XCTAssertFalse(
+            coordinator.updateVisiblePosition(
+                ordinal: 105,
+                key: "Gen.1",
+                atChapterTop: false,
+                context: context
+            )
+        )
+        XCTAssertFalse(modelContext.hasChanges)
+        XCTAssertFalse(
+            coordinator.updateVisiblePosition(
+                ordinal: 105,
+                key: "",
+                atChapterTop: false,
+                context: context
+            )
+        )
+        XCTAssertFalse(modelContext.hasChanges)
+        coordinator.applySynchronizedVersePosition(
+            book: "Genesis",
+            chapter: 1,
+            verse: 5,
+            ordinal: 105,
+            context: context
+        )
+        XCTAssertFalse(modelContext.hasChanges)
+        XCTAssertFalse(
+            coordinator.updateVisiblePosition(
+                reference: BibleReaderNavigationVerseReference(
+                    chapter: 1,
+                    verse: 5,
+                    osisBookId: "Gen",
+                    ordinal: 105
+                ),
+                context: context
+            )
+        )
+        XCTAssertFalse(modelContext.hasChanges)
+        XCTAssertEqual(state.positionWriteCount, 0)
+        XCTAssertTrue(waitForReaderCondition(timeout: 1) { state.persistCount == 1 })
+        XCTAssertFalse(modelContext.hasChanges)
+
+        _ = coordinator.updateVisiblePosition(
+            ordinal: 105,
+            key: "Gen.1",
+            atChapterTop: false,
+            context: context
+        )
+        XCTAssertTrue(
+            waitForReaderCondition(timeout: 1) { state.persistCount == 2 },
+            "An exact callback after the prior attempt remains eligible to retry an unreported failure"
+        )
+        XCTAssertFalse(modelContext.hasChanges)
+        XCTAssertEqual(
+            coordinator.contentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(105)
+        )
+        withExtendedLifetime(container) {}
+    }
+
+    /**
+     Preserves a retained PageManager book index while the active book catalog is unavailable.
+
+     Same-chapter telemetry historically updated only the verse. A transient empty catalog must not
+     turn an exact callback into a destructive `nil` book-index write while chapter/verse handling
+     and the existing persistence debounce remain available.
+     */
+    @MainActor
+    func testReaderNavigationCoordinatorPreservesBookIndexWhenCatalogIsUnavailable() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let position = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
+        let state = NavigationCoordinatorStateBox(position: position)
+        let pageManager = PageManager()
+        pageManager.bibleBibleBook = 1
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 5
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            bookListOverride: []
+        )
+
+        let changed = coordinator.updateVisiblePosition(
+            ordinal: 105,
+            key: "Gen.1",
+            atChapterTop: false,
+            context: context
+        )
+
+        XCTAssertFalse(changed)
+        XCTAssertEqual(state.positionWriteCount, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertTrue(waitForReaderCondition(timeout: 1) { state.persistCount == 1 })
+    }
+
+    /**
+     Repairs stale durable Bible fields without republishing an unchanged controller coordinate.
+
+     Commentary applies an already source-qualified reference. An equal controller position must
+     still repair its active PageManager and persist once, while the return value remains reserved
+     for synchronized-scroll broadcasting of an actual controller-coordinate change.
+     */
+    @MainActor
+    func testReaderNavigationCoordinatorRepairsStalePageManagerForCapturedReference() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let position = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
+        let state = NavigationCoordinatorStateBox(position: position)
+        let pageManager = PageManager()
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 2
+        let context = makeNavigationCoordinatorContext(state: state, pageManager: pageManager)
+
+        let changed = coordinator.updateVisiblePosition(
+            reference: BibleReaderNavigationVerseReference(
+                chapter: 1,
+                verse: 5,
+                osisBookId: "Gen",
+                ordinal: 105
+            ),
+            context: context
+        )
+
+        XCTAssertFalse(changed)
+        XCTAssertEqual(state.position, position)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertTrue(waitForReaderCondition(timeout: 1) { state.persistCount == 1 })
+        XCTAssertEqual(
+            coordinator.contentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(105)
+        )
+    }
+
+    /**
+     Publishes a cross-chapter controller position before its immediate persistence callback.
+
+     The callback is outward and can synchronously inspect observable controller state. It must see
+     the same target already written to the PageManager instead of the chapter being left.
+     */
+    @MainActor
+    func testReaderNavigationCoordinatorImmediatePersistenceObservesPublishedPosition() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        var observedPosition: BibleReaderNavigationPosition?
+        var observedPageManagerPosition: BibleReaderNavigationPosition?
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            onPersistState: {
+                observedPosition = state.position
+                observedPageManagerPosition = BibleReaderNavigationPosition(
+                    book: pageManager.bibleBibleBook == 1 ? "Exodus" : "Genesis",
+                    chapter: pageManager.bibleChapterNo ?? -1,
+                    verse: pageManager.bibleVerseNo ?? -1
+                )
+            }
+        )
+
+        let changed = coordinator.updateVisiblePosition(
+            ordinal: 205,
+            key: "Exod.2",
+            atChapterTop: false,
+            context: context
+        )
+
+        let target = BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5)
+        XCTAssertTrue(changed)
+        XCTAssertEqual(observedPosition, target)
+        XCTAssertEqual(observedPageManagerPosition, target)
+        XCTAssertEqual(state.persistCount, 1)
     }
 
     /**
