@@ -914,3 +914,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ မှတ်တမ်းတွင် ရှာမတွေ့ပါ %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "ကိုယ်ပိုင် မှတ်စုများရွှေ့ပြောင်းပြီး";

@@ -1702,3 +1702,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ không được tìm thấy trong tài liệu %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Đã di chuyển Ghi Chú Của Tôi";

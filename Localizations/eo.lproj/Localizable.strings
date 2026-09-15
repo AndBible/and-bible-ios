@@ -1542,3 +1542,6 @@ Dum uzi Google Drive, %@ akiros aliron nur al aplikaĵaj datumoj, al neniu priva
 
 /* Android shared translations */
 "error_key_not_in_document2" = "Ne trovis “%1$@” en %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Enportitaj notoj";

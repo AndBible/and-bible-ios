@@ -206,7 +206,8 @@ public final class AIGeneratedPageStore {
      - sourceModelName: Provider model identifier, omitted when blank.
    - Returns: Durable page location for reader navigation.
    - Side effects: Under the canonical installed-book lease, may create AI Documents, inserts
-     page/content/cache rows, commits the sync journal once, and broadcasts the committed marker.
+     page/content/cache rows, commits the sync journal once, broadcasts the committed marker, and
+     publishes an installed-registry wakeup only when the AI Documents owner is first created.
    - Throws: Duplicate or foreign reserved identities, strict registry failures, context
      serialization/hash failures, or atomic persistence errors. Failed saves roll back every staged
      row and release the root-wide lease before a queued identity publisher proceeds.
@@ -226,14 +227,15 @@ public final class AIGeneratedPageStore {
       sourceModelName: sourceModelName
     )
 
-    return try mutationCoordinator.withExclusiveTransaction(
+    let publication = try mutationCoordinator.withExclusiveTransaction(
       kind: .myDocument,
       prepare: { () },
       commit: { _ in
         let modelContext = ModelContext(modelContainer)
         do {
           let now = Date()
-          let document = try resolveOrCreateAIDocument(in: modelContext, now: now)
+          let resolvedDocument = try resolveOrCreateAIDocument(in: modelContext, now: now)
+          let document = resolvedDocument.document
           let staged = try stagePage(
             in: modelContext,
             document: document,
@@ -263,7 +265,10 @@ public final class AIGeneratedPageStore {
               ]
             )
           )
-          return location
+          return (
+            location: location,
+            didCreateRegistration: resolvedDocument.didCreateRegistration
+          )
         } catch let error as AIGeneratedPageStoreError {
           modelContext.rollback()
           throw error
@@ -273,6 +278,10 @@ public final class AIGeneratedPageStore {
         }
       }
     )
+    if publication.didCreateRegistration {
+      SwordModuleStore.notifyModulesDidChange()
+    }
+    return publication.location
   }
 
   /**
@@ -456,7 +465,8 @@ public final class AIGeneratedPageStore {
    - Parameters:
      - modelContext: Operation-scoped SwiftData context.
      - now: Shared creation timestamp for the new graph.
-   - Returns: The sole reserved AI Documents row.
+   - Returns: The sole reserved AI Documents row plus whether this transaction created its
+     installed-registry owner.
    - Side effects: When no container exists, reads the injected complete registry before renumbering
      existing documents and inserting the reserved container into the operation context.
    - Throws: Fetch failures, `duplicateAIDocuments`, foreign identity ownership, or strict registry
@@ -469,13 +479,15 @@ public final class AIGeneratedPageStore {
   private func resolveOrCreateAIDocument(
     in modelContext: ModelContext,
     now: Date
-  ) throws -> MyDocument {
+  ) throws -> (document: MyDocument, didCreateRegistration: Bool) {
     let allDocuments = try modelContext.fetch(FetchDescriptor<MyDocument>())
     let aiDocuments = allDocuments.filter { $0.initials == Self.documentInitials }
     guard aiDocuments.count <= 1 else {
       throw AIGeneratedPageStoreError.duplicateAIDocuments
     }
-    if let existing = aiDocuments.first { return existing }
+    if let existing = aiDocuments.first {
+      return (document: existing, didCreateRegistration: false)
+    }
 
     let identityIsUnavailable: Bool
     do {
@@ -508,7 +520,7 @@ public final class AIGeneratedPageStore {
     )
     document.pages = []
     modelContext.insert(document)
-    return document
+    return (document: document, didCreateRegistration: true)
   }
 
   /**

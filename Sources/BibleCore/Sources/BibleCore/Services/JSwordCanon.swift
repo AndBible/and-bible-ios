@@ -239,4 +239,65 @@ enum JSwordCanon {
         }
         return system.references[index].reference
     }
+
+    /**
+     Returns the last verse number for one chapter in Android's pinned JSword canon.
+
+     This reads the compact fixture dimensions without expanding the system's intro-inclusive
+     reference index. Chapter `0` is accepted because Android's reader can retain a source book or
+     chapter introduction before `VerseRange.toV11n` normalizes it.
+
+     - Parameters:
+       - osisBookId: Exact OSIS identifier in the source canon.
+       - chapter: Zero-based introduction chapter or a one-based real chapter.
+       - versification: JSword system name; whitespace-only input means KJV.
+     - Returns: The chapter's last verse, including `0` for an introduction chapter, or `nil` when
+       the system, book, or chapter is invalid.
+     - Side effects: Lazily decodes the immutable bundled canon fixture; it performs no native I/O
+       and changes no caller-visible state.
+     - Failure modes: Missing or revision-mismatched fixture data and unsupported coordinates fail
+       closed with `nil`.
+     */
+    static func lastVerse(
+        osisBookId: String,
+        chapter: Int,
+        versification: String
+    ) -> Int? {
+        guard chapter >= 0,
+              let fixture,
+              let name = normalizedName(versification),
+              let book = fixture.systems[name]?.books.first(where: { $0.osis == osisBookId }),
+              book.chapters.indices.contains(chapter) else {
+            return nil
+        }
+        return book.chapters[chapter]
+    }
+
+    /**
+     Returns real books in Android's pinned JSword canon order.
+
+     JSword's fixture also contains Bible, testament, and book introduction pseudo-books. Those
+     have no real chapters and are omitted. Callers that mirror `BibleTraverser` must separately
+     preserve its KJV-scripture versus non-KJV-scripture classification while selecting candidates.
+
+     - Parameter versification: JSword system name; whitespace-only input means KJV.
+     - Returns: Ordered OSIS identifiers and last chapter numbers for books with at least one real
+       chapter, or `nil` when the system is unsupported or fixture validation failed.
+     - Side effects: Lazily decodes the immutable bundled fixture; no cache or native cursor is
+       mutated.
+     - Failure modes: Invalid fixture data and unknown systems fail closed with `nil`.
+     */
+    static func bookDimensions(
+        versification: String
+    ) -> [(osisBookId: String, lastChapter: Int)]? {
+        guard let fixture,
+              let name = normalizedName(versification),
+              let books = fixture.systems[name]?.books else {
+            return nil
+        }
+        return books.compactMap { book in
+            let lastChapter = book.chapters.count - 1
+            return lastChapter > 0 ? (book.osis, lastChapter) : nil
+        }
+    }
 }

@@ -1527,3 +1527,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ tidak ditemukan dalam dokumen %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Catatanku yang dipindahkan";

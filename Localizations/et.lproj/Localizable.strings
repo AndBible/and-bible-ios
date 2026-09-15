@@ -1540,3 +1540,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ ei leitud dokumendist %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Üle toodud Minu märkmed";

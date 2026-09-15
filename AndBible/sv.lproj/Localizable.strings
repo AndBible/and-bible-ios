@@ -1544,3 +1544,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ hittades inte i dokument %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Migrerade egna anteckningar";

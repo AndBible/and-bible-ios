@@ -658,6 +658,15 @@ final class EpubReaderParityTests: XCTestCase {
         let firstReader = try XCTUnwrap(EpubReader(identifier: identifier, libraryRootURL: library))
         let firstGeneration = firstReader.generationIdentifier
         let firstContent = try XCTUnwrap(firstReader.content(forKey: "1"))
+        XCTAssertTrue(EpubReader.isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: firstGeneration,
+            libraryRootURL: library
+        ))
+        XCTAssertFalse(EpubReader.isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: firstGeneration
+        ))
 
         var secondEntries = epub3Entries(
             title: "Generation Two",
@@ -674,6 +683,16 @@ final class EpubReaderParityTests: XCTestCase {
         let secondReader = try XCTUnwrap(EpubReader(identifier: identifier, libraryRootURL: library))
 
         XCTAssertNotEqual(firstGeneration, secondReader.generationIdentifier)
+        XCTAssertFalse(EpubReader.isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: firstGeneration,
+            libraryRootURL: library
+        ))
+        XCTAssertTrue(EpubReader.isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: secondReader.generationIdentifier,
+            libraryRootURL: library
+        ))
         XCTAssertEqual(firstReader.title, "Generation One")
         XCTAssertTrue(firstReader.content(forKey: "1")?.html.contains("generationone") == true)
         XCTAssertEqual(firstReader.searchResults(query: "generationone").count, 1)
@@ -697,6 +716,14 @@ final class EpubReaderParityTests: XCTestCase {
         ))
         XCTAssertEqual(exactResourceReader.title, "Generation One")
         XCTAssertEqual(exactResourceReader.extractedPath, firstReader.extractedPath)
+
+        try EpubReader.delete(identifier: identifier, libraryRootURL: library)
+        XCTAssertFalse(EpubReader.isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: secondReader.generationIdentifier,
+            libraryRootURL: library
+        ))
+        XCTAssertEqual(exactResourceReader.title, "Generation One")
     }
 
     /**

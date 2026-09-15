@@ -1702,3 +1702,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ कागजात %2$@ मा फेला परेन।";
+
+/* Android shared translations */
+"migrated_my_notes" = "माइग्रेट गरिएका मेरा टिप्पणीहरू";

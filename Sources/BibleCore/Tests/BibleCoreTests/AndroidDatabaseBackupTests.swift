@@ -451,12 +451,11 @@ final class AndroidDatabaseBackupTests: XCTestCase {
             updatedAt: Date(timeIntervalSince1970: 1_700_000_100)
         )
         let content = MyDocumentPageContent(pageId: pageID, content: "# Outline")
-        page.document = document
-        page.pageContent = content
-        document.pages = [page]
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
+        page.document = document
+        page.pageContent = content
         try modelContext.save()
         settingsStore.setBool(.screenKeepOnPref, value: true)
         settingsStore.setString(.localePref, value: "fi")
@@ -3077,7 +3076,7 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         guard sqlite3_step(statement) == SQLITE_ROW else {
             throw AndroidDatabaseBackupError.invalidSQLiteDatabase(url.lastPathComponent)
         }
-        return Int(sqlite3_column_int(statement, 0))
+        return Int(sqlite3_column_int64(statement, 0))
     }
 
     /**
@@ -3947,5 +3946,189 @@ final class AndroidDatabaseBackupTests: XCTestCase {
         let b2 = UInt32(data[offset + 2]) << 16
         let b3 = UInt32(data[offset + 3]) << 24
         return b0 | b1 | b2 | b3
+    }
+}
+
+// MARK: - Memorization row timestamp contracts
+
+extension AndroidDatabaseBackupTests {
+    /**
+     Verifies Android progress restore preserves memorization row timestamps.
+
+     Android stores memorized verses with `memorizedAt` and target rows with `createdAt`. The native
+     Reading Progress Memorization list uses those values for recency ordering, duplicate target
+     rows, and relative timestamps. Restore must therefore import Android row data directly instead
+     of collapsing it through iOS range-only compatibility projections.
+
+     Failure means Android backup restore can show the right ordinals while losing the timeline and
+     independent target rows needed for full Memorize parity.
+     */
+    func testAndroidProgressMapperRestoresMemorizationTimestampsAndTargetRows() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let databaseURL = try makeAndroidProgressDatabase(
+            memorizedVerses: [
+                .init(
+                    id: UUID(uuidString: "16000000-0000-0000-0000-000000000001")!,
+                    kjvOrdinal: 4,
+                    memorizedAt: 1_700_000_100_000
+                ),
+                .init(
+                    id: UUID(uuidString: "16000000-0000-0000-0000-000000000002")!,
+                    kjvOrdinal: 5,
+                    memorizedAt: 1_700_000_200_000
+                ),
+            ],
+            memorizationTargets: [
+                .init(
+                    id: UUID(uuidString: "16000000-0000-0000-0000-000000000003")!,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 11,
+                    createdAt: 1_700_000_300_000
+                ),
+                .init(
+                    id: UUID(uuidString: "16000000-0000-0000-0000-000000000004")!,
+                    kjvOrdinalStart: 10,
+                    kjvOrdinalEnd: 11,
+                    createdAt: 1_700_000_400_000
+                ),
+            ],
+            chapterHistory: [],
+            settings: .init(
+                id: UUID(uuidString: "b2000000-0000-0000-0000-000000000001")!,
+                autoTrackReading: false,
+                autoMarkMemorized: true,
+                memorizeTypeFullWords: false,
+                memorizeWordVisibility: "light",
+                memorizeErrorHeatmap: true,
+                memorizeScrambleHideUsed: false,
+                memorizeIncludeReference: true,
+                activeCycle: 0
+            )
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let report = try AndroidDatabaseBackupProgressMapper.apply(
+            from: databaseURL,
+            mode: .restore,
+            settingsStore: settingsStore
+        )
+        let store = MemorizationProgressStore(settingsStore: settingsStore)
+
+        XCTAssertEqual(report.memorizedVerseCount, 2)
+        XCTAssertEqual(report.targetCount, 2)
+        XCTAssertEqual(
+            store.memorizedVerseRangesWithTimestamps(),
+            [
+                MemorizedVerseRangeWithTimestamp(
+                    range: MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 5),
+                    latestMemorizedAt: 1_700_000_200_000
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            store.memorizationTargets().map(\.createdAt),
+            [1_700_000_400_000, 1_700_000_300_000]
+        )
+        XCTAssertEqual(store.memorizationTargetProgress(), MemorizationTargetProgress(memorized: 0, total: 4))
+    }
+
+    /**
+     Verifies Android progress export writes memorization timestamps from Android-shaped rows.
+
+     iOS persists the same row model Android uses for Memorize progress. Exporting `progress.sqlite3`
+     must copy `memorizedAt` and `createdAt` into Android's tables rather than deriving only ordinal
+     ranges and filling timestamps with placeholders.
+
+     Failure means backup round trips keep visible ordinals but destroy Android's recency ordering
+     and target-row history.
+     */
+    func testAndroidProgressMapperExportsMemorizationTimestampsAndTargetRows() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let verse4 = try verifiedKJVARange(start: 4, end: 4)
+        let verse5 = try verifiedKJVARange(start: 5, end: 5)
+        let target = try verifiedKJVARange(start: 10, end: 11)
+        try MemorizationProgressStore(settingsStore: settingsStore).replacePersistenceSnapshot(
+            MemorizationProgressSnapshot(
+                memorizedVerses: [
+                    MemorizedVerseProgress(
+                        bookInitials: "",
+                        kjvOrdinal: 4,
+                        memorizedAt: 1_700_000_100_000,
+                        ordinalTrust: verse4.ordinalTrust
+                    ),
+                    MemorizedVerseProgress(
+                        bookInitials: "",
+                        kjvOrdinal: 5,
+                        memorizedAt: 1_700_000_200_000,
+                        ordinalTrust: verse5.ordinalTrust
+                    ),
+                ],
+                targetRows: [
+                    MemorizationTargetRow(
+                        id: UUID(uuidString: "16000000-0000-0000-0000-000000000101")!,
+                        bookInitials: "",
+                        startOrdinal: 10,
+                        endOrdinal: 11,
+                        createdAt: 1_700_000_300_000,
+                        ordinalTrust: target.ordinalTrust
+                    ),
+                    MemorizationTargetRow(
+                        id: UUID(uuidString: "16000000-0000-0000-0000-000000000102")!,
+                        bookInitials: "",
+                        startOrdinal: 10,
+                        endOrdinal: 11,
+                        createdAt: 1_700_000_400_000,
+                        ordinalTrust: target.ordinalTrust
+                    ),
+                ]
+            )
+        )
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("memorize-parity-export-\(UUID().uuidString).sqlite3")
+
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+
+        let report = try AndroidDatabaseBackupProgressMapper.writeDatabase(
+            at: databaseURL,
+            settingsStore: settingsStore
+        )
+
+        XCTAssertEqual(report.memorizedVerseCount, 2)
+        XCTAssertEqual(report.targetCount, 2)
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT memorizedAt FROM MemorizedVerse WHERE kjvOrdinal = 4;",
+                at: databaseURL
+            ),
+            1_700_000_100_000
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT memorizedAt FROM MemorizedVerse WHERE kjvOrdinal = 5;",
+                at: databaseURL
+            ),
+            1_700_000_200_000
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT COUNT(*) FROM MemorizationTarget WHERE kjvOrdinalStart = 10 AND kjvOrdinalEnd = 11;",
+                at: databaseURL
+            ),
+            2
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT MIN(createdAt) FROM MemorizationTarget WHERE kjvOrdinalStart = 10 AND kjvOrdinalEnd = 11;",
+                at: databaseURL
+            ),
+            1_700_000_300_000
+        )
+        XCTAssertEqual(
+            try readSQLiteInteger(
+                "SELECT MAX(createdAt) FROM MemorizationTarget WHERE kjvOrdinalStart = 10 AND kjvOrdinalEnd = 11;",
+                at: databaseURL
+            ),
+            1_700_000_400_000
+        )
     }
 }

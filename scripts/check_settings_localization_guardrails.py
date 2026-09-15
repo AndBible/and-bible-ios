@@ -574,6 +574,7 @@ ANDROID_EXACT_DEFAULT_KEYS = frozenset(
         "label_red",
         "label_salvation",
         "label_underline",
+        "migrated_my_notes",
         "okay",
         "plan_description_y1ntpspr",
         "plan_description_y1ot1nt1_OTandNT",

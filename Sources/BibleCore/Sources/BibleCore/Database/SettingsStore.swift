@@ -121,6 +121,9 @@ public final class SettingsStore {
     /// Store-specific durable recovery actions registered by the outer batch and nested callers.
     @ObservationIgnored private var atomicBatchRecoveryActions: [(ModelContainer) throws -> Void] = []
 
+    /// Nonthrowing actions published only after the outermost atomic transaction succeeds.
+    @ObservationIgnored private var atomicBatchSuccessfulCommitActions: [() -> Void] = []
+
     /**
      * Creates a settings store bound to the caller's SwiftData context.
      * - Parameter modelContext: Context used for `Setting` persistence.
@@ -155,6 +158,8 @@ public final class SettingsStore {
        - durableRecovery: Optional store-specific recovery that restores the pre-commit generation
          through fresh contexts after a partial multi-configuration commit. Nested recoveries join the
          outer batch. The settings store snapshots and recovers all `Setting` rows automatically.
+       - afterSuccessfulCommit: Optional nonthrowing publication registered with this batch. Nested
+         publications join the outer owner and run only after its complete transaction succeeds.
        - mutations: Synchronous mutations whose SwiftData effects must commit or roll back together.
      - Returns: Value returned by `mutations` after the primary save succeeds.
      - Side Effects:
@@ -164,6 +169,7 @@ public final class SettingsStore {
        - rolls back pending state on mutation, cancellation, fetch, or commit failure
        - restores pre-commit settings and attempts every registered graph recovery after a partial
          store commit; graph recoveries run in reverse registration order
+       - invokes registered success publications in registration order after resetting batch state
      - Throws:
        - `SettingsStoreAtomicBatchError.modelContextMismatch` when contexts differ
        - `SettingsStoreAtomicBatchError.pendingModelChanges` when the outer context is not clean
@@ -177,6 +183,7 @@ public final class SettingsStore {
     public func performAtomicBatch<Result>(
         in modelContext: ModelContext,
         durableRecovery: ((ModelContainer) throws -> Void)? = nil,
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
         guard self.modelContext === modelContext else {
@@ -186,6 +193,9 @@ public final class SettingsStore {
         if atomicBatchDepth > 0 {
             if let durableRecovery {
                 atomicBatchRecoveryActions.append(durableRecovery)
+            }
+            if let afterSuccessfulCommit {
+                atomicBatchSuccessfulCommitActions.append(afterSuccessfulCommit)
             }
             atomicBatchDepth += 1
             defer { atomicBatchDepth -= 1 }
@@ -212,11 +222,16 @@ public final class SettingsStore {
         atomicBatchDepth = 1
         atomicBatchFailure = nil
         atomicBatchRecoveryActions = durableRecovery.map { [$0] } ?? []
+        atomicBatchSuccessfulCommitActions = afterSuccessfulCommit.map { [$0] } ?? []
+        var didResetBatchState = false
         defer {
-            atomicBatchFailure = nil
-            atomicBatchRecoveryActions.removeAll()
-            atomicBatchDepth = 0
-            modelContext.autosaveEnabled = previousAutosaveEnabled
+            if !didResetBatchState {
+                atomicBatchFailure = nil
+                atomicBatchRecoveryActions.removeAll()
+                atomicBatchSuccessfulCommitActions.removeAll()
+                atomicBatchDepth = 0
+                modelContext.autosaveEnabled = previousAutosaveEnabled
+            }
         }
 
         var result: Result?
@@ -259,6 +274,16 @@ public final class SettingsStore {
                 }
             }
             throw error
+        }
+        let successfulCommitActions = atomicBatchSuccessfulCommitActions
+        atomicBatchFailure = nil
+        atomicBatchRecoveryActions.removeAll()
+        atomicBatchSuccessfulCommitActions.removeAll()
+        atomicBatchDepth = 0
+        modelContext.autosaveEnabled = previousAutosaveEnabled
+        didResetBatchState = true
+        for action in successfulCommitActions {
+            action()
         }
         return result!
     }
@@ -304,16 +329,24 @@ public final class SettingsStore {
      APIs. This convenience preserves the same clean-context, nested-batch, cancellation, one-save,
      and rollback contract as `performAtomicBatch(in:_:)` without exposing the private context.
 
-     - Parameter mutations: Synchronous settings mutations that must commit or roll back together.
+     - Parameters:
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked after the outermost batch
+         commits and resets its ownership state.
+       - mutations: Synchronous settings mutations that must commit or roll back together.
      - Returns: Value returned by `mutations` after the transaction commits.
      - Side Effects: Delegates autosave suppression, deferred nested saves, one commit, and rollback
        to `performAtomicBatch(in:_:)` using this store's context.
      - Throws: Rethrows pending-change, cancellation, mutation, strict fetch, and commit errors.
      */
     public func performAtomicBatch<Result>(
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
-        try performAtomicBatch(in: modelContext, mutations)
+        try performAtomicBatch(
+            in: modelContext,
+            afterSuccessfulCommit: afterSuccessfulCommit,
+            mutations
+        )
     }
 
     /**
@@ -327,6 +360,8 @@ public final class SettingsStore {
 
      - Parameters:
        - modelContext: Exact context used to construct this settings store and stage the graph change.
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked only after the outermost
+         transaction commits and resets its ownership state.
        - mutations: Journal and bookkeeping mutations that must accompany the staged graph change.
      - Returns: Value returned by `mutations` after the transaction commits.
      - Side Effects:
@@ -343,6 +378,7 @@ public final class SettingsStore {
      */
     func performJournaledSave<Result>(
         in modelContext: ModelContext,
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
         guard self.modelContext === modelContext else {
@@ -350,6 +386,9 @@ public final class SettingsStore {
         }
 
         if atomicBatchDepth > 0 {
+            if let afterSuccessfulCommit {
+                atomicBatchSuccessfulCommitActions.append(afterSuccessfulCommit)
+            }
             do {
                 return try mutations()
             } catch {
@@ -362,10 +401,15 @@ public final class SettingsStore {
         modelContext.autosaveEnabled = false
         atomicBatchDepth = 1
         atomicBatchFailure = nil
+        atomicBatchSuccessfulCommitActions = afterSuccessfulCommit.map { [$0] } ?? []
+        var didResetBatchState = false
         defer {
-            atomicBatchFailure = nil
-            atomicBatchDepth = 0
-            modelContext.autosaveEnabled = previousAutosaveEnabled
+            if !didResetBatchState {
+                atomicBatchFailure = nil
+                atomicBatchSuccessfulCommitActions.removeAll()
+                atomicBatchDepth = 0
+                modelContext.autosaveEnabled = previousAutosaveEnabled
+            }
         }
 
         var result: Result?
@@ -384,22 +428,39 @@ public final class SettingsStore {
             }
             throw error
         }
+        let successfulCommitActions = atomicBatchSuccessfulCommitActions
+        atomicBatchFailure = nil
+        atomicBatchSuccessfulCommitActions.removeAll()
+        atomicBatchDepth = 0
+        modelContext.autosaveEnabled = previousAutosaveEnabled
+        didResetBatchState = true
+        for action in successfulCommitActions {
+            action()
+        }
         return result!
     }
 
     /**
      Commits settings-backed mutations and their remote-sync journal through the owned context.
 
-     - Parameter mutations: Settings and journal writes that form one local mutation generation.
+     - Parameters:
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked after the outermost
+         transaction commits and resets its ownership state.
+       - mutations: Settings and journal writes that form one local mutation generation.
      - Returns: Value returned by `mutations` after commit.
      - Side Effects: Delegates save deferral, transaction commit, and rollback to the context-taking
        overload.
      - Throws: Rethrows cancellation, mutation, strict-read, and persistence failures.
      */
     func performJournaledSave<Result>(
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
-        try performJournaledSave(in: modelContext, mutations)
+        try performJournaledSave(
+            in: modelContext,
+            afterSuccessfulCommit: afterSuccessfulCommit,
+            mutations
+        )
     }
 
     /// Local-only singleton setting key used for Android-style global text-display defaults.
@@ -579,17 +640,101 @@ public final class SettingsStore {
     }
 
     /**
-     Reads all persisted settings whose keys start with the supplied prefix.
-     * - Parameter prefix: Leading key prefix to match.
-     * - Returns: Matching `Setting` rows, filtered in memory when the fetch succeeds.
-     * - Note: This fetches all `Setting` rows first because the table is small and this avoids
-     *   relying on string-prefix support inside SwiftData predicates.
-     * - Failure: Fetch errors are swallowed and reported as an empty array.
+     Reads persisted settings whose keys have Swift's exact semantic prefix.
+
+     SQLite's binary string ordering can bound ASCII prefixes without materializing unrelated
+     settings. The final `hasPrefix` check remains authoritative. Empty and non-ASCII prefixes, plus
+     the three ASCII scalars with canonically equivalent non-ASCII spellings, use the complete fetch
+     so SQL cannot exclude a key that Swift considers a semantic prefix match.
+
+     - Parameter prefix: Leading key prefix to match using `String.hasPrefix` semantics.
+     - Returns: Matching rows. Callers apply their own deterministic ordering.
+     - Side effects: Reads the owned `ModelContext` and records an active atomic-batch failure.
+     - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
+       existing fail-soft settings reads.
      */
     public func entries(withPrefix prefix: String) -> [Setting] {
-        let descriptor = FetchDescriptor<Setting>()
+        let descriptor: FetchDescriptor<Setting>
+        if let bounds = Self.binaryPrefixBounds(for: prefix) {
+            let lowerBound = bounds.lowerBound
+            let upperBound = bounds.upperBound
+            descriptor = FetchDescriptor<Setting>(
+                predicate: #Predicate {
+                    $0.key >= lowerBound && $0.key < upperBound
+                }
+            )
+        } else {
+            descriptor = FetchDescriptor<Setting>()
+        }
         do {
             return try modelContext.fetch(descriptor).filter { $0.key.hasPrefix(prefix) }
+        } catch {
+            recordAtomicBatchFailure(error)
+            return []
+        }
+    }
+
+    /**
+     Returns a binary-order range that is a superset of Swift prefix matches for safe ASCII input.
+
+     Swift strings compare canonically equivalent Unicode spellings as equal. Greek question mark,
+     Kelvin sign, and Greek varia canonically map to ASCII semicolon, uppercase K, and grave accent,
+     respectively. A binary ASCII range would omit those spellings, so prefixes containing any of
+     those scalars use the complete-fetch fallback. Non-ASCII input also falls back because this
+     helper does not assume a persistence collation can represent Swift's Unicode prefix semantics.
+
+     - Parameter prefix: Candidate semantic prefix.
+     - Returns: Half-open binary bounds, or `nil` when only a complete fetch is a proven superset.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func binaryPrefixBounds(
+        for prefix: String
+    ) -> (lowerBound: String, upperBound: String)? {
+        guard !prefix.isEmpty else { return nil }
+
+        for scalar in prefix.unicodeScalars {
+            guard scalar.value <= 0x7F else { return nil }
+            switch scalar.value {
+            case 0x3B, 0x4B, 0x60:
+                return nil
+            default:
+                break
+            }
+        }
+
+        guard let finalScalar = prefix.unicodeScalars.last,
+              let successor = UnicodeScalar(finalScalar.value + 1) else {
+            return nil
+        }
+        return (prefix, String(prefix.unicodeScalars.dropLast()) + String(successor))
+    }
+
+    /**
+     Reads the rows inside one dot-delimited settings namespace without materializing unrelated
+     settings.
+
+     The persisted key range from `namespace + "."` through `namespace + "/"` contains every key
+     whose next byte is the namespace delimiter under the store's binary ordering. A final exact
+     prefix check keeps the API's semantics explicit even if a future persistence backend uses a
+     broader comparison collation.
+
+     - Parameter namespace: Namespace without its trailing dot delimiter.
+     - Returns: Matching rows in persistence order. Callers apply their own deterministic ordering.
+     - Side effects: Reads the owned local `ModelContext` and records an active atomic-batch failure.
+     - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
+       existing fail-soft settings reads.
+     */
+    func entries(inExactNamespace namespace: String) -> [Setting] {
+        let lowerBound = "\(namespace)."
+        let upperBound = "\(namespace)/"
+        let descriptor = FetchDescriptor<Setting>(
+            predicate: #Predicate {
+                $0.key >= lowerBound && $0.key < upperBound
+            }
+        )
+        do {
+            return try modelContext.fetch(descriptor).filter { $0.key.hasPrefix(lowerBound) }
         } catch {
             recordAtomicBatchFailure(error)
             return []

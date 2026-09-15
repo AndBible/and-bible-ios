@@ -1,4 +1,5 @@
 import SwiftData
+import SwordKit
 import XCTest
 
 @testable import BibleCore
@@ -78,6 +79,130 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     XCTAssertEqual(events.values.single?.markers.single?.pageId, location.pageID)
     XCTAssertEqual(events.values.single?.markers.single?.sourcePromptId, promptID)
     withExtendedLifetime(observation) {}
+  }
+
+  /** First-time AI Documents registration wakes readers after commit; later page saves stay quiet. */
+  func testFirstAIDocumentsCreationPublishesCommittedRegistryOnce() throws {
+    let container = try makeContainer()
+    let setup = ModelContext(container)
+    setup.insert(MyDocument(
+      name: "Second",
+      initials: "MyDoc_Second",
+      orderNumber: 1,
+      createdAt: Date(timeIntervalSince1970: 2)
+    ))
+    setup.insert(MyDocument(
+      name: "First",
+      initials: "MyDoc_First",
+      orderNumber: 0,
+      createdAt: Date(timeIntervalSince1970: 1)
+    ))
+    try setup.save()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let observation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(observation) }
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      moduleStoreRootURL: uniqueModuleStoreRootURL(),
+      isDocumentInitialsUnavailable: { _ in false }
+    )
+
+    _ = try store.save(
+      content: "First generated page",
+      title: "First",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "first source"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )
+
+    XCTAssertNil(publications.errorDescription)
+    XCTAssertEqual(publications.values, [
+      AIRegistrationSnapshot(
+        initials: ["AIDocuments", "MyDoc_First", "MyDoc_Second"],
+        orderNumbers: [0, 1, 2]
+      )
+    ])
+
+    _ = try store.save(
+      content: "Second generated page",
+      title: "Second",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "second source"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )
+
+    XCTAssertEqual(publications.values.count, 1)
+  }
+
+  /** Cancellation before mutation creates no first-time registration and sends no wakeup. */
+  func testCancelledFirstAIDocumentsCreationPublishesNothing() async throws {
+    let container = try makeContainer()
+    let moduleStoreRootURL = uniqueModuleStoreRootURL()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let transactionEvents = LockedAIMutationEvents()
+    let observation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(observation) }
+    let transactionObservation = ModuleStoreMutationCoordinator.observeTransactions(
+      forModuleRoot: moduleStoreRootURL
+    ) { event in
+      transactionEvents.record(event)
+    }
+    defer { transactionObservation.cancel() }
+    let store = AIGeneratedPageStore(
+      modelContext: ModelContext(container),
+      moduleStoreRootURL: moduleStoreRootURL,
+      isDocumentInitialsUnavailable: { _ in
+        transactionEvents.recordAdmission()
+        return false
+      }
+    )
+
+    let result: Result<Void, Error> = await Task { @MainActor in
+      withUnsafeCurrentTask { task in
+        task?.cancel()
+      }
+      do {
+        _ = try store.save(
+          content: "Cancelled generated page",
+          title: "Cancelled",
+          promptID: UUID(),
+          context: cacheContext(selectedText: "cancelled source"),
+          usedWriteTools: false,
+          sourceModelName: nil
+        )
+        return .success(())
+      } catch {
+        return .failure(error)
+      }
+    }.value
+
+    switch result {
+    case .success:
+      XCTFail("Expected cancellation before the coordinator mutation boundary.")
+    case .failure(let error):
+      XCTAssertTrue(error is CancellationError, "Unexpected cancellation error: \(error)")
+    }
+    let mutationStages = transactionEvents.stages(for: .myDocument)
+    XCTAssertTrue(mutationStages.contains(.cancelledBeforeMutation))
+    XCTAssertFalse(mutationStages.contains(.willMutate))
+    XCTAssertEqual(transactionEvents.admissionCount, 0)
+    XCTAssertTrue(publications.values.isEmpty)
+    XCTAssertNil(publications.errorDescription)
+    XCTAssertTrue(try ModelContext(container).fetch(FetchDescriptor<MyDocument>()).isEmpty)
   }
 
   /**
@@ -208,6 +333,15 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     let prior = MyDocument(name: "Prior", initials: "Prior", orderNumber: 0)
     setup.insert(prior)
     try setup.save()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let registryObservation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(registryObservation) }
     let events = LockedMarkerEvents()
     let center = MyDocumentAIDocMarkerEventCenter()
     let observation = center.observe { events.append($0) }
@@ -242,6 +376,8 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPageContent>()).isEmpty)
     XCTAssertTrue(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).isEmpty)
     XCTAssertTrue(events.values.isEmpty)
+    XCTAssertTrue(publications.values.isEmpty)
+    XCTAssertNil(publications.errorDescription)
     withExtendedLifetime(observation) {}
   }
 
@@ -597,6 +733,90 @@ private final class LockedMarkerEvents: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return storage
+  }
+}
+
+/** Exact installed-registration projection captured from a notification's fresh context. */
+private struct AIRegistrationSnapshot: Equatable {
+  let initials: [String]
+  let orderNumbers: [Int]
+}
+
+/// Lock-backed registry recorder accepted by Foundation's sendable notification callback.
+private final class LockedAIRegistrationPublications: @unchecked Sendable {
+  private let container: ModelContainer
+  private let lock = NSLock()
+  private var storage: [AIRegistrationSnapshot] = []
+  private var storageErrorDescription: String?
+
+  init(container: ModelContainer) {
+    self.container = container
+  }
+
+  /** Reads the committed My Documents registration through a fresh context. */
+  func recordCommittedRegistry() {
+    do {
+      let modelContext = ModelContext(container)
+      let documents = try modelContext.fetch(FetchDescriptor<MyDocument>()).sorted {
+        if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+        return $0.initials < $1.initials
+      }
+      let snapshot = AIRegistrationSnapshot(
+        initials: documents.map(\.initials),
+        orderNumbers: documents.map(\.orderNumber)
+      )
+      withExtendedLifetime(modelContext) {}
+      lock.lock()
+      storage.append(snapshot)
+      lock.unlock()
+    } catch {
+      lock.lock()
+      storageErrorDescription = error.localizedDescription
+      lock.unlock()
+    }
+  }
+
+  var values: [AIRegistrationSnapshot] {
+    lock.lock()
+    defer { lock.unlock() }
+    return storage
+  }
+
+  var errorDescription: String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return storageErrorDescription
+  }
+}
+
+/// Lock-backed coordinator recorder proving cancellation precedes admission and mutation.
+private final class LockedAIMutationEvents: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: [ModuleStoreMutationEvent] = []
+  private var storedAdmissionCount = 0
+
+  func record(_ event: ModuleStoreMutationEvent) {
+    lock.lock()
+    storage.append(event)
+    lock.unlock()
+  }
+
+  func recordAdmission() {
+    lock.lock()
+    storedAdmissionCount += 1
+    lock.unlock()
+  }
+
+  func stages(for kind: ModuleStoreMutationKind) -> [ModuleStoreMutationStage] {
+    lock.lock()
+    defer { lock.unlock() }
+    return storage.filter { $0.kind == kind }.map(\.stage)
+  }
+
+  var admissionCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return storedAdmissionCount
   }
 }
 

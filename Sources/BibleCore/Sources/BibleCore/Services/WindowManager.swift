@@ -191,6 +191,37 @@ public final class WindowManager {
     }
 
     /**
+     Updates the durable accent color through the manager-owned workspace context.
+
+     Android mutates `windowRepository.workspaceSettings.workspaceColor`, so the active window
+     graph and the persisted workspace immediately share one value. Routing this mutation through
+     `WindowManager` gives SwiftUI the same owner used by workspace and pane presentation instead
+     of writing a second-context copy that the visible graph cannot observe.
+
+     - Parameters:
+       - color: Signed ARGB color, or `nil` to restore Android's `#ff444444` default.
+       - workspaceId: Exact workspace receiving the color.
+     - Returns: `true` when the workspace still belongs to the manager-owned store.
+     - Side Effects: Mutates the manager-owned workspace and persists the workspace graph and its
+       remote-sync mutation journal through `WorkspaceStore`.
+     - Failure Modes: A missing workspace is ignored and returns `false`. Existing store persistence
+       failures remain best-effort under `WorkspaceStore.persistChanges()`.
+     */
+    @discardableResult
+    public func setWorkspaceColor(_ color: Int?, workspaceId: UUID) -> Bool {
+        guard let workspace = workspaceStore.workspace(id: workspaceId) else {
+            return false
+        }
+        let resolvedColor = color ?? Workspace.defaultWorkspaceColor
+        guard workspace.workspaceColor != resolvedColor else {
+            return true
+        }
+        workspace.workspaceColor = resolvedColor
+        workspaceStore.persistChanges()
+        return true
+    }
+
+    /**
      Refresh the visible windows list from the active workspace.
      Respects maximized state, filters minimized windows, and applies Android's display grouping
      so links windows render after normal content panes without mutating persisted order numbers.

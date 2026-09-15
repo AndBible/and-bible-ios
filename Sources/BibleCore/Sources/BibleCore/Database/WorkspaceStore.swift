@@ -402,14 +402,14 @@ public final class WorkspaceStore {
      * - Parameter windowId: Window UUID.
      * - Returns: History items belonging to the window.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Complexity: `O(n)` over all history items because window filtering happens after fetch.
+     * - Note: Window membership and newest-first ordering are both applied by SwiftData.
      */
     public func history(windowId: UUID) -> [HistoryItem] {
         let descriptor = FetchDescriptor<HistoryItem>(
+            predicate: #Predicate { $0.window?.id == windowId },
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.filter { $0.window?.id == windowId }
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     // MARK: - Persistence

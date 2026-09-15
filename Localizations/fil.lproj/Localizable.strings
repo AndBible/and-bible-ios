@@ -1643,3 +1643,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "Hindi nahanap ang %1$@ sa dokumento %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Na-migrate ang Aking Mga Tala";

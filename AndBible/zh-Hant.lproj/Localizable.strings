@@ -1557,3 +1557,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@並沒有在文件%2$@中找到。";
+
+/* Android shared translations */
+"migrated_my_notes" = "合併我的筆記";

@@ -1700,3 +1700,6 @@
 
 /* Android shared translations */
 "document_not_installed" = "Please download '%@'";
+
+/* Android shared translations */
+"migrated_my_notes" = "Migrated My Notes";

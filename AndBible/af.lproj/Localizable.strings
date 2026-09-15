@@ -1555,3 +1555,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ is nie in dokument %2$@ gevind nie.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Migreer my notas";

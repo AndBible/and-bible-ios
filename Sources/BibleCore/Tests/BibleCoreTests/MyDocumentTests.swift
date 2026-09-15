@@ -5,6 +5,53 @@ import SwiftData
 @testable import BibleCore
 
 final class MyDocumentStoreTests: XCTestCase {
+    /** First-page selection follows Android order and keeps Java-distinct document identities. */
+    func testFirstPageKeyUsesExactDocumentAndAndroidPageOrder() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let composedInitials = "Caf\u{00E9}MYDOC"
+        let decomposedInitials = "Cafe\u{0301}MYDOC"
+        XCTAssertEqual(composedInitials, decomposedInitials)
+        XCTAssertFalse(composedInitials.utf16.elementsEqual(decomposedInitials.utf16))
+        let document = MyDocument(name: "Composed document", initials: composedInitials)
+        let later = MyDocumentPage(title: "Later", pageKey: "later", orderNumber: 2)
+        let first = MyDocumentPage(title: "First", pageKey: "first", orderNumber: 1)
+        let javaDistinctDocument = MyDocument(
+            name: "Decomposed document",
+            initials: decomposedInitials
+        )
+        let javaDistinctPage = MyDocumentPage(
+            title: "Java-distinct first",
+            pageKey: "decomposed-first",
+            orderNumber: 0
+        )
+        context.insert(document)
+        context.insert(later)
+        context.insert(first)
+        context.insert(javaDistinctDocument)
+        context.insert(javaDistinctPage)
+        later.document = document
+        first.document = document
+        javaDistinctPage.document = javaDistinctDocument
+        try context.save()
+
+        XCTAssertEqual(store.firstPageKey(bookInitials: composedInitials), "first")
+        XCTAssertEqual(
+            store.firstPageKey(bookInitials: decomposedInitials),
+            "decomposed-first"
+        )
+        XCTAssertNil(store.firstPageKey(bookInitials: "MISSING"))
+
+        context.insert(MyDocument(name: "Duplicate", initials: composedInitials))
+        try context.save()
+        XCTAssertNil(store.firstPageKey(bookInitials: composedInitials))
+        XCTAssertEqual(
+            store.firstPageKey(bookInitials: decomposedInitials),
+            "decomposed-first"
+        )
+    }
+
     func testRawContentPayloadResolvesByDocumentInitialsAndPageKey() throws {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
@@ -21,12 +68,11 @@ final class MyDocumentStoreTests: XCTestCase {
         )
         let content = MyDocumentPageContent(pageId: pageId, content: "Raw *markdown*")
 
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
         let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "intro"))
@@ -62,9 +108,6 @@ final class MyDocumentStoreTests: XCTestCase {
             contentType: .markdown
         )
         let firstContent = MyDocumentPageContent(pageId: firstPageId, content: "First content")
-        firstPage.pageContent = firstContent
-        firstPage.document = firstDocument
-        firstDocument.pages = [firstPage]
 
         let secondDocument = MyDocument(name: "Second Document", initials: "SECOND")
         let secondPageId = try XCTUnwrap(UUID(uuidString: "44444444-4444-4444-4444-444444444444"))
@@ -75,9 +118,6 @@ final class MyDocumentStoreTests: XCTestCase {
             contentType: .html
         )
         let secondContent = MyDocumentPageContent(pageId: secondPageId, content: "Second content")
-        secondPage.pageContent = secondContent
-        secondPage.document = secondDocument
-        secondDocument.pages = [secondPage]
 
         context.insert(firstDocument)
         context.insert(firstPage)
@@ -85,6 +125,10 @@ final class MyDocumentStoreTests: XCTestCase {
         context.insert(secondDocument)
         context.insert(secondPage)
         context.insert(secondContent)
+        firstPage.pageContent = firstContent
+        firstPage.document = firstDocument
+        secondPage.pageContent = secondContent
+        secondPage.document = secondDocument
         try context.save()
 
         let firstPayload = try XCTUnwrap(store.rawContentPayload(bookInitials: "FIRST", pageKey: "shared"))
@@ -131,16 +175,15 @@ final class MyDocumentStoreTests: XCTestCase {
         let firstContent = MyDocumentPageContent(pageId: firstPageId, content: "First by order")
         let secondContent = MyDocumentPageContent(pageId: secondPageId, content: "Second by order")
 
-        firstPage.pageContent = firstContent
-        firstPage.document = document
-        secondPage.pageContent = secondContent
-        secondPage.document = document
-        document.pages = [secondPage, firstPage]
         context.insert(document)
         context.insert(firstPage)
         context.insert(firstContent)
         context.insert(secondPage)
         context.insert(secondContent)
+        firstPage.pageContent = firstContent
+        firstPage.document = document
+        secondPage.pageContent = secondContent
+        secondPage.document = document
         try context.save()
 
         let payload = try XCTUnwrap(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "duplicate"))
@@ -170,12 +213,11 @@ final class MyDocumentStoreTests: XCTestCase {
         )
         let content = MyDocumentPageContent(pageId: pageId, content: "Original")
 
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
         XCTAssertTrue(store.savePageContent(
@@ -218,10 +260,9 @@ final class MyDocumentStoreTests: XCTestCase {
             contentType: .html
         )
 
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
+        page.document = document
         try context.save()
 
         XCTAssertFalse(store.savePageContent(
@@ -258,131 +299,122 @@ final class MyDocumentStoreTests: XCTestCase {
      context save. The temporary store directory is removed after the reopened-state assertions.
      */
     func testFailedPageContentSaveRestoresPageGraphBeforeUnrelatedSave() throws {
-        let storeDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MyDocumentSaveAtomicity-\(UUID().uuidString)", isDirectory: true)
-        let storeURL = storeDirectory.appendingPathComponent("MyDocuments.store")
-        try FileManager.default.createDirectory(
-            at: storeDirectory,
-            withIntermediateDirectories: true
-        )
-        defer { try? FileManager.default.removeItem(at: storeDirectory) }
-
-        let originalDate = try XCTUnwrap(DateComponents(
-            calendar: Calendar(identifier: .gregorian),
-            timeZone: TimeZone(secondsFromGMT: 0),
-            year: 2026,
-            month: 7,
-            day: 20,
-            hour: 12
-        ).date)
-        let existingContentPageID = try XCTUnwrap(
-            UUID(uuidString: "12121212-1212-1212-1212-121212121212")
-        )
-        let missingContentPageID = try XCTUnwrap(
-            UUID(uuidString: "34343434-3434-3434-3434-343434343434")
-        )
-
-        do {
-            let container = try makePersistentMyDocumentModelContainer(at: storeURL)
-            let context = ModelContext(container)
-            let document = MyDocument(
-                name: "Target Document",
-                initials: "TARGET",
-                updatedAt: originalDate
+        try withPersistentMyDocumentStore { storeURL in
+            let originalDate = try XCTUnwrap(DateComponents(
+                calendar: Calendar(identifier: .gregorian),
+                timeZone: TimeZone(secondsFromGMT: 0),
+                year: 2026,
+                month: 7,
+                day: 20,
+                hour: 12
+            ).date)
+            let existingContentPageID = try XCTUnwrap(
+                UUID(uuidString: "12121212-1212-1212-1212-121212121212")
             )
-            let existingContentPage = MyDocumentPage(
-                id: existingContentPageID,
-                title: "Existing Title",
-                pageKey: "existing",
-                createdAt: originalDate,
-                updatedAt: originalDate
-            )
-            let existingContent = MyDocumentPageContent(
-                pageId: existingContentPageID,
-                content: "Original body"
-            )
-            let missingContentPage = MyDocumentPage(
-                id: missingContentPageID,
-                title: "Empty Title",
-                pageKey: "empty",
-                createdAt: originalDate,
-                updatedAt: originalDate
-            )
-            let unrelatedDocument = MyDocument(
-                name: "Unrelated Before",
-                initials: "OTHER",
-                updatedAt: originalDate
+            let missingContentPageID = try XCTUnwrap(
+                UUID(uuidString: "34343434-3434-3434-3434-343434343434")
             )
 
-            existingContentPage.document = document
-            existingContentPage.pageContent = existingContent
-            existingContent.page = existingContentPage
-            missingContentPage.document = document
-            document.pages = [existingContentPage, missingContentPage]
-            context.insert(document)
-            context.insert(existingContentPage)
-            context.insert(existingContent)
-            context.insert(missingContentPage)
-            context.insert(unrelatedDocument)
-            try context.save()
-            unrelatedDocument.name = "Unrelated Pending"
+            do {
+                let container = try makePersistentMyDocumentModelContainer(at: storeURL)
+                let context = ModelContext(container)
+                let document = MyDocument(
+                    name: "Target Document",
+                    initials: "TARGET",
+                    updatedAt: originalDate
+                )
+                let existingContentPage = MyDocumentPage(
+                    id: existingContentPageID,
+                    title: "Existing Title",
+                    pageKey: "existing",
+                    createdAt: originalDate,
+                    updatedAt: originalDate
+                )
+                let existingContent = MyDocumentPageContent(
+                    pageId: existingContentPageID,
+                    content: "Original body"
+                )
+                let missingContentPage = MyDocumentPage(
+                    id: missingContentPageID,
+                    title: "Empty Title",
+                    pageKey: "empty",
+                    createdAt: originalDate,
+                    updatedAt: originalDate
+                )
+                let unrelatedDocument = MyDocument(
+                    name: "Unrelated Before",
+                    initials: "OTHER",
+                    updatedAt: originalDate
+                )
 
-            let store = MyDocumentStore(
-                modelContext: context,
-                savePageContentChanges: { _ in throw ForcedMyDocumentSaveError() }
-            )
+                context.insert(document)
+                context.insert(existingContentPage)
+                context.insert(existingContent)
+                context.insert(missingContentPage)
+                context.insert(unrelatedDocument)
+                existingContentPage.document = document
+                existingContentPage.pageContent = existingContent
+                missingContentPage.document = document
+                try context.save()
+                unrelatedDocument.name = "Unrelated Pending"
 
-            XCTAssertFalse(store.savePageContent(
+                let store = MyDocumentStore(
+                    modelContext: context,
+                    savePageContentChanges: { _ in throw ForcedMyDocumentSaveError() }
+                )
+
+                XCTAssertFalse(store.savePageContent(
+                    bookInitials: "TARGET",
+                    pageId: existingContentPageID,
+                    content: "Rejected existing body",
+                    title: "Rejected Existing Title"
+                ))
+                XCTAssertFalse(store.savePageContent(
+                    bookInitials: "TARGET",
+                    pageId: missingContentPageID,
+                    content: "Rejected inserted body",
+                    title: "Rejected Empty Title"
+                ))
+
+                XCTAssertEqual(existingContentPage.title, "Existing Title")
+                XCTAssertEqual(existingContentPage.updatedAt, originalDate)
+                XCTAssertEqual(existingContent.content, "Original body")
+                XCTAssertEqual(missingContentPage.title, "Empty Title")
+                XCTAssertEqual(missingContentPage.updatedAt, originalDate)
+                XCTAssertNil(missingContentPage.pageContent)
+                XCTAssertEqual(document.updatedAt, originalDate)
+                XCTAssertEqual(unrelatedDocument.name, "Unrelated Pending")
+
+                try context.save()
+            }
+
+            let reopenedContainer = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let reopenedContext = ModelContext(reopenedContainer)
+            let reopenedStore = MyDocumentStore(modelContext: reopenedContext)
+            let reopenedDocument = try XCTUnwrap(reopenedStore.document(initials: "TARGET"))
+            let reopenedExistingPage = try XCTUnwrap(reopenedStore.page(
                 bookInitials: "TARGET",
-                pageId: existingContentPageID,
-                content: "Rejected existing body",
-                title: "Rejected Existing Title"
+                pageId: existingContentPageID
             ))
-            XCTAssertFalse(store.savePageContent(
+            let reopenedMissingContentPage = try XCTUnwrap(reopenedStore.page(
                 bookInitials: "TARGET",
-                pageId: missingContentPageID,
-                content: "Rejected inserted body",
-                title: "Rejected Empty Title"
+                pageId: missingContentPageID
             ))
 
-            XCTAssertEqual(existingContentPage.title, "Existing Title")
-            XCTAssertEqual(existingContentPage.updatedAt, originalDate)
-            XCTAssertEqual(existingContent.content, "Original body")
-            XCTAssertEqual(missingContentPage.title, "Empty Title")
-            XCTAssertEqual(missingContentPage.updatedAt, originalDate)
-            XCTAssertNil(missingContentPage.pageContent)
-            XCTAssertEqual(document.updatedAt, originalDate)
-            XCTAssertEqual(unrelatedDocument.name, "Unrelated Pending")
+            XCTAssertEqual(reopenedDocument.updatedAt, originalDate)
+            XCTAssertEqual(reopenedExistingPage.title, "Existing Title")
+            XCTAssertEqual(reopenedExistingPage.updatedAt, originalDate)
+            XCTAssertEqual(reopenedExistingPage.pageContent?.content, "Original body")
+            XCTAssertEqual(reopenedMissingContentPage.title, "Empty Title")
+            XCTAssertEqual(reopenedMissingContentPage.updatedAt, originalDate)
+            XCTAssertNil(reopenedMissingContentPage.pageContent)
+            XCTAssertEqual(reopenedStore.document(initials: "OTHER")?.name, "Unrelated Pending")
 
-            try context.save()
+            let rejectedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
+                predicate: #Predicate { $0.pageId == missingContentPageID }
+            )
+            XCTAssertTrue(try reopenedContext.fetch(rejectedContentDescriptor).isEmpty)
         }
-
-        let reopenedContainer = try makePersistentMyDocumentModelContainer(at: storeURL)
-        let reopenedContext = ModelContext(reopenedContainer)
-        let reopenedStore = MyDocumentStore(modelContext: reopenedContext)
-        let reopenedDocument = try XCTUnwrap(reopenedStore.document(initials: "TARGET"))
-        let reopenedExistingPage = try XCTUnwrap(reopenedStore.page(
-            bookInitials: "TARGET",
-            pageId: existingContentPageID
-        ))
-        let reopenedMissingContentPage = try XCTUnwrap(reopenedStore.page(
-            bookInitials: "TARGET",
-            pageId: missingContentPageID
-        ))
-
-        XCTAssertEqual(reopenedDocument.updatedAt, originalDate)
-        XCTAssertEqual(reopenedExistingPage.title, "Existing Title")
-        XCTAssertEqual(reopenedExistingPage.updatedAt, originalDate)
-        XCTAssertEqual(reopenedExistingPage.pageContent?.content, "Original body")
-        XCTAssertEqual(reopenedMissingContentPage.title, "Empty Title")
-        XCTAssertEqual(reopenedMissingContentPage.updatedAt, originalDate)
-        XCTAssertNil(reopenedMissingContentPage.pageContent)
-        XCTAssertEqual(reopenedStore.document(initials: "OTHER")?.name, "Unrelated Pending")
-
-        let rejectedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
-            predicate: #Predicate { $0.pageId == missingContentPageID }
-        )
-        XCTAssertTrue(try reopenedContext.fetch(rejectedContentDescriptor).isEmpty)
     }
 
     func testAIPageActionContextRequiresSourcePromptMetadata() throws {
@@ -417,15 +449,13 @@ final class MyDocumentStoreTests: XCTestCase {
             sourceBookKey: "Gen.1"
         )
 
-        aiPage.document = document
-        userPage.document = document
-        cacheEntry.page = aiPage
-        aiPage.aiPageCacheEntries = [cacheEntry]
-        document.pages = [aiPage, userPage]
         context.insert(document)
         context.insert(aiPage)
         context.insert(userPage)
         context.insert(cacheEntry)
+        aiPage.document = document
+        userPage.document = document
+        cacheEntry.page = aiPage
         try context.save()
 
         let contextPayload = try XCTUnwrap(store.aiPageActionContext(pageId: aiPageId))
@@ -446,70 +476,93 @@ final class MyDocumentStoreTests: XCTestCase {
     }
 
     func testDeleteAIPageRemovesContentCacheAndRefusesUserPages() throws {
-        let container = try makeMyDocumentModelContainer()
-        let context = ModelContext(container)
-        let store = MyDocumentStore(modelContext: context)
-        let aiPageId = try XCTUnwrap(UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc"))
-        let userPageId = try XCTUnwrap(UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd"))
-        let missingPageId = try XCTUnwrap(UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"))
-        let promptId = try XCTUnwrap(UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff"))
-        let document = MyDocument(name: "My Document", initials: "MYDOC")
-        let aiPage = MyDocumentPage(
-            id: aiPageId,
-            title: "AI Page",
-            pageKey: "ai",
-            sourcePromptId: promptId
-        )
-        let aiContent = MyDocumentPageContent(pageId: aiPageId, content: "AI content")
-        let cacheEntry = AiPageCacheEntry(pageId: aiPageId, sourcePromptId: promptId)
-        let userPage = MyDocumentPage(
-            id: userPageId,
-            title: "User Page",
-            pageKey: "user"
-        )
-        let userContent = MyDocumentPageContent(pageId: userPageId, content: "User content")
+        try withPersistentMyDocumentStore { storeURL in
+            let container = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let context = ModelContext(container)
+            let store = MyDocumentStore(modelContext: context)
+            let aiPageId = try XCTUnwrap(UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc"))
+            let userPageId = try XCTUnwrap(UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd"))
+            let missingPageId = try XCTUnwrap(UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"))
+            let promptId = try XCTUnwrap(UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff"))
+            let document = MyDocument(name: "My Document", initials: "MYDOC")
+            let aiPage = MyDocumentPage(
+                id: aiPageId,
+                title: "AI Page",
+                pageKey: "ai",
+                sourcePromptId: promptId
+            )
+            let aiContent = MyDocumentPageContent(pageId: aiPageId, content: "AI content")
+            let cacheEntry = AiPageCacheEntry(pageId: aiPageId, sourcePromptId: promptId)
+            let userPage = MyDocumentPage(
+                id: userPageId,
+                title: "User Page",
+                pageKey: "user"
+            )
+            let userContent = MyDocumentPageContent(pageId: userPageId, content: "User content")
 
-        aiPage.pageContent = aiContent
-        aiPage.document = document
-        cacheEntry.page = aiPage
-        aiPage.aiPageCacheEntries = [cacheEntry]
-        userPage.pageContent = userContent
-        userPage.document = document
-        document.pages = [aiPage, userPage]
-        context.insert(document)
-        context.insert(aiPage)
-        context.insert(aiContent)
-        context.insert(cacheEntry)
-        context.insert(userPage)
-        context.insert(userContent)
-        try context.save()
+            context.insert(document)
+            context.insert(aiPage)
+            context.insert(aiContent)
+            context.insert(cacheEntry)
+            context.insert(userPage)
+            context.insert(userContent)
+            aiPage.pageContent = aiContent
+            aiPage.document = document
+            cacheEntry.page = aiPage
+            userPage.pageContent = userContent
+            userPage.document = document
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .myDocuments,
+                modelContext: context
+            )
 
-        XCTAssertEqual(store.deleteAIPage(pageId: userPageId), .notAIPage)
-        XCTAssertEqual(store.deleteAIPage(pageId: missingPageId), .pageNotFound)
-        XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
+            let persistedContext = ModelContext(container)
+            let persistedStore = MyDocumentStore(modelContext: persistedContext)
+            let persistedAIPage = try XCTUnwrap(persistedStore.page(pageId: aiPageId))
+            XCTAssertEqual(persistedAIPage.pageContent?.content, "AI content")
+            XCTAssertEqual(persistedAIPage.aiPageCacheEntries?.map(\.id), [cacheEntry.id])
 
-        switch store.deleteAIPage(pageId: aiPageId) {
-        case .deleted(let actionContext):
-            XCTAssertEqual(actionContext.pageId, aiPageId)
-            XCTAssertEqual(actionContext.sourcePromptId, promptId)
-            XCTAssertEqual(actionContext.bookInitials, "MYDOC")
-            XCTAssertEqual(actionContext.pageKey, "ai")
-        default:
-            XCTFail("Expected AI page deletion to succeed")
+            XCTAssertEqual(store.deleteAIPage(pageId: userPageId), .notAIPage)
+            XCTAssertEqual(store.deleteAIPage(pageId: missingPageId), .pageNotFound)
+            XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
+
+            switch store.deleteAIPage(pageId: aiPageId) {
+            case .deleted(let actionContext):
+                XCTAssertEqual(actionContext.pageId, aiPageId)
+                XCTAssertEqual(actionContext.sourcePromptId, promptId)
+                XCTAssertEqual(actionContext.bookInitials, "MYDOC")
+                XCTAssertEqual(actionContext.pageKey, "ai")
+            default:
+                XCTFail("Expected AI page deletion to succeed")
+            }
+
+            XCTAssertNil(store.page(pageId: aiPageId))
+            XCTAssertNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "ai"))
+            XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
+
+            let deletedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
+                predicate: #Predicate { $0.pageId == aiPageId }
+            )
+            let deletedCacheDescriptor = FetchDescriptor<AiPageCacheEntry>(
+                predicate: #Predicate { $0.pageId == aiPageId }
+            )
+            let verificationContainer = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let verificationContext = ModelContext(verificationContainer)
+            XCTAssertTrue(try verificationContext.fetch(deletedContentDescriptor).isEmpty)
+            XCTAssertTrue(try verificationContext.fetch(deletedCacheDescriptor).isEmpty)
+            let deleteEntries = try RemoteSyncLogEntryStore(
+                settingsStore: SettingsStore(modelContext: verificationContext)
+            ).entriesStrict(for: .myDocuments).filter { $0.type == .delete }
+            XCTAssertEqual(Set(deleteEntries.map(\.tableName)), [
+                "MyDocumentPage", "MyDocumentPageContent", "AiPageCacheEntry",
+            ])
+            XCTAssertEqual(deleteEntries.count, 3)
+            // Android uses pageId as the primary key of both child tables; the iOS cache UUID
+            // identifies its local model only and must never become a sync row identity.
+            for entry in deleteEntries {
+                XCTAssertEqual(entry.entityID1, .blob(Data(repeating: 0xcc, count: 16)))
+            }
         }
-
-        XCTAssertNil(store.page(pageId: aiPageId))
-        XCTAssertNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "ai"))
-        XCTAssertNotNil(store.rawContentPayload(bookInitials: "MYDOC", pageKey: "user"))
-
-        let deletedContentDescriptor = FetchDescriptor<MyDocumentPageContent>(
-            predicate: #Predicate { $0.pageId == aiPageId }
-        )
-        let deletedCacheDescriptor = FetchDescriptor<AiPageCacheEntry>(
-            predicate: #Predicate { $0.pageId == aiPageId }
-        )
-        XCTAssertTrue(try context.fetch(deletedContentDescriptor).isEmpty)
-        XCTAssertTrue(try context.fetch(deletedCacheDescriptor).isEmpty)
     }
 
     /**
@@ -552,12 +605,13 @@ final class MyDocumentStoreTests: XCTestCase {
             pageKey: "delete",
             sourcePromptId: promptID
         )
+        context.insert(document)
+        context.insert(editablePage)
+        context.insert(editableContent)
+        context.insert(deletedPage)
         editablePage.document = document
         editablePage.pageContent = editableContent
-        editableContent.page = editablePage
         deletedPage.document = document
-        document.pages = [editablePage, deletedPage]
-        context.insert(document)
         try context.save()
 
         let staged = MyDocument(name: "Unadmitted", initials: "COLLISION")
@@ -623,13 +677,11 @@ final class MyDocumentStoreTests: XCTestCase {
             sourceBookInitials: "KJV",
             sourceBookKey: "Gen.1.1"
         )
-        page.document = document
-        marker.page = page
-        page.aiPageCacheEntries = [marker]
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(marker)
+        page.document = document
+        marker.page = page
 
         XCTAssertTrue(try store.documentsInRegistrationOrder().isEmpty)
         XCTAssertThrowsError(try store.exactDocument(initials: "DRAFT")) { error in
@@ -661,12 +713,187 @@ final class MyDocumentStoreTests: XCTestCase {
         XCTAssertEqual(store.aiDocMarkers(kjvaRange: 1...2).map(\.pageId), [pageID])
     }
 
+    /**
+     Verifies Bible AI-marker lookup applies Android's inclusive overlap query before projection.
+
+     The persisted fixture contains two boundary-touching markers, a nil-range quarantine row, a
+     dangling overlapping row, and 1,000 unrelated ranges. Only the two live boundary rows may
+     appear as marker DTOs, in the established title order. Persisted direct mutation and deletion
+     must then remove both without changing isolated-read semantics.
+
+     Failure means overlap endpoints have drifted from Android Room or stale, unrelated, quarantined,
+     or dangling marker ownership can enter the reader payload. Query-plan and materialization-cost
+     evidence is measured separately from this behavioral contract.
+     */
+    func testAIDocMarkerRangeQueryScopesInclusiveOverlapBeforeProjection() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let document = MyDocument(name: "Generated", initials: "AIDocuments")
+        let leadingPage = MyDocumentPage(
+            id: try XCTUnwrap(UUID(uuidString: "61616161-6161-6161-6161-616161616161")),
+            title: "Zulu",
+            pageKey: "leading"
+        )
+        let trailingPage = MyDocumentPage(
+            id: try XCTUnwrap(UUID(uuidString: "62626262-6262-6262-6262-626262626262")),
+            title: "Alpha",
+            pageKey: "trailing"
+        )
+        let quarantinePage = MyDocumentPage(
+            id: try XCTUnwrap(UUID(uuidString: "63636363-6363-6363-6363-636363636363")),
+            title: "Quarantine",
+            pageKey: "quarantine"
+        )
+        let leading = AiPageCacheEntry(
+            pageId: leadingPage.id,
+            sourcePromptId: UUID(),
+            kjvOrdinalStart: 90,
+            kjvOrdinalEnd: 100
+        )
+        let trailing = AiPageCacheEntry(
+            pageId: trailingPage.id,
+            sourcePromptId: UUID(),
+            kjvOrdinalStart: 200,
+            kjvOrdinalEnd: 210
+        )
+        let quarantine = AiPageCacheEntry(
+            pageId: quarantinePage.id,
+            sourcePromptId: UUID(),
+            kjvOrdinalStart: nil,
+            kjvOrdinalEnd: 150
+        )
+        let dangling = AiPageCacheEntry(
+            pageId: UUID(),
+            sourcePromptId: UUID(),
+            kjvOrdinalStart: 100,
+            kjvOrdinalEnd: 200
+        )
+
+        context.insert(document)
+        context.insert(leadingPage)
+        context.insert(trailingPage)
+        context.insert(quarantinePage)
+        context.insert(leading)
+        context.insert(trailing)
+        context.insert(quarantine)
+        context.insert(dangling)
+        leadingPage.document = document
+        trailingPage.document = document
+        quarantinePage.document = document
+        leading.page = leadingPage
+        trailing.page = trailingPage
+        quarantine.page = quarantinePage
+
+        for index in 0..<1_000 {
+            context.insert(AiPageCacheEntry(
+                pageId: UUID(),
+                sourcePromptId: UUID(),
+                kjvOrdinalStart: 1_000 + index * 2,
+                kjvOrdinalEnd: 1_001 + index * 2
+            ))
+        }
+        try context.save()
+
+        XCTAssertEqual(
+            store.aiDocMarkers(kjvaRange: 100...200).map(\.pageId),
+            [trailingPage.id, leadingPage.id]
+        )
+
+        leading.kjvOrdinalStart = 80
+        leading.kjvOrdinalEnd = 99
+        context.delete(trailing)
+        try context.save()
+
+        XCTAssertTrue(store.aiDocMarkers(kjvaRange: 100...200).isEmpty)
+    }
+
+    /**
+     Verifies actual journal corruption refuses page edits and deletion without publishing either
+     operation or an unrelated caller draft. A fresh context checks durable state after each failure;
+     the test does not inspect private rollback operations or rely on cached model objects.
+     */
+    func testCorruptJournalRejectsPageEditAndDeletionWithoutPublishingGraph() throws {
+        try withPersistentMyDocumentStore { storeURL in
+            let container = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let originalDate = Date(timeIntervalSince1970: 1_000)
+            let document = MyDocument(name: "Generated", initials: "GENERATED", updatedAt: originalDate)
+            let page = MyDocumentPage(
+                title: "Before",
+                pageKey: "page",
+                createdAt: originalDate,
+                updatedAt: originalDate,
+                sourcePromptId: UUID()
+            )
+            let content = MyDocumentPageContent(pageId: page.id, content: "Before body")
+            let cache = AiPageCacheEntry(pageId: page.id, sourcePromptId: try XCTUnwrap(page.sourcePromptId))
+            context.insert(document)
+            context.insert(page)
+            context.insert(content)
+            context.insert(cache)
+            page.document = document
+            page.pageContent = content
+            cache.page = page
+            try context.save()
+
+            let settings = SettingsStore(modelContext: context)
+            let log = RemoteSyncLogEntryStore(settingsStore: settings)
+            let corruptKey = log.prefix(for: .myDocuments) + "corrupt"
+            settings.setString(corruptKey, value: "{not-json")
+            try context.save()
+            context.insert(MyDocument(name: "Pending", initials: "PENDING"))
+            let eventCenter = MyDocumentAIDocMarkerEventCenter()
+            var events: [MyDocumentAIDocMarkersChangedEvent] = []
+            let observation = eventCenter.observe { events.append($0) }
+            defer { observation.cancel() }
+            let store = MyDocumentStore(modelContext: context, aiDocMarkerEventCenter: eventCenter)
+
+            XCTAssertFalse(store.savePageContent(
+                bookInitials: document.initials,
+                pageId: page.id,
+                content: "Rejected body",
+                title: "Rejected title"
+            ))
+            XCTAssertEqual(store.deleteAIPage(pageId: page.id), .saveFailed)
+
+            let verificationContainer = try makePersistentMyDocumentModelContainer(at: storeURL)
+            let verificationContext = ModelContext(verificationContainer)
+            let verificationStore = MyDocumentStore(modelContext: verificationContext)
+            let persisted = try XCTUnwrap(verificationStore.page(pageId: page.id))
+            XCTAssertEqual(persisted.title, "Before")
+            XCTAssertEqual(persisted.updatedAt, originalDate)
+            XCTAssertEqual(persisted.pageContent?.content, "Before body")
+            XCTAssertEqual(persisted.aiPageCacheEntries?.map(\.id), [cache.id])
+            XCTAssertEqual(persisted.document?.updatedAt, originalDate)
+            XCTAssertNil(verificationStore.document(initials: "PENDING"))
+            XCTAssertEqual(SettingsStore(modelContext: verificationContext).getString(corruptKey), "{not-json")
+            XCTAssertTrue(context.hasChanges)
+            XCTAssertTrue(events.isEmpty)
+        }
+    }
+
+    /**
+     Runs durable-store assertions in a unique directory owned by the test runner's temporary sandbox.
+     SwiftData can retain SQLite handles after contexts leave scope and exposes no store-close API,
+     so these files remain for sandbox cleanup after the test process exits. Unlinking them during
+     XCTest teardown can corrupt an active store and generate unrelated background I/O failures.
+     */
+    private func withPersistentMyDocumentStore(_ body: (URL) throws -> Void) throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyDocumentPersistence-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try body(directory.appendingPathComponent("MyDocuments.store"))
+    }
+
     private func makeMyDocumentModelContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
             MyDocumentPage.self,
             MyDocumentPageContent.self,
             AiPageCacheEntry.self,
+            Setting.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
@@ -687,6 +914,7 @@ final class MyDocumentStoreTests: XCTestCase {
             MyDocumentPage.self,
             MyDocumentPageContent.self,
             AiPageCacheEntry.self,
+            Setting.self,
         ])
         let configuration = ModelConfiguration(
             "MyDocumentSaveAtomicity",

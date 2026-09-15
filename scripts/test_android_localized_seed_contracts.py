@@ -59,6 +59,7 @@ class AndroidLocalizedSeedContractTests(unittest.TestCase):
             "label_blue",
             "label_underline",
             "label_salvation",
+            "migrated_my_notes",
         ):
             self.assertIn(f'localized: "{key}"', bookmark_source)
         for english_name in ("Red", "Green", "Blue", "Underline", "Salvation"):

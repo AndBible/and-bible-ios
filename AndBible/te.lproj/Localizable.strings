@@ -1557,3 +1557,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "పత్రం %2$@లో %1$@ కనుగొనబడలేదు.";
+
+/* Android shared translations */
+"migrated_my_notes" = "నా \"నోట్స్\" గమనికలను తరలించాను";

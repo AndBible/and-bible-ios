@@ -42,42 +42,17 @@ final class RemoteSyncStateTests: XCTestCase {
     }
 
     /**
-     Verifies the synced SwiftData schema itself satisfies CloudKit startup validation.
+     Verifies the shared base SwiftData schema satisfies CloudKit startup validation.
 
-     The crash fallback prevents a bad CloudKit schema from taking the whole app down, but the
-     feature contract is stronger: when the user enables iCloud sync, the CloudKit-backed
-     `AndBible` store should load instead of immediately falling back to local storage. This test
-     constructs the same split cloud/local model set as app startup with isolated store names.
-     Failure means the model still contains CloudKit-forbidden constraints, missing relationship
-     inverses, or required attributes without declaration-level defaults.
+     The crash fallback prevents a bad CloudKit schema from taking the whole app down. This test
+     isolates BibleCore's shared base cloud/local partitions under temporary store names. It does
+     not validate the combined application + AI CloudKit schema; that boundary remains outside this
+     test. Failure means a base model still contains CloudKit-forbidden constraints, missing
+     relationship inverses, or required attributes without declaration-level defaults.
      */
     func testICloudSwiftDataSchemaLoadsWithCloudKitConfiguration() throws {
-        let cloudModels: [any PersistentModel.Type] = [
-            Workspace.self,
-            Window.self,
-            PageManager.self,
-            HistoryItem.self,
-            BibleBookmark.self,
-            BibleBookmarkNotes.self,
-            BibleBookmarkToLabel.self,
-            GenericBookmark.self,
-            GenericBookmarkNotes.self,
-            GenericBookmarkToLabel.self,
-            Label.self,
-            StudyPadTextEntry.self,
-            StudyPadTextEntryText.self,
-            MyDocument.self,
-            MyDocumentPage.self,
-            MyDocumentPageContent.self,
-            AiPageCacheEntry.self,
-            ReadingPlan.self,
-            ReadingPlanDay.self,
-            ReadingPlanDefinitionPublicationState.self,
-        ]
-        let localModels: [any PersistentModel.Type] = [
-            Repository.self,
-            Setting.self,
-        ]
+        let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+        let localModels = BibleCoreBaseModelRegistration.localModels
         let schema = Schema(cloudModels + localModels)
         let storeSuffix = UUID().uuidString
         let temporaryDirectory = FileManager.default.temporaryDirectory

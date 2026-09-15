@@ -1531,3 +1531,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ se v dokumentu %2$@ nenachází.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Poznámky přesunuty";

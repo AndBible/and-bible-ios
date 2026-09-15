@@ -1552,3 +1552,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ 이 항목은 %2$@ 문서에서 발견되지 않습니다.";
+
+/* Android shared translations */
+"migrated_my_notes" = "내 노트 이전함";

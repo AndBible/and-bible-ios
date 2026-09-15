@@ -13,8 +13,9 @@ import SwordKit
  Cancel therefore remains side-effect free, while failed Save cannot publish a partial reorder or
  import.
 
- Each operation uses a fresh context from the supplied context's container. This keeps a My
- Documents Save or rollback from committing or discarding unrelated pending scene changes.
+ Each operation uses a fresh non-autosaving context from the supplied context's container. This
+ keeps a My Documents Save from committing unrelated pending scene changes and lets a failed
+ operation discard its private context without reversing a relationship graph on iOS 17.
  */
 @MainActor
 public final class MyDocumentLibraryStore {
@@ -107,6 +108,9 @@ public final class MyDocumentLibraryStore {
         reservedInitials: Set<String>,
         isInitialsUnavailable: (String) throws -> Bool
     ) throws {
+        let registrationBeforeCommit = MyDocumentRegistrationPublication.capture(
+            from: session.persistedBaseline
+        )
         try mutationCoordinator.withExclusiveTransaction(
             kind: .myDocument,
             prepare: { () },
@@ -117,6 +121,13 @@ public final class MyDocumentLibraryStore {
                     isInitialsUnavailable: isInitialsUnavailable
                 )
             }
+        )
+        let registrationAfterCommit = MyDocumentRegistrationPublication.capture(
+            from: session.persistedBaseline
+        )
+        MyDocumentRegistrationPublication.notifyIfChanged(
+            from: registrationBeforeCommit,
+            to: registrationAfterCommit
         )
     }
 
@@ -129,7 +140,7 @@ public final class MyDocumentLibraryStore {
        - isInitialsUnavailable: Required complete-registry lookup evaluated for each inserted row.
      - Side effects: Fetches a fresh isolated context, applies only the session delta, writes the
        remote-sync mutation journal and SwiftData graph once, then advances the saved baseline.
-     - Throws: Validation and persistence failures after rolling back the isolated context; the
+     - Throws: Validation and persistence failures after discarding the isolated context; the
        caller-owned session remains dirty when publication does not complete.
      - Important: The caller must already own `mutationCoordinator` for this store's SWORD root.
      */
@@ -139,6 +150,7 @@ public final class MyDocumentLibraryStore {
         isInitialsUnavailable: (String) throws -> Bool
     ) throws {
         let modelContext = ModelContext(modelContainer)
+        modelContext.autosaveEnabled = false
         let drafts = session.documents
         let baseline = session.persistedBaseline
         let persistedDocuments: [MyDocument]
@@ -167,16 +179,34 @@ public final class MyDocumentLibraryStore {
         let draftPageIDs = Set(drafts.flatMap(\.pages).map(\.id))
         let deletedDocumentIDs = Set(baselineDocumentByID.keys).subtracting(draftDocumentIDs)
         let deletedPageIDs = Set(baselinePageByID.keys).subtracting(draftPageIDs)
+        // Capture stable ownership before staging any deletion. SwiftData may sever the page's
+        // inverse relationship immediately when its document is deleted, so consulting
+        // `page.document` in the second loop can make the same page appear independently deleted.
+        let pageIDsCoveredByDeletedDocuments = Set(
+            persistedPages.compactMap { page -> UUID? in
+                guard let documentID = page.document?.id,
+                      deletedDocumentIDs.contains(documentID) else {
+                    return nil
+                }
+                return page.id
+            }
+        )
 
         do {
             for document in persistedDocuments where deletedDocumentIDs.contains(document.id) {
-                modelContext.delete(document)
+                try MyDocumentDeletionBoundary.stageDocumentDeletion(
+                    document,
+                    in: modelContext
+                )
             }
 
             for page in persistedPages
             where deletedPageIDs.contains(page.id)
-                && page.document.map({ !deletedDocumentIDs.contains($0.id) }) != false {
-                modelContext.delete(page)
+                && !pageIDsCoveredByDeletedDocuments.contains(page.id) {
+                try MyDocumentDeletionBoundary.stagePageDeletion(
+                    page,
+                    in: modelContext
+                )
             }
 
             for draft in drafts {
@@ -249,10 +279,8 @@ public final class MyDocumentLibraryStore {
                 session.acceptSavedChanges()
             }
         } catch let error as MyDocumentManagementError {
-            modelContext.rollback()
             throw error
         } catch {
-            modelContext.rollback()
             throw MyDocumentManagementError.persistenceFailed(error.localizedDescription)
         }
     }

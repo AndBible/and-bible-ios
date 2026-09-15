@@ -1704,3 +1704,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ دستاویز %2$@ میں نہیں ملا۔";
+
+/* Android shared translations */
+"migrated_my_notes" = "میرے نوٹس منتقل ہو گئے";

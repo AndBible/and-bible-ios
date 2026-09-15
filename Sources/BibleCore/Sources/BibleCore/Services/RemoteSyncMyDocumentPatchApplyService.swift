@@ -406,7 +406,21 @@ public final class RemoteSyncMyDocumentPatchApplyService {
 
         try Task.checkCancellation()
         let materializedSnapshot = snapshot.materializedSnapshot()
-        let restoreReport = try settingsStore.performAtomicBatch(in: modelContext) {
+        let registrationBeforeCommit = MyDocumentRegistrationPublication.capture(
+            documents: initialState.0.documentsByID.values
+        )
+        let registrationAfterCommit = MyDocumentRegistrationPublication.capture(
+            from: materializedSnapshot
+        )
+        let restoreReport = try settingsStore.performAtomicBatch(
+            in: modelContext,
+            afterSuccessfulCommit: {
+                MyDocumentRegistrationPublication.notifyIfChanged(
+                    from: registrationBeforeCommit,
+                    to: registrationAfterCommit
+                )
+            }
+        ) {
             let report: RemoteSyncMyDocumentRestoreReport
             if appliedLogEntryCount > 0 {
                 report = try restoreService.replaceLocalMyDocuments(

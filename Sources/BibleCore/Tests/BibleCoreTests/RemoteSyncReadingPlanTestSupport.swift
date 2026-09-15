@@ -179,10 +179,11 @@ final class ReadingPlanSQLiteStoreWriteFailure {
 }
 
 /**
- Production-shaped file-backed reading-plan restore store set.
+ File-backed complete app store set used by reading-plan transaction tests.
 
- Reading plans and days live in one graph configuration while `Setting` rows live in a second local
- configuration, matching `AndBibleApp` without enabling CloudKit in unit tests.
+ The complete cloud and local model partitions match `AndBibleApp` while keeping CloudKit disabled.
+ Reading-plan graph rows therefore retain their production relationship metadata on iOS 17, and
+ `Setting` rows remain independently addressable for physical-store failure injection.
  */
 struct PersistentReadingPlanRestoreStore {
     /// Container spanning the graph and local settings configurations.
@@ -254,21 +255,20 @@ func makeReadingPlanRestoreModelContainer() throws -> ModelContainer {
 }
 
 /**
- Creates or reopens production-shaped file-backed stores for reading-plan restore tests.
+ Creates or reopens complete app-shaped file-backed stores for reading-plan transaction tests.
 
- - Parameter directoryURL: Existing temporary directory that owns both SQLite store families.
+ - Parameter directoryURL: Existing process-lifetime directory that owns both SQLite store families.
  - Returns: Container plus graph/settings URLs used for independent failure injection.
  - Side effects: Creates or opens `ReadingPlanGraph.store` and `ReadingPlanSettings.store` beneath
-   `directoryURL`.
+   `directoryURL`. The caller must keep those files until the xctest process exits because SwiftData
+   has no public synchronous container-close boundary on iOS 17.
  - Failure modes: Rethrows SwiftData model-container/configuration errors.
  */
 func makePersistentReadingPlanRestoreStore(in directoryURL: URL) throws -> PersistentReadingPlanRestoreStore {
-    let graphModels: [any PersistentModel.Type] = [
-        ReadingPlan.self,
-        ReadingPlanDay.self,
-        ReadingPlanDefinitionPublicationState.self,
-    ]
-    let localModels: [any PersistentModel.Type] = [Setting.self]
+    let graphModels = BibleCoreBaseModelRegistration.cloudModels
+        + AIModelRegistration.cloudSyncableModels
+    let localModels = BibleCoreBaseModelRegistration.localModels
+        + AIModelRegistration.localOnlyModels
     let schema = Schema(graphModels + localModels)
     let graphStoreURL = directoryURL.appendingPathComponent("ReadingPlanGraph.store")
     let settingsStoreURL = directoryURL.appendingPathComponent("ReadingPlanSettings.store")

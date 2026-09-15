@@ -26,6 +26,26 @@ import Foundation
  */
 public final class RemoteSyncBookmarkAndroidBookStore {
     /**
+     One preserved Android bookmark book-column value.
+
+     `rawBook == nil` means Android stored SQL NULL. Absence from `snapshotEntries()` means no fidelity
+     value was preserved and callers should derive the value from the live bookmark instead.
+     */
+    struct Entry: Sendable, Equatable {
+        /// Bible bookmark that owns the preserved value.
+        let bookmarkID: UUID
+
+        /// Exact Android column value, including a distinct `nil` for SQL NULL.
+        let rawBook: String?
+
+        /** Creates one decoded fidelity entry without reading or writing persistence. */
+        init(bookmarkID: UUID, rawBook: String?) {
+            self.bookmarkID = bookmarkID
+            self.rawBook = rawBook
+        }
+    }
+
+    /**
      Sentinel persisted for Android rows whose `book` column was NULL.
 
      Real SWORD module initials never contain double underscores, so the sentinel cannot collide
@@ -99,6 +119,24 @@ public final class RemoteSyncBookmarkAndroidBookStore {
     }
 
     /**
+     Returns every well-formed preserved Android bookmark book-column value.
+
+     This projection lets a complete bookmark snapshot read the fidelity namespace once instead of
+     issuing one settings query per Bible bookmark. Malformed keys, noncanonical UUID spellings, and
+     empty payloads are skipped, matching exact canonical-key `rawBook(for:)` lookup; the explicit
+     NULL sentinel remains a present entry whose `rawBook` value is `nil`.
+
+     - Returns: Entries sorted by bookmark UUID string.
+     - Side effects: Reads the local settings table once.
+     - Failure modes: Settings fetch failures retain the store's historical empty-result behavior.
+     */
+    func snapshotEntries() -> [Entry] {
+        settingsStore.entries(inExactNamespace: Keys.prefix)
+            .compactMap(decodeEntry)
+            .sorted { $0.bookmarkID.uuidString < $1.bookmarkID.uuidString }
+    }
+
+    /**
      Removes every preserved Android `book` entry.
 
      - Side effects: deletes all namespaced rows for this store.
@@ -112,5 +150,19 @@ public final class RemoteSyncBookmarkAndroidBookStore {
 
     private func scopedKey(bookmarkID: UUID) -> String {
         "\(Keys.prefix).\(bookmarkID.uuidString.lowercased())"
+    }
+
+    private func decodeEntry(_ entry: Setting) -> Entry? {
+        let prefix = "\(Keys.prefix)."
+        let suffix = String(entry.key.dropFirst(prefix.count))
+        guard entry.key.hasPrefix(prefix), !entry.value.isEmpty,
+              let bookmarkID = UUID(uuidString: suffix),
+              suffix == bookmarkID.uuidString.lowercased() else {
+            return nil
+        }
+        return Entry(
+            bookmarkID: bookmarkID,
+            rawBook: entry.value == Self.nullSentinel ? nil : entry.value
+        )
     }
 }

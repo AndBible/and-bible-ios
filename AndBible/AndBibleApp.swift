@@ -454,36 +454,14 @@ struct AndBibleApp: App {
 
     /// User-data models that live in the CloudKit-capable `AndBible` store.
     private static var cloudModels: [any PersistentModel.Type] {
-        [
-            Workspace.self,
-            Window.self,
-            PageManager.self,
-            HistoryItem.self,
-            BibleBookmark.self,
-            BibleBookmarkNotes.self,
-            BibleBookmarkToLabel.self,
-            GenericBookmark.self,
-            GenericBookmarkNotes.self,
-            GenericBookmarkToLabel.self,
-            Label.self,
-            StudyPadTextEntry.self,
-            StudyPadTextEntryText.self,
-            MyDocument.self,
-            MyDocumentPage.self,
-            MyDocumentPageContent.self,
-            AiPageCacheEntry.self,
-            ReadingPlan.self,
-            ReadingPlanDay.self,
-            ReadingPlanDefinitionPublicationState.self,
-        ] + AIModelRegistration.cloudSyncableModels
+        BibleCoreBaseModelRegistration.cloudModels
+            + AIModelRegistration.cloudSyncableModels
     }
 
     /// Device-local models that are intentionally excluded from CloudKit sync.
     private static var localModels: [any PersistentModel.Type] {
-        [
-            Repository.self,
-            Setting.self,
-        ] + AIModelRegistration.localOnlyModels
+        BibleCoreBaseModelRegistration.localModels
+            + AIModelRegistration.localOnlyModels
     }
 
     /**
@@ -587,20 +565,19 @@ struct AndBibleApp: App {
      - Side effects:
        - creates a default workspace when no workspace exists
        - seeds Android-compatible default/system labels
+       - uses the container's main context, which is also injected into the reader and owned by
+         `WindowManager`, for the presentation graph
      - Failure modes: Label seeding currently swallows persistence failures through its service.
      */
     private static func prepareContainerForUse(
         _ container: ModelContainer,
         windowManager: WindowManager
     ) {
-        let context = ModelContext(container)
-        let workspaceStore = WorkspaceStore(modelContext: context)
-        Self.restoreActiveWorkspace(
-            windowManager: windowManager,
-            modelContainer: container,
-            workspaceStore: workspaceStore,
-            settingsStore: SettingsStore(modelContext: context)
-        )
+        // The reader receives `container.mainContext` from `.modelContainer` below. Bootstrap the
+        // window graph through that same long-lived UI context so `WindowManager` and reader-owned
+        // stores never observe separate registered instances of the active workspace.
+        let context = container.mainContext
+        Self.restoreActiveWorkspace(windowManager: windowManager, modelContainer: container)
 
         let bookmarkStore = BookmarkStore(modelContext: context)
         let bookmarkService = BookmarkService(store: bookmarkStore)
@@ -667,7 +644,7 @@ struct AndBibleApp: App {
             self._modelContainer = State(initialValue: container)
 
             // Initialize services that need ModelContext
-            let context = ModelContext(container)
+            let context = container.mainContext
             try Self.migratePersistedOrdinalTrust(in: context)
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
@@ -700,12 +677,6 @@ struct AndBibleApp: App {
             // Start monitoring iCloud account status
             sync.startMonitoring(container: container)
 
-            if ProcessInfo.processInfo.environment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] == "1" {
-                // Give XCTest time to finish launch bookkeeping before the bootstrap process exits.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    Darwin.exit(EXIT_SUCCESS)
-                }
-            }
         } catch {
             fatalError("Failed to initialize SwiftData: \(error)")
         }
@@ -923,7 +894,7 @@ struct AndBibleApp: App {
      - Returns: Prepared runtime objects plus the effective iCloud mode after startup recovery.
      - Side effects:
        - loads a new SwiftData container using the same startup recovery path as app launch
-       - seeds required workspace/bookmark data in the prepared container
+       - seeds required workspace/bookmark data through the new container's main UI context
        - may clear the persisted iCloud preference through startup recovery when CloudKit fails
      - Failure modes: Re-throws if the requested/fallback SwiftData container cannot be loaded.
      */
@@ -942,7 +913,7 @@ struct AndBibleApp: App {
         let effectiveICloudEnabled = usesLocalUITestContainer
             ? requestedEnabled
             : startupResult.effectiveICloudEnabled
-        let context = ModelContext(container)
+        let context = container.mainContext
         try Self.migratePersistedOrdinalTrust(in: context)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowMgr = WindowManager(workspaceStore: workspaceStore)
@@ -1456,9 +1427,8 @@ struct AndBibleApp: App {
      *
      * - Parameters:
        - windowManager: Live window manager driving the visible workspace UI.
-       - modelContainer: Model container used to create fallback store/context instances.
-       - workspaceStore: Optional prebuilt workspace store for the current context.
-       - settingsStore: Optional prebuilt settings store for the current context.
+       - modelContainer: Model container whose main context owns both the manager graph and the
+         reader environment.
      * - Side effects:
        - may switch the active workspace shown in the UI
        - may create a default workspace when no persisted workspace exists
@@ -1468,13 +1438,14 @@ struct AndBibleApp: App {
      */
     private static func restoreActiveWorkspace(
         windowManager: WindowManager,
-        modelContainer: ModelContainer,
-        workspaceStore: WorkspaceStore? = nil,
-        settingsStore: SettingsStore? = nil
+        modelContainer: ModelContainer
     ) {
-        let context = ModelContext(modelContainer)
-        let resolvedWorkspaceStore = workspaceStore ?? WorkspaceStore(modelContext: context)
-        let resolvedSettingsStore = settingsStore ?? SettingsStore(modelContext: context)
+        // Remote synchronization commits through its isolated operation context. Re-resolve the
+        // resulting active selection through the UI context already owned by `WindowManager` and
+        // injected into the reader instead of introducing another presentation context.
+        let context = modelContainer.mainContext
+        let resolvedWorkspaceStore = WorkspaceStore(modelContext: context)
+        let resolvedSettingsStore = SettingsStore(modelContext: context)
 
         if let activeID = resolvedSettingsStore.activeWorkspaceId,
            let workspace = resolvedWorkspaceStore.workspace(id: activeID) {

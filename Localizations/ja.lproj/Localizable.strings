@@ -1677,3 +1677,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ は文書 %2$@ 内に見つかりませんでした。";
+
+/* Android shared translations */
+"migrated_my_notes" = "マイノートを移行しました";

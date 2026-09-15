@@ -1555,3 +1555,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ নথিতে পাওয়া যায়নি %2$@";
+
+/* Android shared translations */
+"migrated_my_notes" = "মাইগ্রেটেড মাই নোট";

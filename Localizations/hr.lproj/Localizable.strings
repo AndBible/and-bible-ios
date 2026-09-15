@@ -1537,3 +1537,6 @@ Kada koristite Google Drive, %@ dozvoljen je pristup samo datotekama aplikacije,
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ nije pronađen u dokumentu %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Prebačene Moje bilješke";
