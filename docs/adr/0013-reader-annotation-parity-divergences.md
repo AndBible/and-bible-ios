@@ -1,5 +1,5 @@
 ---
-adr: ADR-0011
+adr: ADR-0013
 title: "Reader Annotation Parity Divergences"
 description: >-
   Record the intentional Android divergences kept after the My Notes /
@@ -21,7 +21,13 @@ related-adrs: [ADR-0003, ADR-0008]
 related-work-items: ["PR #382", "issue #376"]
 ---
 
-# 0011: Reader Annotation Parity Divergences
+# 0013: Reader Annotation Parity Divergences
+
+> Identity correction (2026-09-13): This accepted record was originally
+> published as ADR-0011 after that identifier had already been assigned to
+> [Transactional Module Store Mechanism](0011-transactional-module-store-mechanism.md).
+> It is now ADR-0013. The accepted decision, status, date, and substantive
+> prose are unchanged.
 
 Status: Accepted
 

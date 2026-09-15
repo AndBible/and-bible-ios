@@ -29,28 +29,32 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBible \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
-### Test
+### Package and application-host tests
+
+Run the package that owns the affected behavior. For example:
 
 ```bash
-xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+xcodebuild -project AndBible.xcodeproj -scheme BibleCoreTests \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
-### Focused Test Run
+`SwordKitTests`, `BibleViewTests`, and `BibleUITests` select the other package lanes.
+`AndBibleUnitTests` selects the application scene/bootstrap contract.
 
-```bash
-xcodebuild -project AndBible.xcodeproj -scheme AndBible \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState
-```
+### UI journeys
+
+UI tests use the [build and fixture-wrapper workflow](docs/howto/building-and-testing.md#ui-journeys).
+The wrapper installs the exact app product and owns fixture preparation on macOS before the test's
+first app launch. Running a fixture-dependent UI test directly through Xcode or `xcodebuild test`
+has no fixture service and fails with a setup message.
 
 ## Project Structure
 
 ```text
 AndBible.xcodeproj              # Open this in Xcode
 AndBible/                       # App target
-AndBibleTests/                  # App/unit test bundle
-AndBibleUITests/                # UI test bundle
+Tests/AppHost/AndBibleTests/    # Application scene/bootstrap test
+Tests/UI/AndBibleUITests/       # Actual UI journeys
 Package.swift                   # Local Swift package
 Sources/
   SwordKit/                     # libsword wrapper
@@ -111,21 +115,12 @@ its own verified Debug build, and release archives always package a fresh Produc
 - Try Xcode clean build folder
 - Reopen Xcode if resolution gets stuck
 
-### UI tests seem stale
-- Use a clean run with a dedicated derived-data path:
-  ```bash
-  xcodebuild -project AndBible.xcodeproj -scheme AndBible \
-    -destination 'platform=iOS Simulator,name=iPhone 17' \
-    -derivedDataPath .derivedData-local \
-    clean test
-  ```
+### UI products or fixture setup fail
 
-### Search UI tests suddenly return zero results
-- Inspect the UI test harness setup before changing Search assertions
-- Direct-launch Search tests depend on:
-  - a temporary SWORD root
-  - a temporary Search index path
-  - bundled modules being available in the harness
+- Build into a dedicated derived-data directory and use the generated `.xctestrun` from that build.
+- Follow the [UI fixture workflow](docs/howto/building-and-testing.md#ui-journeys); do not replace missing setup with an extra app launch or a guessed container.
+- Search's journey requires its manifest-selected indexed fixture. Check the host service's concrete preparation error before changing a result assertion.
+- Preserve the failed result bundle and compare source/product hashes before rebuilding. Deleting evidence or repeating a failed UI action does not establish correctness.
 
 ## Resources
 

@@ -22,26 +22,74 @@ List available simulators directly:
 xcrun simctl list devices available
 ```
 
-## Run The Test Suite
+## Package and application-host tests
 
-Use `xcodebuild test` and target a simulator.
+Select the package that owns the behavior: `SwordKitTests`, `BibleCoreTests`,
+`BibleViewTests`, or `BibleUITests`. These simulator lanes do not require the application host.
 
 ```bash
-xcodebuild \
-  -project AndBible.xcodeproj \
-  -scheme AndBible \
-  -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
-  -derivedDataPath .derivedData \
-  -resultBundlePath .artifacts/AndBibleTests.xcresult \
-  CODE_SIGNING_ALLOWED=NO \
-  test
+xcodebuild -project AndBible.xcodeproj -scheme BibleCoreTests \
+  -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -derivedDataPath .derivedData-core \
+  -resultBundlePath .artifacts/BibleCoreTests.xcresult \
+  CODE_SIGNING_ALLOWED=NO test
 ```
 
-Notes:
-- `CODE_SIGNING_ALLOWED=NO` keeps CLI simulator runs simple.
-- `.derivedData/` and `.artifacts/` are local build artifacts and should not be committed.
-- Current maintained regression coverage includes the Strong's `H02022` find-all flow in `Sources/BibleCore/Tests/BibleCoreTests/SearchIndexServiceQueryTests.swift`.
+Use `AndBibleUnitTests` for the actual application scene/bootstrap contract. Select affected
+contracts from dependency and behavior analysis; one package or one passing count does not establish
+whole-app coverage. CI's execution wrapper also reconciles the selected and reported identities.
+
+## UI journeys
+
+The UI runner submits fixture requests to a macOS service owned by the repository wrapper.
+The wrapper installs the exact app product, confirms the preceding process has stopped, obtains its
+actual container, and prepares the selected fixture before the first app launch. A direct Xcode UI
+run has no fixture service and fails before preparation. No discovery launch is needed.
+
+The Downloads installation journey also uses this service as a byte-level dependency. The service
+builds a valid deterministic SWORD package, holds its loopback transfer for an observed cancellation
+or an explicit release, and reports the partial and completed byte counts. The app streams the held
+prefix through a URLSession protocol so the visible row must show nonzero progress before release.
+It opts into that protocol
+only for the synthetic `uitest-download.invalid` fixture source. Installation still runs through
+the production repository download delegate, progress, cancellation, ZIP validation, staged
+publication, module reload, and persisted install marker; the old app-side held-install loop is not
+part of the contract.
+
+Choose a dedicated simulator UUID from `simctl list devices available`, then build once:
+
+```bash
+export UITEST_SIMULATOR_ID='SIMULATOR_UUID'
+export UITEST_BUNDLE_ID='org.andbible.ios'
+export UITEST_FIXTURE_TOOL_PATH="$(pwd)/.build/debug/UITestFixtureTool"
+export UITEST_FIXTURE_MANIFEST_PATH="$(pwd)/Tests/UI/Fixtures/ui_test_fixture_manifest.json"
+export UITEST_SWORD_FIXTURE_PATH="$(pwd)/Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+swift build --product UITestFixtureTool
+xcodebuild -project AndBible.xcodeproj -scheme AndBible \
+  -configuration Debug -destination "platform=iOS Simulator,id=${UITEST_SIMULATOR_ID}" \
+  -derivedDataPath .derivedData-ui CODE_SIGNING_ALLOWED=NO build-for-testing
+```
+
+Run the real Search journey from those products:
+
+```bash
+python3 scripts/run_xcodebuild_with_test_selection.py \
+  --project AndBible.xcodeproj --scheme AndBible --configuration Debug \
+  --destination "platform=iOS Simulator,id=${UITEST_SIMULATOR_ID}" \
+  --derived-data-path .derivedData-ui \
+  --result-bundle-path .artifacts/SearchJourney.xcresult \
+  --test-selection-args='-only-testing:AndBibleUITests/AndBibleUITests/testSearchMenuEntryTypingAndResultNavigation' \
+  --action test-without-building
+```
+
+The dedicated directory must contain one `.xctestrun`; pass `--xctestrun-path` when selecting a
+specific artifact from several products. Use a new result-bundle path for each run. For a restored
+CI artifact, use the verified fixture tool, manifest and SWORD paths returned by its importer.
+The same wrapper owns preparation and exact execution reconciliation in both cases.
+
+See [UI sharding](ui-test-sharding.md) for full selections, product reuse, fixture isolation and
+execution-cost evidence. See [performance measurements](performance-measurements.md) for the separate
+Release scheme and measurement boundaries.
 
 ## Build The App For Simulator
 
@@ -111,13 +159,9 @@ Check that the packaged web resources exist under:
 
 ### Simulator tests fail because of stale state
 
-Delete local artifacts and rerun:
-
-```bash
-rm -rf .derivedData .artifacts
-```
-
-Only do this for local cleanup. Do not remove tracked files.
+Keep the failed result bundle and inspect the reported setup or behavior failure. Use a fresh,
+dedicated derived-data directory when product provenance is uncertain. UI fixture reset belongs to
+the wrapper service; it must not mutate a guessed container or run over a live app process.
 
 ### Wrong tool for validation
 

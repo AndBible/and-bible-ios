@@ -29,28 +29,31 @@ Important nuance:
   two UI shards
 - `UI_TEST_MAX_SHARD_COUNT` is a ceiling that prevents stale or inflated timing
   data from multiplying macOS runner setup work
-- with the current manifest, target duration, and cap, the planner emits three
-  balanced shards
-- with the current 15-test smoke suite and timing manifest, the planner would
-  still emit three shards without the cap; the cap remains a guardrail against
-  stale or inflated future timing data
+- with the current 31 source-discovered candidates, historical manifest,
+  default duration for missing entries, target duration, and cap, the planner
+  emits four shards
+- this output does not establish that four is the right shard count: thirteen
+  current candidates have no measured entry, and the remaining values are
+  historical estimates
 
 It is better to describe the current system as "planner-capable with a minimum
 of two shards and a maximum of four shards" unless the timing manifest is being
 refreshed from real runs and the shard limits are being changed because of
 current evidence.
 
-Current local planner output for the checked-in 15-test smoke suite is:
+Current local planner output from those historical/default estimates is:
 
 ```text
-Shard 1/3: 5 tests, estimated 520.107s
-Shard 2/3: 6 tests, estimated 515.852s
-Shard 3/3: 4 tests, estimated 525.000s
+Shard 1/4: 8 tests, estimated 704.465s
+Shard 2/4: 8 tests, estimated 755.886s
+Shard 3/4: 7 tests, estimated 725.513s
+Shard 4/4: 8 tests, estimated 758.771s
 ```
 
-The current timing manifest was regenerated from successful CI run
-`27824737059` on June 19, 2026, and updated with focused local route-smoke
-timings through June 29, 2026.
+The timing manifest records successful CI run `27824737059` on June 19, 2026,
+and focused local route-smoke measurements through June 29, 2026 as historical
+sources. Its versioned document keeps that provenance beside the values and
+labels them as estimates rather than a current duration or runner-cost baseline.
 
 ## How CI Actually Executes
 
@@ -60,11 +63,25 @@ timings through June 29, 2026.
    `Tests/UI/AndBibleUITests/AndBibleUITests*.swift`
 2. load estimated durations from `Tests/UI/Fixtures/ui_test_timings.json`
 3. build a shard matrix via `scripts/build_ui_test_shards.py`
-4. for each shard:
-   - run `build-for-testing`
-   - build the host-side UI fixture tool
+4. build the app, hosted-unit bundle, UI-test bundle, and host-side `UITestFixtureTool` once in
+   `Build UI Test Products`
+5. package the complete `Build/Products` directory, fixture tool, exact fixture manifest, and SWORD
+   seed tree with commit,
+   Xcode, simulator SDK, runner architecture, configuration, signing setting,
+   actual Mach-O slices, file-mode, symlink, and content-digest provenance
+6. for each shard:
+   - download and verify that same-run product archive
+   - start one wrapper-lifetime macOS fixture service in a private directory
+   - for the Downloads fixture only, expose a tokenized loopback package stream whose release and
+     cancellation state is controlled through the same bounded request protocol; require host byte
+     evidence and visible nonzero download progress before releasing the remaining package
    - run one `test-without-building` invocation using the shard's
-     `-only-testing:` selection list
+     `-only-testing:` selection list and the restored `.xctestrun`
+   - read the structured `xcresulttool get test-results` summary and test-node
+     reports, and require the reported identities to exactly match the selection
+7. in the app-host job, download and verify the same product archive, discover every
+   `AndBibleTests` method from its source, and run that exact selection from the restored
+   `.xctestrun` without another app or libsword build
 
 This means each UI shard is one `xcodebuild test-without-building` run, not a
 loop of smaller groups.
@@ -73,20 +90,120 @@ That's an important distinction because of the following:
 
 - fail-fast behavior is different
 - runtime attribution is clearer
-- "all tests in a shard executed" is only true because the shard is a single
-  `xcodebuild` invocation
+- "all tests in a shard executed" requires the post-run identity reconciliation;
+  a single invocation and a positive test count do not prove it
 
-### Build-product reuse experiment
+### Refreshing timing evidence
 
-The earlier build-product reuse experiment has been retired. The active workflow
-keeps the straightforward shard model: each UI shard builds for testing, builds
-the host-side `UITestFixtureTool`, and then runs its selected tests with
-`test-without-building`.
+Only refresh the timing manifest from a complete, successful shard set. Pass
+every shard bundle to the extractor and identify the run that produced them:
 
-Do not reintroduce cross-job Xcode build-product reuse without current CI timing
-data and an explicit product decision. The app-host UI suite is shrinking as
-coverage moves into package lanes, so removing obsolete UI flows is the preferred
-way to reduce CI wall-clock time.
+```bash
+python3 scripts/extract_ui_test_timings_from_xcresult.py \
+  --xcresult-path /path/to/shard-1.xcresult \
+  --xcresult-path /path/to/shard-2.xcresult \
+  --xcresult-path /path/to/shard-3.xcresult \
+  --xcresult-path /path/to/shard-4.xcresult \
+  --test-source Tests/UI/AndBibleUITests/AndBibleUITests*.swift \
+  --source-kind github-actions-run \
+  --source-identifier RUN_ID \
+  --collected-on YYYY-MM-DD \
+  --output Tests/UI/Fixtures/ui_test_timings.json
+```
+
+The extractor uses the structured `xcresulttool get test-results tests` API. It
+refuses failed, skipped, restarted, duplicated, missing, or unexpected tests and
+requires the combined bundles to exactly match the source-discovered inventory.
+The output carries its collection source and date in the versioned manifest.
+
+### Validated build-product reuse
+
+The workflow now builds UI products once and distributes them to the shard jobs.
+This is the production form of the earlier issue #199 experiment, which was
+retired because it was optional and no required job depended on it. The retirement
+did not identify a portability failure.
+
+Three historical workflows proved a producer artifact could execute a real
+app-launching UI test on another `macos-15` runner without rebuilding: runs
+`28303011558`, `28303977192`, and `28311552407`. In run `28311552407`, the
+producer took 9 minutes 10 seconds. Its app build took 4 minutes 42 seconds,
+fixture build 1 minute 20 seconds, staging 11 seconds, and upload 4 seconds. The
+consumer downloaded and restored the archive in 3 seconds before its simulator
+setup and test. A June 19 producer measured the compressed artifact at 59 MiB
+(61,062,403 uploaded bytes), with 14 seconds to stage and 4 seconds to upload.
+
+A September 14, 2026 local restored-consumer gate also verified the current
+artifact contract itself. From a freshly created simulator, the consumer ran
+the genuine hosted app-bootstrap test and two app-launching Search journeys
+from the restored products while sandbox rules denied reads from the producer
+repository and DerivedData paths. All three selected tests passed, the original
+consumer inputs remained unchanged, the wrapper removed its temporary
+`.xctestrun`, and the dedicated simulator was deleted. This establishes the
+current product, app-host, fixture-resource, and temporary-environment
+portability boundary. It does not predict GitHub Actions transfer time, shard
+elapsed time, or runner cost; those still require a complete remote workflow.
+
+The current cost baseline is GitHub Actions run `33124610055` at commit `e7c539a`:
+70 minutes 6 seconds elapsed and 174.60 raw job-minutes. Its UI shards repeated
+27.8 minutes of app builds and 10.15 minutes of fixture builds. One producer
+replaces that repeated compilation. It does not change the current shard count;
+future partition changes still require a fresh complete timing set.
+
+`scripts/manage_ui_test_products.py` owns the portable payload. It carries the
+whole Xcode `Build/Products` tree because the generated `.xctestrun` defines the
+actual dependency graph, including the hosted `AndBibleTests.xctest` under the app's
+`PlugIns` directory. It also carries `.build/debug/UITestFixtureTool`, its
+BibleCore and SwordKit host resource bundles beside the executable, and the
+fixture manifest consumed by that exact build. This prevents SwiftPM's compiled
+producer-checkout resource fallback and the fixture tool's local SWORD source lookup from masking
+an incomplete consumer artifact.
+Consumers fail before simulator execution when the commit, selected Xcode build,
+simulator SDK, runner architecture, build configuration, signing setting,
+actual app/test/fixture Mach-O slices, resources, executable modes, symlinks, or
+file digests do not match the producer manifest. Xcode 26's generated xctestrun
+does not provide an `Architecture` field, so the archive reads built executables
+with `lipo` instead of inferring compatibility from its filename. Consumer jobs
+also reject any shipping app resource tree containing SWORD's `mods.d` directory
+or a recognized lowercase `modules/<driver-family>` payload; unrelated directories
+named `modules` and app-host test plug-in fixtures are outside that product rule.
+They pass the verified fixture tool and bundled manifest paths explicitly; a missing
+explicit manifest cannot fall back to the producer checkout embedded in `#filePath`.
+The wrapper then patches only UI-host environment paths that are runner-local,
+including the private fixture-service directory, into a same-directory temporary
+`.xctestrun` copy and reconciles selected and executed test identities from the
+resulting xcresult. Packaging independently removes those bounded runner-local keys
+from the staged `.xctestrun`, so an expired service directory or producer home cannot
+become part of the reusable artifact. Neither operation mutates the generated producer
+`.xctestrun`.
+
+### Fixture lifecycle
+
+XCTest can defer installation of the target application until
+`XCUIApplication.launch()`, after fixture preparation needs its data container.
+Before starting the fixture service or xcodebuild, the repository wrapper reads
+`UITargetAppPath` from the selected `.xctestrun`, expands only its `__TESTROOT__`
+product path, and verifies the app's `Info.plist`, configured bundle identifier,
+simulator platform, and executable. It installs that exact product once with host
+`simctl` without launching it. For each selected UI test, the test host then
+atomically publishes a bounded `prepare` request to the private directory created
+by `scripts/run_xcodebuild_with_test_selection.py`. The macOS service processes
+one request at a time. It requires CoreSimulator to confirm that the previous app
+process is stopped, obtains the installed data container through
+`simctl get_app_container`, then invokes the verified host fixture tool to reset
+and seed that exact container. Normal test teardown uses `XCUIApplication.terminate()`
+so XCTest owns and classifies the expected process exit; the next prepare request still
+confirms termination independently before mutation. An unavailable product, process state,
+container, service, tool, or fixture resource fails before app launch or further mutation.
+
+Setup does not launch the app to create or discover its container and does not
+search old container directories. The test's first launch therefore uses the
+completed fixture. Keep fixture preparation outside performance intervals and
+validate this lifecycle with both freshly installed and restored build products.
+
+UI test execution must use the repository wrapper with one explicit simulator UUID
+in `--destination`. A direct manual Xcode UI-test run has no macOS fixture owner and
+fails with an actionable setup message. Native-only selections do not start the
+fixture service.
 
 ## Local Validation Guidance
 
@@ -102,7 +219,7 @@ Preferred order:
 
 Why this matters:
 
-- a full serial local UI run covers the same 15 UI tests, but its wall-clock
+- a full serial local UI run covers the same source-discovered UI inventory, but its wall-clock
   runtime is not comparable to CI because CI runs shards in parallel
 - a targeted subset can prove a specific fix, but it does not prove the shard
   or full-suite shape is clean
@@ -139,21 +256,20 @@ For sharding decisions, use shard-shaped runs and current CI data.
 
 2. Keep the maximum shard count tied to observed runner behavior.
 
-   Each UI shard repeats fixed setup before it can run any selected tests:
-   checkout, Xcode selection, SwiftPM and libsword cache restore, simulator
-   runtime validation, simulator creation and boot, `build-for-testing`, host
-   fixture tool build, artifact upload, and simulator cleanup. On CI run
-   `27824737059`, UI shards spent a median of about 604 seconds in setup before
-   `test-without-building` started. More shards can reduce per-shard test time,
-   but stale timing data can also create extra queued macOS jobs that multiply
-   this fixed setup cost.
+   Each UI shard still repeats checkout, Xcode selection, product download and
+   verification, simulator runtime validation, simulator creation and boot,
+   result upload, and simulator cleanup. App and fixture compilation now happen
+   once in the producer. More shards can reduce per-shard test time, but stale
+   timing data can still create extra queued macOS jobs and multiply the remaining
+   fixed setup cost.
 
 3. Be careful about treating the current timing manifest as authoritative unless
    it has been refreshed recently.
 
-   `Tests/UI/Fixtures/ui_test_timings.json` can go stale. When it is stale, the planner
-   still works as a rough balancer, but the "target shard duration" becomes
-   aspirational rather than predictive.
+   `Tests/UI/Fixtures/ui_test_timings.json` can go stale. The loader requires
+   versioned provenance, but provenance does not make old measurements current.
+   When values are stale or absent, the planner still works as a rough balancer,
+   while the "target shard duration" is aspirational rather than predictive.
 
 4. Avoid replacing the single-invocation shard model with ad hoc per-test loops
    unless you are also updating the docs and the reasoning behind the change.
@@ -169,6 +285,7 @@ For sharding decisions, use shard-shaped runs and current CI data.
 
 - `.github/workflows/ios-ci.yml`
 - `scripts/build_ui_test_shards.py`
+- `scripts/manage_ui_test_products.py`
 - `scripts/run_xcodebuild_with_test_selection.py`
 - `Tests/UI/Fixtures/ui_test_timings.json`
 - `Tests/UI/AndBibleUITests/AndBibleUITests.swift`
