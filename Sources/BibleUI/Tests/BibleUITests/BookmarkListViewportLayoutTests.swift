@@ -229,6 +229,349 @@ final class BookmarkListViewportLayoutTests: XCTestCase {
         withExtendedLifetime(container) {}
     }
 
+    /** Notes and label junctions remain live while the real Bookmark list stays mounted. */
+    func testMountedBookmarkListObservesRelationshipInsertEditAndRemovalForBothFamilies() async throws {
+        let container = try makeHostedBookmarkListModelContainer()
+        let context = container.mainContext
+        let bibleBookmark = BibleBookmark(
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            v11n: "KJVA",
+            bookInitials: "KJV",
+            createdAt: Date(timeIntervalSince1970: 200),
+            lastUpdatedOn: Date(timeIntervalSince1970: 200)
+        )
+        bibleBookmark.book = "Genesis"
+        let genericBookmark = GenericBookmark(
+            key: "Entry",
+            bookInitials: "DICT",
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastUpdatedOn: Date(timeIntervalSince1970: 100)
+        )
+        let bibleLabel = BibleCore.Label(name: "Bible label")
+        let genericLabel = BibleCore.Label(name: "Generic label")
+        context.insert(bibleBookmark)
+        context.insert(genericBookmark)
+        context.insert(bibleLabel)
+        context.insert(genericLabel)
+        try context.save()
+
+        let recorder = BookmarkListRowLoadRecorder(content: "Relationship projection")
+        let hosted = BookmarkListView(
+            surfacePalette: .standard,
+            onDismiss: {},
+            rowProjectionLoader: { request, _ in recorder.load(request) },
+            projectionContexts: .empty
+        )
+        .modelContainer(container)
+        let host = makeWindowHost(hosted)
+        defer { host.close() }
+
+        let observedInitialRows = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            )
+        }
+        XCTAssertTrue(observedInitialRows, "Expected both mounted rows to begin unlabelled and without notes.")
+
+        let bibleNote = BibleBookmarkNotes(bookmarkId: bibleBookmark.id, notes: "Bible inserted note")
+        let genericNote = GenericBookmarkNotes(bookmarkId: genericBookmark.id, notes: "Generic inserted note")
+        context.insert(bibleNote)
+        context.insert(genericNote)
+        bibleBookmark.notes = bibleNote
+        genericBookmark.notes = genericNote
+        try context.save()
+
+        let observedNoteInsertion = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: "Bible inserted note",
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: "Generic inserted note",
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            )
+        }
+        XCTAssertTrue(observedNoteInsertion, "Expected note insertion alone to restart both mounted rows.")
+        let insertedNotesBecameVisible = await waitUntil(timeout: 2) {
+            let visibleText = host.recognizedPixelText().joined(separator: " ")
+            return visibleText.contains("Bible inserted note")
+                && visibleText.contains("Generic inserted note")
+        }
+        XCTAssertTrue(insertedNotesBecameVisible, "Expected inserted notes in the real hosted row pixels.")
+
+        let bibleLink = BibleBookmarkToLabel(orderNumber: 20, indentLevel: 1, expandContent: true)
+        let genericLink = GenericBookmarkToLabel(orderNumber: 30, indentLevel: 2, expandContent: false)
+        context.insert(bibleLink)
+        context.insert(genericLink)
+        bibleBookmark.bookmarkToLabels = [bibleLink]
+        genericBookmark.bookmarkToLabels = [genericLink]
+        bibleLink.label = bibleLabel
+        genericLink.label = genericLabel
+        try context.save()
+
+        let observedJunctionInsertion = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: "Bible inserted note",
+                labelID: bibleLabel.id.uuidString,
+                orderNumber: 20
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: "Generic inserted note",
+                labelID: genericLabel.id.uuidString,
+                orderNumber: 30
+            )
+        }
+        XCTAssertTrue(observedJunctionInsertion, "Expected junction insertion alone to restart both mounted rows.")
+
+        bibleLink.orderNumber = 4
+        genericLink.orderNumber = 5
+        try context.save()
+
+        let observedOrderEdit = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: "Bible inserted note",
+                labelID: bibleLabel.id.uuidString,
+                orderNumber: 4
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: "Generic inserted note",
+                labelID: genericLabel.id.uuidString,
+                orderNumber: 5
+            )
+        }
+        XCTAssertTrue(observedOrderEdit, "Expected StudyPad-order edits alone to restart both mounted rows.")
+
+        bibleNote.notes = "Bible edited note"
+        genericNote.notes = "Generic edited note"
+        try context.save()
+
+        let observedNoteEdit = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: "Bible edited note",
+                labelID: bibleLabel.id.uuidString,
+                orderNumber: 4
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: "Generic edited note",
+                labelID: genericLabel.id.uuidString,
+                orderNumber: 5
+            )
+        }
+        XCTAssertTrue(observedNoteEdit, "Expected note edits alone to restart both mounted rows.")
+        let editedNotesReplacedPixels = await waitUntil(timeout: 2) {
+            let visibleText = host.recognizedPixelText().joined(separator: " ")
+            return visibleText.contains("Bible edited note")
+                && visibleText.contains("Generic edited note")
+                && !visibleText.contains("Bible inserted note")
+                && !visibleText.contains("Generic inserted note")
+        }
+        XCTAssertTrue(editedNotesReplacedPixels, "Expected edited notes to replace the prior real row pixels.")
+
+        bibleBookmark.notes = nil
+        genericBookmark.notes = nil
+        context.delete(bibleNote)
+        context.delete(genericNote)
+        try context.save()
+
+        let observedNoteRemoval = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: nil,
+                labelID: bibleLabel.id.uuidString,
+                orderNumber: 4
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: nil,
+                labelID: genericLabel.id.uuidString,
+                orderNumber: 5
+            )
+        }
+        XCTAssertTrue(observedNoteRemoval, "Expected note removal alone to restart both mounted rows.")
+        let removedNotesLeftPixels = await waitUntil(timeout: 2) {
+            let visibleText = host.recognizedPixelText().joined(separator: " ")
+            return !visibleText.contains("Bible edited note")
+                && !visibleText.contains("Generic edited note")
+        }
+        XCTAssertTrue(removedNotesLeftPixels, "Expected removed notes to leave the real hosted row pixels.")
+
+        bibleBookmark.bookmarkToLabels = []
+        genericBookmark.bookmarkToLabels = []
+        context.delete(bibleLink)
+        context.delete(genericLink)
+        try context.save()
+
+        let observedJunctionRemoval = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmark.id,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            ) && recorder.hasGenericState(
+                id: genericBookmark.id,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            )
+        }
+        XCTAssertTrue(observedJunctionRemoval, "Expected junction removal alone to restore both mounted rows to Unlabelled.")
+        withExtendedLifetime(container) {}
+    }
+
+    /** A remote-sync-owned context save republishes mounted relationship and note state. */
+    func testMountedBookmarkListObservesSecondContextRelationshipAndNoteSave() async throws {
+        let container = try makeHostedBookmarkListModelContainer()
+        let context = container.mainContext
+        let bibleBookmark = BibleBookmark(
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            v11n: "KJVA",
+            bookInitials: "KJV",
+            createdAt: Date(timeIntervalSince1970: 200),
+            lastUpdatedOn: Date(timeIntervalSince1970: 200)
+        )
+        bibleBookmark.book = "Genesis"
+        let genericBookmark = GenericBookmark(
+            key: "Entry",
+            bookInitials: "DICT",
+            createdAt: Date(timeIntervalSince1970: 100),
+            lastUpdatedOn: Date(timeIntervalSince1970: 100)
+        )
+        let bibleLabel = BibleCore.Label(name: "Synced Bible label")
+        let genericLabel = BibleCore.Label(name: "Synced Generic label")
+        context.insert(bibleBookmark)
+        context.insert(genericBookmark)
+        context.insert(bibleLabel)
+        context.insert(genericLabel)
+        try context.save()
+
+        let bibleBookmarkID = bibleBookmark.id
+        let genericBookmarkID = genericBookmark.id
+        let bibleLabelID = bibleLabel.id
+        let genericLabelID = genericLabel.id
+        let recorder = BookmarkListRowLoadRecorder(content: "Remote sync projection")
+        let hosted = BookmarkListView(
+            surfacePalette: .standard,
+            onDismiss: {},
+            rowProjectionLoader: { request, _ in recorder.load(request) },
+            projectionContexts: .empty
+        )
+        .modelContainer(container)
+        let host = makeWindowHost(hosted)
+        defer { host.close() }
+
+        let observedInitialRows = await waitUntil {
+            recorder.hasBibleState(
+                id: bibleBookmarkID,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            ) && recorder.hasGenericState(
+                id: genericBookmarkID,
+                note: nil,
+                labelID: BibleCore.Label.unlabeledId.uuidString,
+                orderNumber: 0
+            )
+        }
+        XCTAssertTrue(observedInitialRows, "Expected both mounted rows before the remote-sync-style save.")
+        let mutationBoundary = recorder.requestCount
+
+        // RemoteSyncLifecycleService constructs one fresh ModelContext for a synchronization pass;
+        // its bookmark restore owner inserts notes and junctions through that context.
+        let synchronizationContext = ModelContext(container)
+        let remoteBibleBookmark = try XCTUnwrap(
+            try synchronizationContext.fetch(FetchDescriptor<BibleBookmark>(
+                predicate: #Predicate { $0.id == bibleBookmarkID }
+            )).first
+        )
+        let remoteGenericBookmark = try XCTUnwrap(
+            try synchronizationContext.fetch(FetchDescriptor<GenericBookmark>(
+                predicate: #Predicate { $0.id == genericBookmarkID }
+            )).first
+        )
+        let remoteBibleLabel = try XCTUnwrap(
+            try synchronizationContext.fetch(FetchDescriptor<BibleCore.Label>(
+                predicate: #Predicate { $0.id == bibleLabelID }
+            )).first
+        )
+        let remoteGenericLabel = try XCTUnwrap(
+            try synchronizationContext.fetch(FetchDescriptor<BibleCore.Label>(
+                predicate: #Predicate { $0.id == genericLabelID }
+            )).first
+        )
+        let bibleNote = BibleBookmarkNotes(
+            bookmarkId: bibleBookmarkID,
+            notes: "Synced Bible note"
+        )
+        let genericNote = GenericBookmarkNotes(
+            bookmarkId: genericBookmarkID,
+            notes: "Synced Generic note"
+        )
+        let bibleLink = BibleBookmarkToLabel(orderNumber: 41, indentLevel: 1, expandContent: true)
+        let genericLink = GenericBookmarkToLabel(orderNumber: 42, indentLevel: 2, expandContent: false)
+        synchronizationContext.insert(bibleNote)
+        synchronizationContext.insert(genericNote)
+        synchronizationContext.insert(bibleLink)
+        synchronizationContext.insert(genericLink)
+        bibleNote.bookmark = remoteBibleBookmark
+        genericNote.bookmark = remoteGenericBookmark
+        bibleLink.bookmark = remoteBibleBookmark
+        bibleLink.label = remoteBibleLabel
+        genericLink.bookmark = remoteGenericBookmark
+        genericLink.label = remoteGenericLabel
+        try synchronizationContext.save()
+
+        let observedSynchronizedRows = await waitUntil(timeout: 2) {
+            recorder.hasBibleState(
+                id: bibleBookmarkID,
+                note: "Synced Bible note",
+                labelID: bibleLabelID.uuidString,
+                orderNumber: 41,
+                afterRequestIndex: mutationBoundary
+            ) && recorder.hasGenericState(
+                id: genericBookmarkID,
+                note: "Synced Generic note",
+                labelID: genericLabelID.uuidString,
+                orderNumber: 42,
+                afterRequestIndex: mutationBoundary
+            )
+        }
+        XCTAssertTrue(
+            observedSynchronizedRows,
+            "Expected the mounted list to republish both exact rows after the second-context save. "
+                + "Requests before save: \(mutationBoundary); total: \(recorder.requestCount)"
+        )
+        let synchronizedNotesBecameVisible = await waitUntil(timeout: 2) {
+            let visibleText = host.recognizedPixelText().joined(separator: " ")
+            return visibleText.contains("Synced Bible note")
+                && visibleText.contains("Synced Generic note")
+        }
+        XCTAssertTrue(
+            synchronizedNotesBecameVisible,
+            "Expected remote-sync-style note changes in the real mounted row pixels."
+        )
+        withExtendedLifetime(synchronizationContext) {}
+        withExtendedLifetime(container) {}
+    }
+
     /** Deleting the selected page removes its authoritative row source instead of retaining it. */
     func testPersistedSourceObserverClearsDeletedSelectedPage() async throws {
         let container = try makeMyDocumentModelContainer()
@@ -513,13 +856,17 @@ private final class BookmarkListPersistedSourceRecorder {
 private final class BookmarkListRowLoadRecorder {
     var content: String
     private(set) var loadedContents: [String] = []
+    private(set) var requests: [BookmarkListRowProjectionRequest] = []
 
     init(content: String) {
         self.content = content
     }
 
+    var requestCount: Int { requests.count }
+
     func load(_ request: BookmarkListRowProjectionRequest) -> BookmarkListResolvedRowProjection {
         loadedContents.append(content)
+        requests.append(request)
         return BookmarkListResolvedRowProjection(
             request: request,
             reference: "Selected: page",
@@ -530,6 +877,68 @@ private final class BookmarkListRowLoadRecorder {
                 fullText: content
             )
         )
+    }
+
+    /** Returns whether one mounted Bible row has published the exact related values. */
+    func hasBibleState(id: UUID, note: String?, labelID: String, orderNumber: Int) -> Bool {
+        hasBibleState(
+            id: id,
+            note: note,
+            labelID: labelID,
+            orderNumber: orderNumber,
+            afterRequestIndex: 0
+        )
+    }
+
+    /** Restricts a Bible-state observation to requests published after a causal boundary. */
+    func hasBibleState(
+        id: UUID,
+        note: String?,
+        labelID: String,
+        orderNumber: Int,
+        afterRequestIndex: Int
+    ) -> Bool {
+        guard requests.indices.contains(afterRequestIndex) || afterRequestIndex == requests.endIndex,
+              let request = requests.dropFirst(afterRequestIndex).reversed().first(where: {
+            guard case .bible(let input) = $0 else { return false }
+            return input.id == id
+        }), case .bible(let input) = request else { return false }
+        return input.note == note
+            && input.labelIDs == [labelID]
+            && input.bookmarkToLabels.count == 1
+            && input.bookmarkToLabels[0].labelID.rawValue == labelID
+            && input.bookmarkToLabels[0].orderNumber == orderNumber
+    }
+
+    /** Returns whether one mounted generic row has published the exact related values. */
+    func hasGenericState(id: UUID, note: String?, labelID: String, orderNumber: Int) -> Bool {
+        hasGenericState(
+            id: id,
+            note: note,
+            labelID: labelID,
+            orderNumber: orderNumber,
+            afterRequestIndex: 0
+        )
+    }
+
+    /** Restricts a generic-state observation to requests published after a causal boundary. */
+    func hasGenericState(
+        id: UUID,
+        note: String?,
+        labelID: String,
+        orderNumber: Int,
+        afterRequestIndex: Int
+    ) -> Bool {
+        guard requests.indices.contains(afterRequestIndex) || afterRequestIndex == requests.endIndex,
+              let request = requests.dropFirst(afterRequestIndex).reversed().first(where: {
+            guard case .generic(let input) = $0 else { return false }
+            return input.id == id
+        }), case .generic(let input) = request else { return false }
+        return input.note == note
+            && input.labelIDs == [labelID]
+            && input.bookmarkToLabels.count == 1
+            && input.bookmarkToLabels[0].labelID.rawValue == labelID
+            && input.bookmarkToLabels[0].orderNumber == orderNumber
     }
 }
 

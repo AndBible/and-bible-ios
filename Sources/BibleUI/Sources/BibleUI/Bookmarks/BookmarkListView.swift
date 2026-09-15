@@ -345,11 +345,11 @@ private struct BookmarkListContentView: View {
     /// Active scheme used by the shared application popup palette.
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Raw Bible bookmark query used as part of the source set for filtering and sorting.
-    @Query(sort: \BibleBookmark.createdAt, order: .reverse) private var bibleBookmarks: [BibleBookmark]
+    /// Raw Bible bookmark query with label junctions prefetched for list filtering and rows.
+    @Query private var bibleBookmarks: [BibleBookmark]
 
-    /// Raw generic bookmark query used as part of the source set for filtering and sorting.
-    @Query(sort: \GenericBookmark.createdAt, order: .reverse) private var genericBookmarks: [GenericBookmark]
+    /// Raw generic bookmark query with label junctions prefetched for list filtering and rows.
+    @Query private var genericBookmarks: [GenericBookmark]
 
     /// Raw label query used to build filter chips and label-management affordances.
     @Query(sort: \BibleCore.Label.name) private var labels: [BibleCore.Label]
@@ -455,6 +455,22 @@ private struct BookmarkListContentView: View {
         bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
     ) {
+        var bibleDescriptor = FetchDescriptor<BibleBookmark>(
+            sortBy: [SortDescriptor(\BibleBookmark.createdAt, order: .reverse)]
+        )
+        bibleDescriptor.relationshipKeyPathsForPrefetching = [
+            \BibleBookmark.bookmarkToLabels,
+        ]
+        _bibleBookmarks = Query(bibleDescriptor)
+
+        var genericDescriptor = FetchDescriptor<GenericBookmark>(
+            sortBy: [SortDescriptor(\GenericBookmark.createdAt, order: .reverse)]
+        )
+        genericDescriptor.relationshipKeyPathsForPrefetching = [
+            \GenericBookmark.bookmarkToLabels,
+        ]
+        _genericBookmarks = Query(genericDescriptor)
+
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
         self.rowProjectionLoader = rowProjectionLoader
