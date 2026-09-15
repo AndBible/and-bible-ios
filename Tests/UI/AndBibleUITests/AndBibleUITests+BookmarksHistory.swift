@@ -237,7 +237,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenMyNotesAction",
             destinationIdentifier: "myDocumentsListScreen",
-            readinessIdentifiers: ["myDocumentsListStateExport"],
+            readinessIdentifiers: ["myDocumentsAddButton"],
             in: app,
             timeout: 20
         )
@@ -264,6 +264,11 @@ extension AndBibleUITests {
         waitForReaderRenderedContentState(containing: "readerDestination=none", in: app, timeout: 10)
         waitForReaderRenderedContentState(
             containing: "category=general_book;module=UITESTDOC;book=UI Test Document;chapter=none;key=intro",
+            in: app,
+            timeout: 20
+        )
+        waitForVisibleReaderText(
+            containing: "My Document page one.",
             in: app,
             timeout: 20
         )

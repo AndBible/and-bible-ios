@@ -686,18 +686,18 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
     }
 
     /**
-     Protects pane restoration from replacing a readable fallback with a persisted locked Bible.
+     Protects pane restoration of an installed locked Bible without exposing a readable handle.
 
      - Setup: Configures the reader with plain KJV plus an encrypted empty-key Bible, then restores a
        `PageManager` whose saved Bible identity names the locked module.
-     - Expected result: KJV remains active, the locked saved identity is preserved for a future
-       app-owned unlock workflow, and restore performs no normalization persistence.
-     - Failure meaning: Session restore can bypass the shared activation preflight or erase the user's
-       locked selection before they have a chance to unlock it.
+     - Expected result: The installed locked identity remains selected, its content handle stays nil,
+       and restore performs no normalization persistence.
+     - Failure meaning: Session restore can substitute a readable Bible for Android's installed
+       current document or expose encrypted content before explicit unlock.
      - Side effects: Writes only the temporary SWORD fixture and records persistence callbacks.
      */
     @MainActor
-    func testRestoreSavedPositionKeepsReadableFallbackForPersistedLockedBible() throws {
+    func testRestoreSavedPositionRetainsPersistedInstalledLockedBibleWithoutReadableHandle() throws {
         let (bridge, _) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(
@@ -725,8 +725,8 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
 
         controller.restoreSavedPosition()
 
-        XCTAssertEqual(controller.activeModuleName, "KJV")
-        XCTAssertEqual(controller.activeModule?.info.name, "KJV")
+        XCTAssertEqual(controller.activeModuleName, "LOCKED")
+        XCTAssertNil(controller.activeModule)
         XCTAssertEqual(pageManager.bibleDocument, "LOCKED")
         XCTAssertEqual(persistCount, 0)
     }

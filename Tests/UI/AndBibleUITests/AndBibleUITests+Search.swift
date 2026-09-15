@@ -1956,6 +1956,27 @@ extension AndBibleUITests {
 
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
         let webView = app.webViews.firstMatch
+        func requirePublishedKJV(_ boundary: String) {
+            XCTAssertTrue(
+                waitForUITestCondition("real KJV publication \(boundary)", timeout: 20) {
+                    guard webView.exists, self.elementHasUsableFrame(webView),
+                          app.frame.intersects(webView.frame) else { return false }
+                    let verse = webView.staticTexts.matching(
+                        NSPredicate(format: "label CONTAINS[c] %@", "In the beginning")
+                    ).firstMatch
+                    let sourceTitle = webView.staticTexts.matching(
+                        NSPredicate(format: "label == %@", "THE FIRST BOOK OF MOSES CALLED GENESIS")
+                    ).firstMatch
+                    guard verse.exists, self.elementHasUsableFrame(verse),
+                          sourceTitle.exists, self.elementHasUsableFrame(sourceTitle) else { return false }
+                    return webView.frame.intersects(verse.frame) && app.frame.intersects(verse.frame)
+                        && webView.frame.intersects(sourceTitle.frame)
+                        && app.frame.intersects(sourceTitle.frame)
+                },
+                "Expected the module-derived Genesis title and scripture in the same visible WebView \(boundary)."
+            )
+        }
+        requirePublishedKJV("before editing margins")
         XCTAssertTrue(webView.waitForExistence(timeout: 20))
         var initialWidth: CGFloat = 0
         XCTAssertTrue(
@@ -1982,7 +2003,7 @@ extension AndBibleUITests {
         )
 
         let maxWidthSlider = requireObservedSettingsElement(
-            app.sliders["textDisplayPreferenceEditorSeekBar::Maximum width of text"].firstMatch,
+            app.otherElements["textDisplayPreferenceEditorSeekBar::Maximum width of text"].firstMatch,
             identifier: "textDisplayPreferenceEditorSeekBar::Maximum width of text",
             timeout: 10
         )
@@ -2010,6 +2031,7 @@ extension AndBibleUITests {
             timeout: 10
         )
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
+        requirePublishedKJV("after committing margins")
 
         var narrowedWidth: CGFloat = 0
         let didNarrow = waitForUITestCondition("reader text narrows", timeout: 20) {

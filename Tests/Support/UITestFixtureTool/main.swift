@@ -812,36 +812,38 @@ private final class FixtureContext {
     /**
      Seeds the isolated readable-next inventory without changing the validated picker fixture.
 
-     KJV and `AATESTREADABLE` are readable; `UITESTLOCKED` remains retained but inaccessible. The
-     swap-activity Bible tap must cycle through only the two readable identities.
+     KJV and `AATESTREADABLE` are readable; `UITESTLOCKED` remains installed but inaccessible. The
+     active pane starts on KJV, and swap-activity must cycle through only the two readable identities.
 
-     - Parameter baseline: Active pane whose retained Bible identity is set to the locked module.
-     - Side effects: Writes the locked picker fixture, one cloned readable Bible, retained target,
+     - Parameter baseline: Active pane whose Bible identity is set to readable KJV.
+     - Side effects: Writes the locked picker fixture, one cloned readable Bible, the KJV selection,
        and toolbar action preference.
      - Failure modes: Propagates fixture, module-copy, index, and persistence errors.
      */
     private func seedLockedReadableNext(baseline: BaselineState) throws {
         try seedLockedPickerDownloads()
         try seedUITestReadableBibleModule()
-        baseline.pageManager.bibleDocument = "UITESTLOCKED"
+        baseline.pageManager.bibleDocument = "KJV"
         settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
     }
 
     /**
      Seeds the isolated commentary-to-retained-locked-Bible suggestion inventory.
 
-     The startup controller may publish readable KJV, but the pane retains `UITESTLOCKED`; after a
-     real commentary switch, the next Bible action must preserve that exact locked suggestion.
+     The active pane starts on a real commentary while its Bible page retains `UITESTLOCKED`. The
+     Bible swap action must preserve that exact installed locked suggestion.
 
-     - Parameter baseline: Active pane whose retained Bible identity is set to the locked module.
-     - Side effects: Writes the locked picker fixture, one commentary, retained target, and toolbar
-       action preference.
+     - Parameter baseline: Active commentary pane whose retained Bible identity is the locked module.
+     - Side effects: Writes the locked picker fixture, one commentary, both category selections, and
+       the toolbar action preference.
      - Failure modes: Propagates fixture, commentary, index, and persistence errors.
      */
     private func seedLockedSuggestedCommentary(baseline: BaselineState) throws {
         try seedLockedPickerDownloads()
         try seedUITestCommentaryModule()
         baseline.pageManager.bibleDocument = "UITESTLOCKED"
+        baseline.pageManager.commentaryDocument = "000UITestComm"
+        baseline.pageManager.currentCategoryName = "commentary"
         settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
     }
 

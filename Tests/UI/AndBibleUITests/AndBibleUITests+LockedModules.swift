@@ -202,14 +202,6 @@ extension AndBibleUITests {
     func testSwapActivityFromCommentaryUnlocksExactRetainedBibleSuggestion() {
         let app = makeApp()
         app.launch()
-        waitForReaderRenderedContentState(containing: "category=bible;module=KJV", in: app, timeout: 20)
-        waitForVisibleReaderText(
-            containing: "God created the heaven and the earth",
-            in: app,
-            timeout: 20
-        )
-
-        tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10))
         waitForReaderRenderedContentState(
             containing: "category=commentary;module=000UITestComm",
             in: app,
