@@ -760,9 +760,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 layoutWeight: 1,
                 layoutState: "split"
             )
-            oldWindow.workspace = oldWorkspace
             let oldPageManager = PageManager(id: oldWindowID, currentCategoryName: "commentary")
-            oldPageManager.window = oldWindow
             oldPageManager.commentaryDocument = "MHC"
             oldPageManager.commentaryAnchorOrdinal = 123
             let oldHistory = HistoryItem(
@@ -771,12 +769,14 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 document: "KJV",
                 key: "Gen.1.1"
             )
-            oldHistory.window = oldWindow
             oldHistory.anchorOrdinal = 4
             modelContext.insert(oldWorkspace)
             modelContext.insert(oldWindow)
             modelContext.insert(oldPageManager)
             modelContext.insert(oldHistory)
+            oldWindow.workspace = oldWorkspace
+            oldPageManager.window = oldWindow
+            oldHistory.window = oldWindow
             try modelContext.save()
 
             settingsStore.activeWorkspaceId = oldWorkspaceID
@@ -942,9 +942,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 layoutWeight: 1,
                 layoutState: "split"
             )
-            window.workspace = workspace
             let pageManager = PageManager(id: windowID, currentCategoryName: "bible")
-            pageManager.window = window
             pageManager.bibleDocument = "KJV"
             pageManager.bibleVersification = "KJVA"
             pageManager.bibleChapterNo = 1
@@ -955,12 +953,14 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 document: "KJV",
                 key: "Gen.1.1"
             )
-            history.window = window
             history.anchorOrdinal = 4
             modelContext.insert(workspace)
             modelContext.insert(window)
             modelContext.insert(pageManager)
             modelContext.insert(history)
+            window.workspace = workspace
+            pageManager.window = window
+            history.window = window
             try modelContext.save()
 
             settingsStore.activeWorkspaceId = workspaceID
