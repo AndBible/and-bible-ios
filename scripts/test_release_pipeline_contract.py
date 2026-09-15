@@ -54,8 +54,7 @@ class ReleasePipelineContractTests(unittest.TestCase):
         job_boundaries = (
             ("ios-bibleview-package-tests", "ios-bibleui-package-tests"),
             ("ios-bibleui-package-tests", "bibleview-js"),
-            ("ios-simulator-unit-tests", "ios-simulator-ui-tests"),
-            ("ios-simulator-ui-tests", None),
+            ("ios-ui-foundation", "ios-simulator-unit-tests"),
         )
         for job_name, next_job in job_boundaries:
             job = workflow_job(source, job_name, next_job)
