@@ -286,6 +286,8 @@ struct BibleWindowPane: View {
                 windowMenuButton
                     .padding(AndroidWindowButtonMetrics.paneOverlayInset)
                     .opacity(isWindowButtonRevealed || isWindowMenuPresented ? 1 : (nightMode ? 0.5 : 0.2))
+                    // Fading changes appearance; the pane control remains interactive.
+                    .allowsHitTesting(true)
                     .animation(.easeInOut(duration: 0.3), value: isWindowButtonRevealed)
                     .onAppear { scheduleWindowButtonFade() }
                     .onReceive(NotificationCenter.default.publisher(for: .andBiblePaneButtonsRevealed)) { _ in
@@ -377,7 +379,12 @@ struct BibleWindowPane: View {
 
     /**
      Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
-     Opening the menu also marks this pane active, matching Android's pane menu behavior.
+
+     One real `Button` owns semantic activation and the mutually exclusive tap/hold sequence. The
+     outer simultaneous drag recognizes only translations beyond the pane swipe threshold. Its
+     twelve-point admission occurs after the long press's explicit ten-point movement limit;
+     SwiftUI owns ordinary Button tap cancellation. Opening the menu also marks this pane active,
+     matching Android's pane menu behavior.
     */
     private var windowMenuButton: some View {
         let buttonPalette = AndroidWindowButtonPalette.resolved(
@@ -386,52 +393,57 @@ struct BibleWindowPane: View {
         )
         let isActive = windowManager.activeWindow?.id == window.id
 
-        return ZStack(alignment: .topTrailing) {
-            Text(AndroidWindowButtonMetrics.paneMenuGlyph)
-                .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
-                .foregroundStyle(buttonPalette.paneButtonTextColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return AndroidTapLongPressButton(
+            minimumDuration: 0.5,
+            onTap: { performPaneWindowButtonAction(.openMenu) },
+            onLongPress: { performPaneWindowButtonAction(.minimize) }
+        ) {
+            ZStack(alignment: .topTrailing) {
+                Text(AndroidWindowButtonMetrics.paneMenuGlyph)
+                    .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
+                    .foregroundStyle(buttonPalette.paneButtonTextColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if window.isLinksWindow {
-                ToolbarAssetIcon(
-                    name: AndroidWindowButtonMetrics.paneLinksIconName,
-                    size: AndroidWindowButtonMetrics.paneLinksIconSize
-                )
-                .foregroundStyle(buttonPalette.paneLinksIconColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(.top, 2)
-                .padding(.trailing, 2)
-            }
-
-            if isPaneWindowSyncable && window.isSynchronized {
-                HStack(alignment: .top, spacing: AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding) {
+                if window.isLinksWindow {
                     ToolbarAssetIcon(
-                        name: AndroidWindowButtonMetrics.paneSyncIconName,
+                        name: AndroidWindowButtonMetrics.paneLinksIconName,
+                        size: AndroidWindowButtonMetrics.paneLinksIconSize
+                    )
+                    .foregroundStyle(buttonPalette.paneLinksIconColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 2)
+                    .padding(.trailing, 2)
+                }
+
+                if isPaneWindowSyncable && window.isSynchronized {
+                    HStack(alignment: .top, spacing: AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding) {
+                        ToolbarAssetIcon(
+                            name: AndroidWindowButtonMetrics.paneSyncIconName,
+                            size: AndroidWindowButtonMetrics.paneStatusIconSize
+                        )
+                        .foregroundStyle(buttonPalette.statusIconColor)
+
+                        Text("\(window.syncGroup + 1)")
+                            .font(.system(size: AndroidWindowButtonMetrics.paneSyncGroupTextSize))
+                            .foregroundStyle(buttonPalette.paneButtonTextColor)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, AndroidWindowButtonMetrics.paneStatusIconInset)
+                    .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
+                }
+
+                if paneShowsPinOverlay {
+                    ToolbarAssetIcon(
+                        name: AndroidWindowButtonMetrics.panePinIconName,
                         size: AndroidWindowButtonMetrics.paneStatusIconSize
                     )
                     .foregroundStyle(buttonPalette.statusIconColor)
-
-                    Text("\(window.syncGroup + 1)")
-                        .font(.system(size: AndroidWindowButtonMetrics.paneSyncGroupTextSize))
-                        .foregroundStyle(buttonPalette.paneButtonTextColor)
-                        .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, AndroidWindowButtonMetrics.panePinIconTopInset)
+                    .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, AndroidWindowButtonMetrics.paneStatusIconInset)
-                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
             }
-
-            if paneShowsPinOverlay {
-                ToolbarAssetIcon(
-                    name: AndroidWindowButtonMetrics.panePinIconName,
-                    size: AndroidWindowButtonMetrics.paneStatusIconSize
-                )
-                .foregroundStyle(buttonPalette.statusIconColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, AndroidWindowButtonMetrics.panePinIconTopInset)
-                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
-            }
-        }
             .frame(
                 width: AndroidWindowButtonMetrics.buttonSize,
                 height: AndroidWindowButtonMetrics.buttonSize
@@ -448,20 +460,15 @@ struct BibleWindowPane: View {
                     )
             )
             .contentShape(Rectangle())
-            .gesture(windowMenuTapOrLongPressGesture)
-            .simultaneousGesture(windowMenuDragGesture)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
-            .accessibilityLabel(
-                String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
-            )
-            .accessibilityHint(
-                String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
-            )
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                performPaneWindowButtonAction(.openMenu)
-            }
+        }
+        .simultaneousGesture(windowMenuDragGesture)
+        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
+        .accessibilityLabel(
+            String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
+        )
+        .accessibilityHint(
+            String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
+        )
     }
 
     /**
@@ -506,26 +513,6 @@ struct BibleWindowPane: View {
             ?? windowManager.activeWorkspace?.workspaceSettings?.autoPin
             ?? WorkspaceSettings.defaultAutoPin
         return !autoPin && window.effectivePinMode(autoPin: false)
-    }
-
-    /**
-     Builds Android's mutually exclusive tap/long-press pane-button gesture.
-
-     - Returns: A gesture that opens the pane menu on tap and minimizes on long press.
-     - Side effects: Invokes the same window-state mutations as Android's `WindowButtonWidget`.
-     - Failure modes: Cancelled long presses do not mutate window state.
-     */
-    private var windowMenuTapOrLongPressGesture: some Gesture {
-        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
-            switch value {
-            case .first(true):
-                performPaneWindowButtonAction(.minimize)
-            case .second:
-                performPaneWindowButtonAction(.openMenu)
-            case .first(false):
-                break
-            }
-        }
     }
 
     /**

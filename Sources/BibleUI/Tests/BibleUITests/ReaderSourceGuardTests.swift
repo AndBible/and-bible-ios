@@ -205,7 +205,6 @@ final class ReaderSourceGuardTests: XCTestCase {
     func testAndroidPaneWindowButtonHasExplicitAccessibilityLabel() throws {
         let paneSource = try bibleUISource(named: "BibleWindowPane.swift")
 
-        XCTAssertTrue(paneSource.contains(".accessibilityElement(children: .ignore)"))
         XCTAssertTrue(paneSource.contains(".accessibilityLabel("))
         XCTAssertTrue(paneSource.contains(".accessibilityHint("))
         XCTAssertTrue(paneSource.contains("window_menu_accessibility_label"))

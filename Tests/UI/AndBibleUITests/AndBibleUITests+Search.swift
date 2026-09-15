@@ -810,6 +810,165 @@ extension AndBibleUITests {
     }
 
     /**
+     * Verifies one pane-window control owns Android's tap, hold, and vertical-swipe actions.
+     *
+     * The second pane starts active, so tapping pane zero also proves an inactive pane becomes the
+     * exact action owner before its menu opens. The same real control then minimizes on hold,
+     * restores through the production tab, maximizes on an upward drag, returns through the
+     * production unmaximize action, and minimizes on a downward drag. Each input is issued once;
+     * all outcomes are observed through production accessibility state.
+     *
+     * - Side effects:
+     *   - adds one reader window
+     *   - taps, holds, and vertically drags pane zero's real window control
+     *   - restores and unmaximizes through the existing footer controls
+     * - Failure modes:
+     *   - fails if tap does not activate the inactive pane and open its menu
+     *   - fails if a hold or downward drag does not minimize the exact pane
+     *   - fails if an upward drag does not maximize the exact pane or leaves a second visible reader viewport
+     */
+    func testPaneWindowButtonOwnsTapHoldAndVerticalSwipeActions() {
+        let app = makeApp()
+        app.launch()
+
+        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        let paneIdentifier = "windowPaneMenuButton::0"
+        let tabIdentifier = "windowTabButton::0"
+
+        openPaneMenu(
+            requireObservedSettingsElement(
+                app.buttons[paneIdentifier].firstMatch,
+                identifier: paneIdentifier,
+                timeout: 10
+            ),
+            in: app,
+            timeout: 10
+        )
+        waitForElementValue(tabIdentifier, toContain: "state=active", in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("windowPaneMenuDismissArea::0", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForUITestCondition("Pane menu dismisses after one outside tap", timeout: 10) {
+                self.resolvedPaneMenuSurface(in: app) == nil
+            }
+        )
+
+        requireObservedSettingsElement(
+            app.buttons[paneIdentifier].firstMatch,
+            identifier: paneIdentifier,
+            timeout: 10
+        ).press(forDuration: 0.7)
+        waitForElementValue(tabIdentifier, toContain: "minimized=true", in: app, timeout: 10)
+        XCTAssertNil(
+            resolvedPaneMenuSurface(in: app),
+            "Expected one completed hold to minimize pane zero without opening its tap menu."
+        )
+
+        let minimizedTab = requireWindowTabBarButton(tabIdentifier, in: app, timeout: 10)
+        minimizedTab.press(forDuration: 0.7)
+        XCTAssertTrue(
+            waitForUITestCondition("Minimized window tab opens its anchored menu", timeout: 10) {
+                self.resolvedPaneMenuSurface(in: app) != nil &&
+                    app.otherElements["windowTabMenuDismissalLayer"].firstMatch.exists
+            },
+            "Expected one completed tab hold to open the anchored window menu."
+        )
+        waitForElementValue(tabIdentifier, toContain: "minimized=true", in: app, timeout: 10)
+        let tabMenuDismissalLayer = app.otherElements["windowTabMenuDismissalLayer"].firstMatch
+        tabMenuDismissalLayer.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05)).tap()
+        XCTAssertTrue(
+            waitForUITestCondition("Window tab menu dismisses after one outside tap", timeout: 10) {
+                self.resolvedPaneMenuSurface(in: app) == nil
+            }
+        )
+
+        tapWindowTab(0, in: app, timeout: 10)
+        let restoredPane = requireObservedSettingsElement(
+            app.buttons[paneIdentifier].firstMatch,
+            identifier: paneIdentifier,
+            timeout: 10
+        )
+        restoredPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).press(
+            forDuration: 0.05,
+            thenDragTo: restoredPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -0.4))
+        )
+        let unmaximize = requireWindowTabBarButton(
+            "windowTabUnmaximizeButton",
+            in: app,
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(unmaximize, timeout: 10),
+            "Expected one upward pane-button drag to expose the production unmaximize control."
+        )
+        waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 10)
+        let visibleKJVSourceTitles = app.staticTexts.matching(
+            NSPredicate(format: "label == %@", "THE FIRST BOOK OF MOSES CALLED GENESIS")
+        ).allElementsBoundByIndex.filter {
+            elementHasUsableFrame($0) && app.frame.intersects($0.frame)
+        }
+        let visibleKJVScripture = app.staticTexts.matching(
+            NSPredicate(
+                format: "label CONTAINS[c] %@",
+                "In the beginning"
+            )
+        ).allElementsBoundByIndex.filter {
+            elementHasUsableFrame($0) && app.frame.intersects($0.frame)
+        }
+        XCTAssertEqual(
+            visibleKJVSourceTitles.count,
+            1,
+            "Expected exactly one visible module-derived KJV title while window zero is maximized."
+        )
+        XCTAssertEqual(
+            visibleKJVScripture.count,
+            1,
+            "Expected exactly one visible KJV scripture viewport while window zero is maximized."
+        )
+        if let sourceTitle = visibleKJVSourceTitles.first,
+           let scripture = visibleKJVScripture.first {
+            let horizontalOverlap = min(sourceTitle.frame.maxX, scripture.frame.maxX)
+                - max(sourceTitle.frame.minX, scripture.frame.minX)
+            XCTAssertGreaterThan(
+                horizontalOverlap,
+                0,
+                "Expected the visible KJV title and scripture to occupy the same horizontal reader region."
+            )
+        }
+        XCTAssertNil(
+            resolvedPaneMenuSurface(in: app),
+            "Expected one upward drag to maximize pane zero without opening its tap menu."
+        )
+        tapElementReliably(unmaximize, timeout: 10)
+
+        let unmaximizedPane = requireObservedSettingsElement(
+            app.buttons[paneIdentifier].firstMatch,
+            identifier: paneIdentifier,
+            timeout: 10
+        )
+        unmaximizedPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).press(
+            forDuration: 0.05,
+            thenDragTo: unmaximizedPane.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1.4))
+        )
+        waitForElementValue(tabIdentifier, toContain: "minimized=true", in: app, timeout: 10)
+        XCTAssertNil(
+            resolvedPaneMenuSurface(in: app),
+            "Expected one downward drag to minimize pane zero without opening its tap menu."
+        )
+        tapWindowTab(0, in: app, timeout: 10)
+        XCTAssertTrue(
+            requireObservedSettingsElement(
+                app.buttons[paneIdentifier].firstMatch,
+                identifier: paneIdentifier,
+                timeout: 10
+            ).exists,
+            "Expected the exact pane control to return after production tab restoration."
+        )
+    }
+
+    /**
     Verifies Android's per-window Text Options route, parent-link back stack, and pane Close action.
 
     Android's pane/window menu owns both per-window Text Options and Close. These are distinct

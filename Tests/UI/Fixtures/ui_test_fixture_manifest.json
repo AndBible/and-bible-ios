@@ -22,6 +22,7 @@
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": "my-documents-single",
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": "my-notes-single",
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": "baseline",
+  "AndBibleUITests/AndBibleUITests/testPaneWindowButtonOwnsTapHoldAndVerticalSwipeActions": "baseline",
   "AndBibleUITests/AndBibleUITests/testPassageChooserPreservesSystemDayTheme": "document-switch-custom-theme",
   "AndBibleUITests/AndBibleUITests/testPersistedManualNightModeKeepsReaderDrawerReachable": "reader-night-mode",
   "AndBibleUITests/AndBibleUITests/testReaderDrawerOpensInSpanishAtLargeDynamicType": "baseline",
