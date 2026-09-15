@@ -229,6 +229,14 @@ Current work and acceptance:
   recognition where WebKit's editable element does not expose its child text to accessibility.
   That observer currently covers English, single-pane fixtures; it does not establish screen-reader
   semantics, other locales, or chrome colors. Observation must not perform an extra interaction.
+- The issue-402 parity-orchestrator checker no longer treats three reader service type names or
+  the placement of `BibleReaderInstalledModuleResolver` construction and `resolveDocumentOwner`
+  calls in `BibleReaderController` as behavior contracts. Moving those tokens behind forwarding
+  methods would not change ownership. Exact installed/local owner precedence, locked and replacement
+  rejection, category-safe restore dispatch, bookmark commit preflight, source-generation capture,
+  and publication reauthorization remain protected by executable native tests. Repository guards for
+  Search transaction ownership, Sword registry/backend ownership, and Strong's backend boundaries
+  remain enforced.
 - Remove source substrings, private-helper inventories, and exact branch/event counts when they
   preserve implementation rather than an explicit structural requirement. Existing Search and
   delayed-reader-routing source guards remain open work. Derive expected behavior from pinned
