@@ -5223,11 +5223,13 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: { () -> BibleReaderSwordCommentaryCapture? in
-                manager.performRenderOperation(settings: optionSettings) {
+            captureSource: { cancellation -> BibleReaderSwordCommentaryCapture? in
+                manager.performRenderOperation(settings: optionSettings) { () -> BibleReaderSwordCommentaryCapture? in
+                    guard !cancellation.isCancelled else { return nil }
                     let authorization = manager.contentAuthorizationSnapshot(for: sourceNames)
                     guard authorization.generation == managerGeneration,
                           authorization.modules.first?.accessState == .readable else { return nil }
+                    guard !cancellation.isCancelled else { return nil }
                     let sourceVersification: String
                     if let sourceBibleModule {
                         sourceVersification = VersificationMapper.versificationName(
@@ -5240,8 +5242,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     } else {
                         return nil
                     }
+                    guard !cancellation.isCancelled else { return nil }
                     let commentaryVersification = VersificationMapper.versificationName(for: module)
                     let walker = SwordModuleCommentaryWalker(module: module)
+                    guard !cancellation.isCancelled else { return nil }
                     guard let selected = BibleReaderCommentaryVersificationRouter.resolve(
                         reference: .init(
                             osisBookId: sourceBookID,
@@ -5250,22 +5254,31 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                         ),
                         from: sourceVersification,
                         to: commentaryVersification,
-                        resolve: { mapped in
-                        try? walker.reference(
-                            forKey: "\(mapped.osisBookId).\(mapped.chapter).\(mapped.verse)"
-                        )
-                    }) else { return nil }
-                    let blockResolver = SwordCommentaryBlockResolver(walker: walker)
+                        resolve: { mapped -> SwordCommentaryVerseReference? in
+                            guard !cancellation.isCancelled else { return nil }
+                            let resolved = try? walker.reference(
+                                forKey: "\(mapped.osisBookId).\(mapped.chapter).\(mapped.verse)"
+                            )
+                            return cancellation.isCancelled ? nil : resolved
+                        }
+                    ) else { return nil }
+                    guard !cancellation.isCancelled else { return nil }
+                    let blockResolver = SwordCommentaryBlockResolver(
+                        walker: walker,
+                        cancellationRequested: { cancellation.isCancelled }
+                    )
                     let block = blockResolver.resolveBlock(containing: selected)
-                    guard let fragment = block.fragment,
+                    guard !cancellation.isCancelled,
+                          let fragment = block.fragment,
                           fragment.hasRenderableContent else { return nil }
                     let renderedKey = fragment.annotateRef ?? fragment.key
+                    guard !cancellation.isCancelled else { return nil }
                     let renderedReference = try? walker.reference(forKey: renderedKey)
                     let mapToSource: (
                         SwordCommentaryVerseReference?,
                         String?
                     ) -> BibleReaderCommentaryNavigationTarget? = { target, renderedKey in
-                        guard let target else { return nil }
+                        guard !cancellation.isCancelled, let target else { return nil }
                         return BibleReaderCommentaryVersificationRouter.resolve(
                             reference: .init(
                                 osisBookId: target.osisBookId,
@@ -5275,6 +5288,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             from: commentaryVersification,
                             to: sourceVersification,
                             resolve: { candidate in
+                                guard !cancellation.isCancelled else { return nil }
                                 let sourceOrdinal: Int
                                 if let sourceBibleModule {
                                     guard let ordinal = sourceBibleModule.verseOrdinal(
@@ -5301,6 +5315,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             }
                         )
                     }
+                    let current = mapToSource(renderedReference, renderedKey)
+                    guard !cancellation.isCancelled else { return nil }
+                    let previous = mapToSource(
+                        blockResolver.previousBlockStart(before: block.range.start),
+                        nil
+                    )
+                    guard !cancellation.isCancelled else { return nil }
+                    let next = mapToSource(
+                        blockResolver.nextBlockStart(after: block.range.end),
+                        nil
+                    )
+                    guard !cancellation.isCancelled else { return nil }
                     return BibleReaderSwordCommentaryCapture(
                         fragment: fragment,
                         renderedBook: selected.name,
@@ -5311,18 +5337,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             name: block.range.name
                         ),
                         navigation: BibleReaderCommentaryNavigationAvailability(
-                            current: mapToSource(
-                                renderedReference,
-                                renderedKey
-                            ),
-                            previous: mapToSource(
-                                blockResolver.previousBlockStart(before: block.range.start),
-                                nil
-                            ),
-                            next: mapToSource(
-                                blockResolver.nextBlockStart(after: block.range.end),
-                                nil
-                            )
+                            current: current,
+                            previous: previous,
+                            next: next
                         )
                     )
                 }
@@ -5470,7 +5487,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
       scope: .replacement,
       key: preparationKey,
-      captureSource: { () -> BibleReaderSQLiteCommentaryCapture? in
+      captureSource: { _ -> BibleReaderSQLiteCommentaryCapture? in
         let read: () -> BibleReaderSQLiteCommentaryCapture? = {
           let sourceVersification: String
           if let sourceSwordBible {
@@ -5957,7 +5974,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: sourcePreparation.capture,
+            captureSource: { _ in sourcePreparation.capture() },
             project: { (capture: BibleReaderAuxiliarySourceCapture) in capture },
             captureOwner: { [weak self]
                 (capture: BibleReaderAuxiliarySourceCapture) -> BibleReaderAuxiliaryOwnerSnapshot? in
@@ -6245,7 +6262,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
     documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
       scope: .replacement,
       key: preparationKey,
-      captureSource: { () -> BibleReaderSQLiteAuxiliaryCapture? in
+      captureSource: { _ -> BibleReaderSQLiteAuxiliaryCapture? in
         do {
           let document = try SQLiteReaderDocumentContentBuilder(module: module).dictionary(key: key)
           return .fragment(
@@ -7083,7 +7100,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: preparationKey,
-            captureSource: capture,
+            captureSource: { _ in capture() },
             project: { (source: BibleReaderEpubSourceCapture) in source },
             captureOwner: { [weak self, weak reader]
                 (source: BibleReaderEpubSourceCapture) -> BibleReaderGenericDocumentOwnerSnapshot? in
@@ -9099,7 +9116,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: scope,
             key: key,
-            captureSource: sourcePreparation.capture,
+            captureSource: { _ in sourcePreparation.capture() },
             project: { (capture: BibleReaderBibleChapterSourceCapture) in
                 capture.projectedChapter()
             },
@@ -10330,7 +10347,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: captureRegistry,
+            captureSource: { _ in captureRegistry() },
             project: { (registry: BibleReaderMyDocumentSourceRegistry) in registry },
             captureOwner: { [weak self]
                 (registry: BibleReaderMyDocumentSourceRegistry)
@@ -11235,7 +11252,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: { () -> PreparedMyNotesTarget? in
+            captureSource: { _ -> PreparedMyNotesTarget? in
                 Self.prepareMyNotesTarget(target)
             },
             project: { (preparedTarget: PreparedMyNotesTarget) -> PreparedMyNotesTarget? in
@@ -11571,7 +11588,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: routesOutward ? .transient : .replacement,
             key: key,
-            captureSource: {
+            captureSource: { _ in
                 BibleReaderPreparedMemorizeDocument.capture(
                     request: request,
                     manager: manager,
@@ -11850,7 +11867,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: { () -> BibleReaderPreparedStudyPadSourceRegistry? in
+            captureSource: { _ -> BibleReaderPreparedStudyPadSourceRegistry? in
                 let resolver = BibleReaderInstalledModuleResolver(
                     swordManager: manager,
                     sqliteModules: capturedSQLiteModules
@@ -14382,7 +14399,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: sourcePreparation.capture,
+            captureSource: { _ in sourcePreparation.capture() },
             project: { (capture: BibleReaderBibleChapterSourceCapture) in
                 capture.projectedChapter()
             },

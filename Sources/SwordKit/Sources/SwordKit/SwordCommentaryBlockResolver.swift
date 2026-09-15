@@ -92,18 +92,26 @@ public protocol SwordCommentaryWalking {
 public final class SwordCommentaryBlockResolver {
     /// Production or test walker.
     private let walker: any SwordCommentaryWalking
+    /// Operation-owned cancellation query checked between bounded walker reads.
+    private let cancellationRequested: @Sendable () -> Bool
     /// Per-resolver cache of non-empty rendered fragments.
     private var cache: [SwordCommentaryVerseReference: CachedEntry] = [:]
 
     /**
      Creates a resolver for one commentary navigation action.
 
-     - Parameter walker: Exact verse traversal and raw-fragment provider.
+     - Parameters:
+       - walker: Exact verse traversal and raw-fragment provider.
+       - cancellationRequested: Thread-safe query for a superseded source capture.
      - Side effects: None.
      - Failure modes: None; per-verse read failures are treated as empty separators during use.
      */
-    public init(walker: any SwordCommentaryWalking) {
+    public init(
+        walker: any SwordCommentaryWalking,
+        cancellationRequested: @escaping @Sendable () -> Bool = { false }
+    ) {
         self.walker = walker
+        self.cancellationRequested = cancellationRequested
     }
 
     /**
@@ -114,9 +122,16 @@ public final class SwordCommentaryBlockResolver {
        single-verse block with no fragment.
      - Side effects: Lazily reads and caches adjacent verse fragments.
      - Failure modes: Read/parsing failures are isolated as empty block separators, matching
-       Android's per-verse exception handling.
+       Android's per-verse exception handling. Cancellation returns an incomplete single-verse
+       value that the owning preparation operation must discard.
      */
     public func resolveBlock(containing verse: SwordCommentaryVerseReference) -> SwordCommentaryBlock {
+        guard !cancellationRequested() else {
+            return SwordCommentaryBlock(
+                range: rangeMetadata(start: verse, end: verse),
+                fragment: nil
+            )
+        }
         guard case .content(let selectedFragment, let comparison) = cachedEntry(for: verse) else {
             return SwordCommentaryBlock(
                 range: rangeMetadata(start: verse, end: verse),
@@ -125,13 +140,13 @@ public final class SwordCommentaryBlockResolver {
         }
 
         var start = verse
-        while let candidate = walker.previous(before: start),
+        while let candidate = previous(before: start),
               cachedEntry(for: candidate).comparisonText == comparison {
             start = candidate
         }
 
         var end = verse
-        while let candidate = walker.next(after: end),
+        while let candidate = next(after: end),
               cachedEntry(for: candidate).comparisonText == comparison {
             end = candidate
         }
@@ -148,13 +163,14 @@ public final class SwordCommentaryBlockResolver {
      - Parameter blockEnd: End verse of the current resolved block.
      - Returns: Start verse of the next non-empty block, or `nil` at the document boundary.
      - Side effects: Lazily reads and caches traversed verses.
-     - Failure modes: Read/parsing failures are treated as empty and skipped.
+     - Failure modes: Read/parsing failures are treated as empty and skipped; cancellation stops
+       before the next bounded walker read and returns `nil`.
      */
     public func nextBlockStart(
         after blockEnd: SwordCommentaryVerseReference
     ) -> SwordCommentaryVerseReference? {
         var current = blockEnd
-        while let candidate = walker.next(after: current) {
+        while let candidate = next(after: current) {
             if cachedEntry(for: candidate).comparisonText != nil { return candidate }
             current = candidate
         }
@@ -167,13 +183,14 @@ public final class SwordCommentaryBlockResolver {
      - Parameter blockStart: Start verse of the current resolved block.
      - Returns: Previous block's first verse, or `nil` at the document boundary.
      - Side effects: Lazily reads and caches traversed verses.
-     - Failure modes: Read/parsing failures are treated as empty and skipped.
+     - Failure modes: Read/parsing failures are treated as empty and skipped; cancellation stops
+       before the next bounded walker read and returns `nil`.
      */
     public func previousBlockStart(
         before blockStart: SwordCommentaryVerseReference
     ) -> SwordCommentaryVerseReference? {
         var current = blockStart
-        while let candidate = walker.previous(before: current) {
+        while let candidate = previous(before: current) {
             if cachedEntry(for: candidate).comparisonText != nil {
                 return resolveBlock(containing: candidate).range.start
             }
@@ -192,10 +209,12 @@ public final class SwordCommentaryBlockResolver {
      - Failure modes: Any thrown read/parsing error becomes `.empty` for the current walk.
      */
     private func cachedEntry(for verse: SwordCommentaryVerseReference) -> CachedEntry {
+        guard !cancellationRequested() else { return .empty }
         if let cached = cache[verse] { return cached }
         let entry: CachedEntry
         do {
             let fragment = try walker.fragment(for: verse)
+            guard !cancellationRequested() else { return .empty }
             if let comparison = fragment.comparablePlainText, !comparison.isEmpty {
                 entry = .content(fragment, comparison)
             } else {
@@ -208,6 +227,24 @@ public final class SwordCommentaryBlockResolver {
             cache[verse] = entry
         }
         return entry
+    }
+
+    /** Returns one next reference only while the owning capture remains current. */
+    private func next(
+        after verse: SwordCommentaryVerseReference
+    ) -> SwordCommentaryVerseReference? {
+        guard !cancellationRequested() else { return nil }
+        let result = walker.next(after: verse)
+        return cancellationRequested() ? nil : result
+    }
+
+    /** Returns one previous reference only while the owning capture remains current. */
+    private func previous(
+        before verse: SwordCommentaryVerseReference
+    ) -> SwordCommentaryVerseReference? {
+        guard !cancellationRequested() else { return nil }
+        let result = walker.previous(before: verse)
+        return cancellationRequested() ? nil : result
     }
 
     /**

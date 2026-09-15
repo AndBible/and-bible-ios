@@ -191,6 +191,19 @@ enum BibleReaderDocumentPreparationOutcome<Result: Sendable>: Sendable {
     case cancelled
 }
 
+/** Thread-safe cancellation query retained by one preparation source capture. */
+struct BibleReaderPreparationCancellation: Sendable {
+    private let query: @Sendable () -> Bool
+
+    /** Whether a newer operation or an explicit lifecycle event cancelled this capture. */
+    var isCancelled: Bool { query() }
+
+    /** Creates an immutable query without exposing mutable coordinator state. */
+    fileprivate init(query: @escaping @Sendable () -> Bool) {
+        self.query = query
+    }
+}
+
 /** Type-erased cancellation surface for operations retained in independent request lanes. */
 private protocol BibleReaderAnyPreparationOperation: AnyObject {
     var requestID: UInt64 { get }
@@ -402,7 +415,23 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
         return .started(requestID: operation.requestID)
     }
 
-    /** Owner-capture variant that retains phase, authorization, and cancellation terminal causes. */
+    /**
+     Owner-capture variant that retains phase, authorization, and cancellation terminal causes.
+
+     The immutable query observes the same retained operation cancelled by replacement and
+     `cancelAll`. It cannot interrupt a native call already in progress; callers check it before
+     beginning another read and after each completed read. Captures without bounded work explicitly
+     ignore the query. Existing post-phase cancellation remains authoritative, so an incomplete local
+     capture can never reach projection or publication.
+
+     - Parameters: The immutable request, phase closures, authorization, and completion owners;
+       `captureSource` receives the operation-owned cancellation query.
+     - Returns: Whether this request started work or coalesced with an equivalent operation.
+     - Side effects: Replaces conflicting lanes, settles displaced callbacks on main, and performs
+       accepted preparation phases on the coordinator's existing worker queue.
+     - Failure modes: Reports the existing typed terminal outcome; cancellation never converts to a
+       source-phase failure or permits partial publication.
+     */
     @discardableResult
     func submitWithOwnerCaptureReportingOutcome<
         Captured: Sendable,
@@ -413,7 +442,7 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
     >(
         scope: BibleReaderDocumentPreparationScope,
         key: BibleReaderDocumentPreparationKey,
-        captureSource: @escaping @Sendable () -> Captured?,
+        captureSource: @escaping @Sendable (BibleReaderPreparationCancellation) -> Captured?,
         project: @escaping @Sendable (Captured) -> Projected?,
         captureOwner: @escaping (Projected) -> Owner?,
         enrichSource: @escaping @Sendable (Projected, Owner) -> Enriched?,
@@ -450,8 +479,11 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
 
         workerQueue.async { [self, operation] in
             guard !operation.isCancelled else { return }
+            let cancellation = BibleReaderPreparationCancellation { [weak operation] in
+                operation?.isCancelled ?? true
+            }
             let captured = self.measure(.sourceCapture, operation: operation) {
-                captureSource()
+                captureSource(cancellation)
             }
             guard !operation.isCancelled else { return }
             guard let captured else {

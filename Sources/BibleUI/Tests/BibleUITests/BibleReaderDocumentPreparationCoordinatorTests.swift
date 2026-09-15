@@ -24,7 +24,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: makeKey(content: "generic-key"),
-            captureSource: { "source" },
+            captureSource: { _ in "source" },
             project: { $0 + "-projected" },
             captureOwner: { projected in
                 XCTAssertTrue(Thread.isMainThread)
@@ -78,7 +78,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: {
+            captureSource: { _ in
                 sourceCount.withValue { $0 += 1 }
                 return "source"
             },
@@ -98,7 +98,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: {
+            captureSource: { _ in
                 XCTFail("Equivalent owner request repeated source capture")
                 return "unexpected"
             },
@@ -245,6 +245,102 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         await fulfillment(of: [cancelled, latest], timeout: 2)
         XCTAssertTrue(oldWasCancelled)
         XCTAssertEqual(latestResult, "latest")
+    }
+
+    /**
+     A cancelled source loop stops before a second bounded read and releases the SWORD runtime lane.
+
+     The first read is held until a distinct replacement cancels the operation. Releasing that one
+     read must let the cancellation query end the old capture, after which the queued Bible capture
+     starts and publishes. No elapsed-time threshold or retry participates in the ordering proof.
+     */
+    @MainActor
+    func testCancellableOwnerCaptureStopsOldReadLoopAndReleasesSwordLane() async throws {
+        let moduleRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "reader-preparation-cancellable-source-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: moduleRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: moduleRoot) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: moduleRoot.path))
+        let coordinator = makeCoordinator(attributes: .concurrent)
+        let firstReadEntered = DispatchSemaphore(value: 0)
+        let releaseFirstRead = DispatchSemaphore(value: 0)
+        let replacementAttemptedLane = DispatchSemaphore(value: 0)
+        let oldSettled = expectation(description: "old capture cancelled")
+        let latestCaptureEntered = expectation(description: "replacement capture entered")
+        let latestSettled = expectation(description: "replacement published")
+        let oldReadCount = LockedPreparationValue(0)
+        let oldProjectionCount = LockedPreparationValue(0)
+        let latestEnteredNativeLane = LockedPreparationValue(false)
+
+        coordinator.submitWithOwnerCaptureReportingOutcome(
+            scope: .replacement,
+            key: makeKey(content: "slow-commentary"),
+            captureSource: { cancellation -> String? in
+                manager.performRenderOperation(settings: []) {
+                    for index in 0..<3 {
+                        guard !cancellation.isCancelled else { return nil }
+                        oldReadCount.withValue { $0 += 1 }
+                        if index == 0 {
+                            firstReadEntered.signal()
+                            _ = releaseFirstRead.wait(timeout: .now() + 2)
+                        }
+                    }
+                    return "stale-commentary"
+                }
+            },
+            project: { value in
+                oldProjectionCount.withValue { $0 += 1 }
+                return value
+            },
+            captureOwner: { _ in "old-owner" },
+            enrichSource: { value, _ in value },
+            encode: { value, _, _ in value },
+            isAuthorized: { true },
+            completion: { outcome in
+                guard case .cancelled = outcome else {
+                    return XCTFail("Expected the old source loop to settle as cancelled")
+                }
+                oldSettled.fulfill()
+            }
+        )
+        XCTAssertEqual(firstReadEntered.wait(timeout: .now() + 2), .success)
+
+        coordinator.submitWithOwnerCaptureReportingOutcome(
+            scope: .replacement,
+            key: makeKey(content: "replacement-bible"),
+            captureSource: { _ in
+                replacementAttemptedLane.signal()
+                return manager.performRenderOperation(settings: []) {
+                    latestEnteredNativeLane.withValue { $0 = true }
+                    latestCaptureEntered.fulfill()
+                    return "current-bible"
+                }
+            },
+            project: { $0 },
+            captureOwner: { _ in "current-owner" },
+            enrichSource: { value, _ in value },
+            encode: { value, _, _ in value },
+            isAuthorized: { true },
+            completion: { outcome in
+                guard case .prepared(let value) = outcome else {
+                    return XCTFail("Expected the replacement Bible capture to publish")
+                }
+                XCTAssertEqual(value, "current-bible")
+                latestSettled.fulfill()
+            }
+        )
+        XCTAssertEqual(replacementAttemptedLane.wait(timeout: .now() + 2), .success)
+        XCTAssertFalse(latestEnteredNativeLane.value)
+        releaseFirstRead.signal()
+
+        await fulfillment(
+            of: [oldSettled, latestCaptureEntered, latestSettled],
+            timeout: 2
+        )
+        XCTAssertEqual(oldReadCount.value, 1)
+        XCTAssertEqual(oldProjectionCount.value, 0)
     }
 
     /**
@@ -633,7 +729,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: { "captured" },
+            captureSource: { _ in "captured" },
             project: { $0 },
             captureOwner: { _ in "owner" },
             enrichSource: { _, _ -> String? in nil },
@@ -656,7 +752,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         let retrySubmission = coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: key,
-            captureSource: { "retry" },
+            captureSource: { _ in "retry" },
             project: { $0 },
             captureOwner: { _ in "owner" },
             enrichSource: { source, owner in "\(source)-\(owner)-enriched" },
@@ -697,7 +793,7 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
         coordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
             key: makeKey(content: "enrichment-lease"),
-            captureSource: { "captured" },
+            captureSource: { _ in "captured" },
             project: { $0 },
             captureOwner: { _ in "owner" },
             enrichSource: { [lease = retainedLease] _, _ in
