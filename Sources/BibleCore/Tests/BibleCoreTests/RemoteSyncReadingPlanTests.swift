@@ -1502,12 +1502,19 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
      Verifies the atomic settings API rejects mismatched and already-dirty model contexts.
 
      Both constraints prevent a restore rollback from affecting unrelated pending state or a second
-     persistence store. A failure means callers can believe settings joined a graph commit when they
-     actually used a different context, or can lose pre-existing unsaved changes during rollback.
+     persistence store. The app-shaped disk fixture disables autosave so the test owns the pending
+     edit and its rollback; default autosave can commit that edit independently on iOS 17. Rejection
+     must leave the caller's pending value intact while independent contexts see no durable write.
+     A failure means settings crossed contexts, rejection changed caller-owned state, or writes
+     escaped before the caller explicitly saved them. Store files remain until the test process exits.
      */
     func testSettingsStoreAtomicBatchRequiresExactCleanContext() throws {
-        let container = try makeReadingPlanRestoreModelContainer()
+        let directory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "settings-atomic-admission"
+        )
+        let container = try makePersistentReadingPlanRestoreStore(in: directory).container
         let modelContext = ModelContext(container)
+        modelContext.autosaveEnabled = false
         let settingsStore = SettingsStore(modelContext: modelContext)
         let differentContext = ModelContext(container)
 
@@ -1528,6 +1535,12 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? SettingsStoreAtomicBatchError, .pendingModelChanges)
         }
+        XCTAssertEqual(settingsStore.getString("atomic.pending"), "unsaved")
+        XCTAssertNil(settingsStore.getString("atomic.new"))
+        let beforeCallerRollback = SettingsStore(modelContext: ModelContext(container))
+        XCTAssertNil(beforeCallerRollback.getString("atomic.pending"))
+        XCTAssertNil(beforeCallerRollback.getString("atomic.new"))
+
         modelContext.rollback()
         let reopenedStore = SettingsStore(modelContext: ModelContext(container))
         XCTAssertNil(reopenedStore.getString("atomic.pending"))
