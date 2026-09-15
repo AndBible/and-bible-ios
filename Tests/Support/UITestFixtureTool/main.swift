@@ -35,10 +35,15 @@ private enum ToolCommand: String {
 /// Deterministic fixture scenarios used by the UI automation suite.
 private enum FixtureScenario: String, CaseIterable {
     case baseline = "baseline"
+    case performanceBookmarks10 = "performance-bookmarks-10"
+    case performanceBookmarks1000 = "performance-bookmarks-1000"
+    case performanceBookmarks10000 = "performance-bookmarks-10000"
     case baselineThreeWindows = "baseline-three-windows"
     case commentaryModule = "commentary-module"
     case commentaryModuleThreeWindows = "commentary-module-three-windows"
     case searchIndexed = "search-indexed"
+    case searchCompletePreview = "search-complete-preview"
+    case searchCompletePreviewMulti = "search-complete-preview-multi"
     case searchMultiTranslation = "search-multi-translation"
     case documentSwitchCustomTheme = "document-switch-custom-theme"
     case documentSwitchCustomNightTheme = "document-switch-custom-night-theme"
@@ -52,11 +57,17 @@ private enum FixtureScenario: String, CaseIterable {
     case historyMultiRow = "history-multirow"
     case myNotesSingle = "my-notes-single"
     case myDocumentsSingle = "my-documents-single"
+    case localQuickDocuments = "local-quick-documents"
+    case longBibleQuickSelector = "long-bible-quick-selector"
     case syncNextCloud = "sync-nextcloud"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
     case readerNightMode = "reader-night-mode"
     case downloadsRowOrder = "downloads-row-order"
+    case lockedPickerDownloads = "locked-picker-downloads"
+    case lockedReadableNext = "locked-readable-next"
+    case lockedSuggestedCommentary = "locked-suggested-commentary"
+    case lockedStartupQueue = "locked-startup-queue"
 }
 
 /// Parsed CLI arguments for one fixture-tool invocation.
@@ -65,6 +76,7 @@ private struct ToolArguments {
     let dataContainerURL: URL
     let bundleIdentifier: String
     let scenario: FixtureScenario?
+    let swordFixtureURL: URL?
 
     /**
      Parses the raw CLI argument array.
@@ -87,6 +99,7 @@ private struct ToolArguments {
         var dataContainerPath: String?
         var bundleIdentifier = "org.andbible.ios"
         var scenario: FixtureScenario?
+        var swordFixtureURL: URL?
 
         var index = 1
         while index < arguments.count {
@@ -114,6 +127,12 @@ private struct ToolArguments {
                     throw FixtureToolError.usage("Unknown scenario '\(arguments[index])'. Valid values: \(validScenarios)")
                 }
                 scenario = parsedScenario
+            case "--sword-fixture-path":
+                index += 1
+                guard index < arguments.count else {
+                    throw FixtureToolError.usage("Missing value for --sword-fixture-path")
+                }
+                swordFixtureURL = URL(fileURLWithPath: arguments[index], isDirectory: true)
             default:
                 throw FixtureToolError.usage("Unknown argument '\(argument)'")
             }
@@ -131,6 +150,7 @@ private struct ToolArguments {
         self.dataContainerURL = URL(fileURLWithPath: dataContainerPath, isDirectory: true)
         self.bundleIdentifier = bundleIdentifier
         self.scenario = scenario
+        self.swordFixtureURL = swordFixtureURL
     }
 }
 
@@ -190,6 +210,54 @@ private struct FixturePaths {
         self.cloudStoreURL = applicationSupportURL.appendingPathComponent("AndBible.store", isDirectory: false)
         self.localStoreURL = applicationSupportURL.appendingPathComponent("LocalStore.store", isDirectory: false)
     }
+
+    /**
+     Verifies that Foundation and SwordKit adopted the requested simulator app container.
+
+     `EpubReader` intentionally uses the process-default Documents and SWORD roots. The macOS
+     fixture service redirects those defaults with `CFFIXED_USER_HOME`, but this executable may
+     also be invoked directly. Failing before any default-root EPUB mutation prevents a missing or
+     ignored redirect from reading or deleting a host-library identity.
+
+     - Side effects: Resolves filesystem symlinks for path comparison only.
+     - Throws: `FixtureToolError.usage` unless both default roots exactly match the requested
+       container's `Documents` and `Documents/sword` paths.
+     */
+    func validateDefaultEpubRuntimeRoots(fileManager: FileManager = .default) throws {
+        guard let defaultDocumentsURL = fileManager.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw FixtureToolError.usage(
+                "Fixture process could not resolve its default Documents directory."
+            )
+        }
+        let expectedDocumentsURL = documentsURL.resolvingSymlinksInPath().standardizedFileURL
+        let actualDocumentsURL = defaultDocumentsURL.resolvingSymlinksInPath().standardizedFileURL
+        guard actualDocumentsURL.path == expectedDocumentsURL.path else {
+            throw FixtureToolError.usage(
+                "Fixture process Documents root mismatch; expected '\(expectedDocumentsURL.path)', "
+                    + "resolved '\(actualDocumentsURL.path)'."
+            )
+        }
+
+        let expectedSwordURL = expectedDocumentsURL
+            .appendingPathComponent("sword", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let actualSwordURL = URL(
+            fileURLWithPath: SwordManager.defaultModulePath(),
+            isDirectory: true
+        )
+        .resolvingSymlinksInPath()
+        .standardizedFileURL
+        guard actualSwordURL.path == expectedSwordURL.path else {
+            throw FixtureToolError.usage(
+                "Fixture process SWORD root mismatch; expected '\(expectedSwordURL.path)', "
+                    + "resolved '\(actualSwordURL.path)'."
+            )
+        }
+    }
 }
 
 /// Main command runner for reset and seed operations.
@@ -216,7 +284,8 @@ private struct FixtureTool {
     /**
      Deletes the app's persisted SwiftData stores, search index, and SWORD install metadata.
      *
-     * - Throws: Filesystem errors only when creating the parent directories fails.
+     * - Throws: Path-validation or filesystem errors before any reset mutation can target a
+     *   process-default library outside the requested simulator container.
      */
     private func resetContainer() throws {
         let paths = FixturePaths(dataContainerURL: arguments.dataContainerURL)
@@ -224,6 +293,7 @@ private struct FixtureTool {
 
         try fileManager.createDirectory(at: paths.applicationSupportURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.documentsURL, withIntermediateDirectories: true)
+        try paths.validateDefaultEpubRuntimeRoots(fileManager: fileManager)
 
         try removeSQLiteFamily(at: paths.cloudStoreURL)
         try removeSQLiteFamily(at: paths.localStoreURL)
@@ -234,6 +304,7 @@ private struct FixtureTool {
             try fileManager.removeItem(at: installManagerURL)
         }
         try removeUITestSwordModules(from: paths)
+        try removeUITestEpub()
     }
 
     /**
@@ -245,7 +316,11 @@ private struct FixtureTool {
      */
     private func seedScenario(_ scenario: FixtureScenario) throws {
         let paths = FixturePaths(dataContainerURL: arguments.dataContainerURL)
-        let context = try FixtureContext(paths: paths, bundleIdentifier: arguments.bundleIdentifier)
+        let context = try FixtureContext(
+            paths: paths,
+            bundleIdentifier: arguments.bundleIdentifier,
+            swordFixtureURL: arguments.swordFixtureURL
+        )
         let encodedPreferences = try context.seed(scenario)
         print(encodedPreferences)
     }
@@ -271,6 +346,8 @@ private struct FixtureTool {
 
      Baseline fixture resets intentionally leave the seeded KJV fixture module in place, but
      scenario-local modules must not leak into later grouped test runs that use the same simulator.
+     This includes modules installed through the real Downloads workflow, not only modules seeded
+     directly by the fixture writer.
      */
     private func removeUITestSwordModules(from paths: FixturePaths) throws {
         let fileManager = FileManager.default
@@ -281,16 +358,40 @@ private struct FixtureTool {
             swordURL.appendingPathComponent("mods.d/uitestcomm.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/aatestweb.conf", isDirectory: false),
             swordURL.appendingPathComponent("mods.d/uitestweb.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/uitestdlrec.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/uitestdlwarn.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/uitestlocked.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/000uitestlocka.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/001uitestlockb.conf", isDirectory: false),
+            swordURL.appendingPathComponent("mods.d/aatestreadable.conf", isDirectory: false),
             swordURL.appendingPathComponent("modules/comments/rawcom/000uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/comments/rawcom/uitestcomm", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/aatestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/rawtext/uitestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/aatestweb", isDirectory: true),
             swordURL.appendingPathComponent("modules/texts/ztext/uitestweb", isDirectory: true),
-        ]
+            swordURL.appendingPathComponent("modules/texts/rawtext/uitestdlrec", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/ztext/uitestdlwarn", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/rawtext/uitestlocked", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/rawtext/uitestlocka", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/rawtext/uitestlockb", isDirectory: true),
+            swordURL.appendingPathComponent("modules/texts/ztext/aatestreadable", isDirectory: true),
+        ] + (0..<59).map { index in
+            swordURL.appendingPathComponent(
+                String(format: "mods.d/uitestquick%02d.conf", index),
+                isDirectory: false
+            )
+        }
         for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
             try fileManager.removeItem(at: candidate)
         }
+    }
+
+    /** Removes only the deterministic EPUB identity owned by the local quick-menu scenario. */
+    private func removeUITestEpub() throws {
+        let sourceURL = URL(fileURLWithPath: "UITESTEPUB.epub", isDirectory: false)
+        let identifier = EpubReader.installCandidate(forEpubURL: sourceURL).identifier
+        try EpubReader.delete(identifier: identifier)
     }
 }
 
@@ -305,6 +406,7 @@ private final class FixtureContext {
     private let bookmarkService: BookmarkService
     private let remoteSyncSettingsStore: RemoteSyncSettingsStore
     private let fileManager = FileManager.default
+    private let explicitSwordFixtureURL: URL?
     private var swordManager: SwordManager?
 
     /**
@@ -315,37 +417,14 @@ private final class FixtureContext {
      *   - bundleIdentifier: App bundle identifier used for remote-sync device folder naming.
      * - Throws: SwiftData initialization errors when the container cannot be opened.
      */
-    init(paths: FixturePaths, bundleIdentifier: String) throws {
+    init(paths: FixturePaths, bundleIdentifier: String, swordFixtureURL: URL? = nil) throws {
         self.paths = paths
+        self.explicitSwordFixtureURL = swordFixtureURL?.standardizedFileURL
         try fileManager.createDirectory(at: paths.applicationSupportURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.documentsURL, withIntermediateDirectories: true)
 
-        let cloudModels: [any PersistentModel.Type] = [
-            Workspace.self,
-            Window.self,
-            PageManager.self,
-            HistoryItem.self,
-            BibleBookmark.self,
-            BibleBookmarkNotes.self,
-            BibleBookmarkToLabel.self,
-            GenericBookmark.self,
-            GenericBookmarkNotes.self,
-            GenericBookmarkToLabel.self,
-            Label.self,
-            StudyPadTextEntry.self,
-            StudyPadTextEntryText.self,
-            MyDocument.self,
-            MyDocumentPage.self,
-            MyDocumentPageContent.self,
-            AiPageCacheEntry.self,
-            ReadingPlan.self,
-            ReadingPlanDay.self,
-            ReadingPlanDefinitionPublicationState.self,
-        ]
-        let localModels: [any PersistentModel.Type] = [
-            Repository.self,
-            Setting.self,
-        ]
+        let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+        let localModels = BibleCoreBaseModelRegistration.localModels
 
         let schema = Schema(cloudModels + localModels)
         let cloudConfiguration = ModelConfiguration(
@@ -390,6 +469,15 @@ private final class FixtureContext {
         switch scenario {
         case .baseline:
             break
+        case .performanceBookmarks10:
+            try seedPerformanceBookmarks(count: 10)
+            try seedKJVFixtureSearchIndex()
+        case .performanceBookmarks1000:
+            try seedPerformanceBookmarks(count: 1_000)
+            try seedKJVFixtureSearchIndex()
+        case .performanceBookmarks10000:
+            try seedPerformanceBookmarks(count: 10_000)
+            try seedKJVFixtureSearchIndex()
         case .baselineThreeWindows:
             try ensureVisibleBibleWindowCount(3, baseline: baseline)
         case .commentaryModule:
@@ -399,6 +487,11 @@ private final class FixtureContext {
             try seedUITestCommentaryModule()
         case .searchIndexed:
             try seedKJVFixtureSearchIndex()
+        case .searchCompletePreview:
+            try seedKJVFixtureSearchIndex(includesCompletePreview: true)
+        case .searchCompletePreviewMulti:
+            try seedUITestBibleModule()
+            try seedMultiTranslationSearchIndex(includesCompletePreview: true)
         case .searchMultiTranslation:
             try seedUITestBibleModule()
             try seedMultiTranslationSearchIndex()
@@ -434,6 +527,12 @@ private final class FixtureContext {
             try seedMyNotesSingle()
         case .myDocumentsSingle:
             try seedMyDocumentsSingle()
+        case .localQuickDocuments:
+            try seedMyDocumentsSingle()
+            try seedUITestCommentaryModule()
+            try seedLocalQuickMenuEpub()
+        case .longBibleQuickSelector:
+            try seedLongBibleQuickSelector()
         case .syncNextCloud:
             seedSyncNextCloud(enabledCategories: [])
         case .syncNextCloudBookmarksEnabled:
@@ -444,6 +543,14 @@ private final class FixtureContext {
             seedReaderNightMode()
         case .downloadsRowOrder:
             try seedDownloadsRowOrderCatalog()
+        case .lockedPickerDownloads:
+            try seedLockedPickerDownloads()
+        case .lockedReadableNext:
+            try seedLockedReadableNext(baseline: baseline)
+        case .lockedSuggestedCommentary:
+            try seedLockedSuggestedCommentary(baseline: baseline)
+        case .lockedStartupQueue:
+            try seedLockedStartupQueue(baseline: baseline)
         }
 
         try modelContext.save()
@@ -463,6 +570,9 @@ private final class FixtureContext {
     private struct CachedDownloadModuleFixture: Codable {
         /// Module initials used as the Downloads row identity.
         var name: String
+
+        /// Android-visible abbreviation, or `nil` to preserve the initials fallback.
+        var abbreviation: String?
 
         /// Human-readable description shown under the initials.
         var description: String
@@ -502,15 +612,18 @@ private final class FixtureContext {
     }
 
     /**
-     Seeds a deterministic Downloads catalog that catches row-order regressions during install state.
+     Seeds a deterministic Downloads catalog for abbreviation and install-lifecycle contracts.
 
      Android updates the tapped document row in place when a download starts; it does not rebuild and
      status-sort the list until filter data is rebuilt. This fixture writes a single local-only source
-     and fresh cache containing installed KJV followed by two installable Bible rows, so the UI smoke
-     can tap the last row and assert that it does not jump to Android's `BEING_INSTALLED` sort bucket.
-     The seeded source points at a TEST-NET address and is never refreshed automatically because the
-     cache is fresh; if the test taps install, the real download task stays active long enough for
-     the smoke test to observe Android's in-place progress state without touching a live repository.
+     and fresh cache containing installed KJV, the original recommended/warning transfer rows, and an
+     equal-rank pair whose initials order opposes its abbreviation order. One UI contract verifies the
+     pair's visible abbreviation, search match, and ordering. The install lifecycle contract separately
+     cancels and completes the original warning row while checking its order during the transfer and
+     after relaunch. The seeded source uses the exact synthetic HTTPS host intercepted by the test's
+     injected repository transport. The macOS fixture service owns the corresponding package bytes and
+     transfer gate; production repository download, extraction, publication, and cancellation code
+     remains authoritative.
      */
     private func seedDownloadsRowOrderCatalog() throws {
         let sourceName = "UITest Downloads"
@@ -528,7 +641,7 @@ private final class FixtureContext {
 
         [Sources]
         # AndBibleDefaultSourcesVersion=2
-        HTTPSource=\(sourceName)|192.0.2.1|/catalog
+        HTTPSource=\(sourceName)|uitest-download.invalid|/catalog
         """
         try config.write(
             to: installManagerURL.appendingPathComponent("InstallMgr.conf", isDirectory: false),
@@ -548,6 +661,24 @@ private final class FixtureContext {
                     sourceName: sourceName
                 ),
                 cachedDownloadModule(
+                    name: "ZZZREMOTE",
+                    abbreviation: "Aardvark",
+                    description: "First opposing remote identity",
+                    dataPath: "./modules/texts/rawtext/zzzremote/",
+                    modDrv: "RawText",
+                    version: "1.0",
+                    sourceName: sourceName
+                ),
+                cachedDownloadModule(
+                    name: "AAAREMOTE",
+                    abbreviation: "Aaron",
+                    description: "Second opposing remote identity",
+                    dataPath: "./modules/texts/rawtext/aaaremote/",
+                    modDrv: "RawText",
+                    version: "1.0",
+                    sourceName: sourceName
+                ),
+                cachedDownloadModule(
                     name: "UITESTDLREC",
                     description: "UI Test Downloads Recommended",
                     dataPath: "./modules/texts/rawtext/uitestdlrec/",
@@ -558,8 +689,8 @@ private final class FixtureContext {
                 cachedDownloadModule(
                     name: "UITESTDLWARN",
                     description: "UI Test Downloads Warning",
-                    dataPath: "./modules/texts/rawtext/uitestdlwarn/",
-                    modDrv: "RawText",
+                    dataPath: "./modules/texts/ztext/uitestdlwarn/",
+                    modDrv: "zText",
                     version: "1.0",
                     sourceName: sourceName
                 ),
@@ -577,6 +708,7 @@ private final class FixtureContext {
 
      - Parameters:
        - name: Module initials shown in the Downloads list.
+       - abbreviation: Optional Android-visible title distinct from the installation identity.
        - description: User-visible module description.
        - dataPath: SWORD `DataPath` used if the row is installed during the smoke test.
        - modDrv: SWORD driver used for category and install-file planning.
@@ -588,6 +720,7 @@ private final class FixtureContext {
      */
     private func cachedDownloadModule(
         name: String,
+        abbreviation: String? = nil,
         description: String,
         dataPath: String,
         modDrv: String,
@@ -595,10 +728,11 @@ private final class FixtureContext {
         sourceName: String
     ) -> CachedDownloadModuleFixture {
         let normalizedDataPath = dataPath.hasPrefix("./") ? dataPath : "./\(dataPath)"
+        let abbreviationLine = abbreviation.map { "Abbreviation=\($0)\n" } ?? ""
         let confContent = """
         [\(name)]
         Description=\(description)
-        DataPath=\(normalizedDataPath)
+        \(abbreviationLine)DataPath=\(normalizedDataPath)
         ModDrv=\(modDrv)
         Category=Biblical Texts
         Encoding=UTF-8
@@ -607,6 +741,7 @@ private final class FixtureContext {
         """
         return CachedDownloadModuleFixture(
             name: name,
+            abbreviation: abbreviation,
             description: description,
             category: ModuleCategory.bible.rawValue,
             language: "en",
@@ -620,6 +755,283 @@ private final class FixtureContext {
             downloadURL: nil,
             packageFileName: nil
         )
+    }
+
+    /**
+     Seeds one real encrypted RawText Bible plus a matching Downloads catalog row.
+
+     The payload is generated once by `SwordManagerTestSapphire` and checked into test resources.
+     This fixture only copies those opaque bytes and writes scenario-specific SWORD configuration;
+     it contains no cipher implementation and never substitutes plaintext beneath locked metadata.
+     KJV's index is also seeded so the dedicated locked-row Search test never creates it at runtime.
+     */
+    private func seedLockedPickerDownloads() throws {
+        try seedKJVFixtureSearchIndex()
+        try installEncryptedRawTextModule(
+            name: "UITESTLOCKED",
+            description: "Synthetic Encrypted UI Test Bible",
+            abbreviation: "Locked Test Bible",
+            configFileName: "uitestlocked.conf",
+            dataDirectoryName: "uitestlocked"
+        )
+        let sourceName = "UITest Locked"
+        let installManagerURL = paths.documentsURL.appendingPathComponent("sword_install", isDirectory: true)
+        let cacheURL = installManagerURL.appendingPathComponent("catalog-cache", isDirectory: true)
+        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        let config = """
+        [General]
+        PassiveFTP=true
+
+        [Sources]
+        # AndBibleDefaultSourcesVersion=2
+        HTTPSource=\(sourceName)|uitest-locked.invalid|/catalog
+        """
+        try config.write(
+            to: installManagerURL.appendingPathComponent("InstallMgr.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        let module = cachedDownloadModule(
+            name: "UITESTLOCKED",
+            abbreviation: "Locked Test Bible",
+            description: "Synthetic Encrypted UI Test Bible",
+            dataPath: "./modules/texts/rawtext/uitestlocked/",
+            modDrv: "RawText",
+            version: "1.0",
+            sourceName: sourceName
+        )
+        let data = try JSONEncoder().encode(
+            CachedDownloadCatalogFixture(timestamp: Date(), modules: [module])
+        )
+        try data.write(
+            to: cacheURL.appendingPathComponent("\(sourceName).json", isDirectory: false),
+            options: .atomic
+        )
+    }
+
+    /**
+     Seeds the isolated readable-next inventory without changing the validated picker fixture.
+
+     KJV and `AATESTREADABLE` are readable; `UITESTLOCKED` remains retained but inaccessible. The
+     swap-activity Bible tap must cycle through only the two readable identities.
+
+     - Parameter baseline: Active pane whose retained Bible identity is set to the locked module.
+     - Side effects: Writes the locked picker fixture, one cloned readable Bible, retained target,
+       and toolbar action preference.
+     - Failure modes: Propagates fixture, module-copy, index, and persistence errors.
+     */
+    private func seedLockedReadableNext(baseline: BaselineState) throws {
+        try seedLockedPickerDownloads()
+        try seedUITestReadableBibleModule()
+        baseline.pageManager.bibleDocument = "UITESTLOCKED"
+        settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
+    }
+
+    /**
+     Seeds the isolated commentary-to-retained-locked-Bible suggestion inventory.
+
+     The startup controller may publish readable KJV, but the pane retains `UITESTLOCKED`; after a
+     real commentary switch, the next Bible action must preserve that exact locked suggestion.
+
+     - Parameter baseline: Active pane whose retained Bible identity is set to the locked module.
+     - Side effects: Writes the locked picker fixture, one commentary, retained target, and toolbar
+       action preference.
+     - Failure modes: Propagates fixture, commentary, index, and persistence errors.
+     */
+    private func seedLockedSuggestedCommentary(baseline: BaselineState) throws {
+        try seedLockedPickerDownloads()
+        try seedUITestCommentaryModule()
+        baseline.pageManager.bibleDocument = "UITESTLOCKED"
+        settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
+    }
+
+    /**
+     Installs the second readable Bible used to prove swap-activity next-document ordering.
+
+     The module clones the checked-in KJV zText payload under distinct static metadata. This keeps
+     the fixture to three declared Bible identities (`KJV`, `AATESTREADABLE`, `UITESTLOCKED`) while
+     exercising normal SWORD discovery and rendering instead of a fixture-only backend.
+
+     - Side effects: Copies KJV fixture bytes into the simulator SWORD root, writes one module
+       configuration, and invalidates the SWORD module-discovery cache.
+     - Failure modes: Propagates missing fixture and filesystem errors; no partial success is
+       reported to the UI test host.
+     */
+    private func seedUITestReadableBibleModule() throws {
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let dataURL = swordURL.appendingPathComponent(
+            "modules/texts/ztext/aatestreadable",
+            isDirectory: true
+        )
+        let sourceDataURL = try swordFixtureResourceURL()
+            .appendingPathComponent("modules", isDirectory: true)
+            .appendingPathComponent("texts", isDirectory: true)
+            .appendingPathComponent("ztext", isDirectory: true)
+            .appendingPathComponent("kjv", isDirectory: true)
+
+        try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try copyDirectoryContents(from: sourceDataURL, to: dataURL, replacingExisting: true)
+        let conf = """
+        [AATESTREADABLE]
+        Description=UI Test Readable Bible
+        DataPath=./modules/texts/ztext/aatestreadable/
+        ModDrv=zText
+        SourceType=OSIS
+        Encoding=UTF-8
+        CompressType=ZIP
+        BlockType=BOOK
+        Lang=en
+        Versification=KJV
+        About=Deterministic readable Bible for iOS next-document UI automation.
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent("aatestreadable.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try removeCachedSwordModuleConfig(in: modsDURL)
+    }
+
+    /**
+     Installs 59 readable Bible aliases over the one checked-in KJV payload.
+
+     Together with KJV, this produces the 60-row inventory used to exercise the real quick-menu
+     viewport. Each alias has its own native registration but reuses the immutable fixture bytes,
+     avoiding dozens of multi-megabyte test-only payload copies.
+
+     - Side effects: Writes 59 scenario-owned configuration files and invalidates SWORD discovery.
+     - Failure modes: Propagates fixture and configuration write errors.
+     */
+    private func seedLongBibleQuickSelector() throws {
+        _ = try ensureKJVSwordFixtureModuleAvailable()
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try removeCachedSwordModuleConfig(in: modsDURL)
+
+        for index in 0..<59 {
+            let initials = String(format: "UITESTQ%02d", index)
+            let configuration = """
+            [\(initials)]
+            Description=UI Test Quick Bible \(index)
+            Abbreviation=\(initials)
+            DataPath=./modules/texts/ztext/kjv/
+            ModDrv=zText
+            SourceType=OSIS
+            Encoding=UTF-8
+            CompressType=ZIP
+            BlockType=BOOK
+            Lang=en
+            Versification=KJV
+            About=Readable alias for the long Bible quick-selector UI journey.
+            """
+            try configuration.write(
+                to: modsDURL.appendingPathComponent(
+                    String(format: "uitestquick%02d.conf", index),
+                    isDirectory: false
+                ),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+    }
+
+    /**
+     Seeds two locked-only real encrypted Bibles in deterministic initial queue order.
+
+     Baseline persistence is created first so the app has a valid workspace graph. KJV is then
+     removed from the installed SWORD inventory and the page retains the first locked identity;
+     startup must process both initial locked rows before performing one fresh reconciliation.
+     */
+    private func seedLockedStartupQueue(baseline: BaselineState) throws {
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let kjvConfig = modsDURL.appendingPathComponent("kjv.conf", isDirectory: false)
+        let kjvData = swordURL.appendingPathComponent("modules/texts/ztext/kjv", isDirectory: true)
+        for item in [kjvConfig, kjvData] where fileManager.fileExists(atPath: item.path) {
+            try fileManager.removeItem(at: item)
+        }
+        try installEncryptedRawTextModule(
+            name: "UITESTLOCKA",
+            description: "First Synthetic Locked Bible",
+            abbreviation: "A Locked Bible",
+            configFileName: "000uitestlocka.conf",
+            dataDirectoryName: "uitestlocka"
+        )
+        try installEncryptedRawTextModule(
+            name: "UITESTLOCKB",
+            description: "Second Synthetic Locked Bible",
+            abbreviation: "B Locked Bible",
+            configFileName: "001uitestlockb.conf",
+            dataDirectoryName: "uitestlockb"
+        )
+        baseline.pageManager.bibleDocument = "UITESTLOCKA"
+        baseline.pageManager.bibleVersification = "KJV"
+        try removeCachedSwordModuleConfig(in: modsDURL)
+    }
+
+    /** Copies the four hash-verified Sapphire payload files and writes one locked module config. */
+    private func installEncryptedRawTextModule(
+        name: String,
+        description: String,
+        abbreviation: String,
+        configFileName: String,
+        dataDirectoryName: String
+    ) throws {
+        let sourceURL = try encryptedRawTextFixtureResourceURL()
+        let swordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let modsDURL = swordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let destinationURL = swordURL.appendingPathComponent(
+            "modules/texts/rawtext/\(dataDirectoryName)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: modsDURL, withIntermediateDirectories: true)
+        try copyDirectoryContents(from: sourceURL, to: destinationURL, replacingExisting: true)
+        let conf = """
+        [\(name)]
+        Description=\(description)
+        Abbreviation=\(abbreviation)
+        DataPath=./modules/texts/rawtext/\(dataDirectoryName)/
+        ModDrv=RawText
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        CipherKey=
+        About=Real encrypted UI fixture metadata for \(name).
+        UnlockInfo=
+        """
+        try conf.write(
+            to: modsDURL.appendingPathComponent(configFileName, isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        try removeCachedSwordModuleConfig(in: modsDURL)
+    }
+
+    /** Resolves and validates the exact four opaque encrypted RawText resource files. */
+    private func encryptedRawTextFixtureResourceURL() throws -> URL {
+        let resourceURL = try swordFixtureResourceURL().appendingPathComponent(
+            "ui-test-encrypted-rawtext",
+            isDirectory: true
+        )
+        let required = ["ot", "ot.vss", "nt", "nt.vss"]
+        let names = Set(
+            try fileManager.contentsOfDirectory(atPath: resourceURL.path)
+        )
+        guard names == Set(required) else {
+            throw FixtureToolError.missingSwordFixtureResources(resourceURL.path)
+        }
+        for name in required {
+            let fileURL = resourceURL.appendingPathComponent(name, isDirectory: false)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw FixtureToolError.missingSwordFixtureResources(fileURL.path)
+            }
+        }
+        return resourceURL
     }
 
     /** One canonical FTS row written by deterministic Search UI fixtures. */
@@ -683,10 +1095,12 @@ private final class FixtureContext {
      * fixture queries (`earth`, `earth void`, `jesus`, and `noah`) without forcing UI tests to
      * wait for runtime index creation on fresh simulators.
      *
+     * - Parameter includesCompletePreview: Adds the long Genesis 3:17 row only for the dedicated
+     *   complete-preview scenario, leaving established performance fixtures unchanged.
      * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
      *   written.
      */
-    private func seedKJVFixtureSearchIndex() throws {
+    private func seedKJVFixtureSearchIndex(includesCompletePreview: Bool = false) throws {
         let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
         let sourceMetadata = try seededSearchSourceMetadata(for: "KJV")
         try fileManager.createDirectory(
@@ -714,12 +1128,14 @@ private final class FixtureContext {
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
 
         do {
-            try insertSeededSearchRows(into: db)
+            let rows = Self.seededSearchRows
+                + (includesCompletePreview ? [Self.completePreviewSearchRow] : [])
+            try insertSeededSearchRows(rows, into: db)
             try insertSeededStrongRows(into: db)
             try recordSeededSearchModule(
                 sourceMetadata,
                 into: db,
-                verseCount: Int32(Self.seededSearchRows.count)
+                verseCount: Int32(rows.count)
             )
             try executeSearchSQL("COMMIT", db: db)
         } catch {
@@ -734,10 +1150,12 @@ private final class FixtureContext {
      * The fixture writes deterministic KJV rows plus two `AATESTWEB` rows for the same query so a
      * grouped search must report results from more than one selected translation.
      *
+     * - Parameter includesCompletePreview: Adds the same complete KJV passage to both translations
+     *   only for the dedicated expanded-preview scenario.
      * - Throws: `FixtureToolError.sqlite` when the search-index database cannot be created or
      *   written.
      */
-    private func seedMultiTranslationSearchIndex() throws {
+    private func seedMultiTranslationSearchIndex(includesCompletePreview: Bool = false) throws {
         let databaseURL = paths.documentsURL.appendingPathComponent("search_indexes.sqlite")
         try fileManager.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
@@ -772,7 +1190,20 @@ private final class FixtureContext {
         try executeSearchSQL("BEGIN TRANSACTION", db: db)
 
         do {
+            let completePreviewRows = includesCompletePreview ? [
+                Self.completePreviewSearchRow,
+                SeededSearchRow(
+                    verseKey: "Genesis 3:17",
+                    plainText: Self.completePreviewSearchRow.plainText,
+                    moduleName: "AATESTWEB",
+                    osisBookId: "Gen",
+                    displayBook: "Genesis",
+                    chapter: 3,
+                    verse: 17
+                ),
+            ] : []
             let rows = Self.seededSearchRows + Self.seededMultiTranslationSearchRows
+                + completePreviewRows
             try insertSeededSearchRows(rows, into: db)
             try insertSeededStrongRows(into: db)
             for moduleName in Set(rows.map { $0.moduleName }).sorted() {
@@ -791,16 +1222,6 @@ private final class FixtureContext {
             _ = try? executeSearchSQL("ROLLBACK", db: db)
             throw error
         }
-    }
-
-    /**
-     Inserts the deterministic FTS rows used by Search UI fixtures.
-     *
-     * - Parameter db: Open SQLite handle for `search_indexes.sqlite`.
-     * - Throws: `FixtureToolError.sqlite` when row insertion fails.
-     */
-    private func insertSeededSearchRows(into db: OpaquePointer) throws {
-        try insertSeededSearchRows(Self.seededSearchRows, into: db)
     }
 
     /**
@@ -1149,6 +1570,27 @@ private final class FixtureContext {
     ]
 
     /**
+     Complete KJV Genesis 3:17 preview used only by the visible Search-row contract.
+
+     Its final phrase extends beyond both former 200- and 240-character preview caps. The separate
+     scenario preserves the established performance fixture and existing Search query result sets.
+     Ingestion parity is tested with real source modules in the package lane; this fixture supplies
+     the independently specified indexed input to the production Search form and row renderer.
+     */
+    private static let completePreviewSearchRow = SeededSearchRow(
+        verseKey: "Genesis 3:17",
+        plainText: "And unto Adam he said, Because thou hast hearkened unto the voice of thy wife, "
+            + "and hast eaten of the tree, of which I commanded thee, saying, Thou shalt not eat "
+            + "of it: cursed is the ground for thy sake; in sorrow shalt thou eat of it all the "
+            + "days of thy life;",
+        moduleName: "KJV",
+        osisBookId: "Gen",
+        displayBook: "Genesis",
+        chapter: 3,
+        verse: 17
+    )
+
+    /**
      SQLite rows preseeded into the KJV fixture Strong's index facet.
 
      The token and its UTF-16 `God` range are attached to the full deterministic `Genesis 1:2`
@@ -1291,16 +1733,27 @@ private final class FixtureContext {
     }
 
     /**
-     Resolves the repository SWORD test fixture directory.
+     Resolves the explicit artifact SWORD fixture or the local repository test fixture directory.
 
-     The host fixture tool runs outside the app bundle, so it cannot use `Bundle.main`. Resolving
-     from `#filePath` keeps the fixture tied to checked-out test resources without requiring the app
-     target to package KJV.
+     Product-reuse callers supply the artifact path explicitly. That path is authoritative and a
+     missing directory fails without falling through to the producer checkout compiled into
+     `#filePath`. Local source runs retain repository discovery without requiring the app target to
+     package KJV.
 
      - Returns: Repository `Sources/BibleUI/Tests/BibleUITests/Fixtures/sword` directory.
      - Throws: `FixtureToolError.missingSwordFixtureResources` when the resources are unavailable.
      */
     private func swordFixtureResourceURL() throws -> URL {
+        if let explicitSwordFixtureURL {
+            let requiredConfiguration = explicitSwordFixtureURL
+                .appendingPathComponent("mods.d", isDirectory: true)
+                .appendingPathComponent("kjv.conf", isDirectory: false)
+            guard fileManager.fileExists(atPath: requiredConfiguration.path) else {
+                throw FixtureToolError.missingSwordFixtureResources(explicitSwordFixtureURL.path)
+            }
+            return explicitSwordFixtureURL
+        }
+
         var candidateRootURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while candidateRootURL.path != candidateRootURL.deletingLastPathComponent().path {
             let fixtureSwordURL = candidateRootURL
@@ -1536,6 +1989,82 @@ private final class FixtureContext {
     }
 
     /**
+     Seeds a controlled bookmark-size axis for Release navigation measurements.
+
+     Exactly ten bookmarks belong to the visible Genesis 1 chapter. Remaining rows are distributed
+     over Exodus chapters 1–40, keeping the visible chapter's required annotation work constant.
+     Every fifth row has a fixed-size note. UUIDs, dates, references, and note contents are stable.
+     This isolates bookmark growth; it is not a claim to model every shape of user library.
+
+     - Parameter count: Total bookmark count, at least ten, in a newly reset fixture container.
+     - Side effects: Inserts verified bookmark and note rows into the fixture's production-shaped
+       stores. The outer seed operation saves them once; this does not time production mutation APIs.
+     - Failure modes: Nonempty bookmark fixtures, invalid counts, or an unresolved authoritative
+       source range fail fixture preparation rather than producing a smaller dataset.
+     */
+    private func seedPerformanceBookmarks(count: Int) throws {
+        guard count >= 10,
+              try modelContext.fetchCount(FetchDescriptor<BibleBookmark>()) == 0 else {
+            throw FixtureToolError.usage("Performance bookmarks require an empty store and at least ten rows")
+        }
+        let previousAutosave = modelContext.autosaveEnabled
+        modelContext.autosaveEnabled = false
+        defer { modelContext.autosaveEnabled = previousAutosave }
+
+        var references: [(book: String, range: VerifiedKJVAOrdinalRange)] = []
+        for referenceIndex in 0...40 {
+            let book = referenceIndex == 0 ? "Genesis" : "Exodus"
+            let chapter = max(referenceIndex, 1)
+            let ordinal = try resolveKJVOrdinal(bookName: book, chapter: chapter, verse: 1)
+            guard let range = VerifiedKJVAOrdinalRange(
+                resolvingSourceBookInitials: "KJV",
+                sourceVersification: "KJV",
+                sourceOrdinalStart: ordinal,
+                sourceOrdinalEnd: ordinal
+            ) else {
+                throw FixtureToolError.unresolvedVerse("\(book).\(chapter).1")
+            }
+            references.append((book, range))
+        }
+
+        for index in 0..<count {
+            let reference = references[index < 10 ? 0 : 1 + (index - 10) % 40]
+            guard let id = UUID(uuidString: "F0000000-0000-4000-8000-\(String(format: "%012d", index))") else {
+                throw FixtureToolError.usage("Cannot construct performance bookmark identity")
+            }
+            let date = seededDate(offset: index)
+            let range = reference.range
+            let bookmark = BibleBookmark(
+                id: id,
+                kjvOrdinalStart: range.kjvaOrdinalStart,
+                kjvOrdinalEnd: range.kjvaOrdinalEnd,
+                ordinalStart: range.sourceOrdinalStart,
+                ordinalEnd: range.sourceOrdinalEnd,
+                v11n: range.sourceVersification,
+                bookInitials: range.sourceBookInitials,
+                createdAt: date,
+                lastUpdatedOn: date,
+                ordinalTrustMetadata: range.ordinalTrust
+            )
+            bookmark.book = reference.book
+            modelContext.insert(bookmark)
+            if index.isMultiple(of: 5) {
+                let note = BibleBookmarkNotes(
+                    bookmarkId: id,
+                    notes: String(repeating: "Deterministic performance annotation. ", count: 8),
+                    contentType: "MARKDOWN"
+                )
+                modelContext.insert(note)
+                bookmark.notes = note
+            }
+        }
+        guard try modelContext.fetchCount(FetchDescriptor<BibleBookmark>()) == count,
+              try modelContext.fetchCount(FetchDescriptor<BibleBookmarkNotes>()) == (count + 4) / 5 else {
+            throw FixtureToolError.usage("Performance fixture did not produce the requested row counts")
+        }
+    }
+
+    /**
      Seeds two bookmark rows used by delete and sort workflows.
      */
     private func seedBookmarkMultiRow() throws {
@@ -1678,7 +2207,7 @@ private final class FixtureContext {
             note: nil,
             createdAt: seededDate(offset: 20)
         )
-        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "UI_Test_My_Notes_Note")
+        bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: "Creation begins with God.")
     }
 
     /**
@@ -1717,7 +2246,7 @@ private final class FixtureContext {
         )
         let content = MyDocumentPageContent(
             pageId: pageId,
-            content: "# UI Test My Document\n\nSeeded body for drawer routing coverage."
+            content: "# UI Test My Document\n\nMy Document page one."
         )
 
         page.pageContent = content
@@ -1726,6 +2255,71 @@ private final class FixtureContext {
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
+    }
+
+    /** Installs one real EPUB generation into the simulator app's production library root. */
+    private func seedLocalQuickMenuEpub() throws {
+        try paths.validateDefaultEpubRuntimeRoots(fileManager: fileManager)
+        let temporaryRoot = paths.dataContainerURL.appendingPathComponent(
+            "tmp/ui-test-local-quick-documents",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        let archiveURL = temporaryRoot.appendingPathComponent("UITESTEPUB.epub", isDirectory: false)
+        defer { try? fileManager.removeItem(at: temporaryRoot) }
+
+        let entries: [(String, String)] = [
+            ("mimetype", "application/epub+zip"),
+            ("META-INF/container.xml", """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+              <rootfiles>
+                <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+            """),
+            ("OPS/package.opf", """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>UI Test EPUB</dc:title><dc:language>en</dc:language>
+              </metadata>
+              <manifest>
+                <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+                <item id="first" href="text/first.xhtml" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine><itemref idref="first"/></spine>
+            </package>
+            """),
+            ("OPS/nav.xhtml", """
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+              <body><nav epub:type="toc"><ol>
+                <li><a href="text/first.xhtml#start">First</a></li>
+              </ol></nav></body>
+            </html>
+            """),
+            ("OPS/text/first.xhtml", """
+            <html xmlns="http://www.w3.org/1999/xhtml"><body>
+              <section id="start"><p>EPUB page one.</p></section>
+            </body></html>
+            """),
+        ]
+        let archive = try ZipArchiveWriter.storedArchive(entries: entries.map {
+            ZipArchiveWriterEntry(name: $0.0, data: Data($0.1.utf8))
+        })
+        try archive.write(to: archiveURL, options: .atomic)
+        let candidate = EpubReader.installCandidate(forEpubURL: archiveURL)
+        guard candidate.initials == "Epub-UITESTEPUB_epub" else {
+            throw FixtureToolError.usage("Unexpected deterministic EPUB initials: \(candidate.initials)")
+        }
+        let installedIdentifier = try EpubReader.install(
+            epubURL: archiveURL,
+            moduleStoreRootURL: paths.documentsURL.appendingPathComponent("sword", isDirectory: true),
+            admittingCandidateWith: { _ in }
+        )
+        guard installedIdentifier == candidate.identifier else {
+            throw FixtureToolError.usage("EPUB fixture published an unexpected stable identifier.")
+        }
     }
 
     /**

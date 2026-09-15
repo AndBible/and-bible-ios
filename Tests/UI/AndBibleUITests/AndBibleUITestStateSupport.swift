@@ -56,12 +56,9 @@ extension AndBibleUITests {
      * - Side effects:
      *   - taps Android ASSIGN mode's shared app-bar Up/Back control, which atomically commits the
      *     draft before returning to the bookmark list
-     *   - retries when a hosted simulator accepts the event without running the SwiftUI action
-     *   - polls the bookmark-list state export until the parent reports that Label Assignment is
-     *     no longer presented
+     *   - passively waits for the Back control to disappear and the bookmark filter to be visible
      * - Failure modes:
-     *   - fails if the parent bookmark-list state never reports Label Assignment dismissed within
-     *     the timeout
+     *   - fails if the actual bookmark-list control does not become usable within the timeout
      */
     func dismissLabelAssignmentToBookmarkList(
         in app: XCUIApplication,
@@ -69,28 +66,15 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        tapElementReliably(
-            requireElement("labelAssignmentAppBarBackButton", in: app, timeout: timeout),
-            timeout: timeout
-        )
-
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let bookmarkListState = resolvedBookmarkListStateValue(in: app),
-               bookmarkListState.contains("labelAssignment=false") {
-                return
-            }
-
-            if let backButton = resolvedElement("labelAssignmentAppBarBackButton", in: app) {
-                _ = tapElementIfPossible(backButton, timeout: min(1, max(0.1, deadline.timeIntervalSinceNow)))
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        } while Date() < deadline
-
-        let finalState = resolvedBookmarkListStateValue(in: app) ?? "nil"
+        let backButton = requireElement("labelAssignmentAppBarBackButton", in: app, timeout: timeout)
+        tapElementReliably(backButton, timeout: timeout, file: file, line: line)
+        let filter = unresolvedElement("bookmarkListLabelFilterButton", in: app)
         XCTAssertTrue(
-            finalState.contains("labelAssignment=false"),
-            "Expected Label Assignment to dismiss within \(timeout) seconds. Final bookmark-list state: '\(finalState)'.",
+            waitForUITestCondition("Label Assignment returns to the visible bookmark list", timeout: timeout) {
+                !backButton.exists && filter.exists && self.elementHasUsableFrame(filter)
+                    && app.frame.intersects(filter.frame) && filter.isHittable
+            },
+            "Expected one Back action to commit Label Assignment and return to the bookmark list.",
             file: file,
             line: line
         )
@@ -859,7 +843,7 @@ extension AndBibleUITests {
     }
 
     /**
-     Focuses one text-entry control through XCTest's native tap path without coordinate fallback.
+     Focuses one text-entry control with a single tap on its observed frame.
      *
      * - Parameters:
      *   - element: Text field or search field that should receive keyboard focus.
@@ -868,8 +852,8 @@ extension AndBibleUITests {
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - waits for the text input to exist, then taps it directly so the software keyboard can
-     *     attach without the slower coordinate-based path
+     *   - waits for the text input, then taps it once; callers requesting trailing-edge placement
+     *     use a coordinate inside the observed field
      *   - treats `hasKeyboardFocus` as an early-success hint rather than the only proof of readiness
      *     because some SwiftUI text fields accept keyboard input even when CI never reports that
      *     predicate as true
@@ -894,59 +878,17 @@ extension AndBibleUITests {
             )
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        var didDeliverFocusTap = false
-        repeat {
-            if element.exists && waitForElementToBecomeHittable(element, timeout: 0.5) {
-                func tapAndWaitForFocus(_ action: () -> Void) -> Bool {
-                    action()
-                    didDeliverFocusTap = true
-                    return waitForElementKeyboardFocus(element, timeout: 1)
-                }
-
-                if preferTrailingEdge, !element.frame.isEmpty {
-                    if tapAndWaitForFocus({
-                        element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
-                    }) {
-                        return
-                    }
-                } else if tapAndWaitForFocus({
-                    element.tap()
-                }) {
-                    return
-                }
-
-                if !element.frame.isEmpty, tapAndWaitForFocus({
-                    element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                }) {
-                    return
-                }
-
-                if tapAndWaitForFocus({
-                    element.doubleTap()
-                }) {
-                    return
-                }
-
-                if didDeliverFocusTap {
-                    return
-                }
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        XCTAssertTrue(
-            waitForElementToBecomeHittable(element, timeout: 0),
-            "Expected text input '\(element.identifier)' to become hittable within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        XCTAssertTrue(
-            didDeliverFocusTap,
-            "Expected text input '\(element.identifier)' to receive at least one focus tap within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        guard waitForElementToBecomeHittable(element, timeout: timeout) else {
+            XCTFail("Expected text input '\(element.identifier)' to be hittable.", file: file, line: line)
+            return
+        }
+        if preferTrailingEdge {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        } else {
+            element.tap()
+        }
+        // Focus reporting is only a passive hint; the caller must verify the typed/committed value.
+        _ = waitForElementKeyboardFocus(element, timeout: min(timeout, 1))
     }
 
     /**
@@ -968,57 +910,6 @@ extension AndBibleUITests {
             preferTrailingEdge: preferTrailingEdge,
             requireExistencePreflight: false,
             timeout: timeout,
-            file: file,
-            line: line
-        )
-    }
-
-    /**
-     Focuses a prompt-owned text-entry control without polling `isHittable` or keyboard focus.
-
-     SwiftUI prompt surfaces can occasionally stall XCTest while resolving broad alert or sheet
-     snapshots after a prompt-specific resolver has already found the field. Native prompts can also
-     time out while evaluating `hasKeyboardFocus`, so this helper only delivers focused-field taps;
-     callers prove success by observing the committed prompt value.
-
-     For prompt-owned fields that can stall while re-sampling the field itself, callers can provide
-     a prompt-surface coordinate. That path intentionally avoids `exists` and `frame` checks on the
-     text field after resolution.
-     */
-    func focusResolvedPromptTextEntryElement(
-        _ element: XCUIElement,
-        in app: XCUIApplication,
-        preferTrailingEdge: Bool = false,
-        promptTapCoordinate: (() -> XCUICoordinate?)? = nil,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        let tapOffset = CGVector(dx: preferTrailingEdge ? 0.92 : 0.5, dy: 0.5)
-
-        repeat {
-            if let coordinate = promptTapCoordinate?() {
-                coordinate.tap()
-                return
-            }
-
-            let coordinate: XCUICoordinate
-            if element.exists, !element.frame.isEmpty {
-                coordinate = element.coordinate(withNormalizedOffset: tapOffset)
-            } else {
-                coordinate = app.coordinate(withNormalizedOffset: tapOffset)
-            }
-            coordinate.tap()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            if element.exists, !element.frame.isEmpty {
-                return
-            }
-        } while Date() < deadline
-
-        XCTAssertTrue(
-            element.exists && !element.frame.isEmpty,
-            "Expected prompt text input '\(element.identifier)' to expose a tappable frame within \(timeout) seconds.",
             file: file,
             line: line
         )
@@ -1185,17 +1076,16 @@ extension AndBibleUITests {
     }
 
     /**
-     Toggles one native or app-owned switch element and retries with a second tap only when the
-     first tap does not drive the underlying logical value change.
+     Toggles one native or app-owned switch once and passively observes its resulting value.
      *
      * - Parameters:
      *   - element: Switch element that should toggle.
      *   - expectedValue: Switch value expected after the toggle.
-     *   - timeout: Maximum time to wait for the expected value before retrying/failing.
+     *   - timeout: Maximum time to wait for the expected value after the tap.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - performs one normal tap and, when needed, one more native tap on the same switch
+     *   - performs one normal tap on the switch
      * - Failure modes:
      *   - records an XCTest failure when the switch never reaches `expectedValue`
      */
@@ -1207,19 +1097,8 @@ extension AndBibleUITests {
         line: UInt = #line
     ) {
         tapElementReliably(element, timeout: timeout, file: file, line: line)
-        if waitForSwitchValue(element, toEqual: expectedValue, timeout: min(timeout, 2)) {
-            return
-        }
-
         XCTAssertTrue(
-            waitForElementToBecomeHittable(element, timeout: min(timeout, 2)),
-            "Expected switch '\(element.identifier)' to become hittable before retrying the toggle.",
-            file: file,
-            line: line
-        )
-        element.tap()
-        XCTAssertTrue(
-            waitForSwitchValue(element, toEqual: expectedValue, timeout: min(timeout, 2)),
+            waitForSwitchValue(element, toEqual: expectedValue, timeout: timeout),
             "Expected switch '\(element.identifier)' to reach value '\(expectedValue)' within \(timeout) seconds.",
             file: file,
             line: line
@@ -1275,8 +1154,7 @@ extension AndBibleUITests {
      * - Side effects:
      *   - repeatedly re-queries the exported Sync screen state and stops once the requested token
      *     values appear
-     *   - scrolls the Sync Settings form when needed and uses the real toggle control for each
-     *     retry
+     *   - reveals the Sync Settings control when needed and taps it once
      * - Failure modes:
      *   - records an XCTest failure if the switch never appears or if the Sync screen state does
      *     not reach the requested token after the interaction
@@ -1386,11 +1264,11 @@ extension AndBibleUITests {
      *   - screen: Root Text Display screen element whose exported semantic state should change.
      *   - app: Running application under test.
      *   - expectedScreenToken: Screen accessibility token expected after the toggle.
-     *   - timeout: Maximum time to keep retrying the real UI interaction.
+     *   - timeout: Maximum time to observe the result of the single switch tap.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - repeatedly toggles the real justify-text switch and polls the exported screen state
+     *   - toggles the real justify-text switch once and polls the exported screen state
      * - Failure modes:
      *   - records an XCTest failure if the switch never drives the screen state to the requested
      *     token within the timeout window
@@ -1419,7 +1297,7 @@ extension AndBibleUITests {
             "textDisplaySettingsScreen",
             toContain: expectedScreenToken,
             in: app,
-            timeout: 1,
+            timeout: timeout,
             file: file,
             line: line
         )

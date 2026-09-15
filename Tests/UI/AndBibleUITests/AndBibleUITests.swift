@@ -1,5 +1,4 @@
 import Foundation
-import Darwin
 import XCTest
 #if canImport(UIKit)
 import UIKit
@@ -39,74 +38,18 @@ final class AndBibleUITests: XCTestCase {
     }
 
     /**
-     Tears down the currently running UI-test app process after each test method.
+     Tears down the currently running UI-test app through XCTest after each test method.
      *
      * - Side effects:
-     *   - asks CoreSimulator to terminate the tracked app process so the next test gets a clean launch
+     *   - asks the tracked `XCUIApplication` to terminate its own launched process
      *   - clears the stored app handle for the completed test method
      * - Failure modes:
-     *   - silently ignores already-stopped app processes because termination is only cleanup
+     *   - XCTest records an application-control failure if its launched process cannot terminate;
+     *     the next fixture prepare still independently requires a host-confirmed stopped process
      */
     override func tearDownWithError() throws {
-        if let trackedApp {
-            _ = terminateAppReliably(trackedApp)
-        }
+        trackedApp?.terminate()
         trackedApp = nil
-    }
-
-    /**
-     Protects the host-process capture helper from blocking on descendants that inherit stdout.
-     *
-     * Setup:
-     * - runs a shell process that exits immediately after writing output
-     * - starts a background `sleep` process that inherits stdout
-     *
-     * Expected result:
-     * - the helper returns quickly after the direct child exits
-     * - the helper captures direct-child output without depending on descendant liveness checks
-     *
-     * Failure meaning:
-     * - UI-test fixture bootstrap can stall when `simctl launch` or another host command leaves
-     *   pipe descriptors attached to a launched process that outlives the command
-     *
-     * Side effects:
-     * - starts and best-effort terminates one descendant host `sleep` process
-     */
-    func testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen() {
-        var descendantPID: pid_t?
-        defer {
-            if let descendantPID {
-                _ = kill(descendantPID, SIGTERM)
-            }
-        }
-
-        let startDate = Date()
-        let result = runHostProcess(
-            executablePath: "/bin/sh",
-            arguments: [
-                "-c",
-                """
-                sleep 30 &
-                child_pid=$!
-                printf "fixture-ready:%s" "$child_pid"
-                exit 0
-                """
-            ],
-            timeout: 5
-        )
-        let elapsedSeconds = Date().timeIntervalSince(startDate)
-
-        XCTAssertEqual(result.status, 0)
-        XCTAssertLessThan(
-            elapsedSeconds,
-            5,
-            "Host process capture should return on direct-child exit instead of waiting for inherited pipe descriptors to close."
-        )
-        let outputParts = result.stdout.split(separator: ":", maxSplits: 1)
-        XCTAssertEqual(outputParts.first, "fixture-ready")
-        XCTAssertEqual(outputParts.count, 2)
-        descendantPID = outputParts.last.flatMap { pid_t(String($0)) }
-        XCTAssertNotNil(descendantPID)
     }
 
     /**
@@ -134,99 +77,6 @@ final class AndBibleUITests: XCTestCase {
         )
 
         XCTAssertFalse(elementFrameIsUsable(overflowedMidpointFrame))
-    }
-
-    /**
-     Protects host-side `xcrun simctl` calls from inheriting simulator/XCTest user-directory values
-     or stale command-line-tool selections.
-     *
-     * Setup:
-     * - starts from an environment with explicit CI host user-directory overrides
-     * - includes stale XCTest-style home values that should not reach host subprocesses
-     * - models an inherited stale Xcode, a selected full Xcode, and selected CommandLineTools
-     *
-     * Expected result:
-     * - subprocesses inherit the selected Xcode developer directory
-     * - `HOME`, `TMPDIR`, user identity, and CoreFoundation user-home values match the host runner
-     * - simulator-capable selected Xcode paths beat stale inherited `DEVELOPER_DIR` values
-     * - CommandLineTools is skipped in favor of the default full Xcode when it lacks `simctl`
-     *
-     * Failure meaning:
-     * - UI-test fixture bootstrapping can fail before product behavior runs because `xcrun` cannot
-     *   resolve macOS user directories or CoreSimulator preferences from the XCTest process context
-     * - CI fixture bootstrap can run host tools against an Xcode that cannot drive the simulator
-     *
-     * Side effects: None.
-     */
-    func testHostProcessEnvironmentRestoresMacOSUserDirectories() {
-        let environment = [
-            "DEVELOPER_DIR": "/Applications/Xcode_16.4.app/Contents/Developer",
-            "PATH": "",
-            "HOME": "/var/empty",
-            "TMPDIR": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/T/",
-            "CFFIXED_USER_HOME": "/var/folders/zz/zyxvpxvq6csfxvn_n00001ym0000gn/",
-            "UITEST_HOST_HOME": "/Users/runner",
-            "UITEST_HOST_TMPDIR": "/var/folders/ci/T/",
-            "UITEST_HOST_USER": "runner",
-            "UITEST_HOST_LOGNAME": "runner",
-            "UITEST_HOST_CF_USER_TEXT_ENCODING": "501:0:0",
-        ]
-
-        let sanitizedEnvironment = hostProcessEnvironment(
-            from: environment,
-            selectedDeveloperDir: "/Applications/Xcode_26.3.app/Contents/Developer"
-        )
-
-        XCTAssertEqual(
-            sanitizedEnvironment["DEVELOPER_DIR"],
-            "/Applications/Xcode_26.3.app/Contents/Developer"
-        )
-        XCTAssertEqual(
-            sanitizedEnvironment["UITEST_DEVELOPER_DIR"],
-            sanitizedEnvironment["DEVELOPER_DIR"]
-        )
-        XCTAssertEqual(sanitizedEnvironment["HOME"], "/Users/runner")
-        XCTAssertEqual(sanitizedEnvironment["CFFIXED_USER_HOME"], "/Users/runner")
-        XCTAssertEqual(sanitizedEnvironment["TMPDIR"], "/var/folders/ci/T/")
-        XCTAssertEqual(sanitizedEnvironment["USER"], "runner")
-        XCTAssertEqual(sanitizedEnvironment["LOGNAME"], "runner")
-        XCTAssertEqual(sanitizedEnvironment["__CF_USER_TEXT_ENCODING"], "501:0:0")
-        XCTAssertEqual(sanitizedEnvironment["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
-
-        let staleDeveloperDir = "/Applications/Xcode_16.4.app/Contents/Developer"
-        let selectedDeveloperDir = "/Applications/Xcode_26.3.app/Contents/Developer"
-        let selectedXcodePaths = Set([
-            staleDeveloperDir,
-            "\(staleDeveloperDir)/usr/bin/simctl",
-            selectedDeveloperDir,
-            "\(selectedDeveloperDir)/usr/bin/simctl",
-        ])
-
-        let resolvedDeveloperDir = selectedDeveloperDirForHostProcess(
-            environment: [
-                "DEVELOPER_DIR": staleDeveloperDir,
-            ],
-            xcodeSelectDeveloperDir: { selectedDeveloperDir },
-            fileExists: { selectedXcodePaths.contains($0) }
-        )
-
-        XCTAssertEqual(resolvedDeveloperDir, selectedDeveloperDir)
-
-        let commandLineToolsDir = "/Library/Developer/CommandLineTools"
-        let defaultDeveloperDir = "/Applications/Xcode.app/Contents/Developer"
-        let commandLineToolsFallbackPaths = Set([
-            commandLineToolsDir,
-            defaultDeveloperDir,
-            "\(defaultDeveloperDir)/usr/bin/simctl",
-        ])
-
-        let fallbackDeveloperDir = selectedDeveloperDirForHostProcess(
-            environment: [:],
-            xcodeSelectDeveloperDir: { commandLineToolsDir },
-            fileExists: { commandLineToolsFallbackPaths.contains($0) }
-        )
-
-        XCTAssertEqual(fallbackDeveloperDir, defaultDeveloperDir)
     }
 
 }

@@ -1,4 +1,23 @@
 {
+  "schema_version": 1,
+  "provenance": {
+    "status": "historical-estimates",
+    "collected_through": "2026-06-29",
+    "sources": [
+      {
+        "kind": "github-actions-run",
+        "identifier": "27824737059",
+        "collected_on": "2026-06-19"
+      },
+      {
+        "kind": "focused-local-runs",
+        "identifier": "route-smoke measurements",
+        "collected_through": "2026-06-29"
+      }
+    ],
+    "limitations": "Historical estimates for shard balancing; not a current duration or runner-cost baseline."
+  },
+  "timings": {
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": 155.0,
   "AndBibleUITests/AndBibleUITests/testMarginMaxWidthEditorNarrowsRenderedReaderText": 150.0,
   "AndBibleUITests/AndBibleUITests/testFontSizeEditorGrowsRenderedReaderText": 150.0,
@@ -7,17 +26,15 @@
   "AndBibleUITests/AndBibleUITests/testDocumentChooserMatchesDownloadDocumentsActivityStructure": 105.0,
   "AndBibleUITests/AndBibleUITests/testDownloadsInstallKeepsRowOrderVisibleDuringActivity": 95.0,
   "AndBibleUITests/AndBibleUITests/testDownloadsRepositoryManagerOpensFromOverflow": 165.0,
-  "AndBibleUITests/AndBibleUITests/testHostProcessCaptureReturnsAfterChildExitWhenDescendantKeepsPipeOpen": 6.194,
-  "AndBibleUITests/AndBibleUITests/testHostProcessEnvironmentRestoresMacOSUserDirectories": 0.13,
   "AndBibleUITests/AndBibleUITests/testMyDocumentsScreenOpensFromReaderMenuAndOpensPage": 90.513,
   "AndBibleUITests/AndBibleUITests/testMyNotesPseudoDocumentOpensFromChooser": 93.771,
   "AndBibleUITests/AndBibleUITests/testPaneAllTextOptionsOpensWindowScopeAndWorkspaceParentLink": 105.0,
   "AndBibleUITests/AndBibleUITests/testReadingPlansRouteSelectAdvanceResetAndImportAffordanceFlow": 128.591,
-  "AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState": 165.0,
   "AndBibleUITests/AndBibleUITests/testSettingsBackupRestoreDatabaseWorkflowDestinationAndShareCancel": 133.4,
   "AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions": 127.486,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": 125.0,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": 125.0,
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": 160.0,
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": 0.874
+  }
 }

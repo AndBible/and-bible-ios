@@ -61,6 +61,13 @@
                   ReferencedContainer = "container:AndBible.xcodeproj">
                </BuildableReference>
             </MacroExpansion>
+            <SkippedTests>
+               <Test Identifier="AndBibleUITests/testPerformanceProcessLaunchToVisibleReader"/>
+               <Test Identifier="AndBibleUITests/testPerformanceWarmReturnToVisibleReader"/>
+               <Test Identifier="AndBibleUITests/testPerformanceOpenSearchCriteria"/>
+               <Test Identifier="AndBibleUITests/testPerformanceOpenBookmarks"/>
+               <Test Identifier="AndBibleUITests/testPerformanceOpenSettings"/>
+            </SkippedTests>
          </TestableReference>
       </Testables>
       <CommandLineArguments>

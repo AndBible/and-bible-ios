@@ -413,7 +413,8 @@ extension AndBibleUITests {
      service contracts. Unprovisioned simulator apps cannot launch with CloudKit entitlements, so
      this test explicitly substitutes a local SwiftData container only at that unavailable boundary.
      It still exercises the production toggle, mode-change handler, runtime construction, deferred
-     shell swap, persistence, state transition, and app-owned route-survival wiring.
+     shell swap, persistence, state transition, app-owned route-survival wiring, and the deferred
+     activation boundary that runs when the route is dismissed.
      */
     func testSyncSettingsICloudToggleDoesNotRequireRestart() {
         let app = makeApp()
@@ -447,6 +448,90 @@ extension AndBibleUITests {
         XCTAssertTrue(
             app.otherElements["appOwnedSyncSettingsRoute"].exists,
             "The live runtime apply must preserve the app-owned Sync Settings activity."
+        )
+
+        dismissSyncSettingsThroughExactRoles(in: app)
+
+        openSyncSettingsThroughExactRoles(in: app)
+        waitForSyncState(
+            [
+                "backend": "ICLOUD",
+                "icloudEnabled": "true",
+                "restartRequired": "false",
+            ],
+            in: app,
+            timeout: 20
+        )
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].exists,
+            "Sync Settings must reopen directly after the deferred runtime replacement."
+        )
+        dismissSyncSettingsThroughExactRoles(in: app)
+    }
+
+    /**
+     Dismisses Sync Settings through its retained accessibility roles.
+
+     - Parameter app: Running application whose app-owned Sync Settings route is visible.
+     - Side effects: Activates the exact Android Up button once.
+     - Failure modes: Records a failure if the exact screen, Up button, or reader drawer button does
+       not cross the expected visibility boundary.
+     */
+    private func dismissSyncSettingsThroughExactRoles(in app: XCUIApplication) {
+        let screen = app.otherElements["syncSettingsScreen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 10))
+        let backButton = app.buttons["syncSettingsTopAppBarBackButton"].firstMatch
+        XCTAssertTrue(waitForElementToBecomeHittable(backButton, timeout: 10))
+        backButton.tap()
+        waitForElementToDisappear(screen, timeout: 10)
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(
+                app.buttons["readerNavigationDrawerButton"].firstMatch,
+                timeout: 20
+            ),
+            "The deferred runtime replacement must restore the reader action surface."
+        )
+    }
+
+    /**
+     Reopens Sync Settings from the restored reader through exact production roles.
+
+     - Parameter app: Running application whose reader action surface is ready.
+     - Side effects: Opens the navigation drawer once, performs at most four reveal swipes on its
+       exact scroll surface, and activates Device synchronization once.
+     - Failure modes: Records a failure if the exact drawer, Sync action, screen, or backend row does
+       not become actionable.
+     */
+    private func openSyncSettingsThroughExactRoles(in app: XCUIApplication) {
+        let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
+        XCTAssertTrue(waitForElementToBecomeHittable(drawerButton, timeout: 20))
+        drawerButton.tap()
+
+        let drawer = app.scrollViews["readerNavigationDrawer"].firstMatch
+        guard drawer.waitForExistence(timeout: 10) else {
+            XCTFail("The exact reader navigation drawer ScrollView must appear after one open action.")
+            return
+        }
+        let syncAction = app.buttons["readerOpenSyncSettingsAction"].firstMatch
+        var syncIsHittable = waitForElementToBecomeHittable(syncAction, timeout: 1)
+        for _ in 0..<4 {
+            if syncIsHittable { break }
+            drawer.swipeUp()
+            syncIsHittable = waitForElementToBecomeHittable(syncAction, timeout: 1)
+        }
+        guard syncIsHittable else {
+            XCTFail("Device synchronization must become hittable after bounded drawer scrolling.")
+            return
+        }
+        syncAction.tap()
+
+        XCTAssertTrue(app.otherElements["syncSettingsScreen"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(
+                app.buttons["syncBackendPicker"].firstMatch,
+                timeout: 20
+            ),
+            "The reopened Sync Settings route must publish its exact backend action row."
         )
     }
 

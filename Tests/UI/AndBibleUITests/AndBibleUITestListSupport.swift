@@ -149,98 +149,89 @@ extension AndBibleUITests {
     /**
      Waits until bookmark-list dismissal leaves the reader chrome available again.
      *
-     * Reader-destination dismissal is proven by the compact reader state export reporting that the
-     * app-owned destination is closed. SwiftUI can leave stale bookmark-list
-     * accessibility nodes queryable briefly after a navigation pop, so this helper treats the reader
-     * state export as authoritative and uses bookmark-list sentinels only as a fallback when compact
-     * reader state is unavailable.
+     * Reader-destination dismissal is proven by usable primary reader controls and the absence of
+     * the app-owned Bookmark surface. SwiftUI can leave stale nodes queryable briefly after a pop,
+     * so existence alone is not a sufficient reader-shell boundary.
      *
      * - Parameters:
      *   - app: Running application whose bookmark list is being dismissed.
      *   - timeout: Maximum number of seconds to wait for reader chrome to return.
-     * - Returns: `true` when the reader shell is ready, or when fallback chrome is present and the
-     *   bookmark-list surface is no longer visible.
+     * - Returns: `true` when the reader shell is usable and Bookmark controls have left the viewport.
      * - Side effects:
-     *   - polls reader and bookmark-list accessibility state while SwiftUI transitions settle
+     *   - passively polls visible reader and bookmark-list controls while navigation settles
      * - Failure modes:
-     *   - returns `false` when neither reader state nor fallback chrome proves dismissal before timeout
+     *   - returns `false` when visible controls do not prove dismissal before timeout
      */
     func waitForBookmarkListDismissal(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let didDismiss = waitForUITestCondition(
+        waitForUITestCondition(
             "Wait for bookmark list dismissal",
             timeout: max(0, timeout)
         ) {
-            if self.waitForReaderShellReady(in: app, timeout: 0) {
-                return true
-            }
-            if self.readerDocumentHeaderStateValue(in: app) != nil,
-               !self.bookmarkListSurfaceIsVisible(in: app) {
-                return true
-            }
-            return false
+            self.waitForReaderShellReady(in: app, timeout: 0)
+                && !self.bookmarkListSurfaceIsVisible(in: app)
         }
-
-        if didDismiss || waitForReaderShellReady(in: app, timeout: 0.5) {
-            return true
-        }
-        let bookmarkListHidden = !bookmarkListSurfaceIsVisible(in: app)
-        return readerDocumentHeaderStateValue(in: app) != nil && bookmarkListHidden
     }
 
     /**
      Returns whether the bookmark list is still the active reader destination.
 
-     The reader state export is authoritative because SwiftUI can leave the bookmark-list state
-     export queryable after the destination has already navigated to a document. The app-owned
-     activity root and compact state export remain the fallback for hosts without reader state.
+     SwiftUI can leave route-marker nodes queryable after the destination has already navigated to
+     a document. The visible Back and label-filter controls therefore define the active surface.
 
      - Parameter app: Running application whose bookmark-list presentation is being inspected.
-     - Returns: `true` when the current reader state or fallback sentinels show the bookmark list.
+     - Returns: `true` when either visible Bookmark control occupies the application viewport.
      - Side effects: Reads accessibility state without activating controls.
-     - Failure modes: Falls back to sentinel existence when reader state is unavailable.
+     - Failure modes: Returns false while Bookmark controls are absent or outside the viewport.
      */
     func bookmarkListSurfaceIsVisible(in app: XCUIApplication) -> Bool {
-        if let readerState = readerRenderedContentStateValue(in: app),
-           readerState.contains("readerDestination=")
-        {
-            return readerState.contains("readerDestination=bookmarks")
+        let controls = [
+            app.buttons["bookmarkListAppBarBackButton"].firstMatch,
+            app.buttons["bookmarkListLabelFilterButton"].firstMatch,
+        ]
+        return controls.contains { control in
+            control.exists && elementHasUsableFrame(control) && app.frame.intersects(control.frame)
         }
-
-        return resolvedElement("bookmarkListScreen", in: app) != nil
-            || app.staticTexts["bookmarkListStateExport"].firstMatch.exists
     }
 
     /**
      Selects one label through Android's bookmark spinner and shared app-owned popup menu.
      *
      * - Parameters:
-     *   - labelToken: Sanitized label segment exported in the popup-row identifier and screen state.
+     *   - labelToken: Sanitized label segment exported in the popup-row identifier and selector value.
      *   - app: Running application whose bookmark list should change filters.
      *   - timeout: Maximum number of seconds to wait for the selected-label state update.
      * - Side effects:
      *   - opens the production spinner-style selector
      *   - chooses the matching shared `AndroidPopupMenuRow`
-     *   - waits for the bookmark-list screen state to settle
+     *   - passively waits for the popup to close and the visible selector to report the choice
      * - Failure modes:
-     *   - fails if the selector, popup option, or matching state transition is unavailable
+     *   - fails if the selector, popup option, or matching visible selection is unavailable
      */
     func selectBookmarkListLabelFilter(
         _ labelToken: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) {
-        tapElementReliably(
-            requireElement("bookmarkListLabelFilterButton", in: app, timeout: timeout),
+        let selector = requireElement("bookmarkListLabelFilterButton", in: app, timeout: timeout)
+        tapElementReliably(selector, timeout: timeout)
+        let option = requireElement(
+            "bookmarkListFilterOption::\(labelToken)",
+            in: app,
             timeout: timeout
         )
-        tapElementReliably(
-            requireElement("bookmarkListFilterOption::\(labelToken)", in: app, timeout: timeout),
-            timeout: timeout
+        let popup = requireElement("bookmarkListLabelFilterSurface", in: app, timeout: timeout)
+        tapElementReliably(option, timeout: timeout)
+        XCTAssertTrue(
+            waitForUITestCondition("Bookmark label selector reports the chosen label", timeout: timeout) {
+                !option.exists && !popup.exists && selector.exists
+                    && self.elementHasUsableFrame(selector)
+                    && selector.value as? String == labelToken
+            },
+            "Expected one label-filter selection to close its popup and display '\(labelToken)'."
         )
-        waitForBookmarkListState(containing: "selectedLabel=\(labelToken)", in: app, timeout: timeout)
     }
 
     /**
@@ -526,8 +517,7 @@ extension AndBibleUITests {
     @discardableResult
     func openHistory(in app: XCUIApplication) -> XCUIElement {
         tapReaderAction("readerOpenHistoryAction", in: app, timeout: 20)
-        waitForReaderRenderedContentState(containing: "historyDialog=presented", in: app, timeout: 10)
-        return requireElement("androidHistoryDialog", in: app, timeout: 10)
+        return requireElement("historyScreen", in: app, timeout: 10)
     }
 
     /**
@@ -543,7 +533,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenReadingProgressAction",
             destinationIdentifier: "readingProgressScreen",
-            readinessIdentifiers: [],
+            readinessIdentifiers: ["readingProgressAppBarBackButton"],
             in: app
         )
     }
@@ -717,8 +707,10 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens one reader-overflow destination and waits for either its root or one of its stable
-     ready controls.
+     Opens one reader destination with a single action and observes its visible ready controls.
+
+     A hidden root marker is an identity aid only; supplied readiness controls must be on screen
+     and hittable. A dropped action fails the observation instead of being repeated.
      *
      * - Parameters:
      *   - actionIdentifier: Accessibility identifier of the reader action button.
@@ -741,45 +733,21 @@ extension AndBibleUITests {
         in app: XCUIApplication,
         timeout: TimeInterval = 15
     ) -> XCUIElement {
+        tapReaderAction(actionIdentifier, in: app, timeout: timeout)
         let destination = unresolvedElement(destinationIdentifier, in: app)
-        let readinessCandidates = [destinationIdentifier] + readinessIdentifiers
-
-        for attempt in 1...2 {
-            tapReaderAction(actionIdentifier, in: app, timeout: timeout)
-
-            if waitForAnyElement(readinessCandidates, in: app, timeout: timeout) != nil {
-                if let resolvedDestination = resolvedElement(destinationIdentifier, in: app) {
-                    return resolvedDestination
-                }
-                if destination.exists || destination.waitForExistence(timeout: 1) {
-                    return destination
-                }
-                if let readyElement = waitForAnyElement(readinessIdentifiers, in: app, timeout: 1) {
-                    return readyElement
-                }
+        let identifiers = readinessIdentifiers.isEmpty ? [destinationIdentifier] : readinessIdentifiers
+        var visibleControl: XCUIElement?
+        let ready = waitForUITestCondition("Wait for visible \(destinationIdentifier) controls", timeout: timeout) {
+            // Resolve the currently existing typed candidate on every passive observation. An
+            // identifier ending in `Picker` can name a button-backed Android preference row, so
+            // retaining the first unresolved candidate would poll a segmented control forever.
+            visibleControl = identifiers.lazy.compactMap { self.resolvedElement($0, in: app) }.first {
+                self.elementHasUsableFrame($0) && app.frame.intersects($0.frame) && $0.isHittable
             }
-
-            if attempt == 1 {
-                if readerActionUsesNavigationDrawer(actionIdentifier) {
-                    if let dismissArea = resolvedElement("readerNavigationDrawerDismissArea", in: app) {
-                        tapElementReliably(dismissArea, timeout: min(5, timeout))
-                    }
-                } else if isReaderOverflowMenuLikelyVisible(in: app) {
-                    dismissReaderOverflowMenu(
-                        in: app,
-                        timeout: min(8, timeout),
-                        file: #filePath,
-                        line: #line
-                    )
-                }
-            }
+            return visibleControl != nil
         }
-
-        XCTAssertTrue(
-            destination.exists,
-            "Expected destination '\(destinationIdentifier)' to appear after activating '\(actionIdentifier)'."
-        )
-        return destination
+        XCTAssertTrue(ready, "Expected visible destination controls after one '\(actionIdentifier)' action.")
+        return destination.exists ? destination : visibleControl ?? destination
     }
 
     /**
@@ -975,10 +943,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenTextOptionsAction",
             destinationIdentifier: "textDisplaySettingsScreen",
-            readinessIdentifiers: [
-                "textDisplayFontFamilyButton",
-                "textDisplayJustifyTextToggleButton",
-            ],
+            readinessIdentifiers: ["textDisplayOpenGlobalSettingsButton"],
             in: app,
             timeout: 20
         )
@@ -991,29 +956,14 @@ extension AndBibleUITests {
      * - Side effects:
      *   - resolves the stable reader action surface and pushes the Settings screen onto the
      *     navigation stack
-     *   - dismisses the language restart alert only when it is already present after Settings loads
      * - Failure modes:
      *   - fails when the reader action surface or Settings action cannot be found
      *   - fails when the settings form never appears
      */
     func openSettings(in app: XCUIApplication) {
-        for attempt in 1...2 {
-            if !waitForReaderShellReady(in: app, timeout: 20) {
-                if attempt == 1 {
-                    continue
-                }
-                break
-            }
-
-            tapReaderAction("readerOpenSettingsAction", in: app, timeout: 20)
-            if waitForSettingsReady(in: app, timeout: 20) {
-                return
-            }
-            if attempt == 1 {
-                continue
-            }
-        }
-        XCTFail("Expected the Settings screen to become ready after opening it from the reader menu.")
+        tapReaderAction("readerOpenSettingsAction", in: app, timeout: 20)
+        XCTAssertTrue(waitForSettingsReady(in: app, timeout: 20),
+                      "Expected Settings after one reader menu action.")
     }
 
     /**
@@ -1416,6 +1366,8 @@ extension AndBibleUITests {
             "Reading Progress Settings"
         case "settingsLabelsLink":
             "Labels"
+        case "settingsListPreferenceMenu::toolbar_button_actions":
+            "Action for toolbar button press"
         case "discreteHelpButton":
             "Read this first!"
         case "discreteModeToggle":
@@ -1430,23 +1382,21 @@ extension AndBibleUITests {
     }
 
     /**
-     Opens one Settings destination and retries the row tap once when hosted simulators leave the
-     view on the Settings form after a no-op navigation attempt.
-     *
-     * - Parameters:
-     *   - linkIdentifier: Accessibility identifier of the Settings row to activate.
-     *   - destinationIdentifier: Accessibility identifier of the destination root screen.
-     *   - app: Running application under test.
-     *   - rowTimeout: Maximum number of seconds to wait for the Settings row to resolve.
-     *   - destinationTimeout: Maximum number of seconds to wait for the destination screen.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The resolved destination root element.
-     * - Side effects:
-     *   - opens Settings, taps the requested row, and retries the tap in place when the first
-     *     attempt leaves the UI on the Settings form
-     * - Failure modes:
-     *   - records an XCTest failure if the destination screen never appears after two attempts
+     Opens one Settings destination with a single row tap and observes its visible surface.
+
+     - Parameters:
+       - linkIdentifier: Settings row to reveal and activate.
+       - destinationIdentifier: Destination root accessibility identifier.
+       - readinessIdentifiers: Additional visible controls that establish destination readiness.
+       - app: Running application under test.
+       - rowTimeout: Maximum time to reveal the source row before the action.
+       - destinationTimeout: Maximum time to passively observe the destination after the action.
+       - file: XCTest failure attribution source.
+       - line: XCTest failure attribution line.
+     - Returns: An interactive destination control, or an interactive root when no controls are supplied.
+     - Side effects: Opens Settings, reveals the row, and taps that row once.
+     - Failure modes: Fails if the single action does not produce a visible destination. Diagnostic
+       state exports cannot stand in for the destination's actual controls.
      */
     func openSettingsDestination(
         linkIdentifier: String,
@@ -1459,52 +1409,29 @@ extension AndBibleUITests {
         line: UInt = #line
     ) -> XCUIElement {
         openSettings(in: app)
-        let destination = unresolvedElement(destinationIdentifier, in: app)
-        let readinessCandidates = [destinationIdentifier] + readinessIdentifiers
-
-        for attempt in 0..<2 {
-            tapSettingsElement(linkIdentifier, in: app, timeout: rowTimeout, file: file, line: line)
-            if waitForAnyElement(
-                readinessCandidates,
-                in: app,
-                timeout: destinationTimeout,
-                file: file,
-                line: line
-            ) != nil {
-                if let resolvedDestination = resolvedElement(destinationIdentifier, in: app) {
-                    return resolvedDestination
-                }
-                if destination.exists || destination.waitForExistence(timeout: 1) {
-                    return destination
-                }
-                if let readyElement = waitForAnyElement(
-                    readinessIdentifiers,
-                    in: app,
-                    timeout: 1,
-                    file: file,
-                    line: line
-                ) {
-                    return readyElement
-                }
-            }
-
-            if attempt == 0 {
-                let settingsStillVisible =
-                    waitForSettingsReady(in: app, timeout: 3) ||
-                    unresolvedElement("settingsForm", in: app).exists
-                if settingsStillVisible {
-                    continue
-                }
-            }
+        tapSettingsElement(linkIdentifier, in: app, timeout: rowTimeout, file: file, line: line)
+        let identifiers = (readinessIdentifiers.isEmpty ? [destinationIdentifier] : readinessIdentifiers).filter {
+            !isSemanticStateExportIdentifier($0)
         }
-
+        var visibleDestination: XCUIElement?
+        let ready = waitForUITestCondition("Visible Settings destination", timeout: destinationTimeout) {
+            for identifier in identifiers {
+                guard let element = self.resolvedElement(identifier, in: app),
+                      element.isHittable,
+                      self.elementHasUsableFrame(element),
+                      app.frame.intersects(element.frame) else { continue }
+                visibleDestination = element
+                return true
+            }
+            return false
+        }
         XCTAssertTrue(
-            destination.exists,
-            "Expected Settings destination '\(destinationIdentifier)' to appear after activating '\(linkIdentifier)'.",
+            ready,
+            "Expected Settings destination '\(destinationIdentifier)' after one '\(linkIdentifier)' action.",
             file: file,
             line: line
         )
-        return destination
+        return visibleDestination ?? unresolvedElement(destinationIdentifier, in: app)
     }
 
     /**
