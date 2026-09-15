@@ -392,7 +392,13 @@ def resolve_ui_test_application_product(
 
 
 def ui_test_host_environment_variables(environment: Mapping[str, str]) -> dict[str, str]:
-    """Return only the fixture inputs consumed inside the UI-test process."""
+    """Export allowlisted client inputs with paths anchored to the invoking host.
+
+    XCTest's working directory differs from the host checkout. Resolve relative
+    manifest and service paths before crossing that process boundary; preserve
+    non-path values and never forward unrelated host environment variables.
+    This reads no fixture contents and does not mutate the caller's mapping.
+    """
     fixture_keys = (
         "UITEST_FIXTURE_MANIFEST_PATH",
         "UITEST_SIMULATOR_ID",
@@ -400,11 +406,15 @@ def ui_test_host_environment_variables(environment: Mapping[str, str]) -> dict[s
         "UITEST_FIXTURE_SERVICE_DIRECTORY",
         "PERFORMANCE_LIBRARY_SCALE",
     )
-    return {
+    client_environment = {
         key: environment[key]
         for key in fixture_keys
         if environment.get(key)
     }
+    for key in ("UITEST_FIXTURE_MANIFEST_PATH", "UITEST_FIXTURE_SERVICE_DIRECTORY"):
+        if key in client_environment:
+            client_environment[key] = str(Path(client_environment[key]).absolute())
+    return client_environment
 
 
 def patch_xctestrun_ui_test_environment(

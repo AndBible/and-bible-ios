@@ -648,6 +648,14 @@ def verify_products(
 
 
 def _write_github_output(output_path: Path, destination: Path, xctestrun_path: Path) -> None:
+    """Append verified consumer paths usable from a different process directory.
+
+    Paths refer to the restoring checkout, never the producer's checkout. The
+    output file is appended without changing restored products; filesystem
+    errors propagate to the verification command.
+    """
+    destination = destination.absolute()
+    xctestrun_path = xctestrun_path.absolute()
     with output_path.open("a", encoding="utf-8") as output:
         output.write(f"xctestrun_path={xctestrun_path}\n")
         output.write(f"fixture_tool_path={destination / FIXTURE_RELATIVE_PATH}\n")

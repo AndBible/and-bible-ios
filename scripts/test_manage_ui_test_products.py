@@ -7,6 +7,8 @@ import json
 import os
 import plistlib
 import stat
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -17,6 +19,7 @@ from manage_ui_test_products import (
     ProductArchiveError,
     RUNNER_LOCAL_UI_TEST_ENVIRONMENT_KEYS,
     ToolchainProvenance,
+    _write_github_output,
     current_toolchain_provenance,
     inventory_payload,
     package_products,
@@ -34,6 +37,47 @@ PROVENANCE = ToolchainProvenance(
 
 class ManageUITestProductsTests(unittest.TestCase):
     """Exercises product discovery, provenance checks, and payload integrity."""
+
+    def test_exported_consumer_paths_work_outside_the_restoring_directory(self) -> None:
+        """A separate consumer can read every emitted path after relative restoration."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            destination = root / "consumer"
+            payloads = {
+                "xctestrun_path": ".derivedData/Build/Products/AndBible.xctestrun",
+                "fixture_tool_path": ".build/debug/UITestFixtureTool",
+                "fixture_manifest_path": ".ui-test/fixtures/ui_test_fixture_manifest.json",
+                "sword_fixture_path": ".ui-test/fixtures/sword",
+            }
+            for key, relative_path in payloads.items():
+                path = destination / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if key == "sword_fixture_path":
+                    path.mkdir()
+                    (path / "module.conf").write_text("fixture")
+                else:
+                    path.write_text(key)
+            output = root / "github-output"
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(destination)
+                _write_github_output(output, Path("."), Path(payloads["xctestrun_path"]))
+            finally:
+                os.chdir(previous_directory)
+            exported = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            script = (
+                "import json,pathlib,sys; values=json.loads(sys.argv[1]); "
+                "print(json.dumps({key:(pathlib.Path(value).is_dir() if key == "
+                "'sword_fixture_path' else pathlib.Path(value).read_text()) "
+                "for key,value in values.items()}))"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script, json.dumps(exported)],
+                cwd=root, capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(json.loads(result.stdout), {
+                key: True if key == "sword_fixture_path" else key for key in payloads
+            })
 
     @staticmethod
     def fake_architectures(_path: Path) -> list[str]:

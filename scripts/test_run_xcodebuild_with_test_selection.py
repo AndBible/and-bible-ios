@@ -574,6 +574,39 @@ class XctestrunEnvironmentTests(unittest.TestCase):
             },
         )
 
+    def test_relative_fixture_paths_survive_xctest_working_directory_change(self) -> None:
+        """The generated XCTest environment locates host fixtures from another directory."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = pathlib.Path(temporary_directory)
+            checkout = root / "checkout"
+            checkout.mkdir()
+            manifest = checkout / "manifest.json"
+            manifest.write_text('{"scenario":"reader"}')
+            service = checkout / "service"
+            service.mkdir()
+            (service / "ready").write_text("ready")
+            xctestrun = checkout / "AndBible.xctestrun"
+            with xctestrun.open("wb") as output:
+                plistlib.dump({"UI": {"IsUITestBundle": True}}, output)
+            with contextlib.chdir(checkout):
+                patch_xctestrun_ui_test_environment(str(xctestrun), {
+                    "UITEST_FIXTURE_MANIFEST_PATH": "manifest.json",
+                    "UITEST_FIXTURE_SERVICE_DIRECTORY": "service",
+                })
+            with xctestrun.open("rb") as source:
+                target = plistlib.load(source)["UI"]
+            for environment_key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
+                script = (
+                    "import json,pathlib,sys; e=json.loads(sys.argv[1]); "
+                    "print(pathlib.Path(e['UITEST_FIXTURE_MANIFEST_PATH']).read_text()); "
+                    "print((pathlib.Path(e['UITEST_FIXTURE_SERVICE_DIRECTORY'])/'ready').read_text())"
+                )
+                result = subprocess.run(
+                    [sys.executable, "-c", script, json.dumps(target[environment_key])],
+                    cwd=root, capture_output=True, text=True, check=True,
+                )
+                self.assertEqual(result.stdout.splitlines(), ['{"scenario":"reader"}', "ready"])
+
     def test_selection_requests_ui_tests_for_only_testing_ui_target(self) -> None:
         selection = """
         -only-testing:AndBibleUITests/AndBibleUITests/testSettingsApplicationShortcutsOpenGlobalTextOptions
