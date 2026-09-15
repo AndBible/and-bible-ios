@@ -142,9 +142,11 @@ private struct BibleReaderSQLiteCommentaryCapture: Sendable {
     let navigation: BibleReaderCommentaryNavigationAvailability
 }
 
-/** Bridge-ready commentary document retaining the module-coordinate chapter it renders. */
+/** Bridge-ready commentary document retaining selected state and its rendered annotation owner. */
 private struct BibleReaderPreparedCommentaryDocument: Sendable {
     let auxiliary: BibleReaderPreparedAuxiliaryResult
+    /// Exact effective key used to capture and reauthorize generic annotations.
+    let annotationOwnerKey: String
     let renderedChapter: Int
     let navigation: BibleReaderCommentaryNavigationAvailability
 }
@@ -402,7 +404,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   private var activeSQLiteCommentaryModule: BibleReaderSQLiteModuleHandle?
     private(set) var activeCommentaryModuleName: String?
     private(set) var currentCategory: DocumentCategory = .bible
-    /// Adjacent source-Bible block targets captured with the accepted commentary document.
+    /// Current and adjacent source-Bible targets captured with the accepted commentary document.
     private var commentaryNavigationAvailability = BibleReaderCommentaryNavigationAvailability.empty
     /// Pure planner for Android-style module/category PageManager transitions.
     private let moduleSwitchCoordinator = BibleReaderModuleSwitchCoordinator()
@@ -572,12 +574,22 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
      - Parameter ordinal: Ordinal reported by the source web client.
      - Returns: The source controller's current book/chapter/verse identity for the ordinal, or
        `nil` when the ordinal cannot be resolved in the current source book.
-     - Side effects: May temporarily move the active SWORD module cursor through `verseReference`.
+     - Side effects: Direct accepted commentary ordinals use their immutable captured source route;
+       other reader families may temporarily move the active SWORD cursor through `verseReference`.
      - Failure modes: Invalid ordinals or source books unsupported by the active module return
        `nil`.
      */
     func synchronizedVerseReference(ordinal: Int) -> VerseKeyReference? {
-        verseReference(book: currentBook, ordinal: ordinal)
+        if committedRenderState.identity?.category == .commentary,
+           let target = commentaryNavigationAvailability.target(matchingSourceOrdinal: ordinal) {
+            return VerseKeyReference(
+                osisBookId: target.osisBookID,
+                chapter: target.chapter,
+                verse: target.verse,
+                ordinal: target.sourceOrdinal
+            )
+        }
+        return verseReference(book: currentBook, ordinal: ordinal)
     }
 
     /**
@@ -1121,9 +1133,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         documentKind: ReaderRenderedDocumentKind = .standard
     ) {
         myDocumentCoordinator.clearActivePageUnless(category: category, moduleName: moduleName)
-        if category != .commentary {
-            commentaryNavigationAvailability = .empty
-        }
+        commentaryNavigationAvailability = .empty
         if !preserveCompositeRebuildRequest {
             activeCompositeRebuildRequest = nil
         }
@@ -1750,7 +1760,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     BibleReaderNavigationVerseReference(
                         chapter: $0.chapter,
                         verse: $0.verse,
-                        osisBookId: $0.osisBookId
+                        osisBookId: $0.osisBookId,
+                        ordinal: $0.ordinal
                     )
                 }
             },
@@ -5248,8 +5259,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     let block = blockResolver.resolveBlock(containing: selected)
                     guard let fragment = block.fragment,
                           fragment.hasRenderableContent else { return nil }
-                    let mapToSource: (SwordCommentaryVerseReference?)
-                        -> BibleReaderCommentaryNavigationTarget? = { target in
+                    let renderedKey = fragment.annotateRef ?? fragment.key
+                    let renderedReference = try? walker.reference(forKey: renderedKey)
+                    let mapToSource: (
+                        SwordCommentaryVerseReference?,
+                        String?
+                    ) -> BibleReaderCommentaryNavigationTarget? = { target, renderedKey in
                         guard let target else { return nil }
                         return BibleReaderCommentaryVersificationRouter.resolve(
                             reference: .init(
@@ -5260,20 +5275,29 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             from: commentaryVersification,
                             to: sourceVersification,
                             resolve: { candidate in
+                                let sourceOrdinal: Int
                                 if let sourceBibleModule {
-                                    guard sourceBibleModule.verseOrdinal(
+                                    guard let ordinal = sourceBibleModule.verseOrdinal(
                                         osisBookId: candidate.osisBookId,
                                         chapter: candidate.chapter,
                                         verse: candidate.verse
-                                    ) != nil else { return nil }
+                                    ) else { return nil }
+                                    sourceOrdinal = ordinal
                                 } else if sourceSQLiteBible != nil {
-                                    guard SQLiteReaderNavigationResolver.coordinate(
+                                    guard let coordinate = SQLiteReaderNavigationResolver.coordinate(
                                         osisBookId: candidate.osisBookId,
                                         chapter: candidate.chapter,
                                         verse: candidate.verse
-                                    ) != nil else { return nil }
+                                    ) else { return nil }
+                                    sourceOrdinal = coordinate.ordinal
+                                } else {
+                                    return nil
                                 }
-                                return BibleReaderCommentaryNavigationTarget(candidate)
+                                return BibleReaderCommentaryNavigationTarget(
+                                    key: renderedKey ?? target.osisRef,
+                                    sourceReference: candidate,
+                                    sourceOrdinal: sourceOrdinal
+                                )
                             }
                         )
                     }
@@ -5287,11 +5311,17 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             name: block.range.name
                         ),
                         navigation: BibleReaderCommentaryNavigationAvailability(
+                            current: mapToSource(
+                                renderedReference,
+                                renderedKey
+                            ),
                             previous: mapToSource(
-                                blockResolver.previousBlockStart(before: block.range.start)
+                                blockResolver.previousBlockStart(before: block.range.start),
+                                nil
                             ),
                             next: mapToSource(
-                                blockResolver.nextBlockStart(after: block.range.end)
+                                blockResolver.nextBlockStart(after: block.range.end),
+                                nil
                             )
                         )
                     )
@@ -5357,6 +5387,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                             ),
                         ]
                     ),
+                    annotationOwnerKey: capture.fragment.annotateRef ?? capture.fragment.key,
                     renderedChapter: capture.renderedChapter,
                     navigation: capture.navigation
                 )
@@ -5459,27 +5490,39 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           }) else { return nil }
           do {
             let navigator = SQLiteCommentaryBlockNavigator(module: module)
-            let mapToSource: (JSwordKJVAVerseReference?)
-              -> BibleReaderCommentaryNavigationTarget? = { target in
+            let mapToSource: (
+              JSwordKJVAVerseReference?,
+              String?
+            ) -> BibleReaderCommentaryNavigationTarget? = { target, renderedKey in
               guard let target else { return nil }
               return SQLiteCommentaryReferenceRouter.sourceReference(
                 for: target,
                 destinationVersification: sourceVersification,
                 resolve: { candidate in
+                  let sourceOrdinal: Int
                   if let sourceSwordBible {
-                    guard sourceSwordBible.verseOrdinal(
+                    guard let ordinal = sourceSwordBible.verseOrdinal(
                       osisBookId: candidate.osisBookId,
                       chapter: candidate.chapter,
                       verse: candidate.verse
-                    ) != nil else { return nil }
+                    ) else { return nil }
+                    sourceOrdinal = ordinal
                   } else if sourceSQLiteBible != nil {
-                    guard SQLiteReaderNavigationResolver.coordinate(
+                    guard let coordinate = SQLiteReaderNavigationResolver.coordinate(
                       osisBookId: candidate.osisBookId,
                       chapter: candidate.chapter,
                       verse: candidate.verse
-                    ) != nil else { return nil }
+                    ) else { return nil }
+                    sourceOrdinal = coordinate.ordinal
+                  } else {
+                    return nil
                   }
-                  return BibleReaderCommentaryNavigationTarget(candidate)
+                  return BibleReaderCommentaryNavigationTarget(
+                    key: renderedKey
+                      ?? "\(target.osisId).\(target.chapter).\(target.verse)",
+                    sourceReference: candidate,
+                    sourceOrdinal: sourceOrdinal
+                  )
                 }
               )
             }
@@ -5494,6 +5537,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               document: document,
               module: module
             )
+            let renderedKey = fragment.renderedDocumentOsisReference
+            let renderedCoordinate = SQLiteReaderNavigationResolver.commentaryCoordinate(
+              for: renderedKey
+            )
+            let renderedReference = renderedCoordinate.map {
+              JSwordKJVAVerseReference(
+                osisId: $0.osisBookId,
+                chapter: $0.chapter,
+                verse: $0.verse,
+                ordinal: $0.ordinal
+              )
+            }
             var dependencies = [dependency]
             if let sourceSQLiteBible {
               dependencies.append(.sqlite(
@@ -5514,13 +5569,18 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
               renderedChapter: selected.chapter,
               sourceDependencies: dependencies,
               navigation: BibleReaderCommentaryNavigationAvailability(
+                current: mapToSource(
+                  renderedReference,
+                  renderedKey
+                ),
                 previous: mapToSource(
                   navigator.adjacentBlockStart(
                     osisId: selected.osisId,
                     chapter: selected.chapter,
                     verse: selected.verse,
                     forward: false
-                  )
+                  ),
+                  nil
                 ),
                 next: mapToSource(
                   navigator.adjacentBlockStart(
@@ -5528,7 +5588,8 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
                     chapter: selected.chapter,
                     verse: selected.verse,
                     forward: true
-                  )
+                  ),
+                  nil
                 )
               )
             )
@@ -5547,7 +5608,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
           -> BibleReaderGenericDocumentOwnerSnapshot? in
         self?.genericDocumentOwnerSnapshot(
           bookInitials: initials,
-          key: capture.fragment.annotateReference ?? capture.fragment.key
+          key: capture.fragment.renderedDocumentOsisReference
         )
       },
       enrichSource: {
@@ -5577,6 +5638,7 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             ownerIdentity: owner.identity,
             sourceDependencies: capture.sourceDependencies
           ),
+          annotationOwnerKey: capture.fragment.renderedDocumentOsisReference,
           renderedChapter: capture.renderedChapter,
           navigation: capture.navigation
         )
@@ -5612,12 +5674,12 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
             isCurrent: { [weak self] prepared in
                 guard let self,
                       case .document(
-                        _, let initials, let key, _, _, let ownerIdentity, let dependencies
+                        _, let initials, _, _, _, let ownerIdentity, let dependencies
                       ) = prepared.auxiliary else { return false }
                 return self.sourceDependenciesAreCurrent(dependencies)
                     && self.genericDocumentOwnerSnapshot(
                         bookInitials: initials,
-                        key: key
+                        key: prepared.annotationOwnerKey
                     ).identity == ownerIdentity
             },
             queueBridgePrerequisites: { [weak self] _ in
@@ -8593,7 +8655,9 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
          or an empty value when the web client can only report ordinal telemetry.
 
      Side effects:
-     - updates scroll-restoration state and persists chapter/book changes to the page manager
+     - persists direct commentary anchors in their document-local ordinal space and applies only
+       source references captured with an accepted commentary key transition
+     - updates Bible-family scroll-restoration state and persists chapter/book changes to the page manager
      - notifies the window manager for synchronized scrolling only when this pane is already active
        from explicit user interaction, the callback did not acknowledge sync-origin feedback, and
        the visible Bible position actually changed
@@ -8601,6 +8665,10 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
   public func bridge(
     _ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool
   ) {
+    if consumeVisibleCommentaryPosition(ordinal: ordinal, key: key) {
+      return
+    }
+
         let previousBook = currentBook
         let previousChapter = currentChapter
         let previousVerse = currentVerse
@@ -8627,6 +8695,73 @@ public final class BibleReaderController: NSObject, BibleBridgeDelegate {
         if shouldBroadcastSynchronizedScroll, let window = activeWindow {
             windowManagerRef?.notifyVerseChanged(sourceWindow: window, ordinal: ordinal, key: key)
         }
+    }
+
+    /**
+     Consumes visible-position telemetry for the accepted commentary document family.
+
+     Android treats an `OsisDocument` commentary ordinal as a document-local anchor and changes the
+     shared Bible position only when the visible commentary key changes. Direct SWORD and SQLite
+     capture therefore retains the accepted document's exact rendered-key/source-reference pair
+     off-main. Previous and next targets belong to toolbar navigation and cannot authorize a scroll
+     callback because iOS does not append commentary documents through Vue infinite scroll. This
+     callback never resolves a local BVA ordinal through the active Bible module. Synthetic/error
+     commentary documents are consumed without mutation because Android does not treat them as
+     `OsisDocument`.
+
+     - Parameters:
+       - ordinal: Nonnegative local BVA anchor reported by the accepted Vue document.
+       - key: Rendered commentary OSIS key reported with the anchor.
+     - Returns: `true` for every accepted commentary family so Bible ordinal routing stops.
+     - Side effects: A direct, exact-owner route updates the commentary anchor and applies the
+       rendered key's captured Bible position without history/reload; a changed shared position may
+       broadcast synchronized state.
+     - Failure modes: Missing PageManager state, negative anchors, unknown keys, stale selected
+       owners, and synthetic source provenance are consumed without durable or Bible mutation.
+     */
+    private func consumeVisibleCommentaryPosition(ordinal: Int, key: String) -> Bool {
+        guard let identity = committedRenderState.identity,
+              identity.category == .commentary else { return false }
+
+        guard let target = commentaryNavigationAvailability.target(matchingRenderedKey: key) else {
+            _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+            return true
+        }
+        let acknowledgedSynchronizedScroll = synchronizedScrollCoordinator
+            .acknowledgeVisibleOrdinal(target.sourceOrdinal)
+        guard ordinal >= 0,
+              renderedDocumentKind == .standard,
+              let moduleName = identity.moduleName,
+              committedRenderState.sourceProvenance.containsExactModule(moduleName),
+              let pageManager = activeWindow?.pageManager,
+              pageManager.currentCategoryName == DocumentCategory.commentary.pageManagerKey,
+              let durableModuleName = pageManager.commentaryDocument,
+              SwordJavaStringIdentity.equals(durableModuleName, moduleName) else {
+            return true
+        }
+
+        let anchorChanged = pageManager.commentaryAnchorOrdinal != ordinal
+        if anchorChanged {
+            pageManager.commentaryAnchorOrdinal = ordinal
+        }
+        let visibleVerseChanged = navigationCoordinator.updateVisiblePosition(
+            reference: target.navigationReference,
+            context: makeNavigationContext()
+        )
+        if anchorChanged && !visibleVerseChanged {
+            persistVisibleVerseState(immediate: false)
+        }
+
+        guard !acknowledgedSynchronizedScroll,
+              visibleVerseChanged,
+              computeIsActiveWindow(),
+              let window = activeWindow else { return true }
+        windowManagerRef?.notifyVerseChanged(
+            sourceWindow: window,
+            ordinal: target.sourceOrdinal,
+            key: target.sourceKey
+        )
+        return true
     }
 
     /**

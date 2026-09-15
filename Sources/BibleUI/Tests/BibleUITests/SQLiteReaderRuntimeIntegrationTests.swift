@@ -535,17 +535,36 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     /**
      Verifies covering commentary and exact dictionary content across both SQLite families.
 
-     - Setup: Selects Genesis 1:2 commentary and exact dictionary keys in MyBible and MySword.
-     - Expected result: Covering rows render with source metadata; chooser arrays preserve source
-       order and spelling; successful keys persist and restore; a case mismatch emits deterministic
-       no-content without replacing the retained exact key.
-     - Failure meaning: Runtime lookup uses exact-start commentary only, snaps dictionary keys, or
-       loses auxiliary selections across restore.
+     - Setup: Selects Genesis 1:2 commentary and exact dictionary keys in MyBible and MySword. The
+       MyBible covering row includes a nested `Gen.1.1` annotation that is not the direct annotation
+       owned by Android's `OsisFragment` document contract.
+     - Expected result: Covering rows render with source metadata; the emitted document keeps the
+       selected `Gen.1.2` identity while its local BVA persists as the commentary anchor, without a
+       document reload. Chooser arrays preserve source order and spelling; successful keys persist
+       and restore; a case mismatch emits deterministic no-content without replacing the retained
+       exact key.
+     - Failure meaning: Runtime lookup uses exact-start commentary only, reinterprets a local BVA as
+       a Bible ordinal, authorizes a nested non-document annotation, snaps dictionary keys, or loses
+       auxiliary selections across restore.
      */
     @MainActor
     func testSQLiteCommentaryAndDictionarySelectRenderPersistAndRestoreExactly() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
+        let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/commentary.SQLite3")
+        try executeSQLite(
+            """
+            UPDATE commentaries
+            SET text = '<div annotateRef="Gen.1.1"><p>Range commentary</p></div>'
+            WHERE book_number = 10
+              AND chapter_number_from = 1
+              AND verse_number_from = 1
+              AND chapter_number_to = 1
+              AND verse_number_to = 2
+            """,
+            at: commentaryURL
+        )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -554,8 +573,8 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
 
         for (initials, expectedText) in [
-            ("MyBible-commentary", "Range commentary"),
             ("MySword-sample_cmt", "Range"),
+            ("MyBible-commentary", "Range commentary"),
         ] {
             let baseline = scripts().count
             controller.switchCommentaryDocument(to: initials)
@@ -576,6 +595,43 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             XCTAssertFalse((fragment["language"] as? String ?? "").isEmpty)
             XCTAssertTrue(["ltr", "rtl"].contains(fragment["direction"] as? String ?? ""))
             XCTAssertEqual(pageManager.commentaryDocument, initials)
+            if initials == "MyBible-commentary" {
+                XCTAssertTrue(
+                    (fragment["xml"] as? String)?.contains("annotateRef=\"Gen.1.1\"") == true
+                )
+                XCTAssertEqual(payload["key"] as? String, "Gen.1.2")
+                XCTAssertEqual(payload["osisRef"] as? String, "Gen.1.2")
+                let localRange = try XCTUnwrap(payload["ordinalRange"] as? [Int])
+                XCTAssertEqual(localRange.count, 2)
+                let localAnchor = try XCTUnwrap(localRange.last)
+                let selectedSourceOrdinal = try XCTUnwrap(
+                    manager.module(named: controller.activeModuleName)?.verseOrdinal(
+                        osisBookId: "Gen",
+                        chapter: 1,
+                        verse: 2
+                    )
+                )
+                XCTAssertNotEqual(localAnchor, selectedSourceOrdinal)
+                XCTAssertEqual(
+                    controller.synchronizedVerseReference(ordinal: selectedSourceOrdinal)?.verse,
+                    2
+                )
+                let scriptBoundary = scripts().count
+                let persisted = expectation(description: "SQLite commentary anchor persisted")
+                controller.onPersistState = { persisted.fulfill() }
+                controller.bridge(
+                    bridge,
+                    didScrollToOrdinal: localAnchor,
+                    key: try XCTUnwrap(payload["osisRef"] as? String),
+                    atChapterTop: false
+                )
+                XCTAssertEqual(controller.currentVerse, 2)
+                XCTAssertEqual(pageManager.bibleVerseNo, 2)
+                XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+                XCTAssertEqual(scripts().count, scriptBoundary)
+                await fulfillment(of: [persisted], timeout: 2)
+                controller.onPersistState = nil
+            }
         }
 
         controller.switchCommentaryDocument(to: "MyBible-commentary")

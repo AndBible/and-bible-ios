@@ -6571,7 +6571,6 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
-        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
         self.retainReaderWindowGraph(sourceWindow)
         sourceController.activeWindow = sourceWindow
@@ -7434,7 +7433,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 BibleReaderNavigationVerseReference(
                     chapter: ordinal / 100,
                     verse: ordinal % 100,
-                    osisBookId: osisId(for: bookName)
+                    osisBookId: osisId(for: bookName),
+                    ordinal: ordinal
                 )
             },
             recordHistory: { bookName, chapter, verse in
@@ -7575,6 +7575,64 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             ),
             .ordinal(205)
         )
+    }
+
+    /**
+     Protects the captured-reference path used by commentary key transitions.
+
+     The source-qualified reference has already been resolved off-main. Applying it must update the
+     visible Bible and PageManager position with the captured ordinal, without creating history,
+     reloading Vue content, or asking the ordinal resolver to run again.
+     */
+    func testReaderNavigationCoordinatorAppliesCapturedVisibleReferenceWithoutHistoryOrReload() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let base = makeNavigationCoordinatorContext(state: state, pageManager: pageManager)
+        var ordinalResolutionCount = 0
+        let context = BibleReaderNavigationContext(
+            currentPosition: base.currentPosition,
+            setCurrentPosition: base.setCurrentPosition,
+            pageManager: base.pageManager,
+            bookList: base.bookList,
+            isShowingAndroidMultiDocument: base.isShowingAndroidMultiDocument,
+            clientReady: base.clientReady,
+            chapterCount: base.chapterCount,
+            nextBook: base.nextBook,
+            previousBook: base.previousBook,
+            bookNameForOsisId: base.bookNameForOsisId,
+            ordinalForVerse: base.ordinalForVerse,
+            verseReference: { _, _ in
+                ordinalResolutionCount += 1
+                return nil
+            },
+            recordHistory: base.recordHistory,
+            persistState: base.persistState,
+            scrollToLoadedPosition: base.scrollToLoadedPosition,
+            loadCurrentContent: base.loadCurrentContent
+        )
+
+        let changed = coordinator.updateVisiblePosition(
+            reference: BibleReaderNavigationVerseReference(
+                chapter: 2,
+                verse: 5,
+                osisBookId: "Exod",
+                ordinal: 205
+            ),
+            context: context
+        )
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Exodus", chapter: 2, verse: 5))
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.history, [])
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertEqual(ordinalResolutionCount, 0)
     }
 
     /**

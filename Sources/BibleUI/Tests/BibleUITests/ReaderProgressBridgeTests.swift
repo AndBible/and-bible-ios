@@ -462,6 +462,9 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         controller.settingsStore = settingsStore
         let window = Window()
         let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
@@ -502,6 +505,22 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(controller.isCurrentPageSpeakable)
         XCTAssertFalse(controller.isCurrentPageSyncable)
         XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+
+        let persisted = expectation(description: "memorize scroll does not persist")
+        persisted.isInverted = true
+        controller.onPersistState = { persisted.fulfill() }
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: ordinal + 2,
+            key: "Gen.1.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        await fulfillment(of: [persisted], timeout: 0.45)
     }
 
     /**

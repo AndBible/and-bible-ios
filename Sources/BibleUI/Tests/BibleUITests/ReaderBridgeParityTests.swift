@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
@@ -1236,6 +1237,21 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager,
             documentPreparationCoordinator: coordinator
         )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        window.isSynchronized = true
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        let container = try makeWorkspaceModelContainer()
+        let windowManager = WindowManager(
+            workspaceStore: WorkspaceStore(modelContext: ModelContext(container))
+        )
+        windowManager.activeWindow = window
+        controller.windowManagerRef = windowManager
         controller.bridgeDidSetClientReady(bridge)
         let baseline = scripts().count
 
@@ -1264,10 +1280,62 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse((range["name"] as? String)?.isEmpty ?? true)
         XCTAssertEqual(document["ordinalRange"] as? [Int], [0, 6])
         XCTAssertEqual(fragment["ordinalRange"] as? [Int], [4, 4])
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .commentary)
+        XCTAssertEqual(controller.committedRenderState.sourceProvenance, .swordModules(["STRUCTCOMM"]))
+        let synchronizedReference = try XCTUnwrap(
+            controller.synchronizedVerseReference(ordinal: 4)
+        )
+        XCTAssertEqual(synchronizedReference.osisBookId, "Gen")
+        XCTAssertEqual(synchronizedReference.chapter, 1)
+        XCTAssertEqual(synchronizedReference.verse, 1)
         XCTAssertTrue(xml.contains("<BVA"))
         XCTAssertFalse(xml.contains("No content for selected verse"))
         assertAndroidSetupPayload(setup)
         XCTAssertTrue(controller.hasNext)
+
+        controller.bridge(bridge, didScrollToOrdinal: 6, key: "Gen.1.2", atChapterTop: false)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertNil(pageManager.commentaryAnchorOrdinal)
+
+        let synchronizedScrollBoundary = scripts().count
+        controller.scrollToSynchronizedVerse(
+            osisBookId: synchronizedReference.osisBookId,
+            chapter: synchronizedReference.chapter,
+            verse: synchronizedReference.verse
+        )
+        let synchronizedScrollPayload = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: Array(scripts().dropFirst(synchronizedScrollBoundary)),
+                event: "scroll_to_verse"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(synchronizedScrollPayload["ordinal"] as? Int, 4)
+        let reverseBroadcast = expectation(description: "commentary sync feedback stays passive")
+        reverseBroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _, _ in reverseBroadcast.fulfill() }
+
+        var persistCount = 0
+        let anchorPersisted = expectation(description: "commentary anchor persisted once")
+        controller.onPersistState = {
+            persistCount += 1
+            anchorPersisted.fulfill()
+        }
+        controller.bridge(bridge, didScrollToOrdinal: 6, key: "Gen.1.1", atChapterTop: false)
+        controller.bridge(bridge, didScrollToOrdinal: 6, key: "Gen.1.1", atChapterTop: false)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 6)
+        await fulfillment(of: [anchorPersisted], timeout: 2)
+        await fulfillment(of: [reverseBroadcast], timeout: 0.35)
+        XCTAssertEqual(persistCount, 1)
+
+        let duplicatePersist = expectation(description: "unchanged commentary anchor stays quiet")
+        duplicatePersist.isInverted = true
+        controller.onPersistState = { duplicatePersist.fulfill() }
+        controller.bridge(bridge, didScrollToOrdinal: 6, key: "Gen.1.1", atChapterTop: false)
+        await fulfillment(of: [duplicatePersist], timeout: 0.45)
+        controller.onPersistState = nil
 
         let acceptedEvaluator = bridge.javaScriptEvaluationObserver
         bridge.javaScriptEvaluationObserver = nil
@@ -1293,6 +1361,199 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let nextRange = try XCTUnwrap(nextDocument["commentaryRange"] as? [String: Any])
         XCTAssertEqual(controller.currentVerse, 2)
         XCTAssertEqual(nextRange["startOsisRef"] as? String, "Gen.1.2")
+
+        controller.activeWindow = nil
+        controller.bridge(bridge, didScrollToOrdinal: 4, key: "Gen.1.2", atChapterTop: false)
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 6)
+    }
+
+    /**
+     Verifies a real direct commentary annotation moves the shared source position once.
+
+     - Setup: Installs a RawFiles commentary whose Genesis 1:1 and 1:2 indexes point to one source
+       file directly annotated as `Gen.1.1`, bookmarks only that rendered owner key, starts the
+       Bible at verse two, and accepts that exact commentary payload.
+     - Expected result: The accepted payload exposes selected key `Gen.1.2` and document `osisRef`
+       `Gen.1.1`; its annotation rows come from that rendered key while the selected key stays
+       `Gen.1.2`; one Vue callback persists its local BVA anchor, moves Bible/PageManager state to
+       verse one without a reload, and broadcasts the captured source ordinal/key once.
+     - Failure meaning: Scroll authorization uses an unrendered neighbor, annotations are
+       reauthorized against the selected rather than rendered key, the local BVA is resolved
+       through the Bible module, the commentary anchor is dropped, content reloads, or Android's
+       changed-key synchronization behavior is lost.
+     */
+    @MainActor
+    func testCommentaryDirectRenderedAnnotationMovesSharedSourceWithoutReload() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedRawFilesCoveringCommentary(named: "RANGECOMM", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let bookmarkContainer = try makeBookmarkListModelContainer()
+        let bookmarkContext = ModelContext(bookmarkContainer)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: bookmarkContext))
+        let renderedOwnerBookmark = bookmarkService.addGenericBookmark(
+            bookInitials: "RANGECOMM",
+            key: "Gen.1.1",
+            startOrdinal: 4,
+            endOrdinal: 4
+        )
+        try bookmarkContext.save()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            bookmarkService: bookmarkService,
+            swordManagerOverride: manager
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 2
+        window.pageManager = pageManager
+        window.isSynchronized = true
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        let container = try makeWorkspaceModelContainer()
+        let windowManager = WindowManager(
+            workspaceStore: WorkspaceStore(modelContext: ModelContext(container))
+        )
+        windowManager.activeWindow = window
+        controller.windowManagerRef = windowManager
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        controller.bridgeDidSetClientReady(bridge)
+        let baseline = scripts().count
+
+        controller.switchCommentaryDocument(to: "RANGECOMM")
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["bookInitials"] as? String, "RANGECOMM")
+        XCTAssertEqual(document["key"] as? String, "Gen.1.2")
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(document["annotateRef"] as? String, "Gen.1.1")
+        let genericBookmarks = try XCTUnwrap(
+            document["genericBookmarks"] as? [[String: Any]]
+        )
+        XCTAssertEqual(genericBookmarks.map { $0["id"] as? String }, [
+            renderedOwnerBookmark.id.uuidString,
+        ])
+        XCTAssertEqual(genericBookmarks.first?["key"] as? String, "Gen.1.1")
+        let localRange = try XCTUnwrap(document["ordinalRange"] as? [Int])
+        XCTAssertEqual(localRange.count, 2)
+        let localAnchor = try XCTUnwrap(localRange.last)
+        let renderedSourceOrdinal = try XCTUnwrap(
+            manager.module(named: controller.activeModuleName)?.verseOrdinal(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: 1
+            )
+        )
+        XCTAssertNotEqual(localAnchor, renderedSourceOrdinal)
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 2)
+
+        let persisted = expectation(description: "direct commentary source and anchor persist once")
+        var persistCount = 0
+        controller.onPersistState = {
+            persistCount += 1
+            persisted.fulfill()
+        }
+        let broadcast = expectation(description: "direct commentary source broadcasts once")
+        var broadcastCount = 0
+        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+            broadcastCount += 1
+            XCTAssertEqual(sourceWindow.id, window.id)
+            XCTAssertEqual(sourceOrdinal, renderedSourceOrdinal)
+            XCTAssertEqual(key, "Gen.1.1")
+            broadcast.fulfill()
+        }
+        let scriptBoundary = scripts().count
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: try XCTUnwrap(document["osisRef"] as? String),
+            atChapterTop: false
+        )
+
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+        XCTAssertEqual(scripts().count, scriptBoundary)
+        await fulfillment(of: [persisted, broadcast], timeout: 2)
+        XCTAssertEqual(persistCount, 1)
+        XCTAssertEqual(broadcastCount, 1)
+    }
+
+    /**
+     Rejects an old visible commentary callback after a newer durable owner is selected.
+
+     Bridge rejection deliberately leaves the old document accepted while the public switch path
+     commits the new PageManager commentary module. The old DOM may still report its key, but it
+     cannot overwrite the new owner's anchor or source Bible position.
+     */
+    @MainActor
+    func testCommentaryScrollRejectsOldAcceptedDocumentAfterSelectedOwnerChanges() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCompressedCommentaryAlias(named: "STRUCTA", in: modulePath)
+        try seedCompressedCommentaryAlias(named: "STRUCTB", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let rejectedPublication = expectation(description: "new commentary bridge rejected")
+        let observeRejectedPublication = CommentaryPublicationGate()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .publication,
+                      key.family.rawValue == "sword-commentary",
+                      observeRejectedPublication.consumeIfOpen() else { return }
+                rejectedPublication.fulfill()
+            }
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        var baseline = scripts().count
+        controller.switchCommentaryDocument(to: "STRUCTA")
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: baseline)
+        let acceptedBeforeSwitch = controller.committedRenderState
+
+        bridge.javaScriptEvaluationObserver = nil
+        baseline = scripts().count
+        observeRejectedPublication.open()
+        controller.switchCommentaryDocument(to: "STRUCTB")
+        await fulfillment(of: [rejectedPublication], timeout: 3)
+        XCTAssertEqual(scripts().count, baseline)
+        XCTAssertEqual(pageManager.commentaryDocument, "STRUCTB")
+        XCTAssertEqual(controller.committedRenderState, acceptedBeforeSwitch)
+
+        let persisted = expectation(description: "old commentary callback does not persist")
+        persisted.isInverted = true
+        controller.onPersistState = { persisted.fulfill() }
+        controller.bridge(bridge, didScrollToOrdinal: 6, key: "Gen.1.1", atChapterTop: false)
+        XCTAssertNil(pageManager.commentaryAnchorOrdinal)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        await fulfillment(of: [persisted], timeout: 0.45)
     }
 
     /**
@@ -1625,6 +1886,65 @@ private func seedCompressedCommentaryAlias(named moduleName: String, in modulePa
     config += "\nCategory=Commentaries\n"
     try config.write(
         to: modsDirectory.appendingPathComponent("\(moduleName.lowercased()).conf", isDirectory: false),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+/**
+ Installs one real KJV RawFiles commentary block spanning Genesis 1:1-2.
+
+ Both physical verse-index rows point to the same standalone OSIS file. Its direct annotation owns
+ `Gen.1.1`, so selecting verse two exercises Android's changed-key document identity without
+ fabricating a prepared route or exposing a production test hook.
+ */
+private func seedRawFilesCoveringCommentary(named moduleName: String, in modulePath: String) throws {
+    let root = URL(fileURLWithPath: modulePath, isDirectory: true)
+    let modsDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+    let moduleKey = moduleName.lowercased()
+    let dataDirectory = root.appendingPathComponent(
+        "modules/comments/rawfiles/\(moduleKey)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+
+    let fileName = "0000000"
+    let source = """
+    <verse osisID="Gen.1.1"><div annotateRef="Gen.1.1"><p>Shared covering commentary.</p></div></verse>
+    """
+    try Data(source.utf8).write(
+        to: dataDirectory.appendingPathComponent(fileName, isDirectory: false)
+    )
+    var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
+    for row in [4, 5] {
+        let rowOffset = row * 6
+        oldTestamentIndex[rowOffset + 4] = UInt8(fileName.utf8.count)
+    }
+    try Data(fileName.utf8).write(
+        to: dataDirectory.appendingPathComponent("ot", isDirectory: false)
+    )
+    try Data(oldTestamentIndex).write(
+        to: dataDirectory.appendingPathComponent("ot.vss", isDirectory: false)
+    )
+    try Data().write(to: dataDirectory.appendingPathComponent("nt", isDirectory: false))
+    try Data().write(to: dataDirectory.appendingPathComponent("nt.vss", isDirectory: false))
+    try Data(repeating: 0, count: 4).write(
+        to: dataDirectory.appendingPathComponent("incfile", isDirectory: false)
+    )
+    try """
+    [\(moduleName)]
+    Description=RawFiles Covering Commentary
+    Abbreviation=RFC
+    Category=Commentaries
+    DataPath=./modules/comments/rawfiles/\(moduleKey)/
+    ModDrv=RawFiles
+    SourceType=OSIS
+    Encoding=UTF-8
+    Lang=en
+    Versification=KJV
+    """.write(
+        to: modsDirectory.appendingPathComponent("\(moduleKey).conf", isDirectory: false),
         atomically: true,
         encoding: .utf8
     )

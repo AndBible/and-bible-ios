@@ -281,6 +281,17 @@ struct BibleReaderBookmarkNavigationSQLiteFragment: Equatable, Sendable {
     let sourceHasStrongs: Bool?
 
     /**
+     Exact `osisRef` serialized for the Vue `OsisDocument`.
+
+     Android and `BibleReaderDocumentPayloadFactory` prefer a direct annotation reference, then the
+     source fragment reference, then the persisted key. Keeping scroll authorization on that same
+     value prevents nested SQLite markup from being mistaken for the visible document identity.
+     */
+    var renderedDocumentOsisReference: String {
+        annotateReference ?? fragmentOsisReference ?? key
+    }
+
+    /**
      Copies and validates one builder result as detached bookmark-navigation data.
 
      - Parameters:

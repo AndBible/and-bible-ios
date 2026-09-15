@@ -56,6 +56,9 @@ struct BibleReaderNavigationVerseReference: Equatable {
 
     /// OSIS book identifier associated with the resolved verse.
     let osisBookId: String
+
+    /// Exact source-module ordinal captured with the resolved verse.
+    let ordinal: Int
 }
 
 /**
@@ -361,6 +364,51 @@ final class BibleReaderNavigationCoordinator {
         }
 
         return context.currentPosition() != previousPosition
+    }
+
+    /**
+     Applies a visible source-Bible reference already captured outside the main scroll callback.
+
+     Commentary documents report document-local anchor ordinals, so resolving those ordinals through
+     the active Bible module can both block the main thread and select the wrong Bible verse. This
+     entry point accepts the source-qualified reference captured with the commentary document and
+     applies the same PageManager/debounce policy as ordinary visible Bible telemetry, without
+     history, reload, or another SWORD/SQLite lookup.
+
+     - Parameters:
+       - reference: Exact source-Bible book, chapter, verse, and ordinal captured off-main.
+       - context: Controller-owned state and persistence callbacks.
+     - Returns: `true` only when the visible Bible position changed.
+     - Side effects: Updates controller and PageManager Bible position, retains the source ordinal
+       for a later Bible restore, and persists immediately across book/chapter boundaries or
+       debounced within one chapter.
+     - Failure modes: An OSIS book absent from the active book catalog leaves state unchanged.
+     */
+    @discardableResult
+    func updateVisiblePosition(
+        reference: BibleReaderNavigationVerseReference,
+        context: BibleReaderNavigationContext
+    ) -> Bool {
+        let previousPosition = context.currentPosition()
+        guard let book = context.bookNameForOsisId(reference.osisBookId) else { return false }
+        let position = BibleReaderNavigationPosition(
+            book: book,
+            chapter: reference.chapter,
+            verse: reference.verse
+        )
+        lastScrollTarget = .ordinal(reference.ordinal)
+        guard position != previousPosition else { return false }
+
+        context.setCurrentPosition(position)
+        if let pageManager = context.pageManager() {
+            write(position: position, to: pageManager, bookList: context.bookList())
+            persistVisibleVerseState(
+                immediate: position.book != previousPosition.book
+                    || position.chapter != previousPosition.chapter,
+                persistState: context.persistState
+            )
+        }
+        return true
     }
 
     /**
