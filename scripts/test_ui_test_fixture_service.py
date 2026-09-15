@@ -187,11 +187,24 @@ class FixtureServiceTestCase(unittest.TestCase):
 
     def test_service_lifecycle_creates_private_directory_and_stops_worker(self) -> None:
         service = UITestFixtureService(self.configuration, command_runner=self.runner)
-        service.start()
-        self.assertEqual(self.service_directory.stat().st_mode & 0o777, 0o700)
-        self.assertTrue(service._thread and service._thread.is_alive())
-        service.stop()
+        with service:
+            self.assertEqual(self.service_directory.stat().st_mode & 0o777, 0o700)
+            self.assertTrue(service._thread and service._thread.is_alive())
         self.assertIsNone(service._thread)
+
+    def test_service_context_stops_worker_when_test_body_fails(self) -> None:
+        """A failed lifecycle assertion cannot leak the non-daemon worker into shutdown."""
+        service = UITestFixtureService(self.configuration, command_runner=self.runner)
+
+        with self.assertRaisesRegex(AssertionError, "synthetic lifecycle failure"):
+            with service:
+                self.assertTrue(service._thread and service._thread.is_alive())
+                worker = service._thread
+                raise AssertionError("synthetic lifecycle failure")
+
+        self.assertIsNone(service._thread)
+        self.assertIsNotNone(worker)
+        self.assertFalse(worker.is_alive())
 
     def test_stop_owns_server_that_finishes_starting_after_teardown_begins(self) -> None:
         """A late request worker cannot publish or leak a server after ``stop``."""
@@ -207,6 +220,8 @@ class FixtureServiceTestCase(unittest.TestCase):
 
         service = UITestFixtureService(self.configuration, command_runner=self.runner)
         stop_errors: list[Exception] = []
+        stop_thread: threading.Thread | None = None
+        stop_completed_within_timeout = False
 
         def stop_service() -> None:
             try:
@@ -215,27 +230,35 @@ class FixtureServiceTestCase(unittest.TestCase):
                 stop_errors.append(error)
 
         with mock.patch.object(DownloadFixtureHTTPServer, "start", delayed_start):
-            service.start()
-            request_id = str(uuid4()).upper()
-            payload = {
-                "requestID": request_id,
-                "operation": "prepare",
-                "scenario": "downloads-row-order",
-                "simulatorID": SIMULATOR_ID,
-                "bundleIdentifier": BUNDLE_ID,
-            }
-            temporary = self.service_directory / f".{request_id}.request.tmp"
-            request = self.service_directory / f"{request_id}.request.json"
-            temporary.write_text(json.dumps(payload), encoding="utf-8")
-            os.replace(temporary, request)
-            self.assertTrue(server_started.wait(timeout=2))
+            with service:
+                try:
+                    request_id = str(uuid4()).upper()
+                    payload = {
+                        "requestID": request_id,
+                        "operation": "prepare",
+                        "scenario": "downloads-row-order",
+                        "simulatorID": SIMULATOR_ID,
+                        "bundleIdentifier": BUNDLE_ID,
+                    }
+                    temporary = self.service_directory / f".{request_id}.request.tmp"
+                    request = self.service_directory / f"{request_id}.request.json"
+                    temporary.write_text(json.dumps(payload), encoding="utf-8")
+                    os.replace(temporary, request)
+                    self.assertTrue(server_started.wait(timeout=2))
 
-            stop_thread = threading.Thread(target=stop_service)
-            stop_thread.start()
-            self.assertTrue(service._stop_event.wait(timeout=1))
-            allow_start_to_return.set()
-            stop_thread.join(timeout=2)
+                    stop_thread = threading.Thread(target=stop_service)
+                    stop_thread.start()
+                    self.assertTrue(service._stop_event.wait(timeout=1))
+                    allow_start_to_return.set()
+                    stop_thread.join(timeout=2)
+                    stop_completed_within_timeout = not stop_thread.is_alive()
+                finally:
+                    allow_start_to_return.set()
+                    if stop_thread is not None and stop_thread.ident is not None:
+                        stop_thread.join()
 
+        self.assertIsNotNone(stop_thread)
+        self.assertTrue(stop_completed_within_timeout)
         self.assertFalse(stop_thread.is_alive())
         self.assertEqual(stop_errors, [])
         self.assertIsNone(service._thread)
