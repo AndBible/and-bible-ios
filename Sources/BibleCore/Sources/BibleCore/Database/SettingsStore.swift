@@ -91,6 +91,7 @@ private final class SettingsStoreAtomicOwner: NSObject {
     var firstFailure: Error?
     var recoveryActions: [(ModelContainer) throws -> Void]
     var successfulCommitActions: [() -> Void]
+    var pendingSettings: [String: SettingsStorePendingValue] = [:]
 
     init(
         modelContext: ModelContext,
@@ -109,6 +110,18 @@ private final class SettingsStoreAtomicOwner: NSObject {
             firstFailure = error
         }
     }
+}
+
+/** One immutable settings read, detached from SwiftData and subsequent owner mutations. */
+public struct SettingEntry: Equatable, Sendable {
+    public let key: String
+    public let value: String
+}
+
+/** The last requested value for one key in a synchronous settings owner. */
+private enum SettingsStorePendingValue {
+    case value(String)
+    case removed
 }
 
 /**
@@ -216,8 +229,11 @@ public final class SettingsStore {
     /**
      Performs settings and related SwiftData mutations as one explicit atomic persistence batch.
 
-     All `SettingsStore` SwiftData upserts, removals, and propagation writes reached from `mutations`
-     defer their normal immediate saves. The outermost scope then executes one primary save through
+     `SettingsStore` upserts and removals remain detached values until `mutations` succeeds. Reads
+     through any facade on this context see those pending values, including prefix enumeration.
+     Settings mutations inside the scope must use this API rather than directly changing `Setting`
+     models; unrelated graph models still use the supplied context. The outermost scope then
+     materializes the final settings values and executes one primary save through
      `ModelContext.transaction(block:)`. Nested calls through any `SettingsStore` facade on the exact
      context join the outer synchronous scope and register their durable recovery actions with that
      commit owner; a nested error marks the whole outer batch failed even if an intermediate caller
@@ -329,6 +345,8 @@ public final class SettingsStore {
                         throw failure
                     }
                     try Task.checkCancellation()
+                    try materializePendingSettings(owner)
+                    try Task.checkCancellation()
                     reachedCommitBoundary = true
                 }
             }
@@ -435,7 +453,7 @@ public final class SettingsStore {
 
      Database stores call this after mutating their graph but before saving. Unlike
      `performAtomicBatch(in:_:)`, this boundary intentionally accepts pending model changes owned by
-     the caller. Settings writes performed by `mutations` defer their normal eager saves, and the
+     the caller. Settings writes performed by `mutations` remain detached until it succeeds, and the
      shared context transaction commits the graph and journal together. Existing scopes on the exact
      context absorb nested calls from every `SettingsStore` facade without starting another
      transaction.
@@ -448,7 +466,7 @@ public final class SettingsStore {
      - Returns: Value returned by `mutations` after the transaction commits.
      - Side Effects:
        - temporarily disables autosave for the outermost boundary
-       - defers ordinary `SettingsStore` saves while journal rows are staged
+       - stages settings values shared by all facades on this context, then materializes them
        - commits pending graph and settings mutations through one `ModelContext.transaction`
        - rolls back all pending context changes when validation or commit fails
      - Throws:
@@ -505,6 +523,8 @@ public final class SettingsStore {
                         throw failure
                     }
                     try Task.checkCancellation()
+                    try materializePendingSettings(owner)
+                    try Task.checkCancellation()
                 }
             }
         } catch {
@@ -550,13 +570,19 @@ public final class SettingsStore {
     // MARK: - String
 
     /**
-     * Reads a raw string setting from SwiftData.
+     * Reads a raw string setting from the context owner's pending values or SwiftData.
      * - Parameter key: Persisted setting key.
      * - Returns: Stored string value, or `nil` when the key does not exist or the fetch fails.
-     * - Note: This method has no side effects and does not consult `UserDefaults`.
+     * - Note: Fetch errors poison an active owner; this does not consult `UserDefaults`.
      */
     public func getString(_ key: String) -> String? {
-        fetchSetting(key)?.value
+        if let pending = SettingsStoreAtomicScope.owner(for: modelContext)?.pendingSettings[key] {
+            switch pending {
+            case .value(let value): return value
+            case .removed: return nil
+            }
+        }
+        return fetchSetting(key)?.value
     }
 
     /**
@@ -564,7 +590,7 @@ public final class SettingsStore {
      * - Parameters:
      *   - key: Persisted setting key.
      *   - value: New string value.
-     * - Side Effects: Inserts or updates a `Setting` row and saves the supplied `ModelContext`.
+     * - Side Effects: Stages a value when an owner exists; otherwise updates and saves SwiftData.
      * - Failure: Save errors are swallowed.
      */
     public func setString(_ key: String, value: String) {
@@ -709,10 +735,14 @@ public final class SettingsStore {
     /**
      Removes a persisted setting row when present.
      * - Parameter key: Unique setting key to delete.
-     * - Side Effects: Deletes the matching `Setting` row and saves `modelContext`.
+     * - Side Effects: Stages removal in an owner; otherwise deletes and saves the matching row.
      * - Failure: Save errors are swallowed.
      */
     public func remove(_ key: String) {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
+            owner.pendingSettings[key] = .removed
+            return
+        }
         guard let existing = fetchSetting(key) else {
             return
         }
@@ -721,7 +751,7 @@ public final class SettingsStore {
     }
 
     /**
-     Reads persisted settings whose keys have Swift's exact semantic prefix.
+     Reads detached settings values whose keys have Swift's exact semantic prefix.
 
      SQLite's binary string ordering can bound ASCII prefixes without materializing unrelated
      settings. The final `hasPrefix` check remains authoritative. Empty and non-ASCII prefixes, plus
@@ -729,12 +759,14 @@ public final class SettingsStore {
      so SQL cannot exclude a key that Swift considers a semantic prefix match.
 
      - Parameter prefix: Leading key prefix to match using `String.hasPrefix` semantics.
-     - Returns: Matching rows. Callers apply their own deterministic ordering.
+     - Returns: Immutable matching values including the current owner's pending writes/removals.
+       Retained entries do not change when later writes occur. Callers apply their own ordering;
+       updates must go through `SettingsStore`, not a returned managed model.
      - Side effects: Reads the owned `ModelContext` and records an active atomic-batch failure.
      - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
        existing fail-soft settings reads.
      */
-    public func entries(withPrefix prefix: String) -> [Setting] {
+    public func entries(withPrefix prefix: String) -> [SettingEntry] {
         let descriptor: FetchDescriptor<Setting>
         if let bounds = Self.binaryPrefixBounds(for: prefix) {
             let lowerBound = bounds.lowerBound
@@ -748,7 +780,7 @@ public final class SettingsStore {
             descriptor = FetchDescriptor<Setting>()
         }
         do {
-            return try modelContext.fetch(descriptor).filter { $0.key.hasPrefix(prefix) }
+            return mergedEntries(try modelContext.fetch(descriptor), prefix: prefix)
         } catch {
             recordAtomicBatchFailure(error)
             return []
@@ -801,12 +833,13 @@ public final class SettingsStore {
      broader comparison collation.
 
      - Parameter namespace: Namespace without its trailing dot delimiter.
-     - Returns: Matching rows in persistence order. Callers apply their own deterministic ordering.
+     - Returns: Detached matching values including pending writes/removals. Callers apply their
+       own deterministic ordering and use `SettingsStore` for subsequent updates.
      - Side effects: Reads the owned local `ModelContext` and records an active atomic-batch failure.
      - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
        existing fail-soft settings reads.
      */
-    func entries(inExactNamespace namespace: String) -> [Setting] {
+    func entries(inExactNamespace namespace: String) -> [SettingEntry] {
         let lowerBound = "\(namespace)."
         let upperBound = "\(namespace)/"
         let descriptor = FetchDescriptor<Setting>(
@@ -815,7 +848,7 @@ public final class SettingsStore {
             }
         )
         do {
-            return try modelContext.fetch(descriptor).filter { $0.key.hasPrefix(lowerBound) }
+            return mergedEntries(try modelContext.fetch(descriptor), prefix: lowerBound)
         } catch {
             recordAtomicBatchFailure(error)
             return []
@@ -866,20 +899,90 @@ public final class SettingsStore {
     }
 
     /**
-     * Inserts or updates a raw `Setting` row and saves the context immediately.
+     * Stages a raw settings value in an owner, or updates and saves the context immediately.
      * - Parameters:
      *   - key: Unique setting key.
      *   - value: Raw string payload to persist.
-     * - Side Effects: Mutates SwiftData and saves `modelContext`.
+     * - Side Effects: Updates the owner's values or, outside a batch, mutates and saves SwiftData.
      * - Failure: Save errors are swallowed.
      */
     private func upsert(key: String, value: String) {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
+            owner.pendingSettings[key] = .value(value)
+            return
+        }
         if let existing = fetchSetting(key) {
             existing.value = value
         } else {
             modelContext.insert(Setting(key: key, value: value))
         }
         saveSoftlyUnlessBatching()
+    }
+
+    /**
+     Projects fetched rows plus this exact context owner's pending values into detached entries.
+
+     Stored ordering is preserved where a row survives. New keys follow in sorted order; callers
+     needing a particular presentation order must sort explicitly. Prefix matching retains Swift
+     String semantics, including canonical Unicode equivalence. This performs no persistence write.
+     */
+    private func mergedEntries(_ rows: [Setting], prefix: String) -> [SettingEntry] {
+        let pending = SettingsStoreAtomicScope.owner(for: modelContext)?.pendingSettings ?? [:]
+        var visited = Set<String>()
+        var entries: [SettingEntry] = []
+        for row in rows where row.key.hasPrefix(prefix) {
+            visited.insert(row.key)
+            switch pending[row.key] {
+            case .value(let value): entries.append(SettingEntry(key: row.key, value: value))
+            case .removed: break
+            case nil: entries.append(SettingEntry(key: row.key, value: row.value))
+            }
+        }
+        let insertedKeys = pending.keys.filter { !visited.contains($0) && $0.hasPrefix(prefix) }
+        for key in insertedKeys.sorted() {
+            if case .value(let value) = pending[key] {
+                entries.append(SettingEntry(key: key, value: value))
+            }
+        }
+        return entries
+    }
+
+    /**
+     Materializes the owner's final settings values after its mutation closure has succeeded.
+
+     Every affected row is fetched in bounded key batches before the first model mutation, so read
+     failure leaves staged values detached and large writes avoid one query per setting. Changes
+     join the surrounding graph transaction; this method never saves.
+     Physical commit failures still require the caller's existing rollback and durable recovery.
+     Throws fetch errors directly and preserves failure already recorded by a fail-soft read.
+     */
+    private func materializePendingSettings(_ owner: SettingsStoreAtomicOwner) throws {
+        if let failure = owner.firstFailure { throw failure }
+        let keys = owner.pendingSettings.keys.sorted()
+        var rowsByKey: [String: Setting] = [:]
+        for start in stride(from: 0, to: keys.count, by: 250) {
+            let batchKeys = Array(keys[start..<min(start + 250, keys.count)])
+            let descriptor = FetchDescriptor<Setting>(predicate: #Predicate {
+                batchKeys.contains($0.key)
+            })
+            for row in try modelContext.fetch(descriptor) { rowsByKey[row.key] = row }
+        }
+        try Task.checkCancellation()
+        for key in keys {
+            guard let pending = owner.pendingSettings[key] else { continue }
+            let row = rowsByKey[key]
+            switch pending {
+            case .value(let value):
+                if let row {
+                    if row.value != value { row.value = value }
+                } else {
+                    modelContext.insert(Setting(key: key, value: value))
+                }
+            case .removed:
+                if let row { modelContext.delete(row) }
+            }
+        }
+        if let failure = owner.firstFailure { throw failure }
     }
 
     /**

@@ -206,7 +206,7 @@ public final class RemoteSyncBookmarkPlaybackSettingsStore {
         "\(Keys.prefix).\(kind.rawValue).\(bookmarkID.uuidString.lowercased())"
     }
 
-    private func decodeEntry(_ entry: Setting) -> Entry? {
+    private func decodeEntry(_ entry: SettingEntry) -> Entry? {
         let prefix = "\(Keys.prefix)."
         guard entry.key.hasPrefix(prefix), !entry.value.isEmpty else {
             return nil

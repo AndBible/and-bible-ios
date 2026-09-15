@@ -152,7 +152,7 @@ public final class RemoteSyncBookmarkAndroidBookStore {
         "\(Keys.prefix).\(bookmarkID.uuidString.lowercased())"
     }
 
-    private func decodeEntry(_ entry: Setting) -> Entry? {
+    private func decodeEntry(_ entry: SettingEntry) -> Entry? {
         let prefix = "\(Keys.prefix)."
         let suffix = String(entry.key.dropFirst(prefix.count))
         guard entry.key.hasPrefix(prefix), !entry.value.isEmpty,
