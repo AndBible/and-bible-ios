@@ -2546,10 +2546,11 @@ public final class ModuleRepository: @unchecked Sendable {
      Installs a preflighted local SWORD ZIP with archive-bound overwrite consent and phase progress.
 
      Every accepted file is expanded under an isolated staging root. The archive digest is checked
-     before and after extraction. Publish overlays only exact archive paths, moves existing files
-     into a backup root, writes module data before `.conf` installed markers, and restores all moved
-     files if any commit operation fails. Validation and conflict detection are repeated under the
-     mutation lease so stale UI preflight cannot broaden overwrite consent.
+     before and after extraction. Config entries use the canonical filename derived from their
+     parsed module initials; payload entries retain their exact archive paths. Publish moves existing
+     files into a backup root, writes module data before `.conf` installed markers, and restores all
+     moved files if any commit operation fails. Validation and conflict detection are repeated under
+     the mutation lease so stale UI preflight cannot broaden overwrite consent.
 
      - Parameters:
        - url: Local Android-compatible SWORD archive.
@@ -2672,8 +2673,13 @@ public final class ModuleRepository: @unchecked Sendable {
     /**
      Builds a strict Android-compatible local SWORD ZIP plan.
 
+     Android treats the config section as module identity even when the archive filename differs.
+     The plan preserves the archive entry as its extraction source while changing that entry's
+     staged and published destination to `mods.d/<lowercased initials>.conf`. Conflict inspection,
+     overwrite consent, lease-time revalidation, and rollback therefore all use the same path.
+
      - Parameter url: Archive URL to parse.
-     - Returns: Validated plan containing only direct-root SWORD files.
+     - Returns: Validated plan containing direct-root SWORD files and canonical config destinations.
      - Side effects: Reads ZIP metadata and destination existence.
      - Throws: `ModuleRepositoryError.invalidZip` for unsupported or unsafe layouts.
      */
@@ -2693,6 +2699,7 @@ public final class ModuleRepository: @unchecked Sendable {
 
         let fileManager = FileManager.default
         var seenPaths: Set<String> = []
+        var seenDestinationPaths: Set<String> = []
         var plannedEntries: [LocalSwordZipPlannedEntry] = []
         var configurations: [ModuleStoreStagedConfiguration] = []
         var payloadPaths: [String] = []
@@ -2713,30 +2720,33 @@ public final class ModuleRepository: @unchecked Sendable {
                 throw ModuleRepositoryError.invalidZip("Duplicate ZIP entry path: \(relativePath)")
             }
 
+            var destinationPath = relativePath
             if relativePath.hasPrefix("modules/") {
                 payloadPaths.append(relativePath)
             }
             if relativePath.hasPrefix("mods.d/"), relativePath.hasSuffix(".conf") {
-                configurations.append(ModuleStoreStagedConfiguration(
-                    relativePath: relativePath,
-                    content: try configurationContent(for: archiveEntry, in: url)
-                ))
-            }
-
-            let destinationURL = URL(fileURLWithPath: swordPath, isDirectory: true)
-                .appendingPathComponent(relativePath)
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                let values = try destinationURL.resourceValues(
-                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-                )
-                guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                let content = try configurationContent(for: archiveEntry, in: url)
+                guard let parsedConfig = SwordModuleConfig.parse(content) else {
                     throw ModuleRepositoryError.invalidZip(
-                        "Module destination is not a replaceable regular file: \(relativePath)"
+                        "Invalid module configuration: \(relativePath)"
                     )
                 }
-                conflicts.append(relativePath)
+                destinationPath = "mods.d/\(parsedConfig.name.lowercased()).conf"
+                configurations.append(ModuleStoreStagedConfiguration(
+                    relativePath: destinationPath,
+                    content: content
+                ))
             }
-            plannedEntries.append(LocalSwordZipPlannedEntry(entry: archiveEntry, path: relativePath))
+            guard seenDestinationPaths.insert(destinationPath.lowercased()).inserted else {
+                throw ModuleRepositoryError.invalidZip(
+                    "Duplicate ZIP destination path: \(destinationPath)"
+                )
+            }
+
+            plannedEntries.append(LocalSwordZipPlannedEntry(
+                entry: archiveEntry,
+                path: destinationPath
+            ))
         }
 
         guard !plannedEntries.isEmpty else {
@@ -2750,6 +2760,21 @@ public final class ModuleRepository: @unchecked Sendable {
             )
         } catch {
             throw ModuleRepositoryError.invalidZip(error.localizedDescription)
+        }
+        for plannedEntry in plannedEntries {
+            let destinationURL = URL(fileURLWithPath: swordPath, isDirectory: true)
+                .appendingPathComponent(plannedEntry.path)
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                let values = try destinationURL.resourceValues(
+                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+                )
+                guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                    throw ModuleRepositoryError.invalidZip(
+                        "Module destination is not a replaceable regular file: \(plannedEntry.path)"
+                    )
+                }
+                conflicts.append(plannedEntry.path)
+            }
         }
         let finalArchiveSHA256: String
         do {

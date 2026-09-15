@@ -111,7 +111,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Failure meaning: SQLite shadows a real SWORD book or duplicate case variants leak into state.
      */
     @MainActor
-    func testReadableSwordWinsCanonicalCaseInsensitiveSQLiteIdentityCollision() throws {
+    func testReadableSwordWinsCanonicalCaseInsensitiveSQLiteIdentityCollision() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installMyBiblePackageDuplicate(initials: "kjv", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -124,10 +124,16 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         }
         XCTAssertEqual(duplicateRows.count, 1)
 
+        let initialBoundary = scripts().count
         controller.switchBibleDocument(to: "kjv")
         controller.bridgeDidSetClientReady(bridge)
 
-        let payload = try latestDocumentPayload(from: scripts())
+        let initialEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
+        let payload = try latestDocumentPayload(from: initialEmissions)
         XCTAssertEqual(controller.activeModuleName, "KJV")
         XCTAssertEqual(pageManager.bibleDocument, "KJV")
         XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
@@ -141,10 +147,15 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         restored.activeWindow = controller.activeWindow
         restored.restoreSavedPosition()
         restored.bridgeDidSetClientReady(restoredBridge)
+        let restoredEmissions = try await awaitBridgeEmission(
+            from: restoredScripts,
+            event: "add_documents",
+            after: 0
+        )
         XCTAssertEqual(restored.activeModuleName, "KJV")
         XCTAssertEqual(pageManager.bibleDocument, "KJV")
         XCTAssertEqual(
-            try latestDocumentPayload(from: restoredScripts())["bookInitials"] as? String,
+            try latestDocumentPayload(from: restoredEmissions)["bookInitials"] as? String,
             "KJV"
         )
     }
@@ -392,7 +403,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        their selection outside the immediate switch.
      */
     @MainActor
-    func testEverySQLiteBibleSelectsRendersPersistsRestoresAndCopies() throws {
+    func testEverySQLiteBibleSelectsRendersPersistsRestoresAndCopies() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -416,7 +427,11 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         for (initials, expectedText, language) in expectations {
             let baseline = scripts().count
             controller.switchBibleDocument(to: initials)
-            let emissions = Array(scripts().dropFirst(baseline))
+            let emissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "add_documents",
+                after: baseline
+            )
             let payload = try latestDocumentPayload(from: emissions)
             let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
             let xml = try XCTUnwrap(fragment["xml"] as? String)
@@ -436,7 +451,12 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             restored.activeWindow = controller.activeWindow
             restored.restoreSavedPosition()
             restored.bridgeDidSetClientReady(restoredBridge)
-            let restoredPayload = try latestDocumentPayload(from: restoredScripts())
+            let restoredEmissions = try await awaitBridgeEmission(
+                from: restoredScripts,
+                event: "add_documents",
+                after: 0
+            )
+            let restoredPayload = try latestDocumentPayload(from: restoredEmissions)
             XCTAssertEqual(restored.activeModuleName, initials)
             XCTAssertEqual(restoredPayload["bookInitials"] as? String, initials)
         }
@@ -447,8 +467,69 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(copied.copyModuleState(from: controller))
         XCTAssertEqual(copied.activeModuleName, "MyBible-bible")
         copied.bridgeDidSetClientReady(copyBridge)
-        let copiedPayload = try latestDocumentPayload(from: copyScripts())
+        let copiedEmissions = try await awaitBridgeEmission(
+            from: copyScripts,
+            event: "add_documents",
+            after: 0
+        )
+        let copiedPayload = try latestDocumentPayload(from: copiedEmissions)
         XCTAssertEqual(copiedPayload["bookInitials"] as? String, "MyBible-bible")
+    }
+
+    /**
+     Verifies an exact SQLite Bible can navigate within its committed loaded chapter set.
+
+     The fixture adds Genesis 2 before module discovery, renders Genesis 1, and commits the second
+     chapter through the real infinite-scroll callback. Explicit navigation must emit a qualified
+     verse scroll without replacing the SQLite document generation.
+     */
+    @MainActor
+    func testSQLiteBibleNavigatesToLoadedChapterWithoutReplacingDocument() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let sqliteURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/bible.SQLite3")
+        try executeSQLite(
+            "INSERT INTO verses (book_number, chapter, verse, text) VALUES (10, 2, 1, 'Second chapter');",
+            at: sqliteURL
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        _ = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+        let replacementBoundary = scripts().count
+        controller.switchBibleDocument(to: "MyBible-bible")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+        let appendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 4172)
+        let appendResponse = try await awaitBridgeScript(
+            from: scripts,
+            after: appendBoundary,
+            description: "SQLite append response 4172"
+        ) { $0.hasPrefix("bibleView.response(4172, {") }
+        XCTAssertNotNil(appendResponse)
+        let actionBoundary = scripts().count
+
+        controller.navigateTo(book: "Genesis", chapter: 2, verse: 1)
+
+        let actionScripts = Array(scripts().dropFirst(actionBoundary))
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('clear_document'") })
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: actionScripts, event: "scroll_to_verse") as? [String: Any]
+        )
+        XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-bible")
+        XCTAssertEqual(payload["osisRef"] as? String, "Gen.2")
+        XCTAssertEqual(payload["highlight"] as? Bool, true)
+        XCTAssertEqual(
+            controller.committedRenderState.sourceProvenance,
+            .sqliteModules(["MyBible-bible"])
+        )
     }
 
     /**
@@ -462,7 +543,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        loses auxiliary selections across restore.
      */
     @MainActor
-    func testSQLiteCommentaryAndDictionarySelectRenderPersistAndRestoreExactly() throws {
+    func testSQLiteCommentaryAndDictionarySelectRenderPersistAndRestoreExactly() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -478,8 +559,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         ] {
             let baseline = scripts().count
             controller.switchCommentaryDocument(to: initials)
+            let emissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "add_documents",
+                after: baseline
+            )
             let payload = try latestDocumentPayload(
-                from: Array(scripts().dropFirst(baseline))
+                from: emissions
             )
             let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
             XCTAssertEqual(payload["bookInitials"] as? String, initials)
@@ -501,8 +587,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         restoredCommentary.activeWindow = controller.activeWindow
         restoredCommentary.restoreSavedPosition()
         restoredCommentary.bridgeDidSetClientReady(commentaryBridge)
+        let commentaryEmissions = try await awaitBridgeEmission(
+            from: commentaryScripts,
+            event: "add_documents",
+            after: 0
+        )
         XCTAssertEqual(
-            try latestDocumentPayload(from: commentaryScripts())["bookInitials"] as? String,
+            try latestDocumentPayload(from: commentaryEmissions)["bookInitials"] as? String,
             "MyBible-commentary"
         )
 
@@ -518,8 +609,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
 
             let baseline = scripts().count
             controller.loadDictionaryEntry(key: selectedKey)
+            let emissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "add_documents",
+                after: baseline
+            )
             let payload = try latestDocumentPayload(
-                from: Array(scripts().dropFirst(baseline))
+                from: emissions
             )
             let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
             XCTAssertEqual(payload["key"] as? String, selectedKey)
@@ -534,11 +630,22 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         }
 
         controller.switchDictionaryDocument(to: "MyBible-dictionary")
+        let selectedBoundary = scripts().count
         controller.loadDictionaryEntry(key: "H0430")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: selectedBoundary
+        )
         let mismatchBaseline = scripts().count
         controller.loadDictionaryEntry(key: "h0430")
+        let mismatchEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: mismatchBaseline
+        )
         let mismatchPayload = try latestDocumentPayload(
-            from: Array(scripts().dropFirst(mismatchBaseline))
+            from: mismatchEmissions
         )
         XCTAssertEqual(mismatchPayload["type"] as? String, "error")
         XCTAssertEqual(controller.currentDictionaryKey, "H0430")
@@ -552,7 +659,12 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         restoredDictionary.activeWindow = controller.activeWindow
         restoredDictionary.restoreSavedPosition()
         restoredDictionary.bridgeDidSetClientReady(dictionaryBridge)
-        let restoredPayload = try latestDocumentPayload(from: dictionaryScripts())
+        let dictionaryEmissions = try await awaitBridgeEmission(
+            from: dictionaryScripts,
+            event: "add_documents",
+            after: 0
+        )
+        let restoredPayload = try latestDocumentPayload(from: dictionaryEmissions)
         XCTAssertEqual(restoredDictionary.currentDictionaryKey, "H0430")
         XCTAssertEqual(restoredPayload["key"] as? String, "H0430")
         XCTAssertEqual(restoredPayload["bookInitials"] as? String, "MyBible-dictionary")
@@ -570,13 +682,19 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Side effects: Copies and extends one temporary SQLite fixture; no installed module is changed.
      */
     @MainActor
-    func testSQLiteCommentaryReaderNavigationUsesAdjacentLinkedBlocks() throws {
+    func testSQLiteCommentaryReaderNavigationUsesAdjacentLinkedBlocks() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
             .appendingPathComponent("mybible/commentary.SQLite3")
         try executeSQLite(
             """
+            DELETE FROM commentaries
+            WHERE book_number = 10
+              AND chapter_number_from = 1
+              AND verse_number_from = 1
+              AND chapter_number_to IS NULL
+              AND verse_number_to IS NULL;
             INSERT INTO commentaries (
                 book_number,
                 chapter_number_from,
@@ -594,22 +712,41 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         _ = attachWindow(to: controller)
         controller.bridgeDidSetClientReady(bridge)
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
-        controller.switchCommentaryDocument(to: "MyBible-commentary")
-
         var baseline = scripts().count
+        controller.switchCommentaryDocument(to: "MyBible-commentary")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        XCTAssertTrue(controller.hasNext)
+        XCTAssertFalse(controller.hasPrevious)
+
+        baseline = scripts().count
         controller.navigateNext()
-        var payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        var emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        var payload = try latestDocumentPayload(from: emissions)
         var range = try XCTUnwrap(payload["commentaryRange"] as? [String: Any])
         XCTAssertEqual(payload["key"] as? String, "Gen.1.4")
         XCTAssertEqual(range["startOsisRef"] as? String, "Gen.1.4")
         XCTAssertEqual(range["endOsisRef"] as? String, "Gen.1.5")
+        XCTAssertTrue(controller.hasPrevious)
 
         baseline = scripts().count
         controller.navigatePrevious()
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         range = try XCTUnwrap(payload["commentaryRange"] as? [String: Any])
-        XCTAssertEqual(payload["key"] as? String, "Gen.1.2")
-        XCTAssertEqual(range["startOsisRef"] as? String, "Gen.1.2")
+        XCTAssertEqual(payload["key"] as? String, "Gen.1.1")
+        XCTAssertEqual(range["startOsisRef"] as? String, "Gen.1.1")
         XCTAssertEqual(range["endOsisRef"] as? String, "Gen.1.2")
     }
 
@@ -657,7 +794,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Failure meaning: Both backend handles remain active and renderer precedence hides switches.
      */
     @MainActor
-    func testSwordAndSQLiteSwitchesClearOppositeRuntimeHandles() throws {
+    func testSwordAndSQLiteSwitchesClearOppositeRuntimeHandles() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         try seedEmptyRawCommentaryModule(named: "SwordEmptyComm", in: modulePath)
@@ -672,33 +809,71 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         _ = attachWindow(to: controller)
         controller.bridgeDidSetClientReady(bridge)
 
+        let sqliteBibleBoundary = scripts().count
         controller.switchBibleDocument(to: "MyBible-bible")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: sqliteBibleBoundary
+        )
         var baseline = scripts().count
         controller.switchBibleDocument(to: "KJV")
-        var payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        var emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        var payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
         XCTAssertEqual(controller.activeModuleName, "KJV")
 
+        let sqliteCommentaryBoundary = scripts().count
         controller.switchCommentaryDocument(to: "MyBible-commentary")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: sqliteCommentaryBoundary
+        )
         baseline = scripts().count
         controller.switchCommentaryDocument(to: "SwordEmptyComm")
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["type"] as? String, "error")
         XCTAssertEqual(controller.activeCommentaryModuleName, "SwordEmptyComm")
 
         controller.switchDictionaryDocument(to: "MyBible-dictionary")
+        let sqliteDictionaryBoundary = scripts().count
         controller.loadDictionaryEntry(key: "H0430")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: sqliteDictionaryBoundary
+        )
         _ = controller.switchDictionaryDocument(to: "SwordEmptyDict")
         baseline = scripts().count
         controller.loadDictionaryEntry(key: "H0430")
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["type"] as? String, "error")
         XCTAssertEqual(controller.activeDictionaryModuleName, "SwordEmptyDict")
 
         _ = controller.switchDictionaryDocument(to: "MyBible-dictionary")
         baseline = scripts().count
         controller.loadDictionaryEntry(key: "H0430")
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MyBible-dictionary")
         XCTAssertEqual(payload["key"] as? String, "H0430")
     }
@@ -714,11 +889,11 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        drops an auxiliary selection/key before restore.
      */
     @MainActor
-    func testPaneCopyRestoresSQLiteSelectionsForEveryCategory() throws {
+    func testPaneCopyRestoresSQLiteSelectionsForEveryCategory() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let (sourceBridge, _) = makeRecordingBridge()
+        let (sourceBridge, sourceScripts) = makeRecordingBridge()
         let source = BibleReaderController(
             bridge: sourceBridge,
             swordManagerOverride: manager
@@ -730,7 +905,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             source.switchDictionaryDocument(to: "MySword-sample_dct"),
             .switchedRequiringKeySelection
         )
+        let sourceDictionaryBoundary = sourceScripts().count
         source.loadDictionaryEntry(key: "Elohim")
+        _ = try await awaitBridgeEmission(
+            from: sourceScripts,
+            event: "add_documents",
+            after: sourceDictionaryBoundary
+        )
 
         let (copiedBridge, copiedScripts) = makeRecordingBridge()
         let copied = BibleReaderController(bridge: copiedBridge, initializesSword: false)
@@ -744,28 +925,39 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(copied.copyModuleState(from: source))
         copied.restoreSavedPosition()
         copied.bridgeDidSetClientReady(copiedBridge)
+        let copiedEmissions = try await awaitBridgeEmission(
+            from: copiedScripts,
+            event: "add_documents",
+            after: 0
+        )
 
         XCTAssertEqual(copied.activeModuleName, "MySword-sample_bbl")
         XCTAssertEqual(copied.activeCommentaryModuleName, "MySword-sample_cmt")
         XCTAssertEqual(copied.activeDictionaryModuleName, "MySword-sample_dct")
         XCTAssertEqual(copied.currentDictionaryKey, "Elohim")
         XCTAssertEqual(try copied.activeDictionaryKeys(), ["Elohim", "Logos"])
-        var payload = try latestDocumentPayload(from: copiedScripts())
+        var payload = try latestDocumentPayload(from: copiedEmissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_dct")
         XCTAssertEqual(payload["key"] as? String, "Elohim")
 
         var baseline = copiedScripts().count
         copied.switchCommentaryDocument(to: "MySword-sample_cmt")
-        payload = try latestDocumentPayload(
-            from: Array(copiedScripts().dropFirst(baseline))
+        var emissions = try await awaitBridgeEmission(
+            from: copiedScripts,
+            event: "add_documents",
+            after: baseline
         )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_cmt")
 
         baseline = copiedScripts().count
         copied.switchBibleDocument(to: "MySword-sample_bbl")
-        payload = try latestDocumentPayload(
-            from: Array(copiedScripts().dropFirst(baseline))
+        emissions = try await awaitBridgeEmission(
+            from: copiedScripts,
+            event: "add_documents",
+            after: baseline
         )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_bbl")
     }
 
@@ -773,7 +965,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      Verifies a real manager refresh retains all category-owned SQLite selections and exact keys.
 
      - Setup: Selects MySword Bible, commentary, and dictionary content in a temporary injected
-       module root, then recreates both runtime catalogs through `refreshInstalledModules`.
+       module root, then reconciles both runtime catalogs through `reconcileInstalledSources`.
      - Expected result: The same root is rediscovered, PageManager identities remain unchanged,
        dictionary spelling remains exact, and all three categories render through fresh handles.
      - Failure meaning: Refresh silently returns to the default root, loses category state, reuses
@@ -782,7 +974,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        no global module installation is modified.
      */
     @MainActor
-    func testRefreshRetainsSQLiteSelectionsAndExactDictionaryKeyAcrossAllCategories() throws {
+    func testRefreshRetainsSQLiteSelectionsAndExactDictionaryKeyAcrossAllCategories() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -797,8 +989,12 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             .switchedRequiringKeySelection
         )
         controller.loadDictionaryEntry(key: "Elohim")
+        try await awaitReaderCondition("exact SQLite dictionary key is selected while Bible stays visible") {
+            controller.currentDictionaryKey == "Elohim"
+                && pageManager.dictionaryKey == "Elohim"
+        }
 
-        controller.refreshInstalledModules()
+        controller.reconcileInstalledSources()
 
         XCTAssertEqual(controller.activeModuleName, "MySword-sample_bbl")
         XCTAssertEqual(controller.activeCommentaryModuleName, "MySword-sample_cmt")
@@ -812,14 +1008,22 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
 
         let readyBaseline = scripts().count
         controller.bridgeDidSetClientReady(bridge)
-        var payload = try latestDocumentPayload(
-            from: Array(scripts().dropFirst(readyBaseline))
+        var emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: readyBaseline
         )
+        var payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_bbl")
 
         var baseline = scripts().count
         controller.switchCommentaryDocument(to: "MySword-sample_cmt")
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_cmt")
 
         baseline = scripts().count
@@ -827,7 +1031,12 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             controller.switchDictionaryDocument(to: "MySword-sample_dct"),
             .switchedPreservingKey
         )
-        payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["bookInitials"] as? String, "MySword-sample_dct")
         XCTAssertEqual(payload["key"] as? String, "Elohim")
     }
@@ -845,7 +1054,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
        mutated, keeping the test deterministic in parallel runs.
      */
     @MainActor
-    func testSQLiteShareTextAndCommentaryNoContentUseExactSourcePaths() throws {
+    func testSQLiteShareTextAndCommentaryNoContentUseExactSourcePaths() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installAllSQLiteFixtures(in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -854,7 +1063,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         _ = attachWindow(to: controller)
         controller.bridgeDidSetClientReady(bridge)
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        var baseline = scripts().count
         controller.switchBibleDocument(to: "MyBible-bible")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
         XCTAssertEqual(
             controller.verseCountForActiveModule(book: "Genesis", chapter: 1),
             2
@@ -875,10 +1090,21 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(sharedText?.contains("(MyBible-bible)") == true)
         XCTAssertFalse(sharedText?.contains("<J>") == true)
 
+        baseline = scripts().count
         controller.switchCommentaryDocument(to: "MyBible-commentary")
-        let baseline = scripts().count
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        baseline = scripts().count
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 3)
-        let payload = try latestDocumentPayload(from: Array(scripts().dropFirst(baseline)))
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let payload = try latestDocumentPayload(from: emissions)
         XCTAssertEqual(payload["type"] as? String, "error")
         XCTAssertEqual(payload["errorMessage"] as? String, "No content for selected verse")
     }
@@ -895,7 +1121,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Side effects: Creates a temporary module root and records bridge/share callbacks only.
      */
     @MainActor
-    func testPlainESwordBibleRendersCopiesPersistsAndRestoresSourceText() throws {
+    func testPlainESwordBibleRendersCopiesPersistsAndRestoresSourceText() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try copySQLiteFixture(
             "sample.bbli",
@@ -910,8 +1136,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         let switchBaseline = scripts().count
         controller.switchBibleDocument(to: "ESword-plain")
 
+        let switchEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: switchBaseline
+        )
         var payload = try latestDocumentPayload(
-            from: Array(scripts().dropFirst(switchBaseline))
+            from: switchEmissions
         )
         var fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
         let xml = try XCTUnwrap(fragment["xml"] as? String)
@@ -942,7 +1173,12 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         restored.activeWindow = controller.activeWindow
         restored.restoreSavedPosition()
         restored.bridgeDidSetClientReady(restoredBridge)
-        payload = try latestDocumentPayload(from: restoredScripts())
+        let restoredEmissions = try await awaitBridgeEmission(
+            from: restoredScripts,
+            event: "add_documents",
+            after: 0
+        )
+        payload = try latestDocumentPayload(from: restoredEmissions)
         fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
         XCTAssertEqual(payload["bookInitials"] as? String, "ESword-plain")
         XCTAssertTrue(
@@ -1080,11 +1316,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let bridge = BibleBridge()
         let controller = BibleReaderController(
-            bridge: BibleBridge(),
+            bridge: bridge,
             swordManagerOverride: manager
         )
         _ = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
 
         XCTAssertEqual(controller.switchBibleDocument(to: decomposedInitials), .switched)
         let ordinarySynthesizer = SQLiteIdentitySpeechSynthesizer()
@@ -1177,14 +1415,22 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
-            bridge: BibleBridge(),
+            bridge: bridge,
             swordManagerOverride: manager
         )
         _ = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
 
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        let commentaryBoundary = scripts().count
         XCTAssertEqual(controller.switchCommentaryDocument(to: decomposedCommentary), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: commentaryBoundary
+        )
         XCTAssertEqual(
             Array(try XCTUnwrap(controller.activeCommentaryModuleName).utf8),
             Array(decomposedCommentary.utf8)
@@ -1203,13 +1449,17 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
                 )
             }
         }
+        let commentaryRestoreBoundary = scripts().count
         XCTAssertTrue(commentaryService.start(
             provider: commentarySession.provider,
             callbacks: commentarySession.callbacks
         ).succeeded)
         XCTAssertEqual(controller.activeCommentaryModuleName, composedCommentary)
-        await Task.yield()
-        await Task.yield()
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: commentaryRestoreBoundary
+        )
         XCTAssertEqual(
             Array(try XCTUnwrap(controller.activeCommentaryModuleName).utf8),
             Array(decomposedCommentary.utf8)
@@ -1225,7 +1475,13 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             Array(decomposedDictionary.utf8)
         )
         XCTAssertNil(controller.activeDictionaryModule)
+        let dictionaryBoundary = scripts().count
         controller.loadDictionaryEntry(key: "H0430")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: dictionaryBoundary
+        )
         let dictionarySynthesizer = SQLiteIdentitySpeechSynthesizer()
         let dictionaryService = SpeakService(synthesizer: dictionarySynthesizer)
         let dictionarySession = try XCTUnwrap(
@@ -1239,13 +1495,17 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
                 }
             }
         }
+        let dictionaryRestoreBoundary = scripts().count
         XCTAssertTrue(dictionaryService.start(
             provider: dictionarySession.provider,
             callbacks: dictionarySession.callbacks
         ).succeeded)
         XCTAssertEqual(controller.activeDictionaryModuleName, composedDictionary)
-        await Task.yield()
-        await Task.yield()
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: dictionaryRestoreBoundary
+        )
         XCTAssertEqual(
             Array(try XCTUnwrap(controller.activeDictionaryModuleName).utf8),
             Array(decomposedDictionary.utf8)
@@ -1617,7 +1877,7 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     private func attachWindow(to controller: BibleReaderController) -> PageManager {
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window, attaching: pageManager)
         controller.activeWindow = window
         return pageManager
     }
@@ -1867,34 +2127,6 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         try sidecar.write(to: package.appendingPathComponent("module.json"))
     }
 
-    /**
-     Seeds one readable RawLD entry for exact-key SWORD switch preflight.
-
-     - Parameters:
-       - moduleName: SWORD module identity previously installed by the empty-module fixture helper.
-       - entryKey: Exact dictionary key written into the RawLD record.
-       - modulePath: Temporary SWORD module root.
-     - Side effects: Creates RawLD data/index files beneath the fixture module.
-     - Throws: Fixture setup, record-size conversion, or file-write failures.
-     */
-    private func seedReadableRawDictionaryModule(
-        named moduleName: String,
-        entryKey: String,
-        in modulePath: String
-    ) throws {
-        try seedEmptyRawDictionaryModule(named: moduleName, in: modulePath)
-        let moduleKey = moduleName.lowercased()
-        let prefix = URL(fileURLWithPath: modulePath, isDirectory: true)
-            .appendingPathComponent("modules/lexdict/rawld/\(moduleKey)/\(moduleKey)")
-        let record = Data("\(entryKey)\r\n<div type=\"entry\">Readable fixture</div>".utf8)
-        var recordLength = try XCTUnwrap(UInt16(exactly: record.count)).littleEndian
-        var index = Data([0, 0, 0, 0])
-        withUnsafeBytes(of: &recordLength) { index.append(contentsOf: $0) }
-        var data = record
-        data.append(0x0A)
-        try data.write(to: prefix.appendingPathExtension("dat"))
-        try index.write(to: prefix.appendingPathExtension("idx"))
-    }
 }
 
 /** Deterministic commentary reader with two linked blocks separated by one empty verse. */

@@ -1,4 +1,6 @@
 import XCTest
+@testable import BibleUI
+import SwordKit
 
 /**
  Package-level source-contract guards for reader shell parity that cannot be observed directly.
@@ -66,41 +68,55 @@ final class ReaderSourceGuardTests: XCTestCase {
     }
 
     /**
-     Guards Android's split between unlocked normal shortcuts and the inclusive full chooser.
+     Keeps the pure row contract shared by readable shortcuts and the unlock-capable full chooser.
 
-     - Setup: Extracts the private toolbar menu, next-document, suggested-Bible, Search, and chooser
-       inventory boundaries from BibleUI source.
-     - Expected result: Every automatic/quick/Search Bible path consumes the controller's
-       one-snapshot readable projection, while the full picker consumes the inclusive installed
-       BookSet presentation projection.
-     - Failure meaning: Locked Bibles can re-enter a no-prompt shortcut, or disappear from the only
-       chooser that owns the existing passphrase flow.
-     - Side effects: Reads package source only.
+     - Setup: Projects the same locked and readable Bible metadata through the readable quick-menu
+       input and the inclusive full-chooser filter.
+     - Expected result: The quick selector receives only the readable row, while the full chooser
+       retains both exact identities and marks only the locked row as requiring unlock.
+     - Failure meaning: A selector policy can expose locked content without preflight or remove the
+       locked identity from the route that owns the passphrase flow.
+     - Side effects: None; immutable metadata is projected without reading package source.
      */
-    func testBibleNormalSelectorsExcludeLockedRowsWithoutNarrowingFullChooser() throws {
-        let readerSource = try bibleUISource(named: "BibleReaderView.swift")
-        let pickerSource = try bibleUISource(named: "BibleReaderModulePicker.swift")
-        let menuActionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "performBibleMenuAction",
-            from: readerSource
+    func testReaderSelectorInventoriesKeepLockedRowsInUnlockCapableRoutesOnly() {
+        let locked = ModuleInfo(
+            name: "LOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
         )
-        let nextActionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "performBibleNextDocumentAction",
-            from: readerSource
-        )
-        let suggestedSource = try BibleUITestSourceLocator.extractFunction(
-            named: "suggestedBibleDocumentName",
-            from: readerSource
+        let readable = ModuleInfo(
+            name: "READABLE",
+            description: "Readable Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: false,
+            isUnlocked: true
         )
 
-        XCTAssertTrue(menuActionSource.contains("for: controller.readableBibleModules"))
-        XCTAssertTrue(nextActionSource.contains("modules: controller.readableBibleModules"))
-        XCTAssertTrue(suggestedSource.contains("let readableModules = controller.readableBibleModules"))
-        XCTAssertTrue(readerSource.contains("installedBibleModules: controller?.readableBibleModules ?? []"))
-        XCTAssertTrue(
-            pickerSource.contains("controller.installedBookPresentationsForDocumentPicker()")
+        let quickRows = BibleReaderQuickModuleSelectorPresentation.rows(
+            for: [locked, readable].filter(\.isUnlocked),
+            activeModuleName: nil
         )
-        XCTAssertFalse(pickerSource.contains("controller.readableBibleModules"))
+        let chooserRows = BibleReaderModulePicker.filteredRows(
+            installedBooks: [locked, readable].map {
+                BibleReaderInstalledBookPresentation(info: $0, abbreviation: $0.name)
+            },
+            selectedFilter: .category(.bible),
+            selectedLanguage: "",
+            searchText: ""
+        )
+        let chooserModules = chooserRows.compactMap { row -> ModuleInfo? in
+            guard case .module(let presentation) = row else { return nil }
+            return presentation.info
+        }
+
+        XCTAssertEqual(quickRows.map(\.module.name), ["READABLE"])
+        XCTAssertEqual(chooserModules.map(\.name), ["LOCKED", "READABLE"])
+        XCTAssertTrue(BibleReaderModulePicker.requiresUnlock(locked))
+        XCTAssertFalse(BibleReaderModulePicker.requiresUnlock(readable))
     }
 
     /**

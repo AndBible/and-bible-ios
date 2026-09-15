@@ -138,16 +138,26 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
        real background Compare builder before observing its main-queue payload emission.
      - Failure modes: Fails if the selected Vulgate ordinals are read as KJV, if target conversion
        is skipped, or if either fragment advertises the wrong source versification.
-     - Determinism: An injected wrapper fulfills only after the production Compare builder returns,
-       so simulator load cannot turn the assertion into a two-second scheduling race.
+     - Determinism: The test observes the production coordinator's accepted bridge emission instead
+       of assuming that source capture completes synchronously.
      */
     @MainActor
     func testCompareEventUsesSelectedVulgateFragmentWhileActivePaneIsKJV() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate compare fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Gen", 1, 1,
+                    #"<verse osisID="Gen.1.1">Synthetic Vulgate Genesis one.</verse>"#
+                ),
+                (
+                    "Gen", 1, 2,
+                    #"<verse osisID="Gen.1.2">Synthetic Vulgate Genesis two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -159,32 +169,16 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let start = try XCTUnwrap(source.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
         let end = try XCTUnwrap(source.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
         let (bridge, scripts) = makeRecordingBridge()
-        let compareBuildFinished = expectation(description: "Production Compare builder finished")
-        let resultLock = NSLock()
-        var builtDocumentJSON: String?
         let controller = BibleReaderController(
             bridge: bridge,
-            swordManagerOverride: manager,
-            compareDocumentBuildOperation: { request in
-                let documentJSON = BibleReaderCompareDocumentBuilder.buildDocumentJSON(request)
-                resultLock.lock()
-                builtDocumentJSON = documentJSON
-                resultLock.unlock()
-                compareBuildFinished.fulfill()
-                return documentJSON
-            }
+            swordManagerOverride: manager
         )
         XCTAssertEqual(controller.activeModuleName, "KJV")
 
         controller.bridge(bridge, compareVerses: "VulgTest", startOrdinal: start, endOrdinal: end)
 
-        wait(for: [compareBuildFinished], timeout: 10)
-        resultLock.lock()
-        let didBuildDocument = builtDocumentJSON != nil
-        resultLock.unlock()
-        XCTAssertTrue(didBuildDocument, "Expected the production Compare builder to return a document")
         XCTAssertTrue(
-            waitUntil(timeout: 5) {
+            waitUntil(timeout: 10) {
                 scripts().contains(where: { $0.contains("emit('add_documents'") })
             },
             "Expected the completed Compare document to reach the bridge"
@@ -205,6 +199,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(sourceFragment["v11n"] as? String, "Vulg")
         XCTAssertEqual(sourceFragment["keyName"] as? String, "\(sourceBookName) 1:1-2")
         XCTAssertEqual(sourceFragment["ordinalRange"] as? [Int], [start, end])
+        XCTAssertTrue(
+            (sourceFragment["xml"] as? String)?.contains("Synthetic Vulgate Genesis one.") == true
+        )
         XCTAssertEqual(targetFragment["v11n"] as? String, "KJV")
         XCTAssertEqual(targetFragment["ordinalRange"] as? [Int], [targetStart, targetEnd])
     }
@@ -217,7 +214,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
        or silently substitutes active KJV ordinal semantics.
      */
     @MainActor
-    func testMyNotesRouteConvertsDeclaredVulgateOrdinalToKJVA() throws {
+    func testMyNotesRouteConvertsDeclaredVulgateOrdinalToKJVA() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try seedBibleAliasModule(
             named: "VulgTest",
@@ -251,7 +248,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             openExternalLink: "my-notes://?v11n=Vulg&ordinal=\(sourceOrdinal)"
         )
 
-        let newScripts = Array(scripts().dropFirst(initialScriptCount))
+        let newScripts = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: initialScriptCount
+        )
         let setup = try XCTUnwrap(
             bridgeEmissionPayload(from: newScripts, event: "setup_content") as? [String: Any]
         )
@@ -309,7 +310,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
        as KJV, or silently falls back to the active chapter.
      */
     @MainActor
-    func testMyNotesRouteUsesDeclaredCanonWhenSourceModuleIsNotInstalled() throws {
+    func testMyNotesRouteUsesDeclaredCanonWhenSourceModuleIsNotInstalled() async throws {
         let sourceReference = SwordVersification.Reference(
             osisBookId: "Ps",
             chapter: 10,
@@ -362,7 +363,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             openExternalLink: "my-notes://?v11n=Vulg&ordinal=\(sourceOrdinal)"
         )
 
-        let emissions = Array(scripts().dropFirst(baseline))
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
@@ -423,11 +428,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies a single Android OSIS range remains the next Bible document's complete anchor range.
+     Verifies a single Android OSIS range remains the loaded Bible document's complete anchor range.
 
      Android routes a one-range `Passage` as a Bible document and carries its full source range into
-     `setup_content`. iOS must convert every endpoint into the active module before navigating, then
-     expose the same range in both document metadata and the scoped setup highlight.
+     the scoped scroll highlight. When the same source chapter is already loaded, iOS must convert
+     every endpoint into the active module and scroll without replacing the document generation.
 
      - Side effects: Navigates a temporary KJV reader through one external range link.
      - Failure modes: First-verse-only navigation collapses the range, while source-ordinal reuse
@@ -443,6 +448,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitUntil {
+            scripts().contains { $0.contains("emit('add_documents'") }
+        })
         let baseline = scripts().count
 
         controller.bridge(
@@ -451,21 +459,17 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
 
         let emissions = Array(scripts().dropFirst(baseline))
-        let document = try XCTUnwrap(
-            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
-        )
-        let setup = try XCTUnwrap(
-            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        let scroll = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "scroll_to_verse") as? [String: Any]
         )
 
-        XCTAssertEqual(document["originalOrdinalRange"] as? [Int], [start, end])
-        assertAndroidSetupPayload(setup)
-        XCTAssertEqual(setup["jumpToAnchor"] as? Int, start)
-        XCTAssertEqual(setup["ordinalStart"] as? Int, start)
-        XCTAssertEqual(setup["ordinalEnd"] as? Int, end)
-        XCTAssertEqual(setup["highlight"] as? Bool, true)
-        XCTAssertEqual(setup["bookInitials"] as? String, "KJV")
-        XCTAssertEqual(setup["osisRef"] as? String, "Gen.1")
+        XCTAssertEqual(scroll["ordinal"] as? Int, start)
+        XCTAssertEqual(scroll["ordinalStart"] as? Int, start)
+        XCTAssertEqual(scroll["ordinalEnd"] as? Int, end)
+        XCTAssertEqual(scroll["highlight"] as? Bool, true)
+        XCTAssertEqual(scroll["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(scroll["osisRef"] as? String, "Gen.1")
+        XCTAssertFalse(emissions.contains { $0.contains("emit('clear_document'") })
     }
 
     /**
@@ -553,20 +557,30 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     /**
      Verifies a live Vulgate range remains source-owned while KJV is the active pane.
 
-     The fixture aliases deterministic Bible bytes under Vulgate metadata. The builder receives an
-     ordered Vulgate Psalm range targeted back to that source module; the active KJV pane must not
-     rename, reinterpret, collapse, or reorder it.
+     The fixture stores licensed-safe synthetic verses in a Vulgate-sized RawText index. The
+     builder receives an ordered Vulgate Psalm range targeted back to that source module; the active
+     KJV pane must not rename, reinterpret, collapse, reorder, or substitute its source content.
 
-     - Side effects: Creates temporary SWORD aliases and reads two exact verse entries.
+     - Side effects: Creates one temporary source-valid SWORD module and reads two exact entries.
      - Failure modes: Active-pane inference changes the key/v11n/ordinals, while single-verse
        shortcuts lose the range or its XML order.
      */
     func testLiveMultiPreservesVulgateRangeIdentityAndOrderWithActiveKJV() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate live Multi fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Ps", 10, 1,
+                    #"<verse osisID="Ps.10.1">Synthetic Vulgate Psalm ten one.</verse>"#
+                ),
+                (
+                    "Ps", 10, 2,
+                    #"<verse osisID="Ps.10.2">Synthetic Vulgate Psalm ten two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -602,6 +616,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(sourceFragment["v11n"] as? String, "Vulg")
         XCTAssertEqual(sourceFragment["osisRef"] as? String, "Ps.10.1-Ps.10.2")
         XCTAssertEqual(sourceFragment["ordinalRange"] as? [Int], [start, end])
+        XCTAssertTrue(xml.contains("Synthetic Vulgate Psalm ten one."))
+        XCTAssertTrue(xml.contains("Synthetic Vulgate Psalm ten two."))
         XCTAssertLessThan(
             try XCTUnwrap(xml.range(of: "osisID=\"Ps.10.1\"")?.lowerBound),
             try XCTUnwrap(xml.range(of: "osisID=\"Ps.10.2\"")?.lowerBound)
@@ -615,22 +631,42 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
      therefore resolve each range against its named source module, retain child order, and avoid
      converting either child through the active KJV pane.
 
-     - Side effects: Creates two temporary source-canon aliases and reads both ranges.
+     - Side effects: Creates two source-valid temporary modules and reads both synthetic ranges.
      - Failure modes: A shared v11n, active-module fallback, or aggregate reorder changes fragment
        identity, ordinals, or order.
      */
     func testLiveMultiPreservesMixedSourceModulesRangesAndOrder() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate mixed Multi fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Tob", 1, 1,
+                    #"<verse osisID="Tob.1.1">Synthetic Vulgate Tobit one.</verse>"#
+                ),
+                (
+                    "Tob", 1, 2,
+                    #"<verse osisID="Tob.1.2">Synthetic Vulgate Tobit two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "LXXTest",
             description: "LXX mixed Multi fixture",
             versification: "LXX",
+            entries: [
+                (
+                    "1Esd", 1, 1,
+                    #"<verse osisID="1Esd.1.1">Synthetic LXX Esdras one.</verse>"#
+                ),
+                (
+                    "1Esd", 1, 2,
+                    #"<verse osisID="1Esd.1.2">Synthetic LXX Esdras two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -684,6 +720,12 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertEqual(fragments[0]["ordinalRange"] as? [Int], [vulgStart, vulgEnd])
         XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [lxxStart, lxxEnd])
+        XCTAssertTrue(
+            (fragments[0]["xml"] as? String)?.contains("Synthetic Vulgate Tobit one.") == true
+        )
+        XCTAssertTrue(
+            (fragments[1]["xml"] as? String)?.contains("Synthetic LXX Esdras one.") == true
+        )
     }
 
     /**
@@ -693,23 +735,43 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
      `PassageKeyFactory`. The active KJV pane is intentionally unable to name Tobit or 1 Esdras, so
      any active-catalog inference drops these children and fails the test.
 
-     - Side effects: Creates Vulgate/LXX aliases and reads source-only ranges from temporary SWORD
-       modules.
+     - Side effects: Creates source-valid Vulgate/LXX modules and reads their synthetic source-only
+       ranges.
      - Failure modes: Single-verse parsing, KJV book lookup, source-module loss, or child reordering
        changes the parsed fragment list or produces no restored payload.
      */
     func testRestoredMultiPreservesVulgateAndLXXSourceOnlyRangesWithActiveKJV() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate restored Multi fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Tob", 1, 1,
+                    #"<verse osisID="Tob.1.1">Synthetic restored Vulgate Tobit one.</verse>"#
+                ),
+                (
+                    "Tob", 1, 2,
+                    #"<verse osisID="Tob.1.2">Synthetic restored Vulgate Tobit two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "LXXTest",
             description: "LXX restored Multi fixture",
             versification: "LXX",
+            entries: [
+                (
+                    "1Esd", 1, 1,
+                    #"<verse osisID="1Esd.1.1">Synthetic restored LXX Esdras one.</verse>"#
+                ),
+                (
+                    "1Esd", 1, 2,
+                    #"<verse osisID="1Esd.1.2">Synthetic restored LXX Esdras two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -764,6 +826,13 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
                 try XCTUnwrap(xml.range(of: "osisID=\"\(expectedRefs[1])\"")?.lowerBound)
             )
         }
+        XCTAssertTrue(
+            (fragments[0]["xml"] as? String)?.contains("Synthetic restored Vulgate Tobit one.")
+                == true
+        )
+        XCTAssertTrue(
+            (fragments[1]["xml"] as? String)?.contains("Synthetic restored LXX Esdras one.") == true
+        )
     }
 
     /**
@@ -805,10 +874,59 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies section-title changes preserve Compare because it has no conditional introductions.
+
+     After the first production Compare request is accepted, changing section-title visibility must
+     update config without another document replacement because Compare payloads contain only
+     explicitly selected verses. A failure means invalidation is based on a global SWORD flag
+     instead of the committed document family's native extraction dependency.
+     */
+    @MainActor
+    func testExtractionSettingsRebuildCompareFromCapturedRequest() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        var settings = TextDisplaySettings.appDefaults
+        settings.showSectionTitles = false
+        controller.displaySettings = settings
+        controller.bridgeDidSetClientReady(bridge)
+
+        controller.loadCompareDocument(
+            bookInitials: "KJV",
+            startOrdinal: ordinal,
+            endOrdinal: ordinal
+        )
+        XCTAssertTrue(waitUntil {
+            (try? bridgeEmissionPayloads(from: scripts(), event: "add_documents"))?
+                .contains(where: { ($0 as? [String: Any])?["compare"] as? Bool == true }) == true
+        })
+        let replacementCount = try bridgeEmissionPayloads(
+            from: scripts(),
+            event: "add_documents"
+        ).count
+
+        settings.showSectionTitles = true
+        controller.updateDisplaySettings(settings, nightMode: false)
+
+        XCTAssertEqual(
+            try bridgeEmissionPayloads(from: scripts(), event: "add_documents").count,
+            replacementCount
+        )
+        XCTAssertEqual(controller.committedRenderState.identity?.book, "Compare")
+        XCTAssertEqual(controller.committedRenderState.sourceProvenance, .compositeMayUseSword)
+    }
+
+    /**
      Verifies ordinary Bible navigation invalidates a delayed Compare result.
 
-     - Setup: The injected Compare build gate blocks on a background queue until Genesis 2 replaces
-       the reader content.
+     - Setup: The production preparation queue is suspended until Genesis 2 replaces the reader
+       content.
      - Expected result: The released Compare payload never reaches Vue.
      - Failure meaning: A stale asynchronous Compare can overwrite a newer chapter.
      - Determinism: Semaphores synchronize build start/release; no timing sleep decides ownership.
@@ -819,26 +937,37 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
-        let gate = DelayedCompareBuildGate()
+        let workerQueue = DispatchQueue(label: "ReaderBridgeParityTests-delayed-compare-bible")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
             bridge: bridge,
             swordManagerOverride: manager,
-            compareDocumentBuildOperation: gate.build
+            documentPreparationCoordinator: coordinator
         )
         controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
+        let baseline = scripts().count
+        workerQueue.suspend()
 
         controller.loadCompareDocument(
             bookInitials: "KJV",
             startOrdinal: ordinal,
             endOrdinal: ordinal
         )
-        XCTAssertTrue(gate.waitUntilFirstBuildStarts())
         controller.navigateTo(book: "Genesis", chapter: 2, verse: 1)
-        gate.releaseFirstBuild()
-        waitForMainQueue()
+        workerQueue.resume()
+        XCTAssertTrue(waitUntil { scripts().dropFirst(baseline).contains {
+            $0.contains("emit('add_documents'")
+        } })
 
-        XCTAssertFalse(scripts().contains { $0.contains("delayed-compare-1") })
+        let laterDocuments = try bridgeEmissionPayloads(
+            from: Array(scripts().dropFirst(baseline)),
+            event: "add_documents"
+        )
+        XCTAssertFalse(laterDocuments.contains {
+            ($0 as? [String: Any])?["compare"] as? Bool == true
+        })
         XCTAssertEqual(controller.currentBook, "Genesis")
         XCTAssertEqual(controller.currentChapter, 2)
     }
@@ -858,36 +987,51 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
-        let gate = DelayedCompareBuildGate()
+        let workerQueue = DispatchQueue(label: "ReaderBridgeParityTests-delayed-compare-notes")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
             bridge: bridge,
             swordManagerOverride: manager,
-            compareDocumentBuildOperation: gate.build
+            documentPreparationCoordinator: coordinator
         )
         controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
+        let baseline = scripts().count
+        workerQueue.suspend()
 
         controller.loadCompareDocument(
             bookInitials: "KJV",
             startOrdinal: ordinal,
             endOrdinal: ordinal
         )
-        XCTAssertTrue(gate.waitUntilFirstBuildStarts())
         controller.bridge(bridge, openMyNotes: "KJV", ordinal: ordinal)
-        gate.releaseFirstBuild()
-        waitForMainQueue()
+        workerQueue.resume()
+        XCTAssertTrue(waitUntil {
+            (try? bridgeEmissionPayloads(
+                from: Array(scripts().dropFirst(baseline)),
+                event: "add_documents"
+            ))?.contains { ($0 as? [String: Any])?["type"] as? String == "notes" } == true
+        })
 
-        XCTAssertFalse(scripts().contains { $0.contains("delayed-compare-1") })
+        let laterPayloads = try bridgeEmissionPayloads(
+            from: Array(scripts().dropFirst(baseline)),
+            event: "add_documents"
+        )
+        XCTAssertFalse(laterPayloads.contains {
+            ($0 as? [String: Any])?["compare"] as? Bool == true
+        })
         XCTAssertTrue(controller.showingMyNotes)
-        let notesPayloads = try bridgeEmissionPayloads(from: scripts(), event: "add_documents")
-        XCTAssertTrue(notesPayloads.contains { ($0 as? [String: Any])?["type"] as? String == "notes" })
+        XCTAssertTrue(laterPayloads.contains {
+            ($0 as? [String: Any])?["type"] as? String == "notes"
+        })
     }
 
     /**
      Verifies a second Compare request owns completion when the first build finishes later.
 
-     - Setup: The first build blocks; the second returns immediately and emits its distinct id.
-     - Expected result: Only the second payload reaches Vue after both builds finish.
+     - Setup: Two requests are queued before the production preparation queue resumes.
+     - Expected result: Only the newer payload reaches Vue after the queue finishes.
      - Failure meaning: Compare requests are ordered by completion instead of content intent.
      - Determinism: A condition-backed gate records invocation order and controls only the first.
      */
@@ -898,32 +1042,44 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let firstOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
         let secondOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
-        let gate = DelayedCompareBuildGate()
+        let workerQueue = DispatchQueue(label: "ReaderBridgeParityTests-newest-compare")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
             bridge: bridge,
             swordManagerOverride: manager,
-            compareDocumentBuildOperation: gate.build
+            documentPreparationCoordinator: coordinator
         )
         controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
+        let baseline = scripts().count
+        workerQueue.suspend()
 
         controller.loadCompareDocument(
             bookInitials: "KJV",
             startOrdinal: firstOrdinal,
             endOrdinal: firstOrdinal
         )
-        XCTAssertTrue(gate.waitUntilFirstBuildStarts())
         controller.loadCompareDocument(
             bookInitials: "KJV",
             startOrdinal: secondOrdinal,
             endOrdinal: secondOrdinal
         )
-        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("delayed-compare-2") } })
-        gate.releaseFirstBuild()
-        waitForMainQueue()
+        workerQueue.resume()
+        XCTAssertTrue(waitUntil {
+            (try? bridgeEmissionPayloads(
+                from: Array(scripts().dropFirst(baseline)),
+                event: "add_documents"
+            ))?.contains { ($0 as? [String: Any])?["compare"] as? Bool == true } == true
+        })
 
-        XCTAssertFalse(scripts().contains { $0.contains("delayed-compare-1") })
-        XCTAssertEqual(scripts().filter { $0.contains("delayed-compare-2") }.count, 1)
+        let compareDocuments = try bridgeEmissionPayloads(
+            from: Array(scripts().dropFirst(baseline)),
+            event: "add_documents"
+        ).compactMap { $0 as? [String: Any] }.filter { $0["compare"] as? Bool == true }
+        XCTAssertEqual(compareDocuments.count, 1)
+        let fragments = try XCTUnwrap(compareDocuments.first?["osisFragments"] as? [[String: Any]])
+        XCTAssertTrue(fragments.allSatisfy { $0["osisRef"] as? String == "Gen.1.2" })
     }
 
     /**
@@ -960,6 +1116,10 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
 
         controller.loadDictionaryEntry(key: "G0001")
 
+        XCTAssertTrue(waitUntil {
+            scripts().dropFirst(baseline).contains { $0.contains("emit('add_documents'") }
+        })
+
         let emissions = Array(scripts().dropFirst(baseline))
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
@@ -985,29 +1145,107 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Preserves an authorized SWORD auxiliary key across a rejected initial bridge replacement.
+
+     - Setup: Selects a real RawLD dictionary and loads its exact key through a bridge without an
+       evaluator, then attaches the ordinary observer and sends client-ready.
+     - Expected result: Native selected key survives the rejected dispatch while rendered state is
+       empty; client-ready replays the exact structural entry and then commits rendered identity.
+     - Failure meaning: The shared auxiliary adapter persists selection after bridge acceptance and
+       therefore loses dictionary/general-book/map navigation while Vue is bootstrapping.
+     - Side effects: Writes one isolated dictionary fixture and records the accepted replay only.
+     */
+    @MainActor
+    func testSwordAuxiliarySelectionSurvivesRejectedReplacementAndReplaysOnClientReady() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeRawLDModule(
+            named: "DEFERREDDICT",
+            category: "Lexicons / Dictionaries",
+            description: "Deferred Dictionary",
+            entries: [("G0001", "<entryFree n=\"G0001\"><p>Deferred definition.</p></entryFree>")],
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        XCTAssertEqual(
+            controller.switchDictionaryDocument(to: "DEFERREDDICT"),
+            .switchedRequiringKeySelection
+        )
+
+        controller.loadDictionaryEntry(key: "G0001")
+        try await awaitReaderCondition("authorized deferred dictionary selection") {
+            controller.currentDictionaryKey == "G0001"
+        }
+        XCTAssertEqual(controller.currentCategory, .dictionary)
+        XCTAssertEqual(controller.committedRenderState, .empty)
+
+        var replayScripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { replayScripts.append($0) }
+        let boundary = replayScripts.count
+        controller.bridgeDidSetClientReady(bridge)
+        let emissions = try await awaitBridgeEmission(
+            from: { replayScripts },
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+
+        XCTAssertEqual(document["bookInitials"] as? String, "DEFERREDDICT")
+        XCTAssertEqual(document["key"] as? String, "G0001")
+        XCTAssertTrue(xml.contains("Deferred definition."))
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .dictionary)
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, "DEFERREDDICT")
+        XCTAssertEqual(controller.committedRenderState.identity?.key, "G0001")
+    }
+
+    /**
      Verifies commentary content, range metadata, and next navigation use linked SWORD blocks.
 
      - Setup: Reuses the compressed KJV bytes through a commentary driver so each verse supplies real
        structural content and deterministic neighboring blocks.
      - Expected result: The selected document carries non-null `commentaryRange`, structural OSIS,
-       separate local-BVA and source-versification ranges, and next moves to the next commentary
-       block start.
+       separate local-BVA and source-versification ranges, and next uses its captured adjacent
+       target. A rejected replacement clears that accepted availability, while client-ready replay
+       publishes the intended adjacent block.
      - Failure meaning: Reader commentary has fallen back to synthetic text, lost block metadata, or
        navigates by Bible chapter instead of commentary blocks.
      */
     @MainActor
-    func testCommentaryReaderEmitsStructuralBlockRangeAndNavigatesByBlock() throws {
+    func testCommentaryReaderEmitsStructuralBlockRangeAndNavigatesByBlock() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try seedCompressedCommentaryAlias(named: "STRUCTCOMM", in: modulePath)
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let (bridge, scripts) = makeRecordingBridge()
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let rejectedPublication = expectation(description: "rejected commentary publication")
+        let observeRejectedPublication = CommentaryPublicationGate()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .publication,
+                      key.family.rawValue == "sword-commentary",
+                      observeRejectedPublication.consumeIfOpen() else { return }
+                rejectedPublication.fulfill()
+            }
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
         controller.bridgeDidSetClientReady(bridge)
         let baseline = scripts().count
 
         controller.switchCommentaryDocument(to: "STRUCTCOMM")
 
-        let commentaryEmissions = Array(scripts().dropFirst(baseline))
+        let commentaryEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: commentaryEmissions, event: "add_documents") as? [String: Any]
         )
@@ -1031,9 +1269,24 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         assertAndroidSetupPayload(setup)
         XCTAssertTrue(controller.hasNext)
 
-        let navigationBaseline = scripts().count
+        let acceptedEvaluator = bridge.javaScriptEvaluationObserver
+        bridge.javaScriptEvaluationObserver = nil
+        observeRejectedPublication.open()
         controller.navigateNext()
-        let navigationEmissions = Array(scripts().dropFirst(navigationBaseline))
+        await fulfillment(of: [rejectedPublication], timeout: 3)
+
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertFalse(controller.hasNext)
+        XCTAssertEqual(controller.committedRenderState.identity?.key, "Gen.1.1")
+
+        bridge.javaScriptEvaluationObserver = acceptedEvaluator
+        let replayBaseline = scripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        let navigationEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replayBaseline
+        )
         let nextDocument = try XCTUnwrap(
             bridgeEmissionPayload(from: navigationEmissions, event: "add_documents") as? [String: Any]
         )
@@ -1053,7 +1306,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
        filtered/neighboring key.
      */
     @MainActor
-    func testEmptyGeneralBookAndMapChooserLoadOwningFirstGlobalKey() throws {
+    func testEmptyGeneralBookAndMapChooserLoadOwningFirstGlobalKey() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try writeRawLDModule(
             named: "STRUCTBOOK",
@@ -1089,7 +1342,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             category: .generalBook,
             firstGlobalKey: firstGeneralBookKey
         )
-        let generalEmissions = Array(scripts().dropFirst(generalBaseline))
+        let generalEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: generalBaseline
+        )
         let generalDocument = try XCTUnwrap(
             bridgeEmissionPayload(from: generalEmissions, event: "add_documents") as? [String: Any]
         )
@@ -1107,7 +1364,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             category: .map,
             firstGlobalKey: firstMapKey
         )
-        let mapEmissions = Array(scripts().dropFirst(mapBaseline))
+        let mapEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: mapBaseline
+        )
         let mapDocument = try XCTUnwrap(
             bridgeEmissionPayload(from: mapEmissions, event: "add_documents") as? [String: Any]
         )
@@ -1161,6 +1422,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         pageManager.mapDocument = "SourceMap"
         pageManager.mapKey = exactKey
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
 
@@ -1193,67 +1455,23 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 }
 
-/**
- Thread-safe Compare builder gate used to reproduce completion-order races deterministically.
+/** Lock-owned switch used by the commentary rejection observer across worker/main test phases. */
+private final class CommentaryPublicationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var openState = false
 
- The first invocation blocks until the test releases it; later invocations complete immediately.
- Each response carries a distinct valid Multi-document id so bridge assertions can identify the
- winning request without relying on timestamps.
- */
-private final class DelayedCompareBuildGate: @unchecked Sendable {
-    /// Condition protecting invocation order and first-build release state.
-    private let condition = NSCondition()
-    /// Number of builds that entered the gate.
-    private var buildCount = 0
-    /// Whether the first build reached its controlled midpoint.
-    private var firstBuildStarted = false
-    /// Whether the first build may return its payload.
-    private var firstBuildReleased = false
-
-    /**
-     Builds a distinct synthetic Compare payload and blocks only the first invocation.
-
-     - Parameter request: Captured production request; its validity is established before this
-       injected background boundary and no fields are mutated by the gate.
-     - Returns: Valid serialized Multi JSON tagged by invocation order.
-     - Side effects: Mutates condition-protected test state and may block a background queue.
-     - Failure modes: None; tests must call `releaseFirstBuild()` during cleanup paths.
-     */
-    func build(_ request: BibleReaderCompareDocumentBuilder.Request) -> String? {
-        _ = request
-        condition.lock()
-        buildCount += 1
-        let invocation = buildCount
-        if invocation == 1 {
-            firstBuildStarted = true
-            condition.broadcast()
-            while !firstBuildReleased {
-                condition.wait()
-            }
-        }
-        condition.unlock()
-        return "{\"id\":\"delayed-compare-\(invocation)\",\"type\":\"multi\",\"osisFragments\":[],\"compare\":true,\"contentType\":null}"
-    }
-
-    /** Waits for the first background build to reach the controlled midpoint. */
-    func waitUntilFirstBuildStarts(timeout: TimeInterval = 2) -> Bool {
-        let deadline = Date(timeIntervalSinceNow: timeout)
-        condition.lock()
-        defer { condition.unlock() }
-        while !firstBuildStarted {
-            if !condition.wait(until: deadline) {
-                return firstBuildStarted
-            }
-        }
+    func consumeIfOpen() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard openState else { return false }
+        openState = false
         return true
     }
 
-    /** Releases the first blocked build exactly once. */
-    func releaseFirstBuild() {
-        condition.lock()
-        firstBuildReleased = true
-        condition.broadcast()
-        condition.unlock()
+    func open() {
+        lock.lock()
+        openState = true
+        lock.unlock()
     }
 }
 

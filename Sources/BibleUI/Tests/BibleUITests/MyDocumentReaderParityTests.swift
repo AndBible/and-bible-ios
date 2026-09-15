@@ -84,17 +84,17 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             sourceBookInitials: "SOURCE",
             sourceBookKey: "source"
         )
+        context.insert(sourceDocument)
+        context.insert(sourcePage)
+        context.insert(generatedDocument)
+        context.insert(generatedPage)
+        context.insert(cache)
         sourcePage.document = sourceDocument
         sourceDocument.pages = [sourcePage]
         generatedPage.document = generatedDocument
         generatedPage.aiPageCacheEntries = [cache]
         generatedDocument.pages = [generatedPage]
         cache.page = generatedPage
-        context.insert(sourceDocument)
-        context.insert(sourcePage)
-        context.insert(generatedDocument)
-        context.insert(generatedPage)
-        context.insert(cache)
         try context.save()
 
         let store = MyDocumentStore(modelContext: context)
@@ -128,6 +128,8 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
      */
     func testDocumentPayloadCarriesAndroidAIMetadataAndMarkerShape() throws {
         let coordinator = BibleReaderMyDocumentCoordinator()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
         let promptID = try XCTUnwrap(UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
         let markerPageID = try XCTUnwrap(UUID(uuidString: "11111111-2222-3333-4444-555555555555"))
         let markerDocumentID = try XCTUnwrap(UUID(uuidString: "66666666-7777-8888-9999-aaaaaaaaaaaa"))
@@ -138,7 +140,11 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             sourcePromptId: promptID,
             languageCode: "en"
         )
-        page.pageContent = MyDocumentPageContent(pageId: page.id, content: "**Answer**")
+        let content = MyDocumentPageContent(pageId: page.id, content: "**Answer**")
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        page.pageContent = content
         let metadata = MyDocumentReaderMetadata(
             sourcePromptId: promptID,
             sourcePromptName: "Explain passage",
@@ -212,6 +218,7 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(marker["sourceBookKey"] as? String, "Gen.1.1")
         XCTAssertEqual(marker["labels"] as? [String], ["00000000-0000-ab1e-0000-a1d0c00001a1"])
         XCTAssertGreaterThanOrEqual(marker["hashCode"] as? Int ?? -1, 0)
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -228,7 +235,10 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
      */
     func testMyDocumentPayloadUsesNullableVersificationAndLanguageDirection() throws {
         let coordinator = BibleReaderMyDocumentCoordinator()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
         let document = MyDocument(name: "Journal", initials: "MyDoc_Journal")
+        context.insert(document)
 
         let cases = [
             (pageLanguage: "ar", locale: "en", expectedLanguage: "en", expectedDirection: "ltr"),
@@ -240,7 +250,10 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
                 pageKey: "entry-\(testCase.locale)",
                 languageCode: testCase.pageLanguage
             )
-            page.pageContent = MyDocumentPageContent(pageId: page.id, content: "Body")
+            let content = MyDocumentPageContent(pageId: page.id, content: "Body")
+            context.insert(page)
+            context.insert(content)
+            page.pageContent = content
             let json = try XCTUnwrap(
                 coordinator.documentJSON(
                     document: document,
@@ -258,6 +271,7 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             XCTAssertEqual(fragment["language"] as? String, testCase.expectedLanguage)
             XCTAssertEqual(fragment["direction"] as? String, testCase.expectedDirection)
         }
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -268,32 +282,33 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
      Documents payload without requiring an installed SWORD general-book module.
      */
     @MainActor
-    func testPageManagerPersistsAndRestoresMyDocumentAfterRelaunch() throws {
+    func testPageManagerPersistsAndRestoresMyDocumentAfterRelaunch() async throws {
         let myDocumentContainer = try makeMyDocumentModelContainer()
         let myDocumentContext = ModelContext(myDocumentContainer)
         let document = MyDocument(name: "Journal", initials: "MyDoc_Journal")
         let page = MyDocumentPage(title: "Day one", pageKey: "day-one", languageCode: "en")
         let content = MyDocumentPageContent(pageId: page.id, content: "Relaunch body")
-        page.document = document
-        page.pageContent = content
-        document.pages = [page]
         myDocumentContext.insert(document)
         myDocumentContext.insert(page)
         myDocumentContext.insert(content)
+        page.document = document
+        page.pageContent = content
+        document.pages = [page]
         try myDocumentContext.save()
 
         let workspaceContainer = try makeWorkspaceModelContainer()
         let workspaceContext = ModelContext(workspaceContainer)
         let window = Window(isSynchronized: false, isLinksWindow: false)
         let pageManager = PageManager(id: window.id)
-        pageManager.window = window
-        window.pageManager = pageManager
         workspaceContext.insert(window)
         workspaceContext.insert(pageManager)
+        pageManager.window = window
+        window.pageManager = pageManager
         try workspaceContext.save()
 
         let firstController = BibleReaderController(bridge: BibleBridge())
         firstController.myDocumentStore = MyDocumentStore(modelContext: myDocumentContext)
+        self.retainReaderWindowGraph(window)
         firstController.activeWindow = window
         firstController.onPersistState = { try? workspaceContext.save() }
 
@@ -301,6 +316,10 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             bookInitials: "MyDoc_Journal",
             pageKey: "day-one"
         ))
+        try await awaitReaderCondition("initial My Documents selection") {
+            pageManager.generalBookDocument == "MyDoc_Journal"
+                && pageManager.generalBookKey == "day-one"
+        }
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
         XCTAssertEqual(pageManager.generalBookDocument, "MyDoc_Journal")
         XCTAssertEqual(pageManager.generalBookKey, "day-one")
@@ -314,10 +333,16 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
         relaunchController.myDocumentStore = MyDocumentStore(
             modelContext: ModelContext(myDocumentContainer)
         )
+        self.retainReaderWindowGraph(restoredWindow)
         relaunchController.activeWindow = restoredWindow
 
         relaunchController.restoreSavedPosition()
         relaunchController.loadCurrentContent()
+
+        try await awaitReaderCondition("restored My Documents publication") {
+            relaunchController.renderedContentState
+                == "category=general_book;module=MyDoc_Journal;book=Journal;chapter=none;key=day-one"
+        }
 
         XCTAssertEqual(relaunchController.currentCategory, .generalBook)
         XCTAssertEqual(relaunchController.activeModuleName(for: .generalBook), "MyDoc_Journal")
@@ -408,12 +433,13 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             sourceBookInitials: "KJV",
             sourceBookKey: "Gen.1.1"
         )
+        context.insert(document)
+        context.insert(page)
+        context.insert(cache)
         page.document = document
         page.aiPageCacheEntries = [cache]
         document.pages = [page]
         cache.page = page
-
-        context.insert(document)
         try context.save()
 
         let initiatingUpdateBaseline = initiatingScripts().count
@@ -470,18 +496,18 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
      - Failure modes: Throws for fixture persistence or a malformed emitted document payload.
      */
     @MainActor
-    func testAIDocumentMarkerNavigationUsesExactDocumentAndKey() throws {
+    func testAIDocumentMarkerNavigationUsesExactDocumentAndKey() async throws {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
         let document = MyDocument(name: "AI Documents", initials: "AIDocuments")
         let page = MyDocumentPage(title: "Exact answer", pageKey: "answer")
         let content = MyDocumentPageContent(pageId: page.id, content: "Exact generated content")
-        page.document = document
-        page.pageContent = content
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.document = document
+        page.pageContent = content
+        document.pages = [page]
         try context.save()
 
         let (bridge, scripts) = makeRecordingBridge()
@@ -496,6 +522,7 @@ final class MyDocumentReaderParityTests: BibleUISwordFixtureTestCase {
             )
         )
 
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
         let documentPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: scripts(), event: "add_documents") as? [String: Any]
         )

@@ -28,28 +28,31 @@ final class AIReaderSourceContextTests: BibleUISwordFixtureTestCase {
      controller-local pane state; inherited teardown removes the fixture.
    */
   @MainActor
-  func testControllerAISourceContextRejectsStaleLocalPageAfterInstalledOwnerAppears() throws {
+  func testControllerAISourceContextRejectsStaleLocalPageAfterInstalledOwnerAppears() async throws {
     let container = try makeMyDocumentModelContainer()
     let modelContext = ModelContext(container)
     let document = MyDocument(name: "Local source", initials: "MYDOC")
     let page = MyDocumentPage(title: "Source page", pageKey: "page")
     let content = MyDocumentPageContent(pageId: page.id, content: "Private local content")
+    modelContext.insert(document)
+    modelContext.insert(page)
+    modelContext.insert(content)
     page.document = document
     page.pageContent = content
     content.page = page
     document.pages = [page]
-    modelContext.insert(document)
-    modelContext.insert(page)
-    modelContext.insert(content)
     try modelContext.save()
 
     let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
     controller.myDocumentStore = MyDocumentStore(modelContext: modelContext)
     let window = Window()
     let pageManager = PageManager(id: window.id)
-    window.pageManager = pageManager
+    self.retainReaderWindowGraph(window, attaching: pageManager)
     controller.activeWindow = window
     XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MYDOC", pageKey: "page"))
+    try await awaitReaderCondition("initial My Documents source selection") {
+      controller.currentGeneralBookKey == "page"
+    }
     XCTAssertEqual(
       controller.aiSourceContext(
         expectedDocumentInitials: "MYDOC",
@@ -92,7 +95,7 @@ final class AIReaderSourceContextTests: BibleUISwordFixtureTestCase {
    - Side effects: Mutates only an in-memory SwiftData graph and controller-local pane state.
    */
   @MainActor
-  func testControllerAISourceContextUsesJavaExactDocumentInitials() throws {
+  func testControllerAISourceContextUsesJavaExactDocumentInitials() async throws {
     let composed = "Caf\u{00E9}Source"
     let decomposed = "Cafe\u{0301}Source"
     let container = try makeMyDocumentModelContainer()
@@ -100,21 +103,25 @@ final class AIReaderSourceContextTests: BibleUISwordFixtureTestCase {
     let document = MyDocument(name: "Unicode source", initials: composed)
     let page = MyDocumentPage(title: "Source page", pageKey: "page")
     let content = MyDocumentPageContent(pageId: page.id, content: "Exact Unicode owner content")
+    modelContext.insert(document)
+    modelContext.insert(page)
+    modelContext.insert(content)
     page.document = document
     page.pageContent = content
     content.page = page
     document.pages = [page]
-    modelContext.insert(document)
-    modelContext.insert(page)
-    modelContext.insert(content)
     try modelContext.save()
 
     let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
     controller.myDocumentStore = MyDocumentStore(modelContext: modelContext)
     let window = Window()
-    window.pageManager = PageManager(id: window.id)
+    let pageManager = PageManager(id: window.id)
+    self.retainReaderWindowGraph(window, attaching: pageManager)
     controller.activeWindow = window
     XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: composed, pageKey: page.pageKey))
+    try await awaitReaderCondition("exact UTF-16 My Documents source selection") {
+      controller.currentGeneralBookKey == page.pageKey
+    }
     XCTAssertEqual(
       controller.aiSourceContext(
         expectedDocumentInitials: composed,

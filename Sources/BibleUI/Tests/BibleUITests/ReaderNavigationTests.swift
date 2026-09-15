@@ -1159,6 +1159,81 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(json.contains("Must not appear"))
     }
 
+    /** A successful prepared word lookup clears selection only after its result is accepted. */
+    @MainActor
+    func testPreparedWordLookupPublishesActualDefinitionThenClearsSelection() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedPopulatedRawDictionaryModule(
+            named: "WordLookupAccepted",
+            in: modulePath,
+            features: [],
+            entryKey: "GRACE",
+            entryXML: #"<entryFree n="GRACE">Accepted word definition</entryFree>"#
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridge(bridge, selectionChanged: "grace")
+        XCTAssertTrue(controller.hasActiveSelection)
+        let boundary = scripts().count
+
+        controller.lookupSelectionInDictionaries()
+
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(document["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.first?["bookInitials"] as? String, "WordLookupAccepted")
+        XCTAssertTrue(
+            (fragments.first?["xml"] as? String)?.contains("Accepted word definition") == true
+        )
+        XCTAssertFalse(controller.hasActiveSelection)
+        XCTAssertTrue(scripts().dropFirst(boundary).contains(
+            "window.getSelection().removeAllRanges();"
+        ))
+    }
+
+    /** A prepared word-lookup miss reports Android's toast and retains the selected text. */
+    @MainActor
+    func testPreparedWordLookupMissSettlesWithToastWithoutClearingSelection() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEmptyRawDictionaryModule(
+            named: "WordLookupMiss",
+            in: modulePath,
+            features: []
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let publication = expectation(description: "word lookup miss published")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .publication, key.family.rawValue == "definition" else { return }
+                publication.fulfill()
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        var toast: String?
+        controller.onShowToast = { toast = $0 }
+        controller.bridge(bridge, selectionChanged: "missingword")
+
+        controller.lookupSelectionInDictionaries()
+        await fulfillment(of: [publication], timeout: 3)
+
+        XCTAssertEqual(toast, "Word not found in any dictionary")
+        XCTAssertTrue(controller.hasActiveSelection)
+        XCTAssertFalse(scripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertFalse(scripts().contains("window.getSelection().removeAllRanges();"))
+    }
+
     /**
      Protects Android's JSword TreeSet order for production selected-word results.
 
@@ -1638,6 +1713,106 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Keeps preferred Strong's families separate for Java-distinct canonical Unicode initials.
+
+     Swift string hashing considers composed and decomposed spellings equivalent. Android's book
+     map and the reader's prepared-source authorization do not, so one spelling's accepted family
+     must not reorder the other spelling's candidates.
+     */
+    func testStrongsPreferredFamilyCacheUsesExactUTF16ModuleIdentity() {
+        let cache = AndroidStrongsKeyPreferenceCache()
+        let composed = "ExactCaf\u{00E9}"
+        let decomposed = "ExactCafe\u{0301}"
+        let candidates = BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G243")
+
+        cache.record(.zeroPaddedKey, moduleInitials: composed)
+
+        XCTAssertEqual(
+            cache.orderedCandidates(candidates, moduleInitials: composed).first?.family,
+            .zeroPaddedKey
+        )
+        XCTAssertEqual(
+            cache.orderedCandidates(candidates, moduleInitials: decomposed).first?.family,
+            .key
+        )
+    }
+
+    /**
+     Defers preferred-family history until the prepared definition reaches an accepted bridge.
+
+     - Setup: Queues a lookup whose only matching key uses Android's zero-padded family, refreshes
+       the captured manager before source work starts, then retries the same lookup against the
+       current generation.
+     - Expected result: The rejected generation neither emits content nor changes cache order. The
+       accepted retry emits the actual definition and then records the zero-padded family.
+     - Failure meaning: Speculative or stale source work can change later Strong's key selection.
+     */
+    @MainActor
+    func testStaleDefinitionGenerationDoesNotCommitPreferredFamilyBeforeAcceptedRetry() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let moduleName = "DeferredFamilyGreek"
+        try seedPopulatedRawDictionaryModule(
+            named: moduleName,
+            in: modulePath,
+            features: ["GreekDef"],
+            entries: [
+                ("00243", #"<entryFree n="00243">Deferred 243 definition</entryFree>"#),
+                ("00244", #"<entryFree n="00244">Deferred 244 definition</entryFree>"#),
+            ],
+            strongsPadding: false
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let worker = DispatchQueue(label: "ReaderNavigationTests-definition-stale-generation")
+        worker.suspend()
+        let staleSettled = expectation(description: "stale definition generation settled")
+        let freshSettled = expectation(description: "fresh definition generation published")
+        let publicationCount = ReaderNavigationLockedCounter()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard phase == .publication, key.family.rawValue == "definition" else { return }
+                publicationCount.increment()
+                (publicationCount.value == 1 ? staleSettled : freshSettled).fulfill()
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let cache = AndroidStrongsKeyPreferenceCache.shared
+        let candidates = BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G243")
+        XCTAssertEqual(cache.orderedCandidates(candidates, moduleInitials: moduleName).first?.family, .key)
+
+        controller.bridge(bridge, openExternalLink: "ab-w://?strong=G244")
+        manager.refresh()
+        worker.resume()
+        await fulfillment(of: [staleSettled], timeout: 3)
+        XCTAssertFalse(scripts().contains { $0.contains("emit('add_documents'") })
+        XCTAssertEqual(cache.orderedCandidates(candidates, moduleInitials: moduleName).first?.family, .key)
+
+        let retryBoundary = scripts().count
+        controller.bridge(bridge, openExternalLink: "ab-w://?strong=G244")
+        let retryScripts = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: retryBoundary
+        )
+        await fulfillment(of: [freshSettled], timeout: 3)
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: retryScripts, event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(document["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.first?["keyName"] as? String, "00244")
+        XCTAssertTrue((fragments.first?["xml"] as? String)?.contains("Deferred 244 definition") == true)
+        XCTAssertEqual(
+            cache.orderedCandidates(candidates, moduleInitials: moduleName).first?.family,
+            .zeroPaddedKey
+        )
+    }
+
+    /**
      Seeds one populated RawLD dictionary using the shared empty-module fixture metadata.
 
      - Parameters:
@@ -1981,7 +2156,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      - Side effects: Writes an isolated SWORD fixture that the base test case removes in teardown.
      */
     @MainActor
-    func testStrongsLinkDoesNotNavigateWhenInstalledDictionaryDoesNotContainEntry() throws {
+    func testStrongsLinkDoesNotNavigateWhenInstalledDictionaryDoesNotContainEntry() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawDictionaryModule(
@@ -1990,14 +2165,26 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             features: ["GreekDef"]
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let preparationSettled = expectation(description: "definition miss settled")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .publication, key.family.rawValue == "definition" else { return }
+                preparationSettled.fulfill()
+            }
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
         var routedDefinitionDocument = false
-        controller.onOpenDefinitionDocumentInLinksWindow = { _, _, _ in
+        controller.onOpenDefinitionDocumentInLinksWindow = { _ in
             routedDefinitionDocument = true
         }
         let renderedStateBeforeLookup = controller.renderedContentState
 
         controller.bridge(bridge, openExternalLink: "ab-w://?strong=G243")
+        await fulfillment(of: [preparationSettled], timeout: 2)
 
         XCTAssertFalse(routedDefinitionDocument)
         XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
@@ -2017,7 +2204,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
        scripts in memory.
      */
     @MainActor
-    func testMultiStrongsLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+    func testMultiStrongsLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawDictionaryModule(
@@ -2033,13 +2220,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "ab-w://?strong=G243&strong=H00430"
         )
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(payload["type"] as? String, "multi")
         XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
@@ -2062,7 +2254,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
        scripts in memory.
      */
     @MainActor
-    func testMixedDefinitionMultiLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() throws {
+    func testMixedDefinitionMultiLinkOpensEmptyMultiWhenAllInstalledEntriesMiss() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawDictionaryModule(
@@ -2078,13 +2270,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "ab-w://?strong=G243&robinson=V-PAI-3S"
         )
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
         XCTAssertTrue(payload["contentType"] is NSNull)
@@ -2103,7 +2300,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
        scripts in memory.
      */
     @MainActor
-    func testMultiStrongsLinkKeepsPartialHitWithoutMissFallback() throws {
+    func testMultiStrongsLinkKeepsPartialHitWithoutMissFallback() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedPopulatedRawDictionaryModule(
@@ -2121,13 +2318,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "ab-w://?strong=G243&strong=H00430"
         )
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
         XCTAssertEqual(fragments.count, 1)
@@ -2149,7 +2351,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
        scripts in memory.
      */
     @MainActor
-    func testInterleavedDefinitionLinkPreservesAndroidFragmentOrder() throws {
+    func testInterleavedDefinitionLinkPreservesAndroidFragmentOrder() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedPopulatedRawDictionaryModule(
@@ -2169,13 +2371,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "ab-w://?robinson=V-PAI-3S&strong=G243"
         )
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
         XCTAssertEqual(fragments.map { $0["bookInitials"] as? String }, ["Robinson", "StrongsGreek"])
@@ -2194,7 +2401,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
        scripts in memory.
      */
     @MainActor
-    func testUnknownEmptyDefinitionChildStillSelectsMultiDispatch() throws {
+    func testUnknownEmptyDefinitionChildStillSelectsMultiDispatch() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         try seedEmptyRawDictionaryModule(
@@ -2205,29 +2412,39 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "ab-w://?lemma.TR=&strong=G243"
         )
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         XCTAssertTrue((payload["osisFragments"] as? [[String: Any]])?.isEmpty == true)
         XCTAssertTrue(payload["contentType"] is NSNull)
     }
 
     @MainActor
-    func testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet() throws {
+    func testStrongsLinkEmitsVueDocumentInsteadOfNativeSheet() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let boundary = recordedScripts().count
         controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
         let fragment = try XCTUnwrap(fragments.first)
@@ -2245,30 +2462,35 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     @MainActor
-    func testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable() throws {
+    func testStrongsLinkUsesLinksWindowRoutingCallbackWhenAvailable() async throws {
         let bridge = BibleBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        var routedPayload: (json: String, book: String, key: String)?
-        controller.onOpenDefinitionDocumentInLinksWindow = { documentJSON, renderedBook, renderedKey in
-            routedPayload = (json: documentJSON, book: renderedBook, key: renderedKey)
+        var routedRequest: BibleReaderDefinitionRenderRequest?
+        controller.onOpenDefinitionDocumentInLinksWindow = { request in
+            routedRequest = request
         }
 
         controller.bridge(bridge, openExternalLink: "ab-w://?strong=H00430")
 
-        let payload = try XCTUnwrap(routedPayload)
-        XCTAssertTrue(payload.json.contains(#""contentType":null"#))
-        XCTAssertEqual(payload.book, "Strongs")
-        XCTAssertEqual(payload.key, "strongs")
+        try await awaitReaderCondition("Strong's document routed to the links-window owner") {
+            routedRequest != nil
+        }
+        let request = try XCTUnwrap(routedRequest)
+        XCTAssertTrue(request.initialDocumentJSON.contains(#""contentType":null"#))
+        XCTAssertEqual(request.renderedBook, "Strongs")
+        XCTAssertEqual(request.renderedKey, "strongs")
+        guard case .strongs(let items, let emitsEmptyMultiOnMiss) = request.sourceRequest.source else {
+            return XCTFail("Expected routed Strong's source metadata")
+        }
+        XCTAssertEqual(items, [.strong("H00430")])
+        XCTAssertFalse(emitsEmptyMultiOnMiss)
         XCTAssertEqual(controller.renderedContentState, BibleReaderController.emptyRenderedContentState)
 
-        let targetController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
-        targetController.loadDefinitionDocument(
-            payload.json,
-            renderedBook: payload.book,
-            renderedKey: payload.key
-        )
+        let (targetBridge, _) = makeRecordingBridge()
+        let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
+        targetController.loadDefinitionDocument(request)
         XCTAssertEqual(
             targetController.renderedContentState,
             "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
@@ -2279,6 +2501,142 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             targetController.renderedContentState,
             "category=general_book;module=Multi;book=Multi;chapter=none;key=strongs"
         )
+    }
+
+    /**
+     Rejects a prepared definition when its source pane or workspace loses destination ownership.
+
+     - Setup: Suspends the real preparation queue after submitting a Strong's links-window route,
+       switches the controller to another persisted workspace/window, then releases and retries.
+     - Expected result: The stale request settles without routing. A fresh request from the new pane
+       routes one real definition whose fragment retains the requested Strong's key.
+     - Failure meaning: Immutable source bytes can publish into a pane or workspace that no longer
+       owns the user action.
+     */
+    @MainActor
+    func testQueuedDefinitionRejectsReplacedPaneAndWorkspaceBeforeFreshRoute() async throws {
+        let worker = DispatchQueue(label: "ReaderNavigationTests-definition-pane-workspace")
+        worker.suspend()
+        let publicationCount = ReaderNavigationLockedCounter()
+        let staleSettled = expectation(description: "stale definition pane settled")
+        let freshSettled = expectation(description: "fresh definition pane published")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard phase == .publication, key.family.rawValue == "definition" else { return }
+                publicationCount.increment()
+                (publicationCount.value == 1 ? staleSettled : freshSettled).fulfill()
+            }
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let container = try makeWorkspaceModelContainer()
+        let context = ModelContext(container)
+        let store = WorkspaceStore(modelContext: context)
+        let firstWorkspace = store.createWorkspace(name: "Definition Source")
+        let secondWorkspace = store.createWorkspace(name: "Definition Destination")
+        let firstWindow = try XCTUnwrap(store.windows(workspaceId: firstWorkspace.id).first)
+        let secondWindow = try XCTUnwrap(store.windows(workspaceId: secondWorkspace.id).first)
+        retainReaderWindowGraph(firstWindow)
+        retainReaderWindowGraph(secondWindow)
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.activeWindow = firstWindow
+        var routedRequests: [BibleReaderDefinitionRenderRequest] = []
+        controller.onOpenDefinitionDocumentInLinksWindow = { routedRequests.append($0) }
+
+        controller.bridge(BibleBridge(), openExternalLink: "ab-w://?strong=H00430")
+        controller.activeWindow = secondWindow
+        worker.resume()
+        await fulfillment(of: [staleSettled], timeout: 3)
+        XCTAssertTrue(routedRequests.isEmpty)
+
+        controller.bridge(BibleBridge(), openExternalLink: "ab-w://?strong=H00430")
+        await fulfillment(of: [freshSettled], timeout: 3)
+        let request = try XCTUnwrap(routedRequests.first)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(request.initialDocumentJSON.utf8))
+                as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.first?["keyName"] as? String, "H00430")
+        XCTAssertEqual(controller.activeWindow?.id, secondWindow.id)
+        XCTAssertEqual(controller.activeWindow?.workspace?.id, secondWorkspace.id)
+    }
+
+    /**
+     Rejects definition bytes captured under a superseded explicit dictionary preference.
+
+     A fresh request must resolve only the newly selected module; the old prepared fragment cannot
+     publish merely because its source manager and destination pane remained unchanged.
+     */
+    @MainActor
+    func testQueuedDefinitionRejectsChangedSourcePreferenceBeforeFreshRoute() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        for (name, body) in [
+            ("DefinitionPreferenceOld", "Old selected definition"),
+            ("DefinitionPreferenceNew", "New selected definition"),
+        ] {
+            try seedPopulatedRawDictionaryModule(
+                named: name,
+                in: modulePath,
+                features: ["GreekDef"],
+                entryKey: "G243",
+                entryXML: #"<entryFree n="G243">\#(body)</entryFree>"#,
+                strongsPadding: false
+            )
+        }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeWorkspaceModelContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        settingsStore.setStringSet(
+            .strongsGreekDictionary,
+            values: ["DefinitionPreferenceOld"]
+        )
+        let worker = DispatchQueue(label: "ReaderNavigationTests-definition-preference")
+        worker.suspend()
+        let publicationCount = ReaderNavigationLockedCounter()
+        let staleSettled = expectation(description: "old definition preference settled")
+        let freshSettled = expectation(description: "new definition preference published")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard phase == .publication, key.family.rawValue == "definition" else { return }
+                publicationCount.increment()
+                (publicationCount.value == 1 ? staleSettled : freshSettled).fulfill()
+            }
+        )
+        let controller = BibleReaderController(
+            bridge: BibleBridge(),
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.settingsStore = settingsStore
+        var routedRequests: [BibleReaderDefinitionRenderRequest] = []
+        controller.onOpenDefinitionDocumentInLinksWindow = { routedRequests.append($0) }
+
+        controller.bridge(BibleBridge(), openExternalLink: "ab-w://?strong=G243")
+        settingsStore.setStringSet(
+            .strongsGreekDictionary,
+            values: ["DefinitionPreferenceNew"]
+        )
+        worker.resume()
+        await fulfillment(of: [staleSettled], timeout: 3)
+        XCTAssertTrue(routedRequests.isEmpty)
+
+        controller.bridge(BibleBridge(), openExternalLink: "ab-w://?strong=G243")
+        await fulfillment(of: [freshSettled], timeout: 3)
+        let request = try XCTUnwrap(routedRequests.first)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(request.initialDocumentJSON.utf8))
+                as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.map { $0["bookInitials"] as? String }, ["DefinitionPreferenceNew"])
+        XCTAssertTrue(request.initialDocumentJSON.contains("New selected definition"))
+        XCTAssertFalse(request.initialDocumentJSON.contains("Old selected definition"))
     }
 
     /**
@@ -2295,13 +2653,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     @MainActor
     func testDefinitionDocumentUsesAndroidMultiPageIdentityForLinksWindowTarget() throws {
-        let bridge = BibleBridge()
+        let (bridge, _) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window(isSynchronized: false, isLinksWindow: true)
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -2310,9 +2669,27 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
 
         controller.loadDefinitionDocument(
-            documentJSON,
-            renderedBook: "Strongs",
-            renderedKey: "strongs"
+            BibleReaderDefinitionRenderRequest(
+                sourceRequest: BibleReaderDefinitionPreparationRequest(
+                    source: .strongs(
+                        items: [.strong("H00430")],
+                        emitsEmptyMultiOnMiss: false
+                    ),
+                    stateJSON: nil,
+                    preferences: BibleReaderDefinitionPreferenceSnapshot(
+                        hebrewDictionaries: [],
+                        greekDictionaries: [],
+                        robinsonDictionaries: [],
+                        disabledWordLookupDictionaries: []
+                    )
+                ),
+                initialDocumentJSON: documentJSON,
+                renderedBook: "Strongs",
+                renderedKey: "strongs",
+                sourceAuthorization: .independent,
+                preferredFamilyUpdates: [],
+                onAccepted: nil
+            )
         )
 
         let androidBookAndKeyListRef = "StrongsHebrew:H00430"
@@ -2356,10 +2733,12 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     @MainActor
     func testMultiReferenceDocumentUsesAndroidMultiPageIdentity() {
-        let controller = BibleReaderController(bridge: BibleBridge())
+        let (bridge, _) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge)
         let window = Window(isSynchronized: false, isLinksWindow: true)
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         let bibleDocumentBeforeLoad = pageManager.bibleDocument
         let documentJSON = """
@@ -2411,6 +2790,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.generalBookDocument = "Multi"
         pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
         var persistCount = 0
@@ -2469,6 +2849,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             let pageManager = PageManager(id: window.id, currentCategoryName: categoryName)
             configurePageManager(pageManager)
             window.pageManager = pageManager
+            self.retainReaderWindowGraph(window)
             controller.activeWindow = window
             let baselineCategory = controller.currentCategory
             let baselineGeneralBookName = controller.activeGeneralBookModuleName
@@ -2523,6 +2904,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.generalBookDocument = "Multi"
         pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.restoreSavedPosition()
@@ -2557,6 +2939,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.commentaryDocument = "Memorize"
         pageManager.commentaryAnchorOrdinal = 1
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.restoreSavedPosition()
@@ -2581,7 +2964,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      rendering ordinary no-commentary content.
      */
     @MainActor
-    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromPersistedAnchor() throws {
+    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromPersistedAnchor() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -2594,13 +2977,21 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.commentaryDocument = "Memorize"
         pageManager.commentaryAnchorOrdinal = ordinal
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
 
+        let boundary = recordedScripts().count
         controller.loadCurrentContent()
 
+        let scripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(payload["type"] as? String, "memorize")
         XCTAssertEqual(payload["title"] as? String, "Genesis 1:1")
@@ -2625,7 +3016,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      the user's selected Memorize passage.
      */
     @MainActor
-    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromSerializedSourceBookAndKey() throws {
+    func testRestoredAndroidMemorizeDocumentRebuildsPayloadFromSerializedSourceBookAndKey() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -2640,6 +3031,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.commentaryDocument = "Memorize"
         pageManager.commentaryAnchorOrdinal = startOrdinal
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).setPageManagerEntry(
             .init(
@@ -2653,10 +3045,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         controller.restoreSavedPosition()
 
+        let boundary = recordedScripts().count
         controller.loadCurrentContent()
 
+        let scripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(payload["type"] as? String, "memorize")
         XCTAssertEqual(payload["title"] as? String, "Genesis 1:1-3")
@@ -2685,7 +3084,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      - Side effects: Writes only an inherited temporary SWORD descriptor and in-memory settings.
      */
     @MainActor
-    func testRestoredAndroidMemorizeDocumentRejectsRelockedSourceWithoutMutation() throws {
+    func testRestoredAndroidMemorizeDocumentRejectsRelockedSourceWithoutMutation() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let moduleName = "LockedMemorize"
@@ -2703,7 +3102,19 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         XCTAssertNotNil(manager.module(named: moduleName))
         XCTAssertNil(manager.readableModule(named: moduleName))
-        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let preparationSettled = expectation(description: "locked Memorize preparation settled")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                if phase == .publication, key.family.rawValue == "memorize" {
+                    preparationSettled.fulfill()
+                }
+            }
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
         let settingsStore = try makeInMemorySettingsStore()
         controller.settingsStore = settingsStore
         let ordinal = try XCTUnwrap(
@@ -2717,6 +3128,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.commentaryDocument = "Memorize"
         pageManager.commentaryAnchorOrdinal = ordinal
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore).setPageManagerEntry(
             .init(
@@ -2733,6 +3145,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let baselineRenderedState = controller.renderedContentState
 
         controller.loadCurrentContent()
+
+        await fulfillment(of: [preparationSettled], timeout: 2)
 
         XCTAssertEqual(recordedScripts().count, baselineScripts)
         XCTAssertEqual(controller.renderedContentState, baselineRenderedState)
@@ -2751,7 +3165,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      means iOS has only fixed the bottom-tab label while losing the actual restored links-window content.
      */
     @MainActor
-    func testRestoredAndroidMultiDocumentRebuildsPayloadFromPersistedKey() throws {
+    func testRestoredAndroidMultiDocumentRebuildsPayloadFromPersistedKey() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -2761,13 +3175,19 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.generalBookDocument = "Multi"
         pageManager.generalBookKey = "KJV:Gen.1.1||KJV:John.3.16"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
 
+        let actionBoundary = recordedScripts().count
         controller.loadCurrentContent()
-
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: actionBoundary
+        )
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         let fragments = try XCTUnwrap(payload["osisFragments"] as? [[String: Any]])
 
@@ -2781,6 +3201,48 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             controller.renderedContentState,
             "category=general_book;module=Multi;book=Multi;chapter=none;key=multi"
         )
+    }
+
+    /** Preferred Strong's history commits only when the destination bridge accepts replacement. */
+    @MainActor
+    func testDefinitionPreferredFamilyUpdateRequiresAcceptedDestinationBridge() {
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge)
+        let moduleName = "DefinitionBridgeAcceptance"
+        let cache = AndroidStrongsKeyPreferenceCache.shared
+        let candidates = BibleReaderStrongsDocumentBuilder.strongsLookupKeyCandidates(for: "G243")
+        let request = BibleReaderDefinitionRenderRequest(
+            sourceRequest: BibleReaderDefinitionPreparationRequest(
+                source: .strongs(items: [.strong("G243")], emitsEmptyMultiOnMiss: false),
+                stateJSON: nil,
+                preferences: BibleReaderDefinitionPreferenceSnapshot(
+                    hebrewDictionaries: [],
+                    greekDictionaries: [],
+                    robinsonDictionaries: [],
+                    disabledWordLookupDictionaries: []
+                )
+            ),
+            initialDocumentJSON: #"{"type":"multi","osisFragments":[],"id":"cache-acceptance"}"#,
+            renderedBook: "Strongs",
+            renderedKey: "strongs",
+            sourceAuthorization: .independent,
+            preferredFamilyUpdates: [
+                .init(moduleInitials: moduleName, family: .zeroPaddedKey),
+            ],
+            onAccepted: nil
+        )
+
+        controller.loadDefinitionDocument(request)
+        XCTAssertEqual(cache.orderedCandidates(candidates, moduleInitials: moduleName).first?.family, .key)
+        XCTAssertEqual(controller.committedRenderState, .empty)
+
+        bridge.javaScriptEvaluationObserver = { _ in }
+        controller.loadDefinitionDocument(request)
+        XCTAssertEqual(
+            cache.orderedCandidates(candidates, moduleInitials: moduleName).first?.family,
+            .zeroPaddedKey
+        )
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, "Multi")
     }
 
     #if os(iOS)
@@ -2845,11 +3307,12 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     @MainActor
     func testMultiDocumentNativeSelectionActionsDoNotUseStaleBibleReference() {
-        let bridge = BibleBridge()
+        let (bridge, _) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge)
         let window = Window(isSynchronized: false, isLinksWindow: true)
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.loadMultiReferenceDocument("""
         {
@@ -2891,7 +3354,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let pageManager = PageManager(id: window.id, currentCategoryName: DocumentCategory.generalBook.pageManagerKey)
         pageManager.generalBookDocument = "Multi"
         pageManager.generalBookKey = "KJV:Gen.1.1"
-        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window, attaching: pageManager)
 
         let capabilities = BibleWindowPaneMenuCapabilities(window: window, controller: nil)
 
@@ -2900,25 +3363,29 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     @MainActor
-    func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+    func testDefinitionDocumentRequestedBeforeClientReadyReplaysAfterClientReady() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        let documentJSON = try XCTUnwrap(
-            controller.buildStrongsMultiDocJSON(strongs: ["H00430"], robinson: [])
+        let initialBoundary = recordedScripts().count
+        controller.bridge(
+            bridge,
+            openExternalLink: "ab-w://?strong=H00430"
         )
-
-        controller.loadDefinitionDocument(
-            documentJSON,
-            renderedBook: "Strongs",
-            renderedKey: "strongs"
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialBoundary
         )
         let scriptCountBeforeClientReady = recordedScripts().count
 
         controller.bridgeDidSetClientReady(bridge)
-
-        let clientReadyScripts = Array(recordedScripts().dropFirst(scriptCountBeforeClientReady))
+        let clientReadyScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: scriptCountBeforeClientReady
+        )
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: clientReadyScripts, event: "add_documents") as? [String: Any]
         )
@@ -3028,6 +3495,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         manager.setGlobalOption(.strongsNumbers, enabled: false)
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.loadCurrentContent()
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
@@ -3056,6 +3526,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 5
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.restoreSavedPosition()
@@ -3212,13 +3683,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      test is main-actor isolated for controller callbacks and creates only temporary module fixtures.
      */
     @MainActor
-    func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
+    func testMultiReferenceLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let actionBoundary = recordedScripts().count
         controller.bridge(bridge, openExternalLink: "multi://?osis=Gen.1.1&osis=Exod.2.1&v11n=KJVA")
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: actionBoundary
+        )
 
         let addDocumentsScript = try XCTUnwrap(
             recordedScripts().first(where: { $0.contains("emit('add_documents'") })
@@ -3242,13 +3718,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      needed to capture bridge emission.
      */
     @MainActor
-    func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() throws {
+    func testMultiReferenceOsisLinkEmitsVueMultiDocumentInsteadOfCrossReferenceSheet() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let actionBoundary = recordedScripts().count
         controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1,Exod.2.1&v11n=KJVA")
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: actionBoundary
+        )
 
         let addDocumentsScript = try XCTUnwrap(
             recordedScripts().first(where: { $0.contains("emit('add_documents'") })
@@ -3296,33 +3777,6 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testWindowPaneRouterPreservesForcedDocumentRangeAndVersification() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
-            named: "VulgTest",
-            description: "Vulgate OSIS routing fixture",
-            versification: "Vulg",
-            in: modulePath
-        )
-        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let (sourceBridge, sourceScripts) = makeRecordingBridge()
-        let (targetBridge, targetScripts) = makeRecordingBridge()
-        let sourceController = BibleReaderController(
-            bridge: sourceBridge,
-            swordManagerOverride: manager
-        )
-        let targetController = BibleReaderController(
-            bridge: targetBridge,
-            swordManagerOverride: manager
-        )
-        let targetWindow = Window()
-        let targetPageManager = PageManager(id: targetWindow.id)
-        targetWindow.pageManager = targetPageManager
-        targetController.activeWindow = targetWindow
-        targetController.loadMultiReferenceDocument(
-            #"{"id":"existing-multi","type":"multi","osisFragments":[{"bookInitials":"KJV","osisRef":"Gen.1.1"}],"compare":false}"#
-        )
-        XCTAssertEqual(targetController.currentCategory, .generalBook)
-        let targetScriptBaseline = targetScripts().count
-        let targetModule = try XCTUnwrap(manager.module(named: "VulgTest"))
         let expectedStart = try XCTUnwrap(
             VersificationMapper.convertStrictly(
                 osisBookId: "Ps",
@@ -3341,6 +3795,59 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 to: "Vulg"
             )?.reference
         )
+        var forcedModuleEntries = [
+            (
+                expectedStart.osisBookId,
+                expectedStart.chapter,
+                expectedStart.verse,
+                "<verse osisID=\"\(expectedStart.osisBookId).\(expectedStart.chapter).\(expectedStart.verse)\">Synthetic forced Vulgate start.</verse>"
+            ),
+            (
+                expectedEnd.osisBookId,
+                expectedEnd.chapter,
+                expectedEnd.verse,
+                "<verse osisID=\"\(expectedEnd.osisBookId).\(expectedEnd.chapter).\(expectedEnd.verse)\">Synthetic forced Vulgate end.</verse>"
+            ),
+        ]
+        if !forcedModuleEntries.contains(where: {
+            $0.0 == expectedStart.osisBookId && $0.1 == 1 && $0.2 == 1
+        }) {
+            forcedModuleEntries.append((
+                expectedStart.osisBookId,
+                1,
+                1,
+                "<verse osisID=\"\(expectedStart.osisBookId).1.1\">Synthetic Vulgate included-book probe.</verse>"
+            ))
+        }
+        try seedSyntheticRawTextBibleModule(
+            named: "VulgTest",
+            description: "Vulgate OSIS routing fixture",
+            versification: "Vulg",
+            entries: forcedModuleEntries,
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (sourceBridge, sourceScripts) = makeRecordingBridge()
+        let (targetBridge, targetScripts) = makeRecordingBridge()
+        let sourceController = BibleReaderController(
+            bridge: sourceBridge,
+            swordManagerOverride: manager
+        )
+        let targetController = BibleReaderController(
+            bridge: targetBridge,
+            swordManagerOverride: manager
+        )
+        let targetWindow = Window()
+        let targetPageManager = PageManager(id: targetWindow.id)
+        targetWindow.pageManager = targetPageManager
+        self.retainReaderWindowGraph(targetWindow)
+        targetController.activeWindow = targetWindow
+        targetController.loadMultiReferenceDocument(
+            #"{"id":"existing-multi","type":"multi","osisFragments":[{"bookInitials":"KJV","osisRef":"Gen.1.1"}],"compare":false}"#
+        )
+        XCTAssertEqual(targetController.currentCategory, .generalBook)
+        let targetScriptBaseline = targetScripts().count
+        let targetModule = try XCTUnwrap(manager.module(named: "VulgTest"))
         let expectedStartOrdinal = try XCTUnwrap(
             targetModule.verseOrdinal(
                 osisBookId: expectedStart.osisBookId,
@@ -3409,6 +3916,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             payload["originalOrdinalRange"] as? [Int],
             [expectedStartOrdinal, expectedEndOrdinal]
         )
+        let fragment = try XCTUnwrap(payload["osisFragment"] as? [String: Any])
+        let xml = try XCTUnwrap(fragment["xml"] as? String)
+        XCTAssertTrue(xml.contains("Synthetic forced Vulgate start."))
+        XCTAssertTrue(xml.contains("Synthetic forced Vulgate end."))
         XCTAssertFalse(
             expectedStart.chapter == 10 && expectedStart.verse == 1,
             "Fixture must exercise a real KJVA-to-Vulgate coordinate change"
@@ -3459,13 +3970,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      means mixed cross-reference links can silently drop later list entries or range members.
      */
     @MainActor
-    func testOsisMixedListAndRangeLinkEmitsEveryParsedVerse() throws {
+    func testOsisMixedListAndRangeLinkEmitsEveryParsedVerse() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let actionBoundary = recordedScripts().count
         controller.bridge(bridge, openExternalLink: "osis://?osis=Gen.1.1-Gen.1.2,Exod.2.1&v11n=KJVA")
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: actionBoundary
+        )
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
@@ -3488,17 +4004,22 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      `Gen.1.1-Exod.2.1` fragment would silently include every intervening canonical verse.
      */
     @MainActor
-    func testSpaceDelimitedDiscontiguousOsisListEmitsSeparateMultiFragments() throws {
+    func testSpaceDelimitedDiscontiguousOsisListEmitsSeparateMultiFragments() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
 
+        let actionBoundary = recordedScripts().count
         controller.bridge(
             bridge,
             openExternalLink: "osis://?osis=Gen.1.1-Gen.1.2%20Exod.2.1&v11n=KJVA"
         )
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: actionBoundary
+        )
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
@@ -3712,10 +4233,16 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      */
     func testMultiReferenceDocumentBuilderCreatesAndroidMultiPayload() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate mixed-reference fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Ps", 10, 1,
+                    #"<verse osisID="Ps.10.1">Synthetic Vulgate Multi source.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -3762,15 +4289,19 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(fragments[1]["v11n"] as? String, "Vulg")
         let vulgOrdinal = try XCTUnwrap(vulg.verseOrdinal(osisBookId: "Ps", chapter: 10, verse: 1))
         XCTAssertEqual(fragments[1]["ordinalRange"] as? [Int], [vulgOrdinal, vulgOrdinal])
+        XCTAssertTrue(
+            (fragments[1]["xml"] as? String)?.contains("Synthetic Vulgate Multi source.") == true
+        )
     }
 
     /**
      Validates the native-to-WebView reader configuration contract for Android parity fields.
 
      The setup writes pane text-display settings, app settings, workspace state, and reading
-     progress settings before the client-ready handshake. The expected result is a `set_config`
-     payload whose `config` object includes every renderer field consumed by bibleview-js; a failure
-     means the native settings model can drift from the shared Android renderer contract.
+     progress settings before the client-ready handshake. The expected result is the latest
+     replacement-time `set_config` payload whose `config` object includes every renderer field
+     consumed by bibleview-js; a failure means the native settings model can drift from the shared
+     Android renderer contract or the test can accidentally inspect a superseded config emission.
      */
     @MainActor
     func testReaderConfigPayloadIncludesDisplaySettingsAndActiveWindowState() throws {
@@ -3792,6 +4323,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         _ = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        self.retainReaderWindowGraph(firstWindow)
         windowManager.activeWindow = firstWindow
 
         settingsStore.setBool(.showActiveWindowIndicator, value: true)
@@ -3862,6 +4394,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         controller.displaySettings = display
         controller.nightMode = true
+        self.retainReaderWindowGraph(firstWindow)
         controller.activeWindow = firstWindow
         controller.windowManagerRef = windowManager
 
@@ -3954,7 +4487,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let marginSize = try XCTUnwrap(config["marginSize"] as? [String: Any])
         assertJSONKeys(marginSize, ["marginLeft", "marginRight", "maxWidth"])
 
-        XCTAssertEqual(payload["initial"] as? Bool, false)
+        XCTAssertEqual(payload["initial"] as? Bool, true)
         XCTAssertEqual(config["showVerseNumbers"] as? Bool, false)
         XCTAssertEqual(config["strongsMode"] as? Int, 2)
         XCTAssertEqual(config["showMorphology"] as? Bool, true)
@@ -4127,10 +4660,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         pageManager.bibleVerseNo = 1
         pageManager.textDisplaySettings = displaySettings
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
 
         controller.bridgeDidSetClientReady(bridge)
+
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
 
         let configPayload = try setConfigPayload(from: recordedScripts())
         let config = try XCTUnwrap(configPayload["config"] as? [String: Any])
@@ -4157,6 +4695,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         workspace.workspaceSettings = WorkspaceSettings(hideCompareDocuments: ["ESV"])
         let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         let controller = BibleReaderController(bridge: bridge)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         var persistCount = 0
@@ -4192,11 +4731,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        self.retainReaderWindowGraph(firstWindow)
         windowManager.activeWindow = firstWindow
         settingsStore.setBool(.showActiveWindowIndicator, value: true)
 
         let controller = BibleReaderController(bridge: bridge)
         controller.settingsStore = settingsStore
+        self.retainReaderWindowGraph(secondWindow)
         controller.activeWindow = secondWindow
         controller.windowManagerRef = windowManager
 
@@ -4227,6 +4768,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        self.retainReaderWindowGraph(firstWindow)
         windowManager.activeWindow = firstWindow
 
         let coordinator = BibleReaderConfigurationCoordinator()
@@ -4342,7 +4884,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedModuleName: "Multi",
             pageCategory: .generalBook,
             pageDocumentInitials: "Multi",
-            pageKey: "KJV:Gen.1.1"
+            pageKey: "KJV:Gen.1.1",
+            sourceAuthorization: .independent
         )
         let readyRequest = BibleReaderTransientDocumentRequest(
             documentJSON: #"{"id":"ready"}"#,
@@ -4352,7 +4895,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedModuleName: nil,
             pageCategory: nil,
             pageDocumentInitials: nil,
-            pageKey: nil
+            pageKey: nil,
+            sourceAuthorization: .independent
         )
 
         coordinator.store(pendingRequest, clientReady: false)
@@ -4389,7 +4933,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedModuleName: "Multi",
             pageCategory: .generalBook,
             pageDocumentInitials: "Multi",
-            pageKey: "KJV:Gen.1.1"
+            pageKey: "KJV:Gen.1.1",
+            sourceAuthorization: .independent
         )
         let malformedRequest = BibleReaderTransientDocumentRequest(
             documentJSON: #"{"id":"bad"}"#,
@@ -4399,7 +4944,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedModuleName: "Multi",
             pageCategory: .generalBook,
             pageDocumentInitials: "Multi",
-            pageKey: nil
+            pageKey: nil,
+            sourceAuthorization: .independent
         )
         let missingInitialsRequest = BibleReaderTransientDocumentRequest(
             documentJSON: #"{"id":"missing-initials"}"#,
@@ -4409,7 +4955,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             renderedModuleName: "Multi",
             pageCategory: .generalBook,
             pageDocumentInitials: nil,
-            pageKey: "KJV:Gen.1.1"
+            pageKey: "KJV:Gen.1.1",
+            sourceAuthorization: .independent
         )
 
         let validUpdate = coordinator.pageIdentityUpdate(for: validRequest)
@@ -4453,7 +5000,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testReaderMyDocumentCoordinatorTracksActivePageUntilDifferentRenderedContent() {
         var coordinator = BibleReaderMyDocumentCoordinator()
 
-        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+        coordinator.setActivePage(
+            documentID: UUID(uuidString: "00000000-0000-0000-0000-000000000146")!,
+            bookInitials: "MYDOC",
+            pageKey: "intro"
+        )
 
         XCTAssertEqual(coordinator.activePageKey(for: "MYDOC"), "intro")
         XCTAssertNil(coordinator.activePageKey(for: "OTHER"))
@@ -4464,7 +5015,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         coordinator.clearActivePageUnless(category: .commentary, moduleName: "MYDOC")
         XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
 
-        coordinator.setActivePage(bookInitials: "MYDOC", pageKey: "intro")
+        coordinator.setActivePage(
+            documentID: UUID(uuidString: "00000000-0000-0000-0000-000000000146")!,
+            bookInitials: "MYDOC",
+            pageKey: "intro"
+        )
         coordinator.clearActivePageUnless(category: .generalBook, moduleName: "OTHER")
 
         XCTAssertNil(coordinator.activePageKey(for: "MYDOC"))
@@ -4481,6 +5036,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      out of `BibleReaderController`.
      */
     func testReaderMyDocumentCoordinatorBuildsAndroidGeneralBookDocumentPayload() throws {
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
         let coordinator = BibleReaderMyDocumentCoordinator()
         let pageId = try XCTUnwrap(UUID(uuidString: "77777777-7777-7777-7777-777777777777"))
         let sourcePromptId = try XCTUnwrap(UUID(uuidString: "88888888-8888-8888-8888-888888888888"))
@@ -4494,6 +5051,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             languageCode: "en"
         )
         let content = MyDocumentPageContent(pageId: pageId, content: "Raw \\<markdown\\> & \"quoted\"")
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
         page.pageContent = content
         page.document = document
 
@@ -4539,6 +5099,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testReaderInfiniteScrollCoordinatorKeepsPreviousCandidateUncommittedUntilLoadSucceeds() {
         var coordinator = BibleReaderInfiniteScrollCoordinator()
         coordinator.reset(book: "Exodus", chapter: 2)
+        XCTAssertTrue(coordinator.contains(book: "Exodus", chapter: 2))
+        XCTAssertFalse(coordinator.contains(book: "Exodus", chapter: 1))
 
         let firstCandidate = coordinator.previousCandidate(
             previousBook: { $0 == "Exodus" ? "Genesis" : nil },
@@ -4557,6 +5119,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         if let firstCandidate {
             coordinator.commitPrevious(firstCandidate)
         }
+        XCTAssertTrue(coordinator.contains(book: "Exodus", chapter: 1))
 
         XCTAssertEqual(
             coordinator.previousCandidate(
@@ -4622,6 +5185,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         if let nextBookCandidate {
             coordinator.commitNext(nextBookCandidate)
         }
+        XCTAssertTrue(coordinator.contains(book: "Genesis", chapter: 50))
+        XCTAssertTrue(coordinator.contains(book: "Exodus", chapter: 1))
 
         XCTAssertEqual(
             coordinator.nextCandidate(
@@ -4630,6 +5195,286 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             ),
             BibleReaderInfiniteScrollChapter(book: "Exodus", chapter: 2)
         )
+    }
+
+    /**
+     Protects the boundary between Vue presentation and native SWORD extraction settings.
+
+     Margin, appearance, morphology, footnote, and cross-reference edits must preserve every source
+     family's current document generation because Vue owns their presentation. Native section-title
+     inclusion requires a SWORD Bible replacement, while SQLite/EPUB-style sources continue with
+     config only. An exact no-op must produce no bridge action.
+     */
+    func testReaderDisplayUpdatePolicySeparatesPresentationAndExtractionInvalidation() {
+        let original = TextDisplaySettings.appDefaults
+
+        var presentation = original
+        presentation.maxWidth = (original.maxWidth ?? 170) - 1
+        XCTAssertEqual(
+            BibleReaderDisplayUpdateAction.resolve(
+                previousSettings: original,
+                settings: presentation,
+                previousNightMode: false,
+                nightMode: false,
+                sourceUsesSwordExtraction: true
+            ),
+            .setConfig
+        )
+        XCTAssertEqual(
+            BibleReaderDisplayUpdateAction.resolve(
+                previousSettings: original,
+                settings: original,
+                previousNightMode: false,
+                nightMode: true,
+                sourceUsesSwordExtraction: true
+            ),
+            .setConfig
+        )
+
+        var extraction = original
+        extraction.showSectionTitles = !(original.showSectionTitles ?? true)
+        XCTAssertEqual(
+            BibleReaderDisplayUpdateAction.resolve(
+                previousSettings: original,
+                settings: extraction,
+                previousNightMode: false,
+                nightMode: false,
+                sourceUsesSwordExtraction: true
+            ),
+            .replaceContent
+        )
+        XCTAssertEqual(
+            BibleReaderDisplayUpdateAction.resolve(
+                previousSettings: original,
+                settings: extraction,
+                previousNightMode: false,
+                nightMode: false,
+                sourceUsesSwordExtraction: false
+            ),
+            .setConfig
+        )
+        XCTAssertEqual(
+            BibleReaderDisplayUpdateAction.resolve(
+                previousSettings: original,
+                settings: original,
+                previousNightMode: false,
+                nightMode: false,
+                sourceUsesSwordExtraction: true
+            ),
+            .none
+        )
+    }
+
+    /**
+     Verifies render provenance owns extraction invalidation and exact loaded-source admission.
+
+     Provenance records whether SWORD participates without treating every Vue presentation toggle as
+     a source invalidation. Direct SQLite documents remain config-only but still admit loaded-range
+     navigation for their Java-exact source. Canonically equivalent spelling must not alias either
+     backend identity.
+     */
+    func testCommittedRenderProvenanceSeparatesExtractionFromLoadedSourceIdentity() {
+        let decomposed = "Cafe\u{301}"
+        let composed = "Caf\u{E9}"
+
+        XCTAssertTrue(BibleReaderRenderSourceProvenance.swordModules(["KJV"]).usesSwordExtraction)
+        XCTAssertTrue(BibleReaderRenderSourceProvenance.compositeMayUseSword.usesSwordExtraction)
+        XCTAssertFalse(BibleReaderRenderSourceProvenance.sqliteModules([decomposed]).usesSwordExtraction)
+        XCTAssertFalse(BibleReaderRenderSourceProvenance.independent.usesSwordExtraction)
+        XCTAssertTrue(
+            BibleReaderRenderSourceProvenance.sqliteModules([decomposed])
+                .containsExactModule(decomposed)
+        )
+        XCTAssertFalse(
+            BibleReaderRenderSourceProvenance.sqliteModules([decomposed])
+                .containsExactModule(composed)
+        )
+        XCTAssertFalse(
+            BibleReaderRenderSourceProvenance.compositeMayUseSword.containsExactModule("KJV")
+        )
+    }
+
+    /**
+     Verifies diagnostic token escaping cannot become runtime source or extraction authority.
+
+     The identity deliberately contains legacy delimiters, while provenance keeps its exact source
+     independently. A failure means accessibility serialization has leaked back into runtime policy.
+     */
+    func testCommittedRenderIdentityDerivesDiagnosticsWithoutLosingTypedProvenance() {
+        let state = BibleReaderCommittedRenderState(
+            identity: BibleReaderCommittedRenderIdentity(
+                category: .bible,
+                moduleName: "KJV;module=Other",
+                book: "Genesis;chapter=99",
+                chapter: 1,
+                key: "Gen.1;category=dictionary"
+            ),
+            sourceProvenance: .swordModules(["KJV;module=Other"]),
+            extractionDependency: .sectionTitles
+        )
+
+        XCTAssertEqual(state.identity?.category, .bible)
+        XCTAssertEqual(state.identity?.chapter, 1)
+        XCTAssertTrue(state.sourceProvenance.usesSwordExtraction)
+        XCTAssertEqual(state.extractionDependency, .sectionTitles)
+        XCTAssertTrue(state.sourceProvenance.containsExactModule("KJV;module=Other"))
+        XCTAssertFalse(state.sourceProvenance.containsExactModule("Other"))
+    }
+
+    /**
+     Verifies a native SWORD Bible extraction-option edit replaces the current content generation.
+
+     The controller renders a real fixture chapter, captures an action boundary, and changes native
+     section-title inclusion. The causal emissions must include the config update and one atomic
+     replacement so the rebuilt fragment matches the option generation.
+     */
+    @MainActor
+    func testUpdateDisplaySettingsReplacesContentForSwordExtractionOptionChange() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.displaySettings = .appDefaults
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
+        let actionBoundary = recordedScripts().count
+
+        var settings = TextDisplaySettings.appDefaults
+        settings.showSectionTitles = !(settings.showSectionTitles ?? true)
+        controller.updateDisplaySettings(settings, nightMode: false)
+
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().dropFirst(actionBoundary).contains {
+                $0.contains("emit('clear_document'")
+            }
+        })
+
+        let actionScripts = Array(recordedScripts().dropFirst(actionBoundary))
+        XCTAssertTrue(actionScripts.contains { $0.contains("emit('set_config'") })
+        XCTAssertEqual(
+            actionScripts.filter { $0.contains("emit('clear_document'") }.count,
+            1
+        )
+    }
+
+    /**
+     Verifies a Vue-owned morphology edit preserves a typed Multi document generation.
+
+     The production multi-link route retains complete OSIS markup, including morphology attributes.
+     Enabling morphology therefore updates config without re-reading the real KJV fixture, replacing
+     the Multi payload, or falling through to the ordinary Bible chapter.
+     */
+    @MainActor
+    func testUpdateDisplaySettingsPreservesCompositeDocumentForPresentationChange() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var initialSettings = TextDisplaySettings.appDefaults
+        initialSettings.showMorphology = false
+        controller.displaySettings = initialSettings
+        controller.bridgeDidSetClientReady(bridge)
+        let routeBoundary = recordedScripts().count
+        controller.bridge(
+            bridge,
+            openExternalLink: "multi://?osis=Gen.1.1&osis=John.1.1&v11n=KJV"
+        )
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: routeBoundary
+        )
+        let initialScripts = Array(recordedScripts().dropFirst(routeBoundary))
+        _ = try XCTUnwrap(
+            bridgeEmissionPayload(from: initialScripts, event: "add_documents") as? [String: Any]
+        )
+        let updateBoundary = recordedScripts().count
+
+        var updatedSettings = initialSettings
+        updatedSettings.showMorphology = true
+        controller.updateDisplaySettings(updatedSettings, nightMode: false)
+
+        let updateScripts = Array(recordedScripts().dropFirst(updateBoundary))
+        XCTAssertTrue(updateScripts.contains { $0.contains("emit('set_config'") })
+        XCTAssertFalse(updateScripts.contains { $0.contains("emit('clear_document'") })
+        XCTAssertFalse(updateScripts.contains { $0.contains("emit('add_documents'") })
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .generalBook)
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, "Multi")
+        XCTAssertEqual(controller.committedRenderState.sourceProvenance, .compositeMayUseSword)
+    }
+
+    /**
+     Verifies queued source-neutral Multi work remains current across a presentation-only update.
+
+     The SWORD scripture facade reads decoded source before display-option filters. Changing
+     morphology visibility while that work is queued must therefore update Vue configuration without
+     cancelling or repeating source capture. Acceptance is proved from the requested real verse
+     content and committed Android destination; the phase count is supplemental scheduling evidence.
+     */
+    @MainActor
+    func testQueuedCompositeAcceptsLatestPresentationConfigWithoutRepeatingSourceCapture() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let workerQueue = DispatchQueue(label: "ReaderNavigationTests-composite-presentation")
+        let captureCount = ReaderNavigationLockedCounter()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: workerQueue,
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture, key.family.rawValue == "composite" else { return }
+                captureCount.increment()
+            }
+        )
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        var settings = TextDisplaySettings.appDefaults
+        settings.showMorphology = false
+        controller.displaySettings = settings
+        let initialBoundary = recordedScripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
+        let boundary = recordedScripts().count
+        workerQueue.suspend()
+
+        controller.bridge(
+            bridge,
+            openExternalLink: "multi://?osis=Gen.1.1&osis=John.1.1&v11n=KJV"
+        )
+        settings.showMorphology = true
+        controller.updateDisplaySettings(settings, nightMode: false)
+        workerQueue.resume()
+
+        let laterScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: laterScripts, event: "add_documents") as? [String: Any]
+        )
+        let fragments = try XCTUnwrap(document["osisFragments"] as? [[String: Any]])
+        XCTAssertEqual(fragments.count, 2)
+        let fragmentText = fragments.compactMap { fragment in
+            (fragment["xml"] as? String).flatMap(readerTestXMLCharacterText)
+        }
+        XCTAssertTrue(fragmentText.contains { $0.contains("God created") }, fragmentText.joined())
+        XCTAssertTrue(fragmentText.contains { $0.contains("was the Word") }, fragmentText.joined())
+        let latestPayload = try setConfigPayload(from: laterScripts)
+        let latestConfig = try XCTUnwrap(latestPayload["config"] as? [String: Any])
+        XCTAssertEqual(latestConfig["showMorphology"] as? Bool, true)
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .generalBook)
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, "Multi")
+        XCTAssertEqual(captureCount.value, 1)
     }
 
     @MainActor
@@ -4645,6 +5490,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         let baselineCount = recordedScripts().count
         controller.bridge(bridge, requestMoreToBeginning: 3701)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
         let responseScript = try XCTUnwrap(
             recordedScripts().dropFirst(baselineCount).first {
@@ -4687,6 +5533,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         let baselineCount = recordedScripts().count
         controller.bridge(bridge, requestMoreToEnd: 3703)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
 
         let responseScript = try XCTUnwrap(
             recordedScripts().dropFirst(baselineCount).first {
@@ -4706,6 +5553,116 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             responseScript.contains(#""osisFragment""#),
             "Expected the response payload to preserve the Bible document shape. Script: \(responseScript)"
         )
+    }
+
+    /**
+     Verifies navigation into an appended chapter preserves the live Vue document generation.
+
+     The real controller renders Genesis 1, commits Genesis 2 through the infinite-scroll response,
+     then navigates explicitly to Genesis 2:1. The causal action must emit one highlighted scroll
+     and no clear/add replacement events, proving the optimization uses committed loaded content.
+     */
+    @MainActor
+    func testNavigateToAppendedChapterScrollsWithoutReplacingDocument() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
+        controller.bridge(bridge, requestMoreToEnd: 3704)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("bibleView.response(3704") }
+        })
+        let actionBoundary = recordedScripts().count
+
+        controller.navigateTo(book: "Genesis", chapter: 2, verse: 1)
+
+        let actionScripts = Array(recordedScripts().dropFirst(actionBoundary))
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('clear_document'") })
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            try bridgeEmissionPayload(
+                from: actionScripts,
+                event: "scroll_to_verse"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(payload["highlight"] as? Bool, true)
+        XCTAssertEqual(payload["ordinal"] as? Int, payload["ordinalStart"] as? Int)
+        XCTAssertEqual(payload["ordinal"] as? Int, payload["ordinalEnd"] as? Int)
+        XCTAssertEqual(payload["bookInitials"] as? String, "KJV")
+        XCTAssertEqual(payload["osisRef"] as? String, "Gen.2")
+    }
+
+    /**
+     Verifies chapter-top navigation targets the appended chapter container without replacement.
+
+     An omitted verse has different semantics from verse one: Vue must scroll to the retained
+     chapter document's top marker and must not paint a verse highlight.
+     */
+    @MainActor
+    func testNavigateToAppendedChapterTopTargetsChapterContainerWithoutReplacingDocument() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("emit('add_documents'") }
+        })
+        controller.bridge(bridge, requestMoreToEnd: 3705)
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { $0.contains("bibleView.response(3705") }
+        })
+        let actionBoundary = recordedScripts().count
+
+        controller.navigateTo(book: "Genesis", chapter: 2)
+
+        let actionScripts = Array(recordedScripts().dropFirst(actionBoundary))
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('clear_document'") })
+        XCTAssertFalse(actionScripts.contains { $0.contains("emit('add_documents'") })
+        let payload = try XCTUnwrap(
+            try bridgeEmissionPayload(
+                from: actionScripts,
+                event: "scroll_to_verse"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(payload["targetId"] as? String, "doc-KJV_Gen_2")
+        XCTAssertEqual(payload["highlight"] as? Bool, false)
+        XCTAssertTrue(payload["ordinal"] == nil || payload["ordinal"] is NSNull)
+        XCTAssertTrue(payload["ordinalStart"] == nil || payload["ordinalStart"] is NSNull)
+        XCTAssertTrue(payload["ordinalEnd"] == nil || payload["ordinalEnd"] is NSNull)
+    }
+
+    /**
+     Verifies a rejected loaded scroll falls back to replacement without advancing committed state.
+
+     The bridge is detached only after Genesis 1 and appended Genesis 2 are committed. Navigation
+     then rejects both the loaded scroll and fallback replacement, so runtime render identity must
+     continue to describe the last document generation actually accepted by the bridge.
+     */
+    @MainActor
+    func testRejectedLoadedScrollDoesNotCommitUnrenderedNavigationIdentity() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        defer { try? FileManager.default.removeItem(atPath: modulePath) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.bridge(bridge, requestMoreToEnd: 3706)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.2))
+        let committedState = controller.committedRenderState
+        let actionBoundary = recordedScripts().count
+        bridge.javaScriptEvaluationObserver = nil
+
+        controller.navigateTo(book: "Genesis", chapter: 2, verse: 1)
+
+        XCTAssertEqual(controller.committedRenderState, committedState)
+        XCTAssertEqual(recordedScripts().count, actionBoundary)
     }
 
     @MainActor
@@ -4926,12 +5883,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             sourcePromptId: sourcePromptId
         )
         let content = MyDocumentPageContent(pageId: pageId, content: "Raw *markdown*")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
         let controller = BibleReaderController(bridge: bridge)
@@ -4989,26 +5945,30 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             contentType: .markdown,
             orderNumber: 1
         )
-        firstPage.pageContent = MyDocumentPageContent(
+        let firstContent = MyDocumentPageContent(
             pageId: firstPage.id,
             content: "First body"
         )
-        secondPage.pageContent = MyDocumentPageContent(
+        let secondContent = MyDocumentPageContent(
             pageId: secondPage.id,
             content: "Second body"
         )
-        firstPage.document = document
-        secondPage.document = document
-        document.pages = [firstPage, secondPage]
         context.insert(document)
         context.insert(firstPage)
         context.insert(secondPage)
+        context.insert(firstContent)
+        context.insert(secondContent)
+        firstPage.pageContent = firstContent
+        secondPage.pageContent = secondContent
+        firstPage.document = document
+        secondPage.document = document
         try context.save()
 
         let loadedWindow = Window()
         loadedWindow.pageManager = PageManager(id: loadedWindow.id)
         let loadedController = BibleReaderController(bridge: bridge)
         loadedController.myDocumentStore = store
+        self.retainReaderWindowGraph(loadedWindow)
         loadedController.activeWindow = loadedWindow
 
         XCTAssertTrue(
@@ -5017,6 +5977,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 pageKey: secondPage.pageKey
             )
         )
+        XCTAssertTrue(waitForReaderCondition {
+            loadedController.currentGeneralBookKey == secondPage.pageKey
+        })
         XCTAssertEqual(loadedController.activeGeneralBookModuleName, document.initials)
         XCTAssertEqual(loadedController.currentGeneralBookKey, secondPage.pageKey)
         XCTAssertEqual(loadedWindow.pageManager?.generalBookDocument, document.initials)
@@ -5033,6 +5996,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         restoredWindow.pageManager = restoredPageManager
         let restoredController = BibleReaderController(bridge: BibleBridge())
         restoredController.myDocumentStore = store
+        self.retainReaderWindowGraph(restoredWindow)
         restoredController.activeWindow = restoredWindow
         var persistCount = 0
         restoredController.onPersistState = { persistCount += 1 }
@@ -5044,6 +6008,87 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(restoredPageManager.generalBookDocument, document.initials)
         XCTAssertEqual(restoredPageManager.generalBookKey, secondPage.pageKey)
         XCTAssertEqual(persistCount, 1)
+    }
+
+    /**
+     Preserves an authorized My Documents selection until a newly created reader client is ready.
+
+     - Setup: Loads one exact local page through a bridge with neither a WebView nor a recording
+       evaluator, waits for immutable preparation to settle, then attaches the evaluator and sends
+       the ordinary client-ready callback.
+     - Expected result: The first rejected replacement commits the selected PageManager document
+       and key without claiming rendered content. Client-ready replay publishes that exact page and
+       only then advances committed render identity.
+     - Failure meaning: Async preparation either loses Android's selected-page intent when the web
+       client is absent or reports content as rendered before the bridge accepts it.
+     - Side effects: Uses an in-memory SwiftData graph and records only the replay transaction.
+     */
+    @MainActor
+    func testMyDocumentSelectionSurvivesRejectedReplacementAndReplaysOnClientReady() async throws {
+        let bridge = BibleBridge()
+        let container = try makeMyDocumentModelContainer()
+        let context = ModelContext(container)
+        let store = MyDocumentStore(modelContext: context)
+        let document = MyDocument(name: "Deferred Local", initials: "DEFERREDLOCAL")
+        let page = MyDocumentPage(
+            title: "Deferred Page",
+            pageKey: "deferred-page",
+            contentType: .markdown
+        )
+        let content = MyDocumentPageContent(
+            pageId: page.id,
+            content: "Deferred client-ready body"
+        )
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        page.pageContent = content
+        page.document = document
+        try context.save()
+
+        let window = Window()
+        window.pageManager = PageManager(id: window.id)
+        retainReaderWindowGraph(window)
+        let controller = BibleReaderController(bridge: bridge)
+        controller.myDocumentStore = store
+        controller.activeWindow = window
+
+        XCTAssertTrue(controller.loadMyDocumentPage(
+            bookInitials: document.initials,
+            pageKey: page.pageKey
+        ))
+        try await awaitReaderCondition("revalidated My Documents selection intent") {
+            controller.currentCategory == .generalBook
+                && controller.currentGeneralBookKey == page.pageKey
+        }
+        XCTAssertEqual(window.pageManager?.generalBookDocument, document.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, page.pageKey)
+        XCTAssertEqual(controller.committedRenderState, .empty)
+
+        var replayScripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { replayScripts.append($0) }
+        let replayBoundary = replayScripts.count
+        controller.bridgeDidSetClientReady(bridge)
+        let scripts = try await awaitBridgeEmission(
+            from: { replayScripts },
+            event: "add_documents",
+            after: replayBoundary
+        )
+        let emittedDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
+        )
+        let emittedFragment = try XCTUnwrap(emittedDocument["osisFragment"] as? [String: Any])
+        let emittedXML = try XCTUnwrap(emittedFragment["xml"] as? String)
+        XCTAssertEqual(emittedDocument["isMyDocument"] as? Bool, true)
+        XCTAssertEqual(emittedDocument["bookInitials"] as? String, document.initials)
+        XCTAssertEqual(emittedDocument["key"] as? String, page.pageKey)
+        XCTAssertTrue(
+            readerTestXMLCharacterText(emittedXML)?.contains("Deferred client-ready body") == true,
+            emittedXML
+        )
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .generalBook)
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, document.initials)
+        XCTAssertEqual(controller.committedRenderState.identity?.key, page.pageKey)
     }
 
     /**
@@ -5086,12 +6131,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
                 pageId: pageID,
                 content: "Private local body \(index)"
             )
-            page.pageContent = content
-            page.document = document
-            document.pages = [page]
             context.insert(document)
             context.insert(page)
             context.insert(content)
+            page.pageContent = content
+            page.document = document
             fixtures.append((document, page))
         }
         try context.save()
@@ -5165,12 +6209,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             languageCode: "en"
         )
         let content = MyDocumentPageContent(pageId: pageId, content: "Original *markdown*")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
         let controller = BibleReaderController(bridge: bridge)
@@ -5179,6 +6222,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.bridge(bridge, setEditing: true)
 
         XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MYDOC", pageKey: "intro"))
+        XCTAssertTrue(waitForReaderCondition {
+            controller.renderedContentState
+                == "category=general_book;module=MYDOC;book=My Document;chapter=none;key=intro"
+        })
         XCTAssertEqual(
             controller.renderedContentState,
             "category=general_book;module=MYDOC;book=My Document;chapter=none;key=intro"
@@ -5201,6 +6248,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(savedPayload.title, "Renamed")
 
         controller.bridge(bridge, reloadMyDocumentPage: "MYDOC")
+
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().filter { $0.contains("emit('add_documents'") }.count == 2
+        })
 
         let addDocumentScripts = recordedScripts().filter { $0.contains("emit('add_documents'") }
         XCTAssertEqual(addDocumentScripts.count, 2)
@@ -5276,19 +6327,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         )
         let userContent = MyDocumentPageContent(pageId: userPageId, content: "User content")
 
-        aiPage.pageContent = aiContent
-        aiPage.document = document
-        aiCacheEntry.page = aiPage
-        aiPage.aiPageCacheEntries = [aiCacheEntry]
-        userPage.pageContent = userContent
-        userPage.document = document
-        document.pages = [aiPage, userPage]
         context.insert(document)
         context.insert(aiPage)
         context.insert(aiContent)
         context.insert(aiCacheEntry)
         context.insert(userPage)
         context.insert(userContent)
+        aiPage.pageContent = aiContent
+        aiPage.document = document
+        aiCacheEntry.page = aiPage
+        userPage.pageContent = userContent
+        userPage.document = document
         try context.save()
 
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -5312,9 +6361,19 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertNotNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "user"))
 
         XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "AIDocuments", pageKey: "ai"))
+        XCTAssertTrue(waitForReaderCondition {
+            recordedScripts().contains { script in
+                script.contains("emit('add_documents'") && script.contains("AIDocuments")
+            }
+        })
         let clearDocumentCountBeforeDelete = recordedScripts().filter { $0.contains("emit('clear_document'") }.count
 
         controller.bridge(bridge, deleteMyDocumentPage: aiPageId.uuidString)
+
+        XCTAssertTrue(waitForReaderCondition {
+            controller.renderedContentState
+                == "category=bible;module=KJV;book=Genesis;chapter=1;key=Gen.1"
+        })
 
         XCTAssertNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "ai"))
         XCTAssertNotNil(store.rawContentPayload(bookInitials: "AIDocuments", pageKey: "user"))
@@ -5347,6 +6406,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
@@ -5376,6 +6436,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
@@ -5415,6 +6476,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
@@ -5457,6 +6519,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
@@ -5508,9 +6571,12 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(sourceWindow)
         sourceController.activeWindow = sourceWindow
         sourceController.windowManagerRef = windowManager
+        self.retainReaderWindowGraph(targetWindow)
         targetController.activeWindow = targetWindow
         targetController.windowManagerRef = windowManager
         sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
@@ -5585,12 +6651,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let sourceWindow = Window()
         let sourcePageManager = PageManager(id: sourceWindow.id)
         sourceWindow.pageManager = sourcePageManager
+        self.retainReaderWindowGraph(sourceWindow)
         sourceController.activeWindow = sourceWindow
         sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
         let targetWindow = Window()
         let targetPageManager = PageManager(id: targetWindow.id)
         targetWindow.pageManager = targetPageManager
+        self.retainReaderWindowGraph(targetWindow)
         targetController.activeWindow = targetWindow
         targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         targetController.bridgeDidSetClientReady(targetBridge)
@@ -5644,7 +6712,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         window.isSynchronized = true
         window.syncGroup = 0
         windowManager.setActiveWorkspace(workspace)
+        self.retainReaderWindowGraph(window)
         windowManager.activeWindow = window
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
@@ -5734,13 +6804,16 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         emittedScripts.removeAll()
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "sync-origin scroll must not rebroadcast")
@@ -5810,13 +6883,16 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         emittedScripts.removeAll()
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "intermediate sync-origin scroll must not rebroadcast")
@@ -5871,11 +6947,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         var forwardedDeltas: [Double] = []
@@ -5932,12 +7011,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "detached sync-origin scroll must not rebroadcast")
@@ -5947,6 +7029,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
 
         controller.scrollToOrdinal(ordinal)
+        self.retainReaderWindowGraph(targetWindow)
         windowManager.activeWindow = targetWindow
         controller.bridge(bridge, didScrollToOrdinal: ordinal, key: "Gen.1", atChapterTop: false)
 
@@ -6002,11 +7085,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "passive inactive scroll must not rebroadcast")
@@ -6055,12 +7141,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "sync-origin chapter navigation must not rebroadcast")
@@ -6113,11 +7202,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         sourceWindow.syncGroup = 0
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
+        self.retainReaderWindowGraph(sourceWindow)
         windowManager.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(targetWindow)
             windowManager.activeWindow = targetWindow
         }
         let rebroadcast = expectation(description: "ready replay must not rebroadcast")
@@ -6133,6 +7225,10 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(emittedScripts.contains { $0.contains("scroll_to_verse") })
 
         controller.bridgeDidSetClientReady(bridge)
+
+        XCTAssertTrue(waitForReaderCondition {
+            emittedScripts.contains { $0.contains("emit('setup_content'") }
+        })
 
         XCTAssertFalse(emittedScripts.contains { $0.contains("scroll_to_verse") })
         let setup = try XCTUnwrap(
@@ -6186,12 +7282,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let scrolledWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
         scrolledWindow.isSynchronized = true
         scrolledWindow.syncGroup = 0
+        self.retainReaderWindowGraph(firstWindow)
         windowManager.activeWindow = firstWindow
+        self.retainReaderWindowGraph(scrolledWindow)
         controller.activeWindow = scrolledWindow
         controller.windowManagerRef = windowManager
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
+            self.retainReaderWindowGraph(scrolledWindow)
             windowManager.activeWindow = scrolledWindow
         }
         let broadcast = expectation(description: "user-origin scroll rebroadcasts")
@@ -6229,6 +7328,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
 
@@ -6265,6 +7365,9 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         /// Number of host content reload requests.
         var loadCount = 0
 
+        /// Loaded-range scroll requests accepted by the fixture host.
+        var loadedScrolls: [(position: BibleReaderNavigationPosition, highlight: Bool)] = []
+
         /// Creates a fixture state box for one coordinator test.
         init(position: BibleReaderNavigationPosition) {
             self.position = position
@@ -6283,7 +7386,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         state: NavigationCoordinatorStateBox,
         pageManager: PageManager,
         clientReady: Bool = true,
-        isShowingAndroidMultiDocument: Bool = false
+        isShowingAndroidMultiDocument: Bool = false,
+        acceptsLoadedScroll: Bool = false
     ) -> BibleReaderNavigationContext {
         let books = [
             BibleReaderNavigationBook(name: "Genesis", osisId: "Gen", chapterCount: 50),
@@ -6339,6 +7443,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             persistState: {
                 state.persistCount += 1
             },
+            scrollToLoadedPosition: { position, highlight in
+                guard acceptsLoadedScroll else { return false }
+                state.loadedScrolls.append((position, highlight))
+                return true
+            },
             loadCurrentContent: {
                 state.loadCount += 1
             }
@@ -6376,12 +7485,53 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(state.loadCount, 1)
         XCTAssertEqual(coordinator.originalNavigationOrdinalRange, [203, 203])
         XCTAssertEqual(
-            coordinator.consumeContentRestoreTarget(
+            coordinator.contentRestoreTarget(
                 currentPosition: state.position,
                 ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
             ),
             .ordinal(203)
         )
+        XCTAssertEqual(
+            coordinator.contentRestoreTarget(
+                currentPosition: state.position,
+                ordinalForVerse: { _, chapter, verse in chapter * 100 + verse }
+            ),
+            .ordinal(203),
+            "A failed or superseded preparation must not consume the pending target"
+        )
+        coordinator.commitAcceptedContentRestore(originalOrdinalRange: [203, 203])
+        XCTAssertNil(coordinator.originalNavigationOrdinalRange)
+    }
+
+    /**
+     Protects Android's loaded-range navigation path from unnecessary document replacement.
+
+     The fixture accepts a target as already present in the current Vue generation. Navigation must
+     still update durable position and history, then emit one highlighted scroll without invoking
+     the host extraction callback or leaving a highlight for a future replacement generation.
+     */
+    func testReaderNavigationCoordinatorScrollsLoadedTargetWithoutReloadingContent() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let state = NavigationCoordinatorStateBox(
+            position: BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 1)
+        )
+        let pageManager = PageManager()
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            acceptsLoadedScroll: true
+        )
+
+        coordinator.navigateTo(book: "Genesis", chapter: 2, verse: 4, context: context)
+
+        XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Genesis", chapter: 2, verse: 4))
+        XCTAssertEqual(state.history, ["Gen.2.4"])
+        XCTAssertEqual(state.persistCount, 1)
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertEqual(state.loadedScrolls.count, 1)
+        XCTAssertEqual(state.loadedScrolls.first?.position, state.position)
+        XCTAssertEqual(state.loadedScrolls.first?.highlight, true)
+        XCTAssertNil(coordinator.originalNavigationOrdinalRange)
     }
 
     /**
@@ -6462,4 +7612,53 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(coordinator.hasPrevious(context: multiDocumentContext))
     }
 
+}
+
+/** Pumps the main owner until one asynchronously prepared reader event is observable. */
+@MainActor
+private func waitForReaderCondition(
+    timeout: TimeInterval = 2,
+    _ condition: () -> Bool
+) -> Bool {
+    let deadline = Date(timeIntervalSinceNow: timeout)
+    while !condition(), Date() < deadline {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+    return condition()
+}
+
+/** Extracts normalized XML character data without depending on the production text projector. */
+private func readerTestXMLCharacterText(_ xml: String) -> String? {
+    let collector = ReaderNavigationXMLTextCollector()
+    let parser = XMLParser(data: Data("<reader-test-root>\(xml)</reader-test-root>".utf8))
+    parser.delegate = collector
+    guard parser.parse() else { return nil }
+    return collector.text.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
+}
+
+/** Test-only XML delegate that preserves character data across inline OSIS element boundaries. */
+private final class ReaderNavigationXMLTextCollector: NSObject, XMLParserDelegate {
+    private(set) var text = ""
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        text += string
+    }
+}
+
+/** Lock-protected phase counter shared with the coordinator's worker observer. */
+private final class ReaderNavigationLockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
 }

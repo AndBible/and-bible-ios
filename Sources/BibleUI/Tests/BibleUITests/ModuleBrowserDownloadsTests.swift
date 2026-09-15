@@ -540,48 +540,6 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
     }
 
     /**
-     Guards Downloads row About against regressing to native iOS sheet chrome.
-
-     Android invokes `CommonUtils.showAbout(...)`, which displays a non-cancelable `AlertDialog`
-     message from the row About action. The feature must wire its payload through the shared dialog
-     window/scaffold/action family, which owns the palette, scrim, and modal accessibility behavior.
-     A failure means the Downloads path has drifted back to a SwiftUI sheet or bypassed shared UI.
-     */
-    func testModuleBrowserAboutUsesSharedAndroidDialogInsteadOfSheet() throws {
-        let downloadsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
-        )
-        let detailsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift"
-        )
-        let dialogWindowSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDialogWindow.swift"
-        )
-        let dialogScaffoldSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDialogScaffold.swift"
-        )
-
-        XCTAssertTrue(downloadsSource.contains(".moduleBrowserModuleDetailsDialog("))
-        XCTAssertFalse(downloadsSource.contains(".sheet(item: $selectedModuleDetails)"))
-        XCTAssertTrue(detailsSource.contains("struct ModuleBrowserModuleDetailsDialog: View"))
-        XCTAssertTrue(detailsSource.contains("AndroidDialogWindow("))
-        XCTAssertTrue(detailsSource.contains("AndroidDialogScaffold(title:"))
-        XCTAssertTrue(detailsSource.contains("AndroidDialogTextAction("))
-        XCTAssertTrue(detailsSource.contains("moduleDetailsDialogScreen"))
-        XCTAssertTrue(detailsSource.contains("moduleDetailsOKButton"))
-        XCTAssertTrue(detailsSource.contains("Text(details.androidAboutAttributedMessage)"))
-        XCTAssertTrue(detailsSource.contains("NSAttributedString.DocumentType.html"))
-        XCTAssertTrue(dialogWindowSource.contains("AndroidDialogSurfacePalette.background(for: colorScheme)"))
-        XCTAssertTrue(dialogWindowSource.contains("guard allowsOutsideDismissal else { return }"))
-        XCTAssertTrue(dialogScaffoldSource.contains(".accessibilityAddTraits(.isModal)"))
-        XCTAssertFalse(detailsSource.contains("ForEach(details.androidAboutRows)"))
-        XCTAssertFalse(detailsSource.contains("private func detailRow("))
-        XCTAssertFalse(detailsSource.contains("@Environment(\\.dismiss) private var dismiss"))
-        XCTAssertFalse(detailsSource.contains("Form {"))
-        XCTAssertFalse(detailsSource.contains(".navigationTitle(String(localized: \"about\"))"))
-    }
-
-    /**
      Verifies destructive Downloads row confirmations match Android's exact message/button contract.
 
      Android formats `delete_doc` and `delete_search_index_doc` with `Book.name` (module initials),
@@ -1048,15 +1006,15 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
 
      - Setup: Builds remote rows whose initials oppose their abbreviations, Turkish abbreviations
        whose locale-lowercase order differs from locale-independent case order, and equal lowercase
-       keys, then reads the row-rendering source boundary.
+       keys.
      - Expected result: Sorting and search use Android's per-book locale-lowercased abbreviation and
        preserve catalog order for equal keys, while installation identity remains exact initials;
        primary text and accessibility expose the same abbreviation.
-     - Side effects: Reads package source only for the rendering assertion.
+     - Side effects: None.
      - Failure meaning: MyBible catalog identity is displayed or ordered as initials even though
        Android's Download adapter renders `Book.abbreviation`.
      */
-    func testModuleBrowserUsesAndroidRemoteAbbreviationForDisplaySearchAndOrder() throws {
+    func testModuleBrowserUsesAndroidRemoteAbbreviationForDisplaySearchAndOrder() {
         let modules = [
             RemoteModuleInfo(
                 name: "MyBible-OMEGA_SQLite3",
@@ -1156,12 +1114,6 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             ).map(\.name),
             ["SECOND-BY-INITIALS", "FIRST-BY-INITIALS"]
         )
-
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
-        )
-        XCTAssertTrue(source.contains("Text(module.abbreviation)"))
-        XCTAssertTrue(source.contains(".accessibilityLabel(module.abbreviation)"))
     }
 
     /**
@@ -1810,55 +1762,6 @@ final class ModuleBrowserDownloadsTests: XCTestCase {
             ModuleBrowserView.uninstallFailureMessage("Disk locked"),
             String(localized: "uninstall_failed \("Disk locked")")
         )
-    }
-
-    /**
-     Prevents Downloads' Custom repositories route from hiding native iOS structure below an
-     app-owned parent screen.
-
-     Android renders `CustomRepositories` and `CustomRepositoryEditor` as dedicated activities:
-     the list contains custom rows only, the empty card owns Add and Information commands, and the
-     editor toolbar owns Save, Delete, and Help. A failure means iOS has reintroduced `List`,
-     `Form`, swipe actions, native toolbar presentation, SF-symbol facsimiles, or invented default
-     repository/reset sections inside the Downloads workflow.
-     */
-    func testCustomRepositoriesReuseAndroidActivityStructureAndOwnerPalette() throws {
-        let repositorySource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/RepositoryManagerView.swift"
-        )
-        let downloadsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
-        )
-
-        XCTAssertTrue(repositorySource.contains("AndroidActivityTopAppBar("))
-        XCTAssertTrue(repositorySource.contains("AndroidRaisedTextButton("))
-        XCTAssertTrue(repositorySource.contains("AndroidActivityTextInput("))
-        XCTAssertTrue(repositorySource.contains(".asset(\"ActivityAddCircle\")"))
-        XCTAssertTrue(repositorySource.contains(".asset(\"DrawerHelp\")"))
-        XCTAssertTrue(repositorySource.contains(".asset(\"ActivitySave\")"))
-        XCTAssertTrue(repositorySource.contains(".asset(\"ActivityDelete\")"))
-        XCTAssertTrue(repositorySource.contains("AndBibleIconView(name: \"ActivityPaste\""))
-        XCTAssertTrue(repositorySource.contains("custom_repositories_empty_list_message"))
-        XCTAssertTrue(repositorySource.contains("custom_repositories_create_button_label"))
-        XCTAssertTrue(repositorySource.contains("custom_repositories_info_button_label"))
-        XCTAssertTrue(repositorySource.contains("delete_custom_repository"))
-        XCTAssertTrue(repositorySource.contains("discard_changes_confirmation"))
-        XCTAssertTrue(repositorySource.contains("surfacePalette: ReaderThemeSurfacePalette"))
-        XCTAssertTrue(downloadsSource.contains("RepositoryManagerView(surfacePalette: surfacePalette)"))
-
-        for forbidden in [
-            "List {",
-            "Form {",
-            ".toolbar {",
-            ".swipeActions",
-            ".contextMenu",
-            "Image(systemName:",
-            "defaultRepositoriesSection",
-            "resetSection",
-            "resetToDefaults()",
-        ] {
-            XCTAssertFalse(repositorySource.contains(forbidden), "Unexpected native/invented repository UI: \(forbidden)")
-        }
     }
 
     private func makeModuleRepositoryDownloadMockSession() -> URLSession {

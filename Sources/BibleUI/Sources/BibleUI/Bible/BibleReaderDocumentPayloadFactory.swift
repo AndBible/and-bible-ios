@@ -461,20 +461,20 @@ struct BibleReaderDocumentPayloadFactory {
     }
 
     /**
-     Builds Android's DOM-safe document identifier for one EPUB general-book key.
+     Builds Android's DOM-safe document identifier for one reader source key.
 
      Android replaces every scalar outside Unicode letters and ASCII digits in
-     `<book initials>-<key>` with `_`. The identifier is presentation-only; portable EPUB
-     identity remains the unsanitized `bookInitials` and numeric `key` fields.
+     `<book initials>-<key>` with `_`. The identifier is presentation-only; portable source
+     identity remains in the unsanitized `bookInitials` and `key` fields.
 
      - Parameters:
-       - bookInitials: Exact Android-compatible EPUB initials, including retained `A-z` punctuation.
-       - key: Numeric EPUB fragment key.
+       - bookInitials: Exact Android-compatible source initials.
+       - key: Source document key.
      - Returns: A deterministic DOM-safe document identifier.
      - Side effects: None.
      - Failure modes: None; every input scalar maps to itself or `_`.
      */
-    private static func androidDocumentID(bookInitials: String, key: String) -> String {
+    static func androidDocumentID(bookInitials: String, key: String) -> String {
         "\(bookInitials)-\(key)".unicodeScalars.map { scalar in
             if CharacterSet.letters.contains(scalar) || (48...57).contains(scalar.value) {
                 return String(scalar)

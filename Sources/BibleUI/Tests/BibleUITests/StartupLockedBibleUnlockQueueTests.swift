@@ -1,16 +1,19 @@
 import XCTest
+@testable import BibleCore
 @testable import BibleUI
+@testable import BibleView
 import SwordKit
 
 /**
- Verifies Android's startup locked-Bible queue independently from SwiftUI and real cipher files.
+ Verifies Android's startup locked-Bible queue and its final real-source reconciliation.
 
  These tests protect the behavior that was missing in issue #389: installed locked Bibles are
  snapshotted in registration order, every initial row is processed even after an earlier success,
  cancel/rejection owns an explicit same-row retry decision, and only queue completion returns
  control to the reader's fresh access reconciliation.
  */
-final class StartupLockedBibleUnlockQueueTests: XCTestCase {
+@MainActor
+final class StartupLockedBibleUnlockQueueTests: BibleUISwordFixtureTestCase {
     /**
      Filters only locked Bibles while preserving exact installed registration order.
 
@@ -66,7 +69,6 @@ final class StartupLockedBibleUnlockQueueTests: XCTestCase {
 
         XCTAssertEqual(queue.lockedBibleModules.map(\.name), ["LOCKED-Z", "LOCKED-A"])
         XCTAssertEqual(queue.currentModule?.name, "LOCKED-Z")
-        XCTAssertEqual(queue.presentation, .passphrase)
         XCTAssertFalse(queue.isCompleted)
     }
 
@@ -105,27 +107,16 @@ final class StartupLockedBibleUnlockQueueTests: XCTestCase {
         queue.acceptCurrentModule()
 
         XCTAssertEqual(queue.currentModule?.name, "SECOND")
-        XCTAssertEqual(queue.presentation, .passphrase)
         XCTAssertFalse(queue.isCompleted)
 
         queue.acceptCurrentModule()
 
         XCTAssertNil(queue.currentModule)
-        XCTAssertEqual(queue.presentation, .completed)
         XCTAssertTrue(queue.isCompleted)
     }
 
-    /**
-     Keeps cancellation/rejection on the same row until the explicit retry decision is resolved.
-
-     - Setup: Opens retry confirmation for the first of two locked Bibles, retries once, then opens
-       confirmation again and declines.
-     - Expected result: Retry returns to the first module; No advances exactly once to the second.
-     - Failure meaning: Cancel can silently skip a credential or retry can duplicate/advance rows,
-       breaking Android's nested passphrase loop.
-     - Side effects: None; only pure queue state changes.
-     */
-    func testRetryDecisionRetainsOrAdvancesTheCurrentModuleExplicitly() {
+    /** A terminal decline advances exactly once; credential/retry phases belong to the session. */
+    func testTerminalDeclineAdvancesTheImmutableQueueExactlyOnce() {
         var queue = StartupLockedBibleUnlockQueue(
             installedModules: [
                 ModuleInfo(
@@ -147,61 +138,107 @@ final class StartupLockedBibleUnlockQueueTests: XCTestCase {
             ]
         )
 
-        queue.requestRetryConfirmation()
-        XCTAssertEqual(queue.presentation, .retryConfirmation)
-        XCTAssertEqual(queue.currentModule?.name, "FIRST")
+        queue.declineCurrentModule()
 
-        queue.retryCurrentModule()
-        XCTAssertEqual(queue.presentation, .passphrase)
-        XCTAssertEqual(queue.currentModule?.name, "FIRST")
-
-        queue.requestRetryConfirmation()
-        queue.declineRetryForCurrentModule()
-
-        XCTAssertEqual(queue.presentation, .passphrase)
         XCTAssertEqual(queue.currentModule?.name, "SECOND")
         XCTAssertFalse(queue.isCompleted)
+
+        queue.declineCurrentModule()
+        XCTAssertNil(queue.currentModule)
+        XCTAssertTrue(queue.isCompleted)
+
+        queue.declineCurrentModule()
+        XCTAssertEqual(queue.currentIndex, 2)
     }
 
     /**
-     Guards the reader integration around the pure queue state machine.
+     Reconciles a genuine locked-only A/B startup inventory after A accepts its real cipher key.
 
-     - Setup: Extracts the initial evaluator and post-queue completion function from production.
-     - Expected result: Locked-only evaluation retains the queue before setup, while completion
-       refreshes controllers and performs one policy evaluation without selecting a queued module.
-     - Failure meaning: A refactor can restore the extra-tap-only flow, reconcile after each row, or
-       activate the first accepted module before Android's full queue is complete.
-     - Side effects: Reads package source only.
+     - Setup: Copies the licensed-safe encrypted RawText fixture twice, removes the readable KJV
+       descriptor, starts the reader with only locked A/B, then persists A's verified key.
+     - Expected result: One fresh lifecycle reconciliation selects A and publishes its decrypted
+       body while B remains locked; no second picker selection or cached placeholder is involved.
+     - Failure meaning: Queue completion only refreshes picker rows, retains placeholder bytes, or
+       requires an extra selection after a successful startup unlock.
+     - Side effects: Mutates only the base test case's copied SWORD fixture.
      */
-    func testReaderStartsQueueBeforeSetupAndReconcilesOnlyAfterCompletion() throws {
-        let readerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-        let evaluateSource = try BibleUITestSourceLocator.extractFunction(
-            named: "evaluateStartupDownloadPromptIfNeeded",
-            from: readerSource
-        )
-        let completionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "completeStartupLockedBibleUnlockQueue",
-            from: readerSource
-        )
-        let queueSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/StartupLockedBibleUnlockQueue.swift"
+    func testLockedOnlyABStartupUnlocksAIntoFreshVisibleBody() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedEncryptedBible(named: "LOCKEDA", in: modulePath)
+        try seedEncryptedBible(named: "LOCKEDB", in: modulePath)
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        try FileManager.default.removeItem(
+            at: moduleRoot.appendingPathComponent("mods.d/kjv.conf")
         )
 
-        XCTAssertTrue(evaluateSource.contains("beginStartupLockedBibleUnlockQueueIfNeeded"))
-        XCTAssertTrue(evaluateSource.contains("startupDownloadPromptReason = nil"))
-        XCTAssertTrue(completionSource.contains("refreshInstalledModules()"))
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         XCTAssertEqual(
-            completionSource.components(
-                separatedBy: "StartupDocumentSetupPromptPolicy.evaluation"
-            ).count - 1,
-            1
+            manager.installedModules().filter { $0.category == .bible }.map(\.name),
+            ["LOCKEDA", "LOCKEDB"]
         )
-        XCTAssertFalse(completionSource.contains("switchBibleDocument"))
-        XCTAssertFalse(completionSource.contains("selectUnlockedModule"))
-        XCTAssertTrue(queueSource.contains("ModuleUnlockActionCoordinator.submit"))
-        XCTAssertTrue(queueSource.contains("ModulePickerUnlockDialog"))
-        XCTAssertTrue(queueSource.contains("ModulePickerDecisionDialog"))
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDA"), .locked)
+        XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDB"), .locked)
+
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        let boundary = scripts().count
+
+        XCTAssertTrue(
+            manager.unlockModule(named: "LOCKEDA", withCipherKey: "rawtextcipherkey")
+        )
+        controller.reconcileInstalledSources()
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        XCTAssertEqual(controller.activeModuleName, "LOCKEDA")
+        XCTAssertTrue(emissions.joined().contains("Synthetic encrypted first verse"))
+        XCTAssertEqual(
+            controller.installedModules(for: .bible).first { $0.name == "LOCKEDB" }?.isUnlocked,
+            false
+        )
+    }
+
+    /** Copies one genuine encrypted RawText fixture behind a distinct installed identity. */
+    private func seedEncryptedBible(named name: String, in modulePath: String) throws {
+        let fileManager = FileManager.default
+        let moduleRoot = URL(fileURLWithPath: modulePath, isDirectory: true)
+        let source = moduleRoot.appendingPathComponent(
+            "ui-test-encrypted-rawtext",
+            isDirectory: true
+        )
+        let moduleKey = name.lowercased()
+        let destination = moduleRoot.appendingPathComponent(
+            "modules/texts/rawtext/\(moduleKey)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try fileManager.copyItem(at: source, to: destination)
+        try """
+        [\(name)]
+        Description=Encrypted startup fixture \(name)
+        Abbreviation=\(name)
+        DataPath=./modules/texts/rawtext/\(moduleKey)/
+        ModDrv=RawText
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        CipherKey=
+        """.write(
+            to: moduleRoot.appendingPathComponent("mods.d/\(moduleKey).conf"),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 }

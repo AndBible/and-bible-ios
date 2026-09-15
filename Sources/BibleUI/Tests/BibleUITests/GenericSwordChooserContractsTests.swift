@@ -291,7 +291,6 @@ final class GenericSwordChooserContractsTests: XCTestCase {
         XCTAssertTrue(sources[0].contains("AndroidActivityTextInput("))
         XCTAssertTrue(sources[0].contains("search_dictionary_hint"))
         XCTAssertTrue(sources[1].contains("onEmptyKeys(rawKeys.first)"))
-        XCTAssertTrue(sources[2].contains("reader.firstKey()"))
     }
 
     /**

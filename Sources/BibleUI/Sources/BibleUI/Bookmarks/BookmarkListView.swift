@@ -1,8 +1,11 @@
 // BookmarkListView.swift — Bookmark list screen
 
+import Combine
+import Foundation
 import SwiftUI
 import SwiftData
 import BibleCore
+import SwordKit
 
 /**
  Verse reference resolved from a bookmark ordinal.
@@ -31,6 +34,127 @@ public struct BookmarkListVerseReference: Sendable, Equatable {
     }
 }
 
+/** Persistence-only bookmark values used to resolve one visible row off the model owner. */
+enum BookmarkListRowProjectionRequest: Hashable, Sendable {
+    /// Bible bookmark metadata, ordinals, selection offsets, and stored source identity.
+    case bible(BibleReaderPreparedBibleBookmarkInput)
+
+    /// Generic bookmark metadata, local key range, offsets, and stored source identity.
+    case generic(BibleReaderPreparedGenericBookmarkInput)
+}
+
+/** Source-derived presentation accepted for one exact visible-row request. */
+struct BookmarkListResolvedRowProjection: Sendable, Equatable {
+    /// Exact copied request that produced this result.
+    let request: BookmarkListRowProjectionRequest
+
+    /// Active-versification Bible reference or persisted generic source/key reference.
+    let reference: String
+
+    /// Prefix, emphasized selection, and suffix rendered under the row heading.
+    let textProjection: BookmarkListTextProjection
+
+    init(
+        request: BookmarkListRowProjectionRequest,
+        reference: String,
+        textProjection: BookmarkListTextProjection
+    ) {
+        self.request = request
+        self.reference = reference
+        self.textProjection = textProjection
+    }
+}
+
+/** Exact source and presentation state that can change one visible Bookmark-list row projection. */
+struct BookmarkListRowProjectionContext: Hashable, Sendable {
+    struct Book: Hashable, Sendable {
+        let name: BibleReaderPreparationExactText
+        let osisID: BibleReaderPreparationExactText
+        let abbreviation: BibleReaderPreparationExactText
+        let chapterCount: Int
+        let testament: Int
+    }
+
+    struct Source: Hashable, Sendable {
+        let owner: ObjectIdentifier
+        let initials: BibleReaderPreparationExactText
+    }
+
+    struct Option: Hashable, Sendable {
+        let name: BibleReaderPreparationExactText
+        let enabled: Bool
+    }
+
+    let manager: ObjectIdentifier?
+    let managerGeneration: SwordContentAuthorizationGeneration?
+    let activeSource: Source?
+    let activeInitials: BibleReaderPreparationExactText?
+    let currentBook: BibleReaderPreparationExactText?
+    let books: [Book]
+    let sqliteSources: [Source]
+    let options: [Option]
+
+    static let empty = BookmarkListRowProjectionContext(
+        manager: nil,
+        managerGeneration: nil,
+        activeSource: nil,
+        activeInitials: nil,
+        currentBook: nil,
+        books: [],
+        sqliteSources: [],
+        options: []
+    )
+}
+
+/** Family-specific contexts avoid restarting unrelated generic rows after Bible-only changes. */
+struct BookmarkListProjectionContexts: Hashable, Sendable {
+    let bible: BookmarkListRowProjectionContext
+    let generic: BookmarkListRowProjectionContext
+
+    static let empty = BookmarkListProjectionContexts(bible: .empty, generic: .empty)
+
+    func context(for request: BookmarkListRowProjectionRequest) -> BookmarkListRowProjectionContext {
+        switch request {
+        case .bible: return bible
+        case .generic: return generic
+        }
+    }
+}
+
+/** Pure stale-result gate shared by visible rows and focused package tests. */
+enum BookmarkListRowProjectionPublication {
+    /** Returns a projection only when it belongs to the row's current copied owner identity. */
+    static func accepted(
+        _ projection: BookmarkListResolvedRowProjection?,
+        for request: BookmarkListRowProjectionRequest
+    ) -> BookmarkListResolvedRowProjection? {
+        guard projection?.request == request else { return nil }
+        return projection
+    }
+}
+
+/** Cancellation-propagating worker boundary used by visible-row source capture and projection. */
+enum BookmarkListProjectionWorker {
+    static func run<Value: Sendable>(
+        _ operation: @escaping @Sendable () -> Value?
+    ) async -> Value? {
+        let worker = Task.detached(priority: .userInitiated) {
+            guard !Task.isCancelled else { return Optional<Value>.none }
+            return operation()
+        }
+        return await withTaskCancellationHandler(
+            operation: { await worker.value },
+            onCancel: { worker.cancel() }
+        )
+    }
+}
+
+/** Main-owner orchestration entry that resolves only rows SwiftUI makes visible. */
+typealias BookmarkListRowProjectionLoader = @MainActor @Sendable (
+    BookmarkListRowProjectionRequest,
+    BookmarkListRowProjectionContext
+) async -> BookmarkListResolvedRowProjection?
+
 /**
  Displays a searchable, filterable, and sortable list of Bible and generic bookmarks from SwiftData.
 
@@ -52,6 +176,135 @@ public struct BookmarkListVerseReference: Sendable, Equatable {
    performing navigation directly inside the list
  */
 public struct BookmarkListView: View {
+    /// Legacy navigation callback retained for source compatibility.
+    private let onNavigate: ((String, Int) -> Void)?
+
+    /// Exact Bible/generic navigation callback preferred over the legacy callback.
+    private let onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)?
+
+    /// Active workspace whose shared labels and display settings the route edits.
+    private let workspace: Workspace?
+
+    /// Reader/workspace-owned activity, content, and text palette.
+    private let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Reader-owned route close action; standalone callers resolve SwiftUI dismissal separately.
+    private let onDismiss: (() -> Void)?
+
+    /// Demand-driven source projection invoked by visible rows only.
+    private let rowProjectionLoader: BookmarkListRowProjectionLoader?
+
+    /// Exact family-specific source state used to restart visible row tasks after owner changes.
+    private let projectionContexts: BookmarkListProjectionContexts
+
+    /// Optional SWORD-backed resolver for Bible bookmark ordinals.
+    private let bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
+
+    /// Optional active-module reference resolver used only for row presentation.
+    private let activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)?
+
+    /**
+     Creates a standalone Bookmark activity that uses its SwiftUI navigation owner's dismissal.
+
+     The environment dismissal dependency lives in a separate owner so the state-owning Bookmark
+     activity does not subscribe to dismissal changes while it presents child destinations.
+
+     - Parameters:
+       - onNavigate: Legacy source-compatible chapter callback.
+       - onNavigateTarget: Exact typed callback preferred over the legacy callback.
+       - workspace: Active workspace whose label settings this route edits.
+       - bibleOrdinalResolver: Legacy source-ordinal display resolver.
+       - activeReferenceResolver: Active-module KJVA display resolver.
+       - showsDismissButton: Retained for source compatibility; Android Up remains visible.
+     - Side effects: None until the user invokes an action.
+     - Failure modes: Without a row projection loader, standalone rows retain their persisted
+       metadata and resolve references through the optional synchronous resolvers.
+     */
+    public init(
+        onNavigate: ((String, Int) -> Void)? = nil,
+        onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
+        workspace: Workspace? = nil,
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
+        showsDismissButton: Bool = true
+    ) {
+        self.onNavigate = onNavigate
+        self.onNavigateTarget = onNavigateTarget
+        self.workspace = workspace
+        self.surfacePalette = .standard
+        self.onDismiss = nil
+        self.rowProjectionLoader = nil
+        self.projectionContexts = .empty
+        self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.activeReferenceResolver = activeReferenceResolver
+        _ = showsDismissButton
+    }
+
+    /** Creates the reader-owned activity with an explicit reader-route close command. */
+    init(
+        surfacePalette: ReaderThemeSurfacePalette,
+        onDismiss: @escaping () -> Void,
+        rowProjectionLoader: @escaping BookmarkListRowProjectionLoader,
+        projectionContexts: BookmarkListProjectionContexts,
+        onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
+        workspace: Workspace? = nil,
+        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
+    ) {
+        self.onNavigate = nil
+        self.onNavigateTarget = onNavigateTarget
+        self.workspace = workspace
+        self.surfacePalette = surfacePalette
+        self.onDismiss = onDismiss
+        self.rowProjectionLoader = rowProjectionLoader
+        self.projectionContexts = projectionContexts
+        self.bibleOrdinalResolver = bibleOrdinalResolver
+        self.activeReferenceResolver = activeReferenceResolver
+    }
+
+    @ViewBuilder
+    public var body: some View {
+        if let onDismiss {
+            content(onDismiss: onDismiss)
+        } else {
+            BookmarkListEnvironmentDismissOwner { dismiss in
+                content(onDismiss: dismiss)
+            }
+        }
+    }
+
+    /** Builds the state-owning list with the dismissal policy selected by its owning wrapper. */
+    private func content(onDismiss: @escaping () -> Void) -> some View {
+        BookmarkListContentView(
+            surfacePalette: surfacePalette,
+            onDismiss: onDismiss,
+            rowProjectionLoader: rowProjectionLoader,
+            projectionContexts: projectionContexts,
+            onNavigate: onNavigate,
+            onNavigateTarget: onNavigateTarget,
+            workspace: workspace,
+            bibleOrdinalResolver: bibleOrdinalResolver,
+            activeReferenceResolver: activeReferenceResolver
+        )
+    }
+}
+
+/** Resolves SwiftUI's dynamic dismissal only for standalone Bookmark-list ownership. */
+private struct BookmarkListEnvironmentDismissOwner<Content: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    private let content: (@escaping () -> Void) -> Content
+
+    init(@ViewBuilder content: @escaping (@escaping () -> Void) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content { dismiss() }
+    }
+}
+
+/** Owns all observable Bookmark activity state independently of its dismissal source. */
+private struct BookmarkListContentView: View {
     /// Bookmark-list destinations that should stay inside the app-owned bookmark browser stack.
     private enum BookmarkListRoute: Identifiable, Hashable {
         /// Manage the full set of user labels.
@@ -88,9 +341,6 @@ public struct BookmarkListView: View {
 
     /// SwiftData context used for bookmark deletion and save operations.
     @Environment(\.modelContext) private var modelContext
-
-    /// Dismiss action for closing the bookmark sheet.
-    @Environment(\.dismiss) private var dismiss
 
     /// Active scheme used by the shared application popup palette.
     @Environment(\.colorScheme) private var colorScheme
@@ -134,6 +384,12 @@ public struct BookmarkListView: View {
     /// Current visible navigation or CSV outcome message.
     @State private var presentedMessage: BookmarkListPresentedMessage?
 
+    /// Explicit source invalidation that restarts only currently visible row tasks.
+    @State private var bibleRowProjectionSourceGeneration = 0
+
+    /// EPUB/local registry invalidation restricted to generic Bookmark-list rows.
+    @State private var genericRowProjectionSourceGeneration = 0
+
     /// Whether Android CSV import's document picker is presented.
     @State private var showCSVImporter = false
 
@@ -152,14 +408,14 @@ public struct BookmarkListView: View {
     /// Reader/workspace-owned activity, content, and text palette.
     private let surfacePalette: ReaderThemeSurfacePalette
 
-    /// Reader-owned route close action; standalone callers fall back to environment dismissal.
-    private let onDismiss: (() -> Void)?
+    /// Route close action supplied by the selected reader or standalone ownership policy.
+    private let onDismiss: () -> Void
 
-    /// Canonical annotation-factory projection for Bible row content.
-    private let bibleTextResolver: ((BibleBookmark) -> BookmarkListTextProjection)?
+    /// Demand-driven source projection invoked by visible rows only.
+    private let rowProjectionLoader: BookmarkListRowProjectionLoader?
 
-    /// Canonical annotation-factory projection for generic row content.
-    private let genericTextResolver: ((GenericBookmark) -> BookmarkListTextProjection)?
+    /// Exact family-specific source state used to restart visible row tasks after owner changes.
+    private let projectionContexts: BookmarkListProjectionContexts
 
     /// Optional SWORD-backed resolver for Bible bookmark ordinals.
     var bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)?
@@ -172,59 +428,28 @@ public struct BookmarkListView: View {
     var activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)?
 
     /**
-     Creates the bookmark list view.
+     Creates the reader-owned Bookmark activity without resolving SwiftUI's dismissal environment.
 
      - Parameters:
-       - onNavigate: Legacy source-compatible callback; exact navigation does not invoke it.
-       - onNavigateTarget: Exact typed callback preferred over the legacy chapter-only callback.
-       - workspace: Active workspace whose label-specific settings should be shown by Label Manager.
-       - bibleOrdinalResolver: Optional resolver that maps `(bookName, ordinal)` to a concrete
-         chapter/verse for legacy row display using the active Bible versification.
-       - activeReferenceResolver: Optional resolver that maps a stored KJVA ordinal to the active
-         module's versification (book name plus chapter/verse) for display only.
-       - showsDismissButton: Retained for source compatibility. The app-owned activity always
-         provides Android Up navigation and never presents native sheet chrome.
-     */
-    public init(
-        onNavigate: ((String, Int) -> Void)? = nil,
-        onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
-        workspace: Workspace? = nil,
-        bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
-        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
-        showsDismissButton: Bool = true
-    ) {
-        self.onNavigate = onNavigate
-        self.onNavigateTarget = onNavigateTarget
-        self.workspace = workspace
-        self.surfacePalette = .standard
-        self.onDismiss = nil
-        self.bibleTextResolver = nil
-        self.genericTextResolver = nil
-        self.bibleOrdinalResolver = bibleOrdinalResolver
-        self.activeReferenceResolver = activeReferenceResolver
-        _ = showsDismissButton
-    }
-
-    /**
-     Creates the reader-owned app activity with its live palette and canonical content resolvers.
-
-     - Parameters:
-       - surfacePalette: Active window/workspace palette shared with reader chrome.
-       - onDismiss: Clears the reader-owned destination without native sheet dismissal.
-       - bibleTextResolver: Reader annotation-factory projection for Bible bookmark text.
-       - genericTextResolver: Stored-source annotation-factory projection for generic text.
-       - onNavigateTarget: Exact typed navigation callback.
-       - workspace: Active workspace for shared label management.
+       - surfacePalette: Reader-owned activity, content, and text palette.
+       - onDismiss: Reader route callback invoked by Bookmark Up navigation.
+       - rowProjectionLoader: Demand-driven source projection for visible rows.
+       - projectionContexts: Exact source state used to restart affected row projections.
+       - onNavigate: Legacy source-compatible chapter callback.
+       - onNavigateTarget: Exact typed callback preferred over the legacy callback.
+       - workspace: Active workspace whose label settings this route edits.
        - bibleOrdinalResolver: Legacy source-ordinal display resolver.
        - activeReferenceResolver: Active-module KJVA display resolver.
-     - Side effects: none until the user invokes an action.
-     - Failure modes: Missing content resolvers leave verse previews empty while retaining rows.
+     - Side effects: None until the user invokes an action.
+     - Failure modes: A missing row projection leaves the affected row preview unresolved while
+       retaining its persistence-backed list membership.
      */
     init(
         surfacePalette: ReaderThemeSurfacePalette,
         onDismiss: @escaping () -> Void,
-        bibleTextResolver: @escaping (BibleBookmark) -> BookmarkListTextProjection,
-        genericTextResolver: @escaping (GenericBookmark) -> BookmarkListTextProjection,
+        rowProjectionLoader: BookmarkListRowProjectionLoader?,
+        projectionContexts: BookmarkListProjectionContexts,
+        onNavigate: ((String, Int) -> Void)? = nil,
         onNavigateTarget: ((BookmarkNavigationTarget) throws -> Void)? = nil,
         workspace: Workspace? = nil,
         bibleOrdinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
@@ -232,9 +457,9 @@ public struct BookmarkListView: View {
     ) {
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
-        self.bibleTextResolver = bibleTextResolver
-        self.genericTextResolver = genericTextResolver
-        self.onNavigate = nil
+        self.rowProjectionLoader = rowProjectionLoader
+        self.projectionContexts = projectionContexts
+        self.onNavigate = onNavigate
         self.onNavigateTarget = onNavigateTarget
         self.workspace = workspace
         self.bibleOrdinalResolver = bibleOrdinalResolver
@@ -260,17 +485,23 @@ public struct BookmarkListView: View {
                 BookmarkListItem(
                     bibleBookmark: $0,
                     ordinalResolver: bibleOrdinalResolver,
-                    activeReferenceResolver: activeReferenceResolver,
-                    textProjection: bibleTextResolver?($0) ?? .empty
+                    activeReferenceResolver: rowProjectionLoader == nil
+                        ? activeReferenceResolver
+                        : nil
                 )
             }
         let genericItems = genericBookmarks.map {
-            BookmarkListItem(
-                genericBookmark: $0,
-                textProjection: genericTextResolver?($0) ?? .empty
-            )
+            BookmarkListItem(genericBookmark: $0)
         }
         return bibleItems + genericItems
+    }
+
+    /** Returns only the source-family generation that can change this row's projection. */
+    private func rowProjectionGeneration(for request: BookmarkListRowProjectionRequest) -> Int {
+        switch request {
+        case .bible: return bibleRowProjectionSourceGeneration
+        case .generic: return genericRowProjectionSourceGeneration
+        }
     }
 
     /// Android assignable labels in stable visible-name order, excluding synthetic Unlabelled.
@@ -288,8 +519,20 @@ public struct BookmarkListView: View {
     /**
      Builds the bookmark list screen, empty state, and related navigation destinations.
      */
-    public var body: some View {
-        AndroidActivitySurface(palette: surfacePalette) {
+    var body: some View {
+        let visibleBookmarks = filteredBookmarks
+        let detailedState = UITestRuntimeConfiguration.enablesDetailedAccessibilityExports
+            ? BookmarkListProjection.accessibilityValue(
+                for: visibleBookmarks,
+                selectedLabelId: selectedLabelId,
+                labels: labels.map(BookmarkListLabel.init),
+                searchText: searchText,
+                isAssigningLabels: bookmarkListIsAssigningLabels,
+                includeRowTokens: true,
+                rowTokenLimit: UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
+            )
+            : nil
+        return AndroidActivitySurface(palette: surfacePalette) {
             appBar
         } content: {
             VStack(spacing: 0) {
@@ -298,19 +541,19 @@ public struct BookmarkListView: View {
                     bookmarkSearchSection
                 }
                 Divider().overlay(surfacePalette.inactiveBorderColor)
-                bookmarkList
+                bookmarkList(visibleBookmarks: visibleBookmarks)
             }
         }
         .overlay(alignment: .topLeading) {
             AndroidActivityAccessibilityMarker(
                 label: String(localized: "bookmarks", defaultValue: "Bookmarks"),
                 accessibilityIdentifier: "bookmarkListScreen",
-                accessibilityValue: bookmarkListAccessibilityValue,
+                accessibilityValue: detailedState,
                 surfaceColor: surfacePalette.backgroundColor
             )
         }
         .overlay(alignment: .topLeading) {
-            bookmarkListStateExport
+            bookmarkListStateExport(detailedState)
         }
         .navigationDestination(item: $activeBookmarkListRoute) { route in
             bookmarkListDestination(route)
@@ -327,6 +570,18 @@ public struct BookmarkListView: View {
         }
         .onChange(of: selectedLabelId) { _, _ in selectedBookmarkIDs = [] }
         .onChange(of: searchText) { _, _ in selectedBookmarkIDs = [] }
+        .onReceive(
+            NotificationCenter.default.publisher(for: SwordModuleStore.modulesDidChangeNotification)
+                .receive(on: DispatchQueue.main)
+        ) { _ in
+            bibleRowProjectionSourceGeneration &+= 1
+            genericRowProjectionSourceGeneration &+= 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: EpubReader.libraryDidChangeNotification)
+        ) { _ in
+            genericRowProjectionSourceGeneration &+= 1
+        }
         .androidAnchoredPopupMenu(
             anchorID: PopupAnchor.labelFilter,
             isPresented: popupBinding(.labelFilter),
@@ -514,10 +769,10 @@ public struct BookmarkListView: View {
     }
 
     /// Scrollable Android Bookmark rows or the activity's simple empty-list text.
-    private var bookmarkList: some View {
+    private func bookmarkList(visibleBookmarks: [BookmarkListItem]) -> some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if filteredBookmarks.isEmpty {
+                if visibleBookmarks.isEmpty {
                     Text(String(localized: "empty_list", defaultValue: "No items to display"))
                         .font(.system(size: 17))
                         .foregroundStyle(surfacePalette.foregroundColor)
@@ -525,9 +780,16 @@ public struct BookmarkListView: View {
                         .padding(.top, 16)
                         .accessibilityIdentifier("bookmarkListEmptyText")
                 }
-                ForEach(filteredBookmarks) { bookmark in
+                ForEach(visibleBookmarks) { bookmark in
                 BookmarkRow(
                     bookmark: bookmark,
+                    projectionLoader: rowProjectionLoader,
+                    projectionContext: projectionContexts.context(
+                        for: bookmark.rowProjectionRequest
+                    ),
+                    sourceGeneration: rowProjectionGeneration(
+                        for: bookmark.rowProjectionRequest
+                    ),
                     showNotes: showNotes,
                     isSelected: selectedBookmarkIDs.contains(bookmark.id),
                     unlabeledColor: unlabeledLabelColor,
@@ -592,19 +854,6 @@ public struct BookmarkListView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Stable bookmark-list state exported for UI automation, including route presentation flags.
-    private var bookmarkListAccessibilityValue: String {
-        BookmarkListProjection.accessibilityValue(
-            for: filteredBookmarks,
-            selectedLabelId: selectedLabelId,
-            labels: labels,
-            searchText: searchText,
-            isAssigningLabels: bookmarkListIsAssigningLabels,
-            includeRowTokens: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
-            rowTokenLimit: UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
-        )
-    }
-
     /// Whether the bookmark-list route is currently showing label assignment.
     private var bookmarkListIsAssigningLabels: Bool {
         if case .labelAssignment = activeBookmarkListRoute {
@@ -615,15 +864,15 @@ public struct BookmarkListView: View {
 
     /// Compact hidden state probe used by UI tests instead of snapshotting the live list surface.
     @ViewBuilder
-    private var bookmarkListStateExport: some View {
-        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Text(bookmarkListAccessibilityValue)
+    private func bookmarkListStateExport(_ accessibilityValue: String?) -> some View {
+        if let accessibilityValue {
+            Text(accessibilityValue)
                 .font(.system(size: 1))
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("bookmarkListStateExport")
-                .accessibilityValue(bookmarkListAccessibilityValue)
+                .accessibilityValue(accessibilityValue)
         }
     }
 
@@ -631,7 +880,7 @@ public struct BookmarkListView: View {
     private var bookmarkListSelectedLabelAccessibilityToken: String {
         BookmarkListProjection.selectedLabelToken(
             selectedLabelId: selectedLabelId,
-            labels: labels
+            labels: labels.map(BookmarkListLabel.init)
         )
     }
 
@@ -864,14 +1113,10 @@ public struct BookmarkListView: View {
         }
     }
 
-    /// Returns to the reader-owned route, or dismisses a standalone host.
+    /// Returns through the dismissal command selected by the owning wrapper.
     private func closeBookmarkList() {
         activePopup = nil
-        if let onDismiss {
-            onDismiss()
-        } else {
-            dismiss()
-        }
+        onDismiss()
     }
 
     /**
@@ -959,6 +1204,12 @@ public struct BookmarkListView: View {
         ))
     }
 
+
+}
+
+
+/** Pure user-visible reference formatting shared by Bookmark rows and reader projections. */
+enum BookmarkListReferenceProjection {
     /**
      Converts bookmark ordinals into a human-readable verse reference string.
 
@@ -970,15 +1221,36 @@ public struct BookmarkListView: View {
         ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
     ) -> String {
+        verseReference(
+            kjvaStartOrdinal: bookmark.kjvOrdinalStart,
+            kjvaEndOrdinal: bookmark.kjvOrdinalEnd,
+            legacyBookName: bookmark.book,
+            sourceStartOrdinal: bookmark.ordinalStart,
+            sourceEndOrdinal: bookmark.ordinalEnd,
+            ordinalResolver: ordinalResolver,
+            activeReferenceResolver: activeReferenceResolver
+        )
+    }
+
+    /** Formats copied Bible bookmark ordinals without retaining the persistence model. */
+    static func verseReference(
+        kjvaStartOrdinal: Int,
+        kjvaEndOrdinal: Int,
+        legacyBookName: String?,
+        sourceStartOrdinal: Int,
+        sourceEndOrdinal: Int,
+        ordinalResolver: ((String, Int) -> BookmarkListVerseReference?)? = nil,
+        activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil
+    ) -> String {
         // Prefer the active module's versification for Android-parity display; exact navigation is
         // emitted separately through the typed target contract.
         let resolve: (Int) -> (bookName: String, reference: BookmarkListVerseReference)? = { ordinal in
             activeReferenceResolver?(ordinal) ?? kjvaVerseReference(ordinal: ordinal)
         }
-        if let start = resolve(bookmark.kjvOrdinalStart) {
-            let effectiveKJVEnd = bookmark.kjvOrdinalEnd > bookmark.kjvOrdinalStart
-                ? bookmark.kjvOrdinalEnd
-                : bookmark.kjvOrdinalStart
+        if let start = resolve(kjvaStartOrdinal) {
+            let effectiveKJVEnd = kjvaEndOrdinal > kjvaStartOrdinal
+                ? kjvaEndOrdinal
+                : kjvaStartOrdinal
             let end = resolve(effectiveKJVEnd) ?? start
             return formattedBibleReference(
                 startBookName: start.bookName,
@@ -988,15 +1260,17 @@ public struct BookmarkListView: View {
             )
         }
 
-        let legacyBookName = bookmark.book?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let effectiveEnd = bookmark.ordinalEnd > 0 ? bookmark.ordinalEnd : bookmark.ordinalStart
-        if !legacyBookName.isEmpty,
-           let startReference = ordinalResolver?(legacyBookName, bookmark.ordinalStart),
-           let endReference = ordinalResolver?(legacyBookName, effectiveEnd) {
+        let trimmedLegacyBookName = legacyBookName?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ) ?? ""
+        let effectiveEnd = sourceEndOrdinal > 0 ? sourceEndOrdinal : sourceStartOrdinal
+        if !trimmedLegacyBookName.isEmpty,
+           let startReference = ordinalResolver?(trimmedLegacyBookName, sourceStartOrdinal),
+           let endReference = ordinalResolver?(trimmedLegacyBookName, effectiveEnd) {
             return formattedBibleReference(
-                startBookName: legacyBookName,
+                startBookName: trimmedLegacyBookName,
                 startReference: startReference,
-                endBookName: legacyBookName,
+                endBookName: trimmedLegacyBookName,
                 endReference: endReference
             )
         }
@@ -1062,8 +1336,20 @@ public struct BookmarkListView: View {
      - Returns: Reference text like `UITESTDICT: Entry 1`.
      */
     static func genericReference(for bookmark: GenericBookmark) -> String {
-        let module = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = bookmark.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        genericReference(bookInitials: bookmark.bookInitials, key: bookmark.key)
+    }
+
+    /** Formats a copied generic source identity without retaining its SwiftData model. */
+    static func genericReference(
+        for bookmark: BibleReaderPreparedGenericBookmarkInput
+    ) -> String {
+        genericReference(bookInitials: bookmark.sourceBookInitials, key: bookmark.key)
+    }
+
+    /** Formats one persisted generic source/key pair for list presentation. */
+    private static func genericReference(bookInitials: String, key: String) -> String {
+        let module = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if module.isEmpty {
             return key.isEmpty ? "Unknown" : key
         }
@@ -1271,7 +1557,7 @@ enum BookmarkListProjection {
     static func accessibilityValue(
         for items: [BookmarkListItem],
         selectedLabelId: UUID?,
-        labels: [BibleCore.Label],
+        labels: [BookmarkListLabel],
         searchText: String,
         isAssigningLabels: Bool,
         includeRowTokens: Bool,
@@ -1305,14 +1591,14 @@ enum BookmarkListProjection {
      */
     static func selectedLabelToken(
         selectedLabelId: UUID?,
-        labels: [BibleCore.Label]
+        labels: [BookmarkListLabel]
     ) -> String {
         guard let selectedLabelId else { return "all" }
         if selectedLabelId == BibleCore.Label.unlabeledId { return "unlabelled" }
         guard let label = labels.first(where: { $0.id == selectedLabelId }) else {
             return "all"
         }
-        return bookmarkListAccessibilitySegment(AndroidLabelPresentation.displayName(for: label))
+        return bookmarkListAccessibilitySegment(label.displayName)
     }
 
     /**
@@ -1420,6 +1706,28 @@ extension UUID: @retroactive Identifiable {
 
 // MARK: - Bookmark List Item
 
+/** Immutable label values copied while one bookmark relationship graph is on its SwiftData owner. */
+struct BookmarkListLabel: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let name: String
+    let color: Int
+    let displayName: String
+
+    init(_ label: BibleCore.Label) {
+        id = label.id
+        name = label.name
+        color = label.color
+        displayName = AndroidLabelPresentation.displayName(for: label)
+    }
+
+    init(id: UUID = UUID(), name: String, color: Int = BibleCore.Label.defaultColor) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.displayName = name
+    }
+}
+
 /// Normalized row data for Bible and generic bookmarks shown in `BookmarkListView`.
 struct BookmarkListItem: Identifiable {
     /// Original SwiftData model backing the row.
@@ -1433,6 +1741,9 @@ struct BookmarkListItem: Identifiable {
 
     /// Original SwiftData model backing the row.
     let source: Source
+
+    /// Complete persistence-only request copied while the SwiftData graph is on its owner.
+    let rowProjectionRequest: BookmarkListRowProjectionRequest
 
     /// User-visible reference text.
     let reference: String
@@ -1456,7 +1767,7 @@ struct BookmarkListItem: Identifiable {
     let textProjection: BookmarkListTextProjection
 
     /// Labels assigned to the bookmark.
-    let labels: [BibleCore.Label]
+    let labels: [BookmarkListLabel]
 
     /// Exact Bible or generic destination emitted to the parent reader.
     let exactNavigationTarget: BookmarkNavigationTarget?
@@ -1502,7 +1813,7 @@ struct BookmarkListItem: Identifiable {
         activeReferenceResolver: ((Int) -> (bookName: String, reference: BookmarkListVerseReference)?)? = nil,
         textProjection: BookmarkListTextProjection = .empty
     ) {
-        let reference = BookmarkListView.verseReference(
+        let reference = BookmarkListReferenceProjection.verseReference(
             for: bookmark,
             ordinalResolver: ordinalResolver,
             activeReferenceResolver: activeReferenceResolver
@@ -1510,6 +1821,12 @@ struct BookmarkListItem: Identifiable {
         let noteText = bookmark.notes?.notes ?? ""
         self.id = bookmark.id
         self.source = .bible(bookmark)
+        self.rowProjectionRequest = .bible(
+            BibleReaderPreparedBibleBookmarkInput(
+                bookmark,
+                unlabeledLabelID: BibleCore.Label.unlabeledId.uuidString
+            )
+        )
         self.reference = reference
         self.searchableText = noteText
         self.createdAt = bookmark.createdAt
@@ -1517,7 +1834,10 @@ struct BookmarkListItem: Identifiable {
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.textProjection = textProjection
-        self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        self.labels = bookmark.bookmarkToLabels?
+            .compactMap(\.label)
+            .map(BookmarkListLabel.init)
+            .sorted { $0.name < $1.name } ?? []
         do {
             self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
             self.navigationError = nil
@@ -1534,7 +1854,7 @@ struct BookmarkListItem: Identifiable {
 
         // This projection exists only until the parent adopts `onNavigateTarget`; it never guesses.
         if let target = activeReferenceResolver?(bookmark.kjvOrdinalStart)
-            ?? BookmarkListView.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
+            ?? BookmarkListReferenceProjection.kjvaVerseReference(ordinal: bookmark.kjvOrdinalStart) {
             self.navigationTarget = (
                 bookName: target.bookName,
                 chapter: target.reference.chapter
@@ -1549,10 +1869,16 @@ struct BookmarkListItem: Identifiable {
         genericBookmark bookmark: GenericBookmark,
         textProjection: BookmarkListTextProjection = .empty
     ) {
-        let reference = BookmarkListView.genericReference(for: bookmark)
+        let reference = BookmarkListReferenceProjection.genericReference(for: bookmark)
         let noteText = bookmark.notes?.notes ?? ""
         self.id = bookmark.id
         self.source = .generic(bookmark)
+        self.rowProjectionRequest = .generic(
+            BibleReaderPreparedGenericBookmarkInput(
+                bookmark,
+                unlabeledLabelID: BibleCore.Label.unlabeledId.uuidString
+            )
+        )
         self.reference = reference
         self.searchableText = noteText
         self.createdAt = bookmark.createdAt
@@ -1560,7 +1886,10 @@ struct BookmarkListItem: Identifiable {
         self.customIcon = bookmark.customIcon
         self.noteText = noteText
         self.textProjection = textProjection
-        self.labels = bookmark.bookmarkToLabels?.compactMap { $0.label }.sorted { $0.name < $1.name } ?? []
+        self.labels = bookmark.bookmarkToLabels?
+            .compactMap(\.label)
+            .map(BookmarkListLabel.init)
+            .sorted { $0.name < $1.name } ?? []
         do {
             self.exactNavigationTarget = try BookmarkNavigationTargetResolver.resolve(bookmark)
             self.navigationError = nil
@@ -1586,11 +1915,34 @@ struct BookmarkListItem: Identifiable {
  context-menu gestures.
  */
 private struct BookmarkRow: View {
+    /** Exact row/source generation used by SwiftUI task cancellation. */
+    private struct ProjectionTaskIdentity: Hashable {
+        let request: BookmarkListRowProjectionRequest
+        let context: BookmarkListRowProjectionContext
+        let sourceGeneration: Int
+        let persistedSource: BibleReaderPreparedMyDocumentSource?
+    }
+
     /// Active AppCompat scheme used for the shared selection accent.
     @Environment(\.colorScheme) private var colorScheme
 
     /// Bookmark being rendered.
     let bookmark: BookmarkListItem
+
+    /// Source-aware resolver invoked only while this LazyVStack row is visible.
+    let projectionLoader: BookmarkListRowProjectionLoader?
+
+    /// Exact active/source state that authorized this row attempt.
+    let projectionContext: BookmarkListRowProjectionContext
+
+    /// Route-local source generation advanced by installed-module replacement notifications.
+    let sourceGeneration: Int
+
+    /// Current source-derived content for the exact copied row request.
+    @State private var resolvedProjection: BookmarkListResolvedRowProjection?
+
+    /// Complete request/source identity that authorized `resolvedProjection`.
+    @State private var resolvedTaskIdentity: ProjectionTaskIdentity?
 
     /// Whether note previews are visible under Android's persisted setting.
     let showNotes: Bool
@@ -1623,14 +1975,37 @@ private struct BookmarkRow: View {
      Failure modes: none; an incomplete gesture invokes neither command
     */
     var body: some View {
-        AndroidTapLongPressButton(
-            isLongPressActionActive: isSelected,
+        switch bookmark.rowProjectionRequest {
+        case .bible:
+            rowContent(persistedSource: nil)
+        case .generic(let input):
+            BookmarkListPersistedMyDocumentSourceObserver(
+                documentInitials: input.sourceBookInitials,
+                pageKey: input.key
+            ) { persistedSource in
+                rowContent(persistedSource: persistedSource)
+            }
+        }
+    }
+
+    /** Builds the row and restarts its projection for one exact observed persisted source value. */
+    private func rowContent(
+        persistedSource: BibleReaderPreparedMyDocumentSource?
+    ) -> some View {
+        let taskIdentity = ProjectionTaskIdentity(
+            request: bookmark.rowProjectionRequest,
+            context: projectionContext,
+            sourceGeneration: sourceGeneration,
+            persistedSource: persistedSource
+        )
+        let visibleProjection = resolvedTaskIdentity == taskIdentity ? resolvedProjection : nil
+        return AndroidTapLongPressButton(
             onTap: onSelect,
             onLongPress: onLongPress
         ) {
             VStack(alignment: .leading, spacing: 4) {
-                headerRow
-                bookmarkContent
+                headerRow(projection: visibleProjection)
+                bookmarkContent(projection: visibleProjection)
                 notePreview
             }
             .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
@@ -1646,11 +2021,29 @@ private struct BookmarkRow: View {
         .accessibilityAction(named: Text(String(localized: "select", defaultValue: "Select"))) {
             onLongPress()
         }
-        .accessibilityIdentifier(bookmarkRowIdentifier())
+        .accessibilityIdentifier(bookmarkRowIdentifier(projection: visibleProjection))
+        .task(id: taskIdentity) {
+            if resolvedTaskIdentity != taskIdentity {
+                resolvedProjection = nil
+                resolvedTaskIdentity = nil
+            }
+            guard let projectionLoader else { return }
+            let loaded = await projectionLoader(
+                bookmark.rowProjectionRequest,
+                projectionContext
+            )
+            guard !Task.isCancelled,
+                  let projection = BookmarkListRowProjectionPublication.accepted(
+                    loaded,
+                    for: bookmark.rowProjectionRequest
+                  ) else { return }
+            resolvedProjection = projection
+            resolvedTaskIdentity = taskIdentity
+        }
     }
 
     /// Assigned labels rendered as Android's generic tag glyphs, excluding Speak.
-    private var visibleTagLabels: [BibleCore.Label] {
+    private var visibleTagLabels: [BookmarkListLabel] {
         bookmark.labels.filter { $0.name != BibleCore.Label.speakLabelName }
     }
 
@@ -1660,7 +2053,7 @@ private struct BookmarkRow: View {
     }
 
     /// Header row containing label tags, Speak state, reference, and Android's fixed date pattern.
-    private var headerRow: some View {
+    private func headerRow(projection: BookmarkListResolvedRowProjection?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 2) {
             if bookmark.labels.isEmpty {
                 AndBibleIconView(name: "BookmarkLabel", size: 24)
@@ -1677,7 +2070,7 @@ private struct BookmarkRow: View {
                     .foregroundStyle(surfacePalette.foregroundColor)
             }
 
-            Text(bookmark.reference)
+            Text(projection?.reference ?? bookmark.reference)
                 .font(.system(size: 17))
                 .lineLimit(2)
                 .layoutPriority(1)
@@ -1694,11 +2087,12 @@ private struct BookmarkRow: View {
 
     @ViewBuilder
     /// Verse/generic source content with only the persisted selection emphasized.
-    private var bookmarkContent: some View {
-        if !bookmark.textProjection.fullText.isEmpty {
-            (Text(bookmark.textProjection.prefix)
-                + Text(bookmark.textProjection.selectedText).bold()
-                + Text(bookmark.textProjection.suffix))
+    private func bookmarkContent(projection: BookmarkListResolvedRowProjection?) -> some View {
+        let textProjection = projection?.textProjection ?? bookmark.textProjection
+        if !textProjection.fullText.isEmpty {
+            (Text(textProjection.prefix)
+                + Text(textProjection.selectedText).bold()
+                + Text(textProjection.suffix))
                 .font(.system(size: 14))
                 .foregroundStyle(surfacePalette.foregroundColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1710,28 +2104,16 @@ private struct BookmarkRow: View {
     /// Optional note-preview text shown when the bookmark has saved note content.
     private var notePreview: some View {
         if showNotes, !bookmark.noteText.isEmpty {
-            if let attributedNote {
-                Text(attributedNote)
-                    .font(.system(size: 14))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            } else {
-                Text(bookmark.noteText)
-                    .font(.system(size: 14))
-                    .foregroundStyle(surfacePalette.foregroundColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
+            AndroidHTMLText(
+                htmlBody: bookmark.noteText,
+                baseFont: .system(size: 14),
+                basePointSize: 14,
+                foregroundColor: surfacePalette.foregroundColor
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 4)
         }
-    }
-
-    /// HTML note spans recolored to the owning reader/workspace palette.
-    private var attributedNote: AttributedString? {
-        guard var attributed = try? AttributedString(htmlBody: bookmark.noteText) else { return nil }
-        attributed.foregroundColor = surfacePalette.foregroundColor
-        return attributed
     }
 
     /// Android `EEE, yyyy-MM-dd HH:mm` timestamp rendered in the user's locale/time zone.
@@ -1750,10 +2132,80 @@ private struct BookmarkRow: View {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func bookmarkRowIdentifier() -> String {
-        "bookmarkListRowButton::\(bookmark.accessibilitySegment)"
+    private func bookmarkRowIdentifier(
+        projection: BookmarkListResolvedRowProjection?
+    ) -> String {
+        bookmarkListRowAccessibilityIdentifier(
+            reference: projection?.reference ?? bookmark.reference
+        )
     }
 
+}
+
+/**
+ Observes the exact local My Documents source that can supply one visible generic bookmark row.
+
+ SwiftData's documented `ModelContext.didSave` notification was absent in the observed iOS 17.5
+ runtimes. Dynamic queries keep invalidation on SwiftData's supported observation path and scope
+ each visible row to its stored document initials and page key. The exact copied source becomes
+ part of the row task identity, so content, title, key, language, or ownership changes cancel and
+ restart only that row's projection.
+ */
+struct BookmarkListPersistedMyDocumentSourceObserver<Content: View>: View {
+    @Query private var documents: [MyDocument]
+    @Query private var pages: [MyDocumentPage]
+
+    private let requestedDocumentInitials: BibleReaderPreparationExactText
+    private let requestedPageKey: BibleReaderPreparationExactText
+    private let fallbackLanguage: String
+    private let content: (BibleReaderPreparedMyDocumentSource?) -> Content
+
+    init(
+        documentInitials: String,
+        pageKey: String,
+        @ViewBuilder content: @escaping (BibleReaderPreparedMyDocumentSource?) -> Content
+    ) {
+        _documents = Query(filter: #Predicate { $0.initials == documentInitials })
+        _pages = Query(filter: #Predicate {
+            $0.pageKey == pageKey && $0.document?.initials == documentInitials
+        })
+        requestedDocumentInitials = BibleReaderPreparationExactText(documentInitials)
+        requestedPageKey = BibleReaderPreparationExactText(pageKey)
+        fallbackLanguage = Locale.current.language.languageCode?.identifier ?? "en"
+        self.content = content
+    }
+
+    var body: some View {
+        content(source)
+    }
+
+    /** Fails closed when Android's exact document or page identity is ambiguous. */
+    private var source: BibleReaderPreparedMyDocumentSource? {
+        let exactDocuments = documents.filter {
+            BibleReaderPreparationExactText($0.initials) == requestedDocumentInitials
+        }
+        let exactPages = pages.filter {
+            BibleReaderPreparationExactText($0.pageKey) == requestedPageKey
+                && $0.document.map {
+                    BibleReaderPreparationExactText($0.initials) == requestedDocumentInitials
+                } == true
+        }
+        guard exactDocuments.count == 1,
+              exactPages.count == 1,
+              let document = exactDocuments.first,
+              let page = exactPages.first,
+              page.document?.id == document.id else { return nil }
+        return BibleReaderPreparedMyDocumentSource(
+            document: document,
+            page: page,
+            fallbackLanguage: fallbackLanguage
+        )
+    }
+}
+
+/** Builds the stable visible-row accessibility identifier from its rendered reference. */
+private func bookmarkListRowAccessibilityIdentifier(reference: String) -> String {
+    "bookmarkListRowButton::\(bookmarkListAccessibilitySegment(reference))"
 }
 
 /**

@@ -231,27 +231,7 @@ struct AIReaderHelpDialog: View {
         case .localized:
             Text(text.localizedValue)
         case .html(let html):
-            if let attributed = attributedHTML(html) {
-                Text(attributed)
-            } else {
-                Text(html)
-            }
+            AndroidHTMLText(htmlBody: html)
         }
-    }
-
-    /** Converts bundled BibleView help HTML to native attributed text with active links. */
-    private func attributedHTML(_ html: String) -> AttributedString? {
-        guard let data = html.data(using: .utf8),
-              let value = try? NSAttributedString(
-                  data: data,
-                  options: [
-                      .documentType: NSAttributedString.DocumentType.html,
-                      .characterEncoding: String.Encoding.utf8.rawValue,
-                  ],
-                  documentAttributes: nil
-              ) else {
-            return nil
-        }
-        return AttributedString(value)
     }
 }

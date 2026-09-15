@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
@@ -790,6 +791,8 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
             startOrdinal: ordinal,
             endOrdinal: ordinal
         ))
+        let bookmarkContainer = try makeBookmarkListModelContainer()
+        let bookmarkContext = ModelContext(bookmarkContainer)
         let lockedBookmark = BibleBookmark(
             kjvOrdinalStart: ordinal,
             kjvOrdinalEnd: ordinal,
@@ -798,8 +801,8 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
             v11n: "KJV",
             bookInitials: lockedName
         )
+        bookmarkContext.insert(lockedBookmark)
         lockedBookmark.book = "Genesis"
-        XCTAssertEqual(controller.bookmarkListTextProjection(for: lockedBookmark), .empty)
         let readableBookmark = BibleBookmark(
             kjvOrdinalStart: ordinal,
             kjvOrdinalEnd: ordinal,
@@ -808,7 +811,10 @@ final class InstalledScriptureSourceTests: BibleUISwordFixtureTestCase {
             v11n: "KJV",
             bookInitials: "KJV"
         )
+        bookmarkContext.insert(readableBookmark)
         readableBookmark.book = "Genesis"
+        try bookmarkContext.save()
+        XCTAssertEqual(controller.bookmarkListTextProjection(for: lockedBookmark), .empty)
         XCTAssertFalse(
             controller.bookmarkListTextProjection(for: readableBookmark).fullText.isEmpty
         )

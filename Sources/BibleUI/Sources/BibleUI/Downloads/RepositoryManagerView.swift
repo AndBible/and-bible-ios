@@ -47,8 +47,8 @@ public struct RepositoryManagerView: View {
     /// Reader/workspace palette inherited from Document Downloader.
     private let surfacePalette: ReaderThemeSurfacePalette
 
-    /// Complete persisted source inventory; presentation filters it to custom sources.
-    @State private var sources: [SourceConfig] = []
+    /// Persisted user-installed sources shown by Android's Custom repositories activity.
+    @State private var customSources: [SourceConfig] = []
 
     /// Active Android editor activity state, or `nil` while the list activity is visible.
     @State private var editorState: RepositorySourceEditorState?
@@ -130,11 +130,6 @@ public struct RepositoryManagerView: View {
     private static let customRepositoriesWikiURL = URL(
         string: "https://github.com/AndBible/and-bible/wiki/Custom-repositories"
     )!
-
-    /// Persisted sources Android exposes in this activity; packaged defaults remain in Downloads.
-    private var customSources: [SourceConfig] {
-        sources.filter { !sourceManager.isDefaultSource($0) }
-    }
 
     /// Editable URL binding that invalidates any result derived from the previous value.
     private var editorURLBinding: Binding<String> {
@@ -605,9 +600,18 @@ public struct RepositoryManagerView: View {
         return paragraphs.joined(separator: "\n\n")
     }
 
-    /** Reloads persisted sources without altering the active editor. */
+    /**
+     Reloads the persisted custom-source rows without altering the active editor.
+
+     Built-in sources are removed at the persistence boundary so SwiftUI body and layout passes
+     only traverse the rows this activity can render.
+
+     - Returns: Nothing; the view state receives the current custom rows.
+     - Side effects: Loads repository configuration and replaces `customSources`.
+     - Failure modes: The source manager represents an unreadable inventory as an empty list.
+     */
     private func loadSources() {
-        sources = sourceManager.loadSources()
+        customSources = sourceManager.loadSources().filter { !sourceManager.isDefaultSource($0) }
     }
 
     /** Opens a blank Android editor activity and clears validation/error state. */

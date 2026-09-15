@@ -24,6 +24,25 @@ import {Nullable} from "@/types/common";
 
 export type UseScroll = ReturnType<typeof useScroll>;
 
+/**
+ * Carries an exact loaded-content destination and optional source-qualified highlight range.
+ *
+ * The selection fields match setup_content so scrolling already rendered content preserves the
+ * same selection without replacing the document. Omitted fields retain scrollToId's defaults.
+ */
+export type ScrollToVerseRequest = {
+    ordinal: Nullable<number>,
+    targetId?: string,
+    now?: boolean,
+    highlight?: boolean,
+    force?: boolean,
+    duration?: number,
+    ordinalStart?: Nullable<number>,
+    ordinalEnd?: Nullable<number>,
+    bookInitials?: string,
+    osisRef?: string,
+};
+
 export function resolveScrollToVerseRequest(
     {
         ordinal = null,
@@ -31,17 +50,13 @@ export function resolveScrollToVerseRequest(
         highlight = false,
         force = false,
         duration = undefined,
-    }: {
-        ordinal: Nullable<number>,
-        now?: boolean,
-        highlight?: boolean,
-        force?: boolean,
-        duration?: number,
-    }
+        targetId,
+        ...selection
+    }: ScrollToVerseRequest
 ) {
     return {
-        targetId: ordinal == null ? null : `o-${ordinal}`,
-        options: {now, highlight, force, duration},
+        targetId: targetId ?? (ordinal == null ? null : `o-${ordinal}`),
+        options: {now, highlight, force, duration, ...selection},
     };
 }
 
@@ -298,13 +313,7 @@ export function useScroll(
     }
 
     setupEventBusListener("set_offsets", setToolbarOffset)
-    setupEventBusListener("scroll_to_verse", (request: {
-        ordinal: Nullable<number>,
-        now?: boolean,
-        highlight?: boolean,
-        force?: boolean,
-        duration?: number,
-    }) => {
+    setupEventBusListener("scroll_to_verse", (request: ScrollToVerseRequest) => {
         const {targetId, options} = resolveScrollToVerseRequest(request);
         scrollToId(targetId, options);
     })

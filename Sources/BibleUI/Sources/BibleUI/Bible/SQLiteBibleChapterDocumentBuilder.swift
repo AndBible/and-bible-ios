@@ -13,6 +13,20 @@ import SwordKit
  missing; the builder never generates placeholder verses.
  */
 struct SQLiteBibleChapterDocumentBuilder {
+    /** One copied SQLite verse row used by the source-independent projector. */
+    struct CapturedVerse: Sendable {
+        let verse: Int
+        let text: String
+    }
+
+    /** Complete immutable chapter read returned by one operation-owned SQLite connection. */
+    struct CapturedChapter: Sendable {
+        let osisBookId: String
+        let chapter: Int
+        let verses: [CapturedVerse]
+        let isPlainESword: Bool
+    }
+
     /// Readable database-backed Bible selected by the pane.
     let module: BibleReaderSQLiteModuleHandle
 
@@ -31,14 +45,37 @@ struct SQLiteBibleChapterDocumentBuilder {
         osisBookId: String,
         chapter: Int
     ) -> BibleChapterDocumentBuilder.LoadedChapterContent? {
+        guard let capture = captureChapter(osisBookId: osisBookId, chapter: chapter) else {
+            return nil
+        }
+        return Self.projectChapter(capture)
+    }
+
+    /** Reads exact SQLite source rows and copies the module-specific markup classification. */
+    func captureChapter(osisBookId: String, chapter: Int) -> CapturedChapter? {
         guard chapter > 0,
               let rows = try? module.chapterContent(osisId: osisBookId, chapter: chapter),
               !rows.isEmpty else {
             return nil
         }
 
+        return CapturedChapter(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verses: rows.map { CapturedVerse(verse: $0.verse, text: $0.text) },
+            isPlainESword: SQLiteReaderMarkupProjection.isPlainESword(module)
+        )
+    }
+
+    /** Projects copied rows into OSIS without retaining or reading the SQLite module handle. */
+    static func projectChapter(
+        _ capture: CapturedChapter
+    ) -> BibleChapterDocumentBuilder.LoadedChapterContent? {
+        let osisBookId = capture.osisBookId
+        let chapter = capture.chapter
+
         var firstTextByVerse: [Int: String] = [:]
-        for row in rows where row.verse > 0 {
+        for row in capture.verses where row.verse > 0 {
             if firstTextByVerse[row.verse] == nil {
                 firstTextByVerse[row.verse] = row.text
             }
@@ -58,7 +95,7 @@ struct SQLiteBibleChapterDocumentBuilder {
             xml += "<verse osisID=\"\(coordinate.osisKey)\" verseOrdinal=\"\(coordinate.ordinal)\">"
             let projectedText = SQLiteReaderMarkupProjection.bibleVerseXML(
                 text.trimmingCharacters(in: .whitespacesAndNewlines),
-                module: module
+                isPlainESword: capture.isPlainESword
             )
             xml += SQLiteDocumentXMLCompatibility.validatedFragmentOrEscapedText(projectedText)
             xml += " </verse>"

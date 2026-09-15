@@ -3,6 +3,8 @@
 // This view coordinates the toolbar, sheets, and overlays for multi-window
 // Bible reading. Each window's WebView is rendered by a BibleWindowPane.
 
+import Combine
+import Foundation
 import SwiftUI
 import SwiftData
 import BibleView
@@ -276,6 +278,32 @@ public struct BibleReaderView: View {
         let installedModules: [ModuleInfo]
     }
 
+    /**
+     Retains one non-Bible toolbar action through the existing exact-module credential flow.
+
+     The controller reference and authorization token bind the prompt to the pane and retained Bible
+     that created it. The embedded `ModuleUnlockSession` owns only Android's passphrase/retry phases;
+     reader selection remains in this surface after every owner boundary is revalidated.
+
+     Side effects: None; manager and pane mutations occur only in validated reader callbacks.
+
+     Failure modes: The reader clears this request when the window, controller, retained module, or
+     credential session no longer matches the captured authorization.
+     */
+    private struct SuggestedBibleUnlockRequest: Identifiable {
+        /// Exact controller instance that received the original toolbar action.
+        let controller: BibleReaderController
+
+        /// Captured pane/controller/module/session authorization boundary.
+        let authorization: BibleReaderSuggestedBibleUnlockAuthorization
+
+        /// Existing shared credential state for the exact retained Bible.
+        var session: ModuleUnlockSession
+
+        /// Stable SwiftUI presentation identity inherited from the credential session.
+        var id: ModuleUnlockSession.ID { session.id }
+    }
+
     /// Internal reader-overflow destinations that should run only after the overflow sheet dismisses.
     private enum ReaderOverflowPresentation {
         case labelManager
@@ -417,6 +445,9 @@ public struct BibleReaderView: View {
     /// Failed generic quick-selector action retained for an explicit user retry.
     @State private var pendingGenericQuickModuleSwitchRetry: GenericQuickModuleSwitchRetry?
 
+    /// Exact retained-Bible unlock request owned by a non-Bible toolbar suggestion.
+    @State private var suggestedBibleUnlockRequest: SuggestedBibleUnlockRequest?
+
     /// Presents the Android-style left navigation drawer from the reader header.
     @State private var showReaderNavigationDrawer = false
 
@@ -544,9 +575,6 @@ public struct BibleReaderView: View {
 
     /// Window that owns the currently presented pane-scoped sheet or chooser flow.
     @State private var panePresentationTargetWindowId: UUID?
-
-    /// Ensures the launch-seeded UI-test Search destination is only auto-presented once per app session.
-    @State private var didPresentUITestLaunchSearch = false
 
     /// One-shot completion state for the bridge-driven reference chooser flow.
     @State private var refChooserRequest = BibleReaderReferenceChooserRequest()
@@ -696,8 +724,8 @@ public struct BibleReaderView: View {
 
      - Returns: A binding that resolves nil stored colors to Android's `#ff444444` fallback and
        writes edits to the pane target workspace when available.
-     - Side effects: Setting the binding mutates `Workspace.workspaceColor`, refreshes reader chrome,
-       and saves the view's model context.
+     - Side effects: Setting the binding asks `WindowManager` to mutate and persist its owned
+       workspace, then refreshes reader chrome after that owner accepts the workspace identity.
      - Failure modes: If the target workspace no longer exists, writes are ignored.
      */
     private var workspaceColorBinding: Binding<Int?> {
@@ -708,11 +736,12 @@ public struct BibleReaderView: View {
             },
             set: { newValue in
                 let workspaceID = panePresentationTargetWindow?.workspace?.id ?? windowManager.activeWorkspace?.id
-                let workspace = workspaceID.flatMap { WorkspaceStore(modelContext: modelContext).workspace(id: $0) }
                 let resolvedColor = newValue ?? Workspace.defaultWorkspaceColor
-                workspace?.workspaceColor = resolvedColor
+                guard let workspaceID,
+                      windowManager.setWorkspaceColor(newValue, workspaceId: workspaceID) else {
+                    return
+                }
                 workspaceChromeColor = resolvedColor
-                try? modelContext.save()
             }
         )
     }
@@ -803,15 +832,18 @@ public struct BibleReaderView: View {
     /// Compact dedicated state export used by UI tests instead of snapshotting the full reader.
     @ViewBuilder
     private var readerRenderedContentStateExport: some View {
-        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            Text(readerRenderedContentStateValue)
+        if let diagnosticValue = BibleReaderDiagnosticProvider.value(
+            enabled: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+            provider: { readerRenderedContentStateValue }
+        ) {
+            Text(diagnosticValue)
                 .font(.system(size: 1))
                 .frame(width: 1, height: 1)
                 .opacity(0.01)
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("readerRenderedContentState")
                 .accessibilityLabel("readerRenderedContentState")
-                .accessibilityValue(readerRenderedContentStateValue)
+                .accessibilityValue(diagnosticValue)
         }
     }
 
@@ -1021,10 +1053,15 @@ public struct BibleReaderView: View {
         .onChange(of: windowManager.activeWindow?.id) { _, _ in
             dismissBibleQuickSelector()
             dismissCommentaryQuickSelector()
+            clearSuggestedBibleUnlockIfInvalid()
             syncActiveDisplaySettings()
         }
         .onChange(of: windowManager.controllerVersion) { _, _ in
+            clearSuggestedBibleUnlockIfInvalid()
             evaluateStartupDownloadPromptIfNeeded()
+        }
+        .onChange(of: windowManager.activeWindow?.pageManager?.bibleDocument) { _, _ in
+            clearSuggestedBibleUnlockIfInvalid()
         }
         #if os(iOS)
         .onAppear {
@@ -1079,9 +1116,37 @@ public struct BibleReaderView: View {
             }
         }
         .overlay {
+            if let request = suggestedBibleUnlockRequest {
+                ModuleUnlockFlowView(
+                    session: suggestedBibleUnlockSessionBinding,
+                    unlockModule: { moduleName, cipherKey in
+                        unlockSuggestedBible(
+                            moduleName: moduleName,
+                            cipherKey: cipherKey,
+                            expectedRequestID: request.id
+                        )
+                    },
+                    onAccepted: { module in
+                        completeSuggestedBibleUnlock(
+                            module,
+                            expectedRequestID: request.id
+                        )
+                    },
+                    onDeclined: { _ in
+                        clearSuggestedBibleUnlock(expectedRequestID: request.id)
+                    }
+                )
+                .id(request.id)
+                .zIndex(50)
+            }
+        }
+        .overlay {
             if let request = startupLockedBibleUnlockRequest {
                 StartupLockedBibleUnlockQueueView(
                     installedModules: request.installedModules,
+                    initialCipherKey: { moduleName in
+                        request.manager.persistedCipherKey(named: moduleName) ?? ""
+                    },
                     unlockModule: { moduleName, cipherKey in
                         request.manager.unlockModule(
                             named: moduleName,
@@ -1127,8 +1192,8 @@ public struct BibleReaderView: View {
                     style: .normal,
                     perform: {
                         pendingGenericQuickModuleSwitchRetry = nil
-                        selectCommentaryQuickModule(
-                            retry.module,
+                        selectCommentaryQuickDocument(
+                            .installed(retry.module),
                             targetWindowId: retry.targetWindowId
                         )
                     }
@@ -1145,7 +1210,12 @@ public struct BibleReaderView: View {
         .onChange(of: activeReaderDestination) { oldValue, newValue in
             handleActiveReaderDestinationChange(from: oldValue, to: newValue)
         }
-        .onReceive(NotificationCenter.default.publisher(for: SwordModuleStore.modulesDidChangeNotification)) { _ in
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: SwordModuleStore.modulesDidChangeNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { _ in
             Task { @MainActor in
                 handleModuleStoreDidChange()
             }
@@ -1562,7 +1632,7 @@ public struct BibleReaderView: View {
             swordManager: controller?.swordManager,
             searchIndexService: searchIndexService,
             searchIndexSourceRegistry: controller?.makeSearchIndexSourceRegistry(),
-            installedBibleModules: controller?.readableBibleModules ?? [],
+            installedBibleModules: controller?.installedBibleModules ?? [],
             currentBook: controller?.currentBook ?? "Genesis",
             currentOsisBookId: searchSheetCurrentOsisBookId,
             selectionPreferences: SearchSelectionPreferences(
@@ -1761,23 +1831,21 @@ public struct BibleReaderView: View {
             BookmarkListView(
                 surfacePalette: readerThemeSurfacePalette,
                 onDismiss: { activeReaderDestination = nil },
-                bibleTextResolver: { bookmark in
-                    panePresentationController?.bookmarkListTextProjection(for: bookmark) ?? .empty
+                rowProjectionLoader: { [weak controller = panePresentationController] request, context in
+                    await controller?.bookmarkListRowProjection(
+                        for: request,
+                        expectedContext: context
+                    )
                 },
-                genericTextResolver: { bookmark in
-                    panePresentationController?.bookmarkListTextProjection(for: bookmark) ?? .empty
-                },
+                projectionContexts: panePresentationController?.bookmarkListProjectionContexts
+                    ?? .empty,
                 onNavigateTarget: { target in
                     guard let controller = panePresentationController else {
                         throw BibleReaderBookmarkNavigationCommitFailure.readerUnavailable
                     }
                     try controller.navigate(toBookmarkTarget: target)
                 },
-                workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace,
-                bibleOrdinalResolver: { book, ordinal in
-                    panePresentationController?.bookmarkListVerseReference(book: book, ordinal: ordinal)
-                },
-                activeReferenceResolver: panePresentationController?.bookmarkListActiveReferenceResolver() ?? nil
+                workspace: panePresentationTargetWindow?.workspace ?? windowManager.activeWorkspace
             )
             #if os(iOS)
             .toolbar(.hidden, for: .navigationBar)
@@ -2240,13 +2308,13 @@ public struct BibleReaderView: View {
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
                 moduleStoreRootURL: paneModuleStoreRootURL,
-                workspaceColor: workspaceColorBinding,
+                workspaceColor: nil,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
                     defaultValue: "Global text options"
                 ),
                 scope: .global,
-                workspaceName: windowManager.activeWorkspace?.name,
+                workspaceName: nil,
                 surfacePalette: readerThemeSurfacePalette,
                 onBack: dismissReaderDestination,
                 onChange: applyGlobalDisplaySettingsChange
@@ -3428,7 +3496,7 @@ public struct BibleReaderView: View {
         downloadsDefaultDownloadMode = .disabled
         let shouldWaitForStartupDefaultDownloads = startupDefaultDownloadsInFlight
         for (_, ctrl) in windowManager.controllers {
-            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            (ctrl as? BibleReaderController)?.reconcileInstalledSources()
         }
         guard !shouldWaitForStartupDefaultDownloads else {
             return
@@ -3450,7 +3518,7 @@ public struct BibleReaderView: View {
     private func handleImportExportDestinationClosed() {
         startupRestoreImportTarget = nil
         for (_, ctrl) in windowManager.controllers {
-            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            (ctrl as? BibleReaderController)?.reconcileInstalledSources()
         }
         reevaluateStartupDownloadPromptAfterDownloads()
     }
@@ -3473,7 +3541,7 @@ public struct BibleReaderView: View {
         // up by the queue's single final refresh instead of changing its length or reader state.
         guard startupLockedBibleUnlockRequest == nil else { return }
         for (_, ctrl) in windowManager.controllers {
-            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            (ctrl as? BibleReaderController)?.reconcileInstalledSources()
         }
         guard startupDownloadPromptReason != nil else { return }
         let evaluation = StartupDocumentSetupPromptPolicy.evaluation(
@@ -3616,26 +3684,232 @@ public struct BibleReaderView: View {
     }
 
     /**
-     Resolves the Bible document Android would switch back to from a non-Bible document mode.
+     Resolves the exact Bible document Android would switch back to from a non-Bible document mode.
 
      Android's `DocumentControl.suggestedBible` returns the active window's current Bible document
      when Bible is not the visible document type. iOS stores that same pane-scoped choice on
-     `PageManager.bibleDocument`; if it is absent, locked, or no longer installed, the readable
-     Bible list provides the same default fallback established when the reader is initialized.
+     `PageManager.bibleDocument` and resolves it from Android's inclusive installed Bible inventory.
+     A locked retained identity therefore remains the target instead of silently selecting an
+     unrelated readable Bible.
 
      - Parameter controller: Pane controller that owns the toolbar action.
-     - Returns: Readable Bible module abbreviation to show, or `nil` when no readable Bible exists.
-     - Side effects: Reads fresh native module access state through the controller.
-     - Failure modes: Returns `nil` when the pane has no readable Bible modules; the saved locked
-       identity remains unchanged for a future app-owned unlock workflow.
+     - Returns: Exact installed retained Bible, then Android's saved category default or first
+       readable BookSet fallback when the retained identity was removed.
+     - Side effects: None; the controller performs access preflight only after identity resolution.
+     - Failure modes: Wrong-category registered identities and empty inventories return nil.
      */
-    private func suggestedBibleDocumentName(for controller: BibleReaderController) -> String? {
-        let readableModules = controller.readableBibleModules
-        if let saved = controller.activeWindow?.pageManager?.bibleDocument,
-           readableModules.contains(where: { $0.name == saved }) {
-            return saved
+    private func suggestedBibleDocument(for controller: BibleReaderController) -> ModuleInfo? {
+        if let retained = BibleReaderSuggestedBibleSelectionPolicy.module(
+            retainedModuleName: controller.activeWindow?.pageManager?.bibleDocument,
+            installedModules: controller.installedBibleModules
+        ) {
+            return retained
         }
-        return readableModules.first?.name
+        return controller.preferredInstalledToolbarDocument(
+            for: .bible,
+            currentName: controller.activeWindow?.pageManager?.bibleDocument
+        )
+    }
+
+    /**
+     Switches to Android's exact retained Bible or begins the reviewed iOS unlock adaptation.
+
+     Android passes `DocumentControl.suggestedBible` directly into its page switch. iOS preserves
+     that identity but keeps the controller's explicit access preflight: readable content switches
+     immediately, while a locked module enters the existing shared credential flow for that same
+     pane and module.
+
+     - Parameter controller: Focused pane controller that received the non-Bible toolbar action.
+     - Side effects: May switch the exact retained Bible or present one exact-module unlock session.
+     - Failure modes: Wrong-category and unavailable identities leave the non-Bible document
+       unchanged.
+     */
+    private func switchToSuggestedBibleDocument(_ controller: BibleReaderController) {
+        guard let module = suggestedBibleDocument(for: controller) else { return }
+        switch controller.switchBibleToolbarDocument(to: module.name) {
+        case .switched:
+            return
+        case .requiresUnlock:
+            presentSuggestedBibleUnlock(module, controller: controller)
+        case .unavailable:
+            return
+        }
+    }
+
+    /**
+     Presents one existing credential session bound to the exact suggested-Bible owner.
+
+     - Parameters:
+       - module: Inclusive installed Bible row rejected as locked by fresh controller preflight.
+       - controller: Exact pane controller that performed that preflight.
+     - Side effects: Replaces any prior suggested-Bible prompt with a newly authorized shared
+       `ModuleUnlockSession` and reads only the persisted key for prefill.
+     - Failure modes: A controller no longer registered to the active pane is rejected without a
+       prompt or manager mutation.
+     */
+    private func presentSuggestedBibleUnlock(
+        _ module: ModuleInfo,
+        controller: BibleReaderController
+    ) {
+        guard let windowID = windowManager.activeWindow?.id,
+              self.controller(for: windowID) === controller,
+              SwordJavaStringIdentity.equals(
+                  controller.activeWindow?.pageManager?.bibleDocument ?? "",
+                  module.name
+              ) else {
+            suggestedBibleUnlockRequest = nil
+            return
+        }
+        let session = ModuleUnlockSession(
+            module: module,
+            initialCipherKey: controller.swordManager?.persistedCipherKey(named: module.name) ?? ""
+        )
+        suggestedBibleUnlockRequest = SuggestedBibleUnlockRequest(
+            controller: controller,
+            authorization: BibleReaderSuggestedBibleUnlockAuthorization(
+                windowID: windowID,
+                controllerID: ObjectIdentifier(controller),
+                moduleIdentity: SwordJavaExactStringIdentity(module.name),
+                sessionID: session.id
+            ),
+            session: session
+        )
+    }
+
+    /**
+     Existing-session binding that rejects stale ownership before committing credential mutations.
+
+     - Returns: A binding to the exact still-authorized `ModuleUnlockSession`.
+     - Side effects: Valid session updates replace only the current request's embedded session;
+       invalid and nil updates clear the suggested flow.
+     - Failure modes: Window, controller, retained-module, session-module, and session-ID changes
+       reject the pending update and clear the stale request.
+     */
+    private var suggestedBibleUnlockSessionBinding: Binding<ModuleUnlockSession?> {
+        Binding(
+            get: {
+                validatedSuggestedBibleUnlockRequest()?.session
+            },
+            set: { updatedSession in
+                guard var request = validatedSuggestedBibleUnlockRequest(),
+                      let updatedSession,
+                      request.authorization.authorizes(
+                          activeWindowID: windowManager.activeWindow?.id,
+                          registeredControllerID: self.controller(
+                              for: request.authorization.windowID
+                          ).map(ObjectIdentifier.init),
+                          retainedModuleName: request.controller.activeWindow?
+                              .pageManager?.bibleDocument,
+                          sessionModuleName: updatedSession.module.name,
+                          presentedSessionID: updatedSession.id
+                      ) else {
+                    suggestedBibleUnlockRequest = nil
+                    return
+                }
+                request.session = updatedSession
+                suggestedBibleUnlockRequest = request
+            }
+        )
+    }
+
+    /**
+     Resolves the current request only while every captured owner boundary remains valid.
+
+     - Parameter expectedRequestID: Optional rendered session identity issuing the callback.
+     - Returns: The still-authorized request, or `nil` for stale and replaced owners.
+     - Side effects: None.
+     - Failure modes: Missing requests and any pane/controller/module/session mismatch return nil.
+     */
+    private func validatedSuggestedBibleUnlockRequest(
+        expectedRequestID: ModuleUnlockSession.ID? = nil
+    ) -> SuggestedBibleUnlockRequest? {
+        guard let request = suggestedBibleUnlockRequest,
+              expectedRequestID == nil || request.id == expectedRequestID,
+              let registeredController = controller(for: request.authorization.windowID),
+              registeredController === request.controller,
+              request.authorization.authorizes(
+                  activeWindowID: windowManager.activeWindow?.id,
+                  registeredControllerID: ObjectIdentifier(registeredController),
+                  retainedModuleName: registeredController.activeWindow?
+                      .pageManager?.bibleDocument,
+                  sessionModuleName: request.session.module.name,
+                  presentedSessionID: request.session.id
+              ) else {
+            return nil
+        }
+        return request
+    }
+
+    /** Clears the suggested flow whenever its captured pane, controller, module, or session is stale. */
+    private func clearSuggestedBibleUnlockIfInvalid() {
+        guard suggestedBibleUnlockRequest != nil,
+              validatedSuggestedBibleUnlockRequest() == nil else { return }
+        suggestedBibleUnlockRequest = nil
+    }
+
+    /** Clears only the rendered suggested-Bible session that issued a terminal callback. */
+    private func clearSuggestedBibleUnlock(expectedRequestID: ModuleUnlockSession.ID) {
+        guard suggestedBibleUnlockRequest?.id == expectedRequestID else { return }
+        suggestedBibleUnlockRequest = nil
+    }
+
+    /**
+     Applies one passphrase only while the suggested-Bible owner is still exact.
+
+     - Parameters:
+       - moduleName: Exact module target emitted by the existing credential session.
+       - cipherKey: User-entered key preserved without normalization.
+       - expectedRequestID: Rendered session identity issuing the submission.
+     - Returns: The manager's validation result.
+     - Side effects: On a valid owner, asks its manager to validate and persist one exact key;
+       invalid owners are cleared before any manager mutation.
+     - Failure modes: Stale ownership, target mismatch, and missing managers return false.
+     */
+    private func unlockSuggestedBible(
+        moduleName: String,
+        cipherKey: String,
+        expectedRequestID: ModuleUnlockSession.ID
+    ) -> Bool {
+        guard let request = validatedSuggestedBibleUnlockRequest(
+            expectedRequestID: expectedRequestID
+        ), SwordJavaExactStringIdentity(moduleName) == request.authorization.moduleIdentity,
+           let manager = request.controller.swordManager else {
+            clearSuggestedBibleUnlock(expectedRequestID: expectedRequestID)
+            return false
+        }
+        return manager.unlockModule(named: moduleName, withCipherKey: cipherKey)
+    }
+
+    /**
+     Refreshes and switches the exact accepted suggestion after revalidating its owner twice.
+
+     - Parameters:
+       - module: Exact module accepted by the shared credential session.
+       - expectedRequestID: Rendered session identity issuing the accepted callback.
+     - Side effects: Rebuilds the captured controller's installed source inventory, clears the
+       credential flow, and switches only the same retained Bible.
+     - Failure modes: Stale owner/module state before or after refresh clears the flow without a
+       pane switch. The controller's authoritative switch handles a source that remains unavailable.
+     */
+    private func completeSuggestedBibleUnlock(
+        _ module: ModuleInfo,
+        expectedRequestID: ModuleUnlockSession.ID
+    ) {
+        guard let request = validatedSuggestedBibleUnlockRequest(
+            expectedRequestID: expectedRequestID
+        ), SwordJavaExactStringIdentity(module.name) == request.authorization.moduleIdentity else {
+            clearSuggestedBibleUnlock(expectedRequestID: expectedRequestID)
+            return
+        }
+        request.controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
+        guard validatedSuggestedBibleUnlockRequest(
+            expectedRequestID: expectedRequestID
+        ) != nil else {
+            clearSuggestedBibleUnlock(expectedRequestID: expectedRequestID)
+            return
+        }
+        clearSuggestedBibleUnlock(expectedRequestID: expectedRequestID)
+        request.controller.switchBibleToolbarDocument(to: module.name)
     }
 
     /**
@@ -3652,7 +3926,7 @@ public struct BibleReaderView: View {
         let controller = controller(for: targetWindowId)
         dismissBibleQuickSelector()
         guard let controller else { return }
-        controller.switchBibleDocument(to: module.name)
+        controller.switchBibleToolbarDocument(to: module.name)
     }
 
     /**
@@ -3728,28 +4002,25 @@ public struct BibleReaderView: View {
      - Parameters:
        - controller: Pane controller that owns installed module lists.
        - includeAuxiliaryDocuments: Whether to include general books and dictionaries.
-     - Returns: Candidate modules in the same category mix Android hands to `menuForDocs`.
-     - Side effects: none.
-     - Failure modes: none; empty installed lists return an empty candidate list.
+     - Returns: Candidate installed or local documents in Android's shared `menuForDocs` mix.
+     - Side effects: Captures one fresh complete owner registry when auxiliary documents are included.
+     - Failure modes: Local registration metadata failure returns nil rather than exposing a partial
+       collision-sensitive list.
      */
-    private func commentaryQuickSelectorModules(
+    private func commentaryQuickSelectorDocuments(
         _ controller: BibleReaderController,
         includeAuxiliaryDocuments: Bool
-    ) -> [ModuleInfo] {
-        var modules = controller.installedCommentaryModules.filter(\.isUnlocked)
-        guard includeAuxiliaryDocuments else {
-            return modules
-        }
-        modules += controller.installedGeneralBookModules
-        modules += controller.installedDictionaryModules
-        return modules
+    ) -> [BibleReaderQuickModuleSelectorPresentation.Selection]? {
+        controller.commentaryQuickDocumentSelections(
+            includeAuxiliaryDocuments: includeAuxiliaryDocuments
+        )
     }
 
     /**
      Applies a commentary/document quick-selector choice to the captured pane.
 
      - Parameters:
-       - module: Installed module selected from the Android-parity quick selector.
+       - selection: Exact installed or local document selected from the Android-parity quick selector.
        - targetWindowId: Captured window whose controller owns the popup selection.
      - Side effects: Dismisses the popup and switches the pane through the category-specific
        current-document path. Generic exact keys render immediately, invalid/missing keys open their
@@ -3758,29 +4029,49 @@ public struct BibleReaderView: View {
        not part of Android's commentary quick popup, the selection is ignored after dismissal.
        SWORD key validation/enumeration failures leave pane state unchanged and remain retryable.
      */
-    private func selectCommentaryQuickModule(_ module: ModuleInfo, targetWindowId: UUID?) {
+    private func selectCommentaryQuickDocument(
+        _ selection: BibleReaderQuickModuleSelectorPresentation.Selection,
+        targetWindowId: UUID?
+    ) {
         let controller = controller(for: targetWindowId)
         dismissCommentaryQuickSelector()
         guard let controller else { return }
-        switch module.category {
-        case .commentary:
-            controller.switchCommentaryDocument(to: module.name)
-        case .dictionary:
-            handleGenericQuickModuleSwitch(
-                controller.switchDictionaryDocument(to: module.name),
-                module: module,
-                targetWindowId: targetWindowId,
-                browser: .dictionaryBrowser
+        switch selection {
+        case .installed(let module):
+            switch module.category {
+            case .commentary:
+                controller.switchCommentaryToolbarDocument(to: module.name)
+            case .dictionary:
+                handleGenericQuickModuleSwitch(
+                    controller.switchDictionaryToolbarDocument(to: module.name),
+                    module: module,
+                    targetWindowId: targetWindowId,
+                    browser: .dictionaryBrowser
+                )
+            case .generalBook:
+                handleGenericQuickModuleSwitch(
+                    controller.switchGeneralBookToolbarDocument(to: module.name),
+                    module: module,
+                    targetWindowId: targetWindowId,
+                    browser: .generalBookBrowser
+                )
+            default:
+                return
+            }
+        case .epub(
+            let identifier,
+            let generationIdentifier,
+            let initials,
+            _,
+            _
+        ):
+            controller.switchEpubToolbarDocument(
+                identifier: identifier,
+                expectedGenerationIdentifier: generationIdentifier,
+                expectedInitials: initials
             )
-        case .generalBook:
-            handleGenericQuickModuleSwitch(
-                controller.switchGeneralBookDocument(to: module.name),
-                module: module,
-                targetWindowId: targetWindowId,
-                browser: .generalBookBrowser
-            )
-        default:
-            return
+        case .myDocument(let id, let initials, _, _):
+            controller.switchMyDocumentToolbarDocument(expectedID: id, initials: initials)
         }
     }
 
@@ -3845,7 +4136,6 @@ public struct BibleReaderView: View {
         configureSpeakService(with: store)
         syncActiveDisplaySettings()
         installSynchronizedScrollingCallback()
-        presentUITestLaunchSearchIfNeeded()
         evaluateStartupDownloadPromptIfNeeded()
     }
 
@@ -4000,7 +4290,7 @@ public struct BibleReaderView: View {
         startupLockedBibleUnlockRequest = nil
 
         for (_, ctrl) in windowManager.controllers {
-            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            (ctrl as? BibleReaderController)?.reconcileInstalledSources()
         }
 
         let reconciliationManager = focusedController?.swordManager
@@ -4047,7 +4337,7 @@ public struct BibleReaderView: View {
         }
 
         for (_, ctrl) in windowManager.controllers {
-            (ctrl as? BibleReaderController)?.refreshInstalledModules()
+            (ctrl as? BibleReaderController)?.reconcileInstalledSources()
         }
         reevaluateStartupDownloadPromptAfterDownloads()
     }
@@ -4724,7 +5014,8 @@ public struct BibleReaderView: View {
                         colorScheme: colorScheme,
                         surfacePalette: readerThemeSurfacePalette,
                         maximumHeight: placement.maximumHeight,
-                        onSelect: { module in
+                        onSelect: { selection in
+                            guard case .installed(let module) = selection else { return }
                             selectBibleQuickModule(module, targetWindowId: targetWindowId)
                         }
                     )
@@ -4770,8 +5061,11 @@ public struct BibleReaderView: View {
                         maximumHeight: placement.maximumHeight,
                         accessibilityIdentifier: "readerCommentaryQuickSelector",
                         rowAccessibilityIdentifierPrefix: "readerCommentaryQuickSelectorRow",
-                        onSelect: { module in
-                            selectCommentaryQuickModule(module, targetWindowId: targetWindowId)
+                        onSelect: { selection in
+                            selectCommentaryQuickDocument(
+                                selection,
+                                targetWindowId: targetWindowId
+                            )
                         }
                     )
                     .frame(width: width, alignment: .topLeading)
@@ -5763,7 +6057,7 @@ public struct BibleReaderView: View {
         case .none:
             return
         case .switchDirectly(let row):
-            controller.switchBibleDocument(to: row.module.name)
+            controller.switchBibleToolbarDocument(to: row.module.name)
         case .showPopup(let rows):
             presentBibleQuickSelector(controller, rows: rows)
         }
@@ -5790,15 +6084,14 @@ public struct BibleReaderView: View {
     private func performBibleNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .bible {
-            guard let moduleName = suggestedBibleDocumentName(for: controller) else { return }
-            controller.switchBibleDocument(to: moduleName)
+            switchToSuggestedBibleDocument(controller)
             return
         }
         cycleToNextModule(
             modules: controller.readableBibleModules,
             activeName: controller.activeModuleName
         ) { nextName in
-            controller.switchBibleDocument(to: nextName)
+            controller.switchBibleToolbarDocument(to: nextName)
         }
     }
 
@@ -5819,12 +6112,12 @@ public struct BibleReaderView: View {
         includeAuxiliaryDocuments: Bool = true
     ) {
         guard let controller else { return }
-        let modules = commentaryQuickSelectorModules(
+        guard let documents = commentaryQuickSelectorDocuments(
             controller,
             includeAuxiliaryDocuments: includeAuxiliaryDocuments
-        )
+        ) else { return }
         switch BibleReaderQuickModuleSelectorPresentation.action(
-            for: modules,
+            for: documents,
             activeModuleName: currentCommentaryQuickSelectorModuleName(for: controller)
         ) {
         case .none:
@@ -5833,7 +6126,7 @@ public struct BibleReaderView: View {
             let targetWindowId = windowManager.controllers.first { _, registeredController in
                 (registeredController as? BibleReaderController) === controller
             }?.key ?? windowManager.activeWindow?.id
-            selectCommentaryQuickModule(row.module, targetWindowId: targetWindowId)
+            selectCommentaryQuickDocument(row.selection, targetWindowId: targetWindowId)
         case .showPopup(let rows):
             presentCommentaryQuickSelector(controller, rows: rows)
         }
@@ -5856,8 +6149,11 @@ public struct BibleReaderView: View {
     private func performCommentaryNextDocumentAction(_ controller: BibleReaderController?) {
         guard let controller else { return }
         if controller.currentCategory != .commentary {
-            if let moduleName = controller.activeCommentaryModuleName {
-                controller.switchCommentaryDocument(to: moduleName)
+            if let module = controller.preferredInstalledToolbarDocument(
+                for: .commentary,
+                currentName: controller.activeWindow?.pageManager?.commentaryDocument
+            ) {
+                controller.switchCommentaryToolbarDocument(to: module.name)
             } else {
                 performCommentaryChooserAction()
             }
@@ -5867,7 +6163,7 @@ public struct BibleReaderView: View {
             modules: controller.installedCommentaryModules,
             activeName: controller.activeCommentaryModuleName
         ) { nextName in
-            controller.switchCommentaryDocument(to: nextName)
+            controller.switchCommentaryToolbarDocument(to: nextName)
         }
     }
 
@@ -6090,8 +6386,6 @@ public struct BibleReaderView: View {
         searchIsStrongsFindAll = isStrongsFindAll
         if let initialQuery {
             searchInitialQuery = initialQuery
-        } else if let uiTestQuery = UITestSearchQuerySeed.consume() {
-            searchInitialQuery = uiTestQuery
         } else {
             searchInitialQuery = ""
         }
@@ -6099,18 +6393,6 @@ public struct BibleReaderView: View {
             await Task.yield()
             activeReaderDestination = .search
         }
-    }
-
-    /// Auto-presents Search once on launch when UI tests seed a query through app launch metadata.
-    @MainActor
-    private func presentUITestLaunchSearchIfNeeded() {
-        guard !didPresentUITestLaunchSearch,
-              let launchQuery = UITestSearchQuerySeed.consume() else {
-            return
-        }
-
-        didPresentUITestLaunchSearch = true
-        presentSearch(from: windowManager.activeWindow?.id, initialQuery: launchQuery)
     }
 
     #if os(iOS)
@@ -6287,12 +6569,15 @@ private struct ReaderPanePreparationView: View {
 
 /// Applies the compact reader state to early reader chrome only for UI automation.
 private struct ReaderRenderedContentStateAccessibilityModifier: ViewModifier {
-    let value: String
+    let valueProvider: () -> String
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            content.accessibilityValue(value)
+        if let diagnosticValue = BibleReaderDiagnosticProvider.value(
+            enabled: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+            provider: valueProvider
+        ) {
+            content.accessibilityValue(diagnosticValue)
         } else {
             content
         }
@@ -6300,8 +6585,10 @@ private struct ReaderRenderedContentStateAccessibilityModifier: ViewModifier {
 }
 
 private extension View {
-    func readerRenderedContentStateAccessibilityValue(_ value: String) -> some View {
-        modifier(ReaderRenderedContentStateAccessibilityModifier(value: value))
+    func readerRenderedContentStateAccessibilityValue(
+        _ value: @autoclosure @escaping () -> String
+    ) -> some View {
+        modifier(ReaderRenderedContentStateAccessibilityModifier(valueProvider: value))
     }
 }
 

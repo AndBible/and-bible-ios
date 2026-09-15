@@ -28,12 +28,12 @@ final class BookmarkListProjectionTests: XCTestCase {
      - the native BookmarkList sort menu can drift from Android's bookmark ordering contract even
        though the app route still opens.
      */
-    func testBookmarkListProjectionSortsCreatedDateAndBibleOrderLikeAndroid() {
-        let exodus = bibleItem(
+    func testBookmarkListProjectionSortsCreatedDateAndBibleOrderLikeAndroid() throws {
+        let exodus = try bibleItem(
             reference: "Exodus 2:1",
             createdAt: Date(timeIntervalSince1970: 100)
         )
-        let matthew = bibleItem(
+        let matthew = try bibleItem(
             reference: "Matthew 3:1",
             createdAt: Date(timeIntervalSince1970: 200)
         )
@@ -74,9 +74,9 @@ final class BookmarkListProjectionTests: XCTestCase {
      - the list may regress to platform search chrome or fail to restore rows when the visible query
        is cleared.
      */
-    func testBookmarkListProjectionSearchNarrowsAndClearsRows() {
-        let exodus = bibleItem(reference: "Exodus 2:1", note: "Wilderness history")
-        let matthew = bibleItem(reference: "Matthew 3:1", note: "Gospel result")
+    func testBookmarkListProjectionSearchNarrowsAndClearsRows() throws {
+        let exodus = try bibleItem(reference: "Exodus 2:1", note: "Wilderness history")
+        let matthew = try bibleItem(reference: "Matthew 3:1", note: "Gospel result")
 
         let filtered = BookmarkListProjection.filteredItems(
             [exodus, matthew],
@@ -122,14 +122,14 @@ final class BookmarkListProjectionTests: XCTestCase {
      Failure meaning:
      - the BookmarkList could expose a StudyPad handoff or filtered row set for the wrong label.
      */
-    func testBookmarkListProjectionLabelFilterNarrowsAndClearsRows() {
-        let seedLabel = Label(name: "UI Test Seed")
-        let genesis = bibleItem(
+    func testBookmarkListProjectionLabelFilterNarrowsAndClearsRows() throws {
+        let seedLabel = BookmarkListLabel(name: "UI Test Seed")
+        let genesis = try bibleItem(
             reference: "Genesis 1:1",
             labels: [seedLabel],
             note: "Selected label note"
         )
-        let exodus = bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
+        let exodus = try bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
 
         let filtered = BookmarkListProjection.filteredItems(
             [genesis, exodus],
@@ -176,14 +176,14 @@ final class BookmarkListProjectionTests: XCTestCase {
      - BookmarkList reset behavior can regress while route-level UI smokes keep passing, or search
        can incorrectly bypass the selected-label filter.
      */
-    func testBookmarkListProjectionComposesLabelFilterAndSearchThenResets() {
-        let seedLabel = Label(name: "UI Test Seed")
-        let genesis = bibleItem(
+    func testBookmarkListProjectionComposesLabelFilterAndSearchThenResets() throws {
+        let seedLabel = BookmarkListLabel(name: "UI Test Seed")
+        let genesis = try bibleItem(
             reference: "Genesis 1:1",
             labels: [seedLabel],
             note: "Selected label note"
         )
-        let exodus = bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
+        let exodus = try bibleItem(reference: "Exodus 2:1", note: "Conflicting note")
         let items = [genesis, exodus]
 
         let labelFiltered = BookmarkListProjection.filteredItems(
@@ -249,10 +249,10 @@ final class BookmarkListProjectionTests: XCTestCase {
      - generic bookmarks can disappear from Android-compatible filtered bookmark lists, or the
        visible workflow can keep passing while package-level list projection has drifted.
      */
-    func testBookmarkListProjectionFiltersGenericBookmarksByAssignedLabel() {
-        let seedLabel = Label(name: "UI Test Seed")
-        let assigned = genericItem(module: "UITESTDICT", key: "Entry 1", labels: [seedLabel])
-        let unassigned = genericItem(module: "UITESTDICT", key: "Entry 2")
+    func testBookmarkListProjectionFiltersGenericBookmarksByAssignedLabel() throws {
+        let seedLabel = BookmarkListLabel(name: "UI Test Seed")
+        let assigned = try genericItem(module: "UITESTDICT", key: "Entry 1", labels: [seedLabel])
+        let unassigned = try genericItem(module: "UITESTDICT", key: "Entry 2")
 
         let filtered = BookmarkListProjection.filteredItems(
             [assigned, unassigned],
@@ -374,12 +374,15 @@ final class BookmarkListProjectionTests: XCTestCase {
         let kjvaPsalm10Verse1 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 10, verse: 1)
         )
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let bookmark = BibleBookmark(
             kjvOrdinalStart: kjvaPsalm10Verse1,
             kjvOrdinalEnd: kjvaPsalm10Verse1,
             ordinalStart: kjvaPsalm10Verse1,
             ordinalEnd: kjvaPsalm10Verse1
         )
+        context.insert(bookmark)
 
         // Active module is Vulgate: KJVA Psalm 10:1 maps back to Psalm 9:22.
         let activeResolver: (Int) -> (bookName: String, reference: BookmarkListVerseReference)? = { ordinal in
@@ -396,6 +399,103 @@ final class BookmarkListProjectionTests: XCTestCase {
         let kjvaItem = BookmarkListItem(bibleBookmark: bookmark)
         XCTAssertEqual(kjvaItem.reference, "Psalms 10:1")
         XCTAssertEqual(kjvaItem.navigationTarget?.chapter, 10)
+        withExtendedLifetime(container) {}
+    }
+
+    /** Metadata projection copies a complete worker request without reading source content. */
+    func testBookmarkListMetadataProjectionDefersSourceContentUntilRowIsVisible() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
+        let bookmark = GenericBookmark(
+            id: UUID(uuidString: "20000000-0000-0000-0000-000000000021")!,
+            key: "Entry 1",
+            bookInitials: "UITESTDICT",
+            createdAt: Date(timeIntervalSince1970: 10),
+            ordinalStart: 3,
+            ordinalEnd: 4,
+            lastUpdatedOn: Date(timeIntervalSince1970: 11)
+        )
+        bookmark.startOffset = 2
+        bookmark.endOffset = 8
+        context.insert(bookmark)
+
+        let item = BookmarkListItem(genericBookmark: bookmark)
+
+        XCTAssertEqual(item.reference, "UITESTDICT: Entry 1")
+        XCTAssertEqual(item.textProjection, BookmarkListTextProjection.empty)
+        guard case .generic(let request) = item.rowProjectionRequest else {
+            return XCTFail("Generic list metadata must produce a generic copied request.")
+        }
+        XCTAssertEqual(request.id, bookmark.id)
+        XCTAssertEqual(request.sourceBookInitials, "UITESTDICT")
+        XCTAssertEqual(request.key, "Entry 1")
+        XCTAssertEqual(request.ordinalStart, 3)
+        XCTAssertEqual(request.ordinalEnd, 4)
+        XCTAssertEqual(request.startOffset, 2)
+        XCTAssertEqual(request.endOffset, 8)
+        withExtendedLifetime(container) {}
+    }
+
+    /** A delayed visible-row result cannot publish after the persisted owner identity changes. */
+    func testBookmarkListRowPublicationRejectsDelayedStaleOwnerResult() throws {
+        let id = UUID(uuidString: "20000000-0000-0000-0000-000000000022")!
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
+        let bookmark = GenericBookmark(
+            id: id,
+            key: "Before",
+            bookInitials: "UITESTDICT",
+            createdAt: Date(timeIntervalSince1970: 10),
+            lastUpdatedOn: Date(timeIntervalSince1970: 10)
+        )
+        context.insert(bookmark)
+        let originalRequest = BookmarkListItem(genericBookmark: bookmark).rowProjectionRequest
+        bookmark.key = "After"
+        let changedRequest = BookmarkListItem(genericBookmark: bookmark).rowProjectionRequest
+        let delayed = BookmarkListResolvedRowProjection(
+            request: originalRequest,
+            reference: "UITESTDICT: Before",
+            textProjection: BookmarkListTextProjection(
+                prefix: "",
+                selectedText: "Before content",
+                suffix: "",
+                fullText: "Before content"
+            )
+        )
+
+        XCTAssertEqual(
+            BookmarkListRowProjectionPublication.accepted(delayed, for: originalRequest),
+            delayed
+        )
+        XCTAssertNil(
+            BookmarkListRowProjectionPublication.accepted(delayed, for: changedRequest)
+        )
+        withExtendedLifetime(container) {}
+    }
+
+    /** Cancelling a queued visible row prevents its native/source read after the lease opens. */
+    func testBookmarkListProjectionCancellationReachesQueuedWorkerBeforeSourceRead() async {
+        let enteredQueue = expectation(description: "worker queued behind source lease")
+        let releaseQueue = DispatchSemaphore(value: 0)
+        let sourceReads = LockedCounter()
+        let task = Task<Bool?, Never> {
+            await BookmarkListProjectionWorker.run {
+                () -> Bool? in
+                enteredQueue.fulfill()
+                releaseQueue.wait()
+                guard !Task.isCancelled else { return nil }
+                sourceReads.increment()
+                return true
+            }
+        }
+
+        await fulfillment(of: [enteredQueue], timeout: 1)
+        task.cancel()
+        releaseQueue.signal()
+        let result = await task.value
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sourceReads.value, 0)
     }
 
     /**
@@ -419,9 +519,9 @@ final class BookmarkListProjectionTests: XCTestCase {
     private func bibleItem(
         reference: String,
         createdAt: Date = Date(timeIntervalSince1970: 100),
-        labels: [Label] = [],
+        labels: [BookmarkListLabel] = [],
         note: String? = nil
-    ) -> BookmarkListItem {
+    ) throws -> BookmarkListItem {
         let ordinal = kjvaOrdinal(for: reference)
         let bookmark = BibleBookmark(
             kjvOrdinalStart: ordinal,
@@ -435,21 +535,26 @@ final class BookmarkListProjectionTests: XCTestCase {
             .split(separator: " ")
             .dropLast()
             .joined(separator: " ")
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
+        context.insert(bookmark)
         if let note {
             let notes = BibleBookmarkNotes(bookmarkId: bookmark.id, notes: note)
+            context.insert(notes)
             notes.bookmark = bookmark
-            bookmark.notes = notes
         }
         if !labels.isEmpty {
-            bookmark.bookmarkToLabels = labels.map { label in
+            for label in labels {
+                let attachedLabel = Label(id: label.id, name: label.name, color: label.color)
                 let link = BibleBookmarkToLabel()
+                context.insert(attachedLabel)
+                context.insert(link)
                 link.bookmark = bookmark
-                link.label = label
-                return link
+                link.label = attachedLabel
             }
         }
 
-        return BookmarkListItem(bibleBookmark: bookmark) { _, _ in
+        let item = BookmarkListItem(bibleBookmark: bookmark) { _, _ in
             let chapterVerse = reference
                 .split(separator: " ")
                 .last?
@@ -463,6 +568,8 @@ final class BookmarkListProjectionTests: XCTestCase {
             }
             return BookmarkListVerseReference(chapter: chapter, verse: verse)
         }
+        withExtendedLifetime(container) {}
+        return item
     }
 
     /**
@@ -516,8 +623,8 @@ final class BookmarkListProjectionTests: XCTestCase {
     private func genericItem(
         module: String,
         key: String,
-        labels: [Label] = []
-    ) -> BookmarkListItem {
+        labels: [BookmarkListLabel] = []
+    ) throws -> BookmarkListItem {
         let bookmark = GenericBookmark(
             key: key,
             bookInitials: module,
@@ -526,15 +633,22 @@ final class BookmarkListProjectionTests: XCTestCase {
             ordinalEnd: 1,
             lastUpdatedOn: Date(timeIntervalSince1970: 100)
         )
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
+        context.insert(bookmark)
         if !labels.isEmpty {
-            bookmark.bookmarkToLabels = labels.map { label in
+            for label in labels {
+                let attachedLabel = Label(id: label.id, name: label.name, color: label.color)
                 let link = GenericBookmarkToLabel()
+                context.insert(attachedLabel)
+                context.insert(link)
                 link.bookmark = bookmark
-                link.label = label
-                return link
+                link.label = attachedLabel
             }
         }
-        return BookmarkListItem(genericBookmark: bookmark)
+        let item = BookmarkListItem(genericBookmark: bookmark)
+        withExtendedLifetime(container) {}
+        return item
     }
 
     /**
@@ -561,5 +675,19 @@ final class BookmarkListProjectionTests: XCTestCase {
         )
         bookmark.book = book
         return bookmark
+    }
+}
+
+/** Thread-safe work counter used to prove cancellation suppresses source reads. */
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.withLock { storage }
+    }
+
+    func increment() {
+        lock.withLock { storage += 1 }
     }
 }

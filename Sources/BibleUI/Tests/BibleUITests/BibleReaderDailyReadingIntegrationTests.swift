@@ -35,7 +35,11 @@ final class BibleReaderDailyReadingIntegrationTests: BibleUISwordFixtureTestCase
 
         try await controller.performDailyReadingAction(request)
 
-        let emissions = Array(scripts().dropFirst(baseline))
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: baseline
+        )
         let setup = try XCTUnwrap(
             bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
         )
@@ -128,7 +132,11 @@ final class BibleReaderDailyReadingIntegrationTests: BibleUISwordFixtureTestCase
                     passages: [passage("Gen", chapter: 1, startVerse: 1, endVerse: 2)]
                 )
             )
-            let readEmissions = Array(scripts().dropFirst(readBaseline))
+            let readEmissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "setup_content",
+                after: readBaseline
+            )
             let setup = try XCTUnwrap(
                 bridgeEmissionPayload(from: readEmissions, event: "setup_content") as? [String: Any]
             )

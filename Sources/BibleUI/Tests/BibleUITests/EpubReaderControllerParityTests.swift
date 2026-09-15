@@ -42,12 +42,11 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let document = MyDocument(name: "Colliding local document", initials: reader.initials)
         let page = MyDocumentPage(title: "Local page", pageKey: "1", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Private local collision")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
@@ -85,7 +84,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
      - Side effects: Installs/deletes one temporary EPUB and writes an in-memory SwiftData graph;
        no speech utterance is submitted to the platform.
      */
-    func testGenericSpeechAdmitsEpubBeforeCollidingMyDocument() throws {
+    func testGenericSpeechAdmitsEpubBeforeCollidingMyDocument() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
         let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
@@ -97,18 +96,24 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let document = MyDocument(name: "Shadowed speech document", initials: reader.initials)
         let page = MyDocumentPage(title: "Local page", pageKey: "1", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Private local collision")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
         try context.save()
 
-        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         controller.myDocumentStore = MyDocumentStore(modelContext: context)
         controller.switchEpub(identifier: identifier)
+        let boundary = scripts().count
         controller.loadEpubEntry(key: "1")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
         let service = SpeakService()
         let session = try XCTUnwrap(controller.defaultSpeechSession(service: service))
         let unit = try XCTUnwrap(session.provider.currentUnit(settings: service.settings))
@@ -142,9 +147,16 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.switchEpub(identifier: identifier)
+        let epubBoundary = recordedScripts().count
         controller.loadEpubEntry(key: "1")
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: epubBoundary
+        )
 
         let service = SpeakService(synthesizer: EpubParitySpeechSynthesizer())
         let session = try XCTUnwrap(controller.defaultSpeechSession(service: service))
@@ -163,7 +175,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
             try FileManager.default.removeItem(at: moduleCacheURL)
         }
-        controller.refreshInstalledModules()
+        controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
         XCTAssertEqual(
             controller.registeredInstalledModuleInfo(named: reader.initials)?.name,
             lateOwnerInitials
@@ -208,8 +220,10 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     /**
      Preserves deferred EPUB speech navigation while the captured generation remains globally owned.
 
-     - Setup: Starts a two-page EPUB speech session, switches the pane to KJV, then advances speech
-       without adding any competing installed or local registration.
+     - Setup: Positions a two-page EPUB speech session at the first page's final addressable ordinal,
+       switches the pane to KJV, then advances speech once without adding any competing installed or
+       local registration. Android's `ONE_VERSE` transport advances one BVA ordinal, so the fixture
+       starts at the page boundary to exercise deferred cross-page synchronization with one action.
      - Expected result: Fresh authorization admits one downstream content read and the real callback
        reactivates the same EPUB generation at its second numeric key.
      - Failure meaning: The stale-owner guard suppresses valid Android EPUB speech synchronization.
@@ -225,15 +239,35 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.switchEpub(identifier: identifier)
+        let initialBoundary = recordedScripts().count
         controller.loadEpubEntry(key: "1")
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
 
         let service = SpeakService(synthesizer: EpubParitySpeechSynthesizer())
         let session = try XCTUnwrap(controller.defaultSpeechSession(service: service))
+        let firstContent = try XCTUnwrap(reader.content(forKey: "1"))
+        let maximumSetupSteps = firstContent.ordinalRange.count
+        for _ in 0..<maximumSetupSteps
+            where session.provider.currentPosition?.ordinalStart
+                != firstContent.ordinalRange.upperBound {
+            XCTAssertTrue(session.provider.forward(.oneUnit))
+        }
+        XCTAssertEqual(
+            session.provider.currentPosition?.ordinalStart,
+            firstContent.ordinalRange.upperBound
+        )
         XCTAssertTrue(service.start(provider: session.provider, callbacks: session.callbacks).succeeded)
-        await Task.yield()
-        await Task.yield()
+        try await awaitReaderCondition("EPUB speech starts on numeric key 1") {
+            service.currentPosition?.key == "1"
+                && service.currentPosition?.ordinalStart == firstContent.ordinalRange.upperBound
+        }
         XCTAssertEqual(controller.switchBibleDocument(to: "KJV"), .switched)
         let baselineScriptCount = recordedScripts().count
         var authorizedReadCount = 0
@@ -244,11 +278,12 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         })
         XCTAssertEqual(authorizedReadCount, 1)
 
-        for _ in 0..<8 where service.currentPosition?.key != "2" {
-            service.nextUnit()
-            await Task.yield()
-            await Task.yield()
-        }
+        service.nextUnit()
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineScriptCount
+        )
 
         XCTAssertEqual(service.currentPosition?.key, "2")
         XCTAssertEqual(controller.currentCategory, .generalBook)
@@ -273,7 +308,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
      indexed fragment. A failure means cold-start restore can select the wrong section or leak the
      former iOS-only EPUB identity into the reader contract.
      */
-    func testRestoreUsesGeneralBookIdentityAndRendersPersistedNumericKey() throws {
+    func testRestoreUsesGeneralBookIdentityAndRendersPersistedNumericKey() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
         let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
@@ -287,10 +322,17 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
             generalBookDocument: reader.initials,
             generalBookKey: expected.persistedKey
         )
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.restoreSavedPosition()
+        let boundary = recordedScripts().count
         controller.loadCurrentContent()
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
 
         XCTAssertEqual(controller.currentCategory, .generalBook)
         XCTAssertEqual(controller.activeGeneralBookModuleName, reader.initials)
@@ -300,7 +342,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         XCTAssertNil(window.pageManager?.epubHref)
 
         let payload = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(payload["bookInitials"] as? String, reader.initials)
         XCTAssertEqual(payload["bookCategory"] as? String, DocumentCategory.generalBook.rawValue)
@@ -327,16 +369,24 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
      Failure means Rebuild index can jump content, leave resource URLs on a pruned generation, or
      replace the active pane after a stale cross-document callback.
      */
-    func testRebuiltEpubGenerationAdoptionPreservesKeyAndRejectsDifferentDocument() throws {
+    func testRebuiltEpubGenerationAdoptionPreservesKeyAndRejectsDifferentDocument() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
         let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
-        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.switchEpub(identifier: identifier)
+        let boundary = scripts().count
         controller.loadEpubEntry(key: "2")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
         let originalGeneration = try XCTUnwrap(controller.activeEpubReader).generationIdentifier
 
         let rebuiltReader = try EpubReader.rebuildSearchIndex(identifier: identifier)
@@ -368,23 +418,27 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Migrates legacy EPUB fields into Android's durable general-book identity exactly once.
+    Migrates legacy EPUB fields into Android's durable general-book identity and canonical key.
 
-     Setup persists the legacy package identifier and an XHTML href with an anchor. Restore must
-     resolve that href through the indexed manifest/id mapping, write module initials plus numeric
-     key, clear the old fields, and request persistence once. A failure means existing local tabs
-     can reopen at the wrong fragment or remain permanently outside Android's page-state model.
+    Setup persists the legacy package identifier and an XHTML href with an anchor while the reader
+    client is not ready. Restore first persists that unresolved selection without reading the EPUB
+    index on the main actor. The ordinary async content load then resolves and publishes numeric key
+    `2`, persists the canonical key, and leaves the legacy fields cleared. A failure means existing
+    local tabs can lose their delayed-ready destination or keep an href outside Android's durable
+    general-book model.
      */
-    func testRestoreMigratesLegacyEpubHrefIntoGeneralBookState() throws {
+    func testRestoreMigratesLegacyEpubHrefIntoGeneralBookState() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
         let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
         defer { try? EpubReader.delete(identifier: identifier) }
         let reader = try XCTUnwrap(EpubReader(identifier: identifier))
-        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         let window = makeWindow(category: DocumentCategory.epub.pageManagerKey)
         window.pageManager?.epubIdentifier = identifier
         window.pageManager?.epubHref = "OPS/text/second.xhtml#target"
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -393,13 +447,371 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
 
         XCTAssertEqual(controller.currentCategory, .generalBook)
         XCTAssertEqual(controller.activeEpubIdentifier, identifier)
-        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(controller.currentGeneralBookKey, "OPS/text/second.xhtml#target")
         XCTAssertEqual(window.pageManager?.currentCategoryName, DocumentCategory.generalBook.pageManagerKey)
         XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)
-        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "OPS/text/second.xhtml#target")
         XCTAssertNil(window.pageManager?.epubIdentifier)
         XCTAssertNil(window.pageManager?.epubHref)
         XCTAssertEqual(persistCount, 1)
+
+        let boundary = recordedScripts().count
+        controller.loadCurrentContent()
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(payload["bookInitials"] as? String, reader.initials)
+        XCTAssertEqual(payload["key"] as? String, "2")
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(persistCount, 2)
+    }
+
+    /**
+     Preserves a worker-resolved EPUB selection when its first bridge replacement is rejected.
+
+     - Setup: Activates a real EPUB through a bridge with no evaluator, requests its second entry,
+       waits for prepared publication to settle, then attaches the ordinary bridge observer and
+       sends client-ready.
+     - Expected result: The exact canonical key is persisted before the rejected dispatch while
+       committed render state stays empty; client-ready replays the selected entry and only then
+       advances rendered identity.
+     - Failure meaning: EPUB retains a separate post-bridge selection lifecycle and loses Android's
+       selected general-book destination whenever Vue is still bootstrapping.
+     - Side effects: Installs/deletes one temporary EPUB and records only the accepted replay.
+     */
+    func testEpubSelectionSurvivesRejectedReplacementAndReplaysOnClientReady() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let bridge = BibleBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+
+        controller.loadEpubEntry(key: "2")
+        try await awaitReaderCondition("worker-resolved EPUB selection intent") {
+            controller.currentGeneralBookKey == "2"
+                && window.pageManager?.generalBookKey == "2"
+        }
+
+        XCTAssertEqual(controller.currentCategory, .generalBook)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, reader.initials)
+        XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)
+        XCTAssertEqual(controller.committedRenderState, .empty)
+
+        var replayScripts: [String] = []
+        bridge.javaScriptEvaluationObserver = { replayScripts.append($0) }
+        let boundary = replayScripts.count
+        controller.bridgeDidSetClientReady(bridge)
+        let emissions = try await awaitBridgeEmission(
+            from: { replayScripts },
+            event: "add_documents",
+            after: boundary
+        )
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(payload["bookInitials"] as? String, reader.initials)
+        XCTAssertEqual(payload["key"] as? String, "2")
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .generalBook)
+        XCTAssertEqual(controller.committedRenderState.identity?.moduleName, reader.initials)
+        XCTAssertEqual(controller.committedRenderState.identity?.key, "2")
+    }
+
+    /** A cancelled older key cannot retry over a newer key in the same EPUB generation. */
+    func testDelayedEpubKeyASettlementCannotReselectOverNewerKeyB() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let worker = DispatchQueue(label: "org.andbible.tests.epub-key-supersession")
+        worker.suspend()
+        var workerIsSuspended = true
+        defer { if workerIsSuspended { worker.resume() } }
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+
+        controller.loadEpubEntry(key: "1")
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        worker.resume()
+        workerIsSuspended = false
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(document["key"] as? String, "2")
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(controller.activeEpubIdentifier, identifier)
+    }
+
+    /** A cancelled request from EPUB A cannot retry after the pane selects a different EPUB B. */
+    func testDelayedEpubASettlementCannotReselectOverNewerEpubB() async throws {
+        let firstArchiveURL = try makeArchive()
+        let secondArchiveURL = try makeArchive()
+        defer {
+            try? FileManager.default.removeItem(at: firstArchiveURL.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: secondArchiveURL.deletingLastPathComponent())
+        }
+        let firstIdentifier = try installDefaultLibraryEpubFixture(epubURL: firstArchiveURL)
+        let secondIdentifier = try installDefaultLibraryEpubFixture(epubURL: secondArchiveURL)
+        defer {
+            try? EpubReader.delete(identifier: firstIdentifier)
+            try? EpubReader.delete(identifier: secondIdentifier)
+        }
+        let secondReader = try XCTUnwrap(EpubReader(identifier: secondIdentifier))
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let worker = DispatchQueue(label: "org.andbible.tests.epub-document-supersession")
+        worker.suspend()
+        var workerIsSuspended = true
+        defer { if workerIsSuspended { worker.resume() } }
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: firstIdentifier)
+        controller.loadEpubEntry(key: "1")
+
+        controller.switchEpub(identifier: secondIdentifier)
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        worker.resume()
+        workerIsSuspended = false
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(document["bookInitials"] as? String, secondReader.initials)
+        XCTAssertEqual(document["key"] as? String, "2")
+        XCTAssertEqual(controller.activeEpubIdentifier, secondIdentifier)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, secondReader.initials)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookDocument, secondReader.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+    }
+
+    /** A current EPUB request retries once when only its captured source authorization expires. */
+    func testCurrentEpubRequestRefreshesAfterManagerGenerationChanges() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let worker = DispatchQueue(label: "org.andbible.tests.epub-source-authorization")
+        worker.suspend()
+        var workerIsSuspended = true
+        defer { if workerIsSuspended { worker.resume() } }
+        let sourceCaptureCount = EpubParityLockedValue(0)
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, _ in
+                guard phase == .sourceCapture else { return }
+                sourceCaptureCount.withValue { $0 += 1 }
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        manager.refresh()
+        worker.resume()
+        workerIsSuspended = false
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertEqual(sourceCaptureCount.value, 2)
+        XCTAssertEqual(document["bookInitials"] as? String, reader.initials)
+        XCTAssertEqual(document["key"] as? String, "2")
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(controller.committedRenderState.identity?.key, "2")
+    }
+
+    /** Cancelling a current EPUB preparation settles without publishing an error or selection. */
+    func testCurrentEpubCancellationHasNoPublicationEffects() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let worker = DispatchQueue(label: "org.andbible.tests.epub-current-cancellation")
+        worker.suspend()
+        var workerIsSuspended = true
+        defer { if workerIsSuspended { worker.resume() } }
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        coordinator.cancelAll()
+        worker.resume()
+        workerIsSuspended = false
+        let drained = expectation(description: "cancelled EPUB worker drained")
+        worker.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 2)
+
+        XCTAssertEqual(scripts().count, boundary)
+        XCTAssertEqual(controller.activeEpubIdentifier, identifier)
+        XCTAssertEqual(controller.activeGeneralBookModuleName, reader.initials)
+        XCTAssertNil(controller.currentGeneralBookKey)
+        XCTAssertNil(window.pageManager?.generalBookKey)
+        XCTAssertEqual(controller.committedRenderState, .empty)
+    }
+
+    /** Reentrant persistence navigation cannot let the older EPUB selection dispatch afterward. */
+    func testEpubPersistenceCallbackNavigationSupersedesOlderDispatch() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+        var didNavigateFromPersistence = false
+        controller.onPersistState = {
+            guard !didNavigateFromPersistence else { return }
+            didNavigateFromPersistence = true
+            controller.loadEpubEntry(key: "2")
+        }
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "1")
+        try await awaitReaderCondition("reentrant EPUB selection accepted") {
+            controller.currentGeneralBookKey == "2"
+                && controller.committedRenderState.identity?.key == "2"
+        }
+        let emittedScripts = Array(scripts().dropFirst(boundary))
+        let documentEmissions = emittedScripts.filter { $0.contains("add_documents") }
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: documentEmissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertTrue(didNavigateFromPersistence)
+        XCTAssertEqual(documentEmissions.count, 1)
+        XCTAssertEqual(document["bookInitials"] as? String, reader.initials)
+        XCTAssertEqual(document["key"] as? String, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+    }
+
+    /** Source invalidation from persistence retries the still-current EPUB exactly once. */
+    func testEpubPersistenceCallbackSourceInvalidationRevalidatesBeforeDispatch() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
+        let captures = EpubParityLockedValue(0)
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: DispatchQueue(label: "org.andbible.tests.epub-persist-source"),
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture, key.family.rawValue == "epub" else { return }
+                captures.withValue { $0 += 1 }
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        controller.activeWindow = window
+        controller.switchEpub(identifier: identifier)
+        var invalidatedSource = false
+        controller.onPersistState = {
+            guard !invalidatedSource else { return }
+            invalidatedSource = true
+            manager.refresh()
+        }
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+
+        XCTAssertTrue(invalidatedSource)
+        XCTAssertEqual(captures.value, 2)
+        XCTAssertEqual(
+            emissions.filter { $0.contains("emit('add_documents'") }.count,
+            1
+        )
+        XCTAssertEqual(document["bookInitials"] as? String, reader.initials)
+        XCTAssertEqual(document["key"] as? String, "2")
+        XCTAssertEqual(controller.committedRenderState.identity?.key, "2")
     }
 
     /**
@@ -411,7 +823,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
      preserve its `target` jump id. A failure means overlapping hrefs from distinct EPUB identities
      can cross-navigate or internal anchors can lose their exact destination at the bridge boundary.
      */
-    func testInternalLinkRequiresMatchingInitialsAndNavigatesToIndexedAnchor() throws {
+    func testInternalLinkRequiresMatchingInitialsAndNavigatesToIndexedAnchor() async throws {
         let archiveURL = try makeArchive()
         defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
         let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
@@ -424,30 +836,39 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
             generalBookDocument: reader.initials,
             generalBookKey: "1"
         )
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
 
+        let foreignBoundary = recordedScripts().count
         controller.bridge(bridge, openEpubLink: "Epub-Foreign", toKey: "second", toId: "target")
         XCTAssertEqual(controller.currentGeneralBookKey, "1")
-        XCTAssertTrue(recordedScripts().isEmpty)
+        XCTAssertEqual(recordedScripts().count, foreignBoundary)
 
         let caseOnlyImpostor = reader.initials.uppercased()
         XCTAssertNotEqual(caseOnlyImpostor, reader.initials)
+        let impostorBoundary = recordedScripts().count
         controller.bridge(bridge, openEpubLink: caseOnlyImpostor, toKey: "second", toId: "target")
         XCTAssertEqual(controller.currentGeneralBookKey, "1")
-        XCTAssertTrue(recordedScripts().isEmpty)
+        XCTAssertEqual(recordedScripts().count, impostorBoundary)
 
+        let navigationBoundary = recordedScripts().count
         controller.bridge(bridge, openEpubLink: reader.initials, toKey: "second", toId: "target")
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: navigationBoundary
+        )
 
         XCTAssertEqual(controller.currentGeneralBookKey, "2")
         XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)
         XCTAssertEqual(window.pageManager?.generalBookKey, "2")
         let document = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(document["key"] as? String, "2")
         let setup = try XCTUnwrap(
-            bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
         )
         XCTAssertEqual(setup["jumpToId"] as? String, "target")
     }
@@ -479,6 +900,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
             generalBookDocument: reader.initials,
             generalBookKey: "1"
         )
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.restoreSavedPosition()
         XCTAssertEqual(controller.activeEpubIdentifier, identifier)
@@ -493,7 +915,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
             try FileManager.default.removeItem(at: moduleCacheURL)
         }
-        controller.refreshInstalledModules()
+        controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
         XCTAssertEqual(
             controller.registeredInstalledModuleInfo(named: reader.initials)?.name,
             "LateEpubLinkOwner"
@@ -538,6 +960,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         defer { try? EpubReader.delete(identifier: identifier) }
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.switchEpub(identifier: identifier)
@@ -584,6 +1007,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
         let inventory = try controller.bookmarkNavigationInventory(for: target)
@@ -632,8 +1056,8 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
        - category: Persisted Android page-manager category key.
        - generalBookDocument: Optional general-book module initials.
        - generalBookKey: Optional durable numeric/general-book key.
-     - Returns: Detached window whose page manager is ready for controller restore.
-     - Side effects: Allocates in-memory SwiftData model objects without inserting a context.
+     - Returns: Context-owned window whose page manager is ready for controller restore.
+     - Side effects: Inserts both nodes before wiring their relationship for iOS 17 SwiftData.
      - Failure modes: None.
      */
     private func makeWindow(
@@ -645,7 +1069,7 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let pageManager = PageManager(id: window.id, currentCategoryName: category)
         pageManager.generalBookDocument = generalBookDocument
         pageManager.generalBookKey = generalBookKey
-        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window, attaching: pageManager)
         return window
     }
 
@@ -710,6 +1134,28 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         })
         try archive.write(to: archiveURL, options: .atomic)
         return archiveURL
+    }
+}
+
+/** Minimal thread-safe value used by EPUB worker-phase assertions. */
+private final class EpubParityLockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: Value
+
+    init(_ value: Value) {
+        storage = value
+    }
+
+    var value: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func withValue(_ operation: (inout Value) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        operation(&storage)
     }
 }
 

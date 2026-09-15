@@ -195,6 +195,39 @@ struct ReaderSetupContentPayload: Encodable {
 }
 
 /**
+ Wire payload for navigating within chapters retained by the current Vue document generation.
+
+ This mirrors the object consumed by the shared reader's `scroll_to_verse` handler. Explicit verse
+ navigation carries its ordinal range so Vue can preserve the same temporary highlight semantics as
+ a replacement-time `setup_content` jump.
+ */
+struct ReaderScrollToVersePayload: Encodable {
+    /// Module-local ordinal whose element should become visible for an explicit verse target.
+    let ordinal: Int?
+
+    /// Exact Vue element id for chapter-top navigation within an appended document.
+    let targetId: String?
+
+    /// Whether Vue should bypass animated scrolling.
+    let now: Bool
+
+    /// Whether Vue should paint the supplied ordinal range.
+    let highlight: Bool
+
+    /// First ordinal in the temporary highlight range.
+    let ordinalStart: Int?
+
+    /// Last ordinal in the temporary highlight range.
+    let ordinalEnd: Int?
+
+    /// Source module initials used to scope the temporary highlight.
+    let bookInitials: String?
+
+    /// Source OSIS chapter key used to scope the temporary highlight.
+    let osisRef: String?
+}
+
+/**
  Android commentary block metadata attached to one rendered OSIS document.
 
  The range identifies the complete linked commentary block even when the selected verse is inside

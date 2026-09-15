@@ -40,6 +40,14 @@ describe("scroll composable", () => {
         });
     });
 
+    it("targets the requested loaded chapter heading for chapter-top navigation", () => {
+        expect(resolveScrollToVerseRequest({
+            ordinal: 32,
+            targetId: "doc-KJV.Gen.2",
+            now: true,
+        }).targetId).toBe("doc-KJV.Gen.2");
+    });
+
     /**
      * Protects Android setup-content parity for anchored selection restoration.
      *
@@ -47,7 +55,8 @@ describe("scroll composable", () => {
      * The source module and OSIS reference must reach the highlighter so mixed-module documents do
      * not infer identity from whichever pane happens to be active.
      */
-    it("highlights the complete setup anchor range before restoring scroll", async () => {
+    it.each(["setup_content", "scroll_to_verse"])(
+        "%s highlights the complete source-qualified range before scrolling", async event => {
         const target = document.createElement("span");
         target.id = "o-77";
         Object.defineProperty(target, "innerText", {value: "John 3:16"});
@@ -77,7 +86,10 @@ describe("scroll composable", () => {
             template: "<div />",
         }));
 
-        eventBus.emit("setup_content", [{
+        eventBus.emit(event, [{
+            ordinal: 77,
+            now: true,
+            force: true,
             jumpToOrdinal: null,
             jumpToAnchor: 77,
             jumpToId: null,

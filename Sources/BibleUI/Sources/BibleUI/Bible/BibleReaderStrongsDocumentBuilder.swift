@@ -45,6 +45,21 @@ func bibleReaderAndroidDocumentLocalizedString(
    encoding/read failures; only automatic true-absence paths synthesize localized download content.
  */
 struct BibleReaderStrongsDocumentBuilder {
+    /** One preference update that becomes durable only after its document is accepted. */
+    struct PreferredFamilyUpdate: Hashable, Sendable {
+        let moduleInitials: String
+        let family: AndroidStrongsKeyFamily
+    }
+
+    /** Copied Strong's/morphology fragments before pure bridge serialization. */
+    struct Capture: Sendable {
+        let fragments: [OsisFragment]
+        let contentType: String?
+        let stateJSON: String?
+        let preferredFamilyUpdates: [PreferredFamilyUpdate]
+        let requiresRenderOptionAuthorization: Bool
+    }
+
     /// Reads a persisted string-set preference such as selected Strong's dictionary modules.
     typealias SelectedPreferenceValues = (AppPreferenceKey) -> [String]
 
@@ -246,10 +261,44 @@ struct BibleReaderStrongsDocumentBuilder {
         stateJSON: String? = nil,
         emitsEmptyMultiOnMiss: Bool = false
     ) -> String? {
+        guard let capture = captureStrongsMultiDocument(
+            items: items,
+            stateJSON: stateJSON,
+            emitsEmptyMultiOnMiss: emitsEmptyMultiOnMiss
+        ) else { return nil }
+        capture.preferredFamilyUpdates.forEach {
+            strongsLookupKeyPreferenceCache.record(
+                $0.family,
+                moduleInitials: $0.moduleInitials
+            )
+        }
+        return BibleReaderMultiFragmentDocumentBuilder.buildJSON(
+            fragments: capture.fragments,
+            compare: false,
+            contentType: capture.contentType,
+            stateJSON: capture.stateJSON,
+            id: "strongs-multi-\(UUID().uuidString)"
+        )
+    }
+
+    /**
+     Captures Strong's and morphology source fragments without committing preference history.
+
+     The controller uses this boundary inside its serialized source lease and applies returned
+     preference updates only after the destination bridge accepts the complete document. Direct
+     builder callers retain their historical behavior through `buildStrongsMultiDocumentJSON`.
+     */
+    func captureStrongsMultiDocument(
+        items: [BibleReaderDefinitionItem],
+        stateJSON: String? = nil,
+        emitsEmptyMultiOnMiss: Bool = false
+    ) -> Capture? {
         strongsDocumentBuilderLogger.info(
             "buildStrongsMultiDocumentJSON: items=\(String(describing: items)), swordManager=\(self.swordManager == nil ? "nil" : "alive")"
         )
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
+        var preferredFamilyUpdates: [PreferredFamilyUpdate] = []
+        var requiresRenderOptionAuthorization = false
         var containsStrongsOrMorphologyContent = false
         let containsRobinsonRequest = items.contains { item in
             if case .robinson = item {
@@ -276,7 +325,11 @@ struct BibleReaderStrongsDocumentBuilder {
                     "buildStrongsMultiDocumentJSON: keyOptions=\(keyCandidates.map(\.value))"
                 )
                 for mod in lexModules {
-                    if let lookup = lookupStrongs(in: mod, candidates: keyCandidates) {
+                    if let resolved = lookupStrongs(in: mod, candidates: keyCandidates) {
+                        let lookup = resolved.lookup
+                        preferredFamilyUpdates.append(resolved.update)
+                        requiresRenderOptionAuthorization = requiresRenderOptionAuthorization
+                            || lookup.requiresRenderOptionAuthorization
                         let isHebrew = Self.isHebrewStrongsNumber(num)
                         let keyName = lookup.actualKey
                         let strongsLinkPrefix = isHebrew ? "H" : "G"
@@ -326,6 +379,8 @@ struct BibleReaderStrongsDocumentBuilder {
                 }
                 for mod in morphModules {
                     if let lookup = mod.lookup([code]) {
+                        requiresRenderOptionAuthorization = requiresRenderOptionAuthorization
+                            || lookup.requiresRenderOptionAuthorization
                         let keyName = lookup.actualKey
                         let xml = dictionaryEntryXML(
                             for: lookup,
@@ -368,10 +423,12 @@ struct BibleReaderStrongsDocumentBuilder {
             guard containsRobinsonRequest || emitsEmptyMultiOnMiss else { return nil }
         }
 
-        return BibleReaderMultiFragmentDocumentBuilder.buildJSON(
-            fragments: fragments,
+        return Capture(
+            fragments: fragments.map(Self.osisFragment),
             contentType: containsStrongsOrMorphologyContent ? "strongs" : nil,
-            stateJSON: stateJSON
+            stateJSON: stateJSON,
+            preferredFamilyUpdates: preferredFamilyUpdates,
+            requiresRenderOptionAuthorization: requiresRenderOptionAuthorization
         )
     }
 
@@ -490,20 +547,45 @@ struct BibleReaderStrongsDocumentBuilder {
     private func lookupStrongs(
         in module: LexiconModule,
         candidates: [AndroidStrongsKeyCandidate]
-    ) -> DictionaryLookupResult? {
+    ) -> (lookup: DictionaryLookupResult, update: PreferredFamilyUpdate)? {
         let orderedCandidates = strongsLookupKeyPreferenceCache.orderedCandidates(
             candidates,
             moduleInitials: module.name
         )
         for candidate in orderedCandidates {
             guard let result = module.lookup([candidate.value]) else { continue }
-            strongsLookupKeyPreferenceCache.record(
-                candidate.family,
-                moduleInitials: module.name
+            return (
+                result,
+                PreferredFamilyUpdate(
+                    moduleInitials: module.name,
+                    family: candidate.family
+                )
             )
-            return result
         }
         return nil
+    }
+
+    /** Copies one tuple fragment into the Sendable BibleView value used by async preparation. */
+    static func osisFragment(
+        _ fragment: BibleReaderMultiFragmentDocumentBuilder.Fragment
+    ) -> OsisFragment {
+        OsisFragment(
+            xml: fragment.xml.replacingOccurrences(of: "\r", with: ""),
+            key: fragment.key,
+            keyName: fragment.keyName,
+            v11n: fragment.v11n,
+            bookCategory: fragment.bookCategory,
+            bookInitials: fragment.bookInitials,
+            bookAbbreviation: fragment.bookAbbreviation,
+            osisRef: fragment.osisRef,
+            isNewTestament: false,
+            features: fragment.features,
+            hasStrongs: fragment.hasStrongs,
+            ordinalRange: nil,
+            language: fragment.language,
+            direction: fragment.direction,
+            isNativeHtml: fragment.isNativeHtml
+        )
     }
 
     /**
@@ -671,6 +753,9 @@ struct BibleReaderStrongsDocumentBuilder {
         /// Typed post-resolution error rendered as an Android `OsisError` fragment.
         let payloadFailure: PayloadFailure?
 
+        /// Whether this entry came from the legacy rendered-text compatibility path.
+        let requiresRenderOptionAuthorization: Bool
+
         /**
          Creates a dictionary lookup result with explicit renderer expectations.
 
@@ -696,7 +781,8 @@ struct BibleReaderStrongsDocumentBuilder {
             renderedText: String,
             isNativeHtml: Bool = false,
             payloadReadyXML: String? = nil,
-            payloadFailure: PayloadFailure? = nil
+            payloadFailure: PayloadFailure? = nil,
+            requiresRenderOptionAuthorization: Bool = false
         ) {
             self.actualKey = actualKey
             self.osisID = osisID ?? actualKey
@@ -706,6 +792,7 @@ struct BibleReaderStrongsDocumentBuilder {
             self.isNativeHtml = isNativeHtml
             self.payloadReadyXML = payloadReadyXML
             self.payloadFailure = payloadFailure
+            self.requiresRenderOptionAuthorization = requiresRenderOptionAuthorization
         }
     }
 

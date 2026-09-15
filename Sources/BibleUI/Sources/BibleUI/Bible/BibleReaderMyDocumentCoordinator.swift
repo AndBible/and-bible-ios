@@ -34,6 +34,9 @@ struct BibleReaderMyDocumentCoordinator {
     /// Active local My Documents document initials currently rendered in the pane.
     private var activeBookInitials: String?
 
+    /// Exact persisted My Documents owner selected for this pane.
+    private var activeDocumentID: UUID?
+
     /// Active local My Documents page key currently rendered in the pane.
     private var activePageKey: String?
 
@@ -41,14 +44,31 @@ struct BibleReaderMyDocumentCoordinator {
      Records the My Documents page currently visible in the reader.
 
      - Parameters:
+       - documentID: Exact persisted owner UUID authorized for this selection.
        - bookInitials: Android-compatible generated general-book initials for the document.
        - pageKey: Page key scoped to `bookInitials`.
      - Side effects: Replaces the active document/page identity for this coordinator.
      - Failure modes: None; callers are responsible for resolving the page before recording it.
      */
-    mutating func setActivePage(bookInitials: String, pageKey: String) {
+    mutating func setActivePage(documentID: UUID, bookInitials: String, pageKey: String) {
+        activeDocumentID = documentID
         activeBookInitials = bookInitials
         activePageKey = pageKey
+    }
+
+    /**
+     Records an exact page-less My Documents owner without manufacturing a page key.
+
+     - Parameters:
+       - documentID: Exact persisted owner UUID authorized for this selection.
+       - bookInitials: Java-exact generated-book initials for the owner.
+     - Side effects: Replaces the active owner and clears any active page key.
+     - Failure modes: None; callers authorize the owner before recording it.
+     */
+    mutating func setActiveEmptyDocument(documentID: UUID, bookInitials: String) {
+        activeDocumentID = documentID
+        activeBookInitials = bookInitials
+        activePageKey = nil
     }
 
     /**
@@ -58,6 +78,7 @@ struct BibleReaderMyDocumentCoordinator {
      - Failure modes: None.
      */
     mutating func clearActivePage() {
+        activeDocumentID = nil
         activeBookInitials = nil
         activePageKey = nil
     }
@@ -91,6 +112,20 @@ struct BibleReaderMyDocumentCoordinator {
      */
     func activePageKey(for bookInitials: String) -> String? {
         Self.javaExactMatch(activeBookInitials, bookInitials) ? activePageKey : nil
+    }
+
+    /**
+     Returns the exact selected page-less owner only for the same Java-exact initials.
+
+     - Parameter bookInitials: Generated-book initials to compare using Java UTF-16 equality.
+     - Returns: Persisted owner UUID only when the selected owner has no page key.
+     - Side effects: None.
+     - Failure modes: A page-backed or differently named owner returns nil.
+     */
+    func activeEmptyDocumentID(for bookInitials: String) -> UUID? {
+        guard activePageKey == nil,
+              Self.javaExactMatch(activeBookInitials, bookInitials) else { return nil }
+        return activeDocumentID
     }
 
     /**

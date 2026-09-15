@@ -93,4 +93,31 @@ final class BibleUIBridgeTestSupportTests: XCTestCase {
         let payload = try setConfigPayload(from: scripts)
         XCTAssertEqual(payload["message"] as? String, wrapperLikeText)
     }
+
+    /**
+     Verifies configuration assertions select the final emission inside one explicit action boundary.
+
+     Setup records an earlier unrelated config, captures the action boundary, and then emits two
+     causal configuration states. The shared config helper must return the final causal state while
+     the general event helper retains its documented first-emission behavior. A failure means tests
+     can either assert stale setup state or silently reinterpret every multi-emission event as latest.
+     */
+    func testSetConfigPayloadUsesLatestEmissionInsideCallerActionBoundary() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        bridge.emitEncoded(event: "set_config", data: ["phase": "setup"])
+        let actionBoundary = recordedScripts().count
+
+        bridge.emitEncoded(event: "set_config", data: ["phase": "intermediate"])
+        bridge.emitEncoded(event: "set_config", data: ["phase": "committed"])
+
+        let actionScripts = Array(recordedScripts().dropFirst(actionBoundary))
+        let firstPayload = try XCTUnwrap(
+            try bridgeEmissionPayload(from: actionScripts, event: "set_config") as? [String: String]
+        )
+        let finalPayload = try setConfigPayload(from: actionScripts)
+
+        XCTAssertEqual(firstPayload, ["phase": "intermediate"])
+        XCTAssertEqual(finalPayload["phase"] as? String, "committed")
+        XCTAssertNotEqual(finalPayload["phase"] as? String, "setup")
+    }
 }

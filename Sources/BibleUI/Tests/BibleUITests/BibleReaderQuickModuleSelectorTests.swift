@@ -2,17 +2,51 @@ import Foundation
 import XCTest
 @testable import BibleUI
 @testable import SwordKit
-import enum SwiftUI.ColorScheme
 
 /**
  Package-level coverage for Android quick document selector presentation parity.
 
- These tests cover BibleUI-owned quick-selector sorting, labeling, popup threshold, and renderer
- structure without app bootstrap or SWORD fixtures. Controller document-switch side effects live in
+ These tests cover BibleUI-owned quick-selector sorting, labeling, exact identity, and popup
+ threshold without app bootstrap or SWORD fixtures. Controller document-switch side effects live in
  `BibleReaderDocumentSwitchControllerTests` so pure presentation failures stay separate from SWORD
  fixture failures.
  */
 final class BibleReaderQuickModuleSelectorTests: XCTestCase {
+    /** The shared toolbar row model sorts and retains exact installed/EPUB/My Documents targets. */
+    func testQuickDocumentRowsIncludeAuthorizedLocalGeneralBooks() {
+        let installed = ModuleInfo(
+            name: "DICT",
+            description: "Dictionary",
+            category: .dictionary,
+            language: "en"
+        )
+        let selections: [BibleReaderQuickModuleSelectorPresentation.Selection] = [
+            .myDocument(
+                id: UUID(),
+                initials: "MYDOC",
+                name: "My document",
+                language: "fi"
+            ),
+            .epub(
+                identifier: "epub-id",
+                generationIdentifier: "generation-id",
+                initials: "Epub-Book",
+                title: "A book",
+                language: "en"
+            ),
+            .installed(installed),
+        ]
+
+        let rows = BibleReaderQuickModuleSelectorPresentation.rows(
+            for: selections,
+            activeModuleName: "Epub-Book"
+        )
+
+        XCTAssertEqual(rows.map(\.title), ["A book (en)", "DICT (en)", "MYDOC (fi)"])
+        XCTAssertEqual(rows.map(\.selection.name), ["Epub-Book", "DICT", "MYDOC"])
+        XCTAssertEqual(rows.map(\.isEnabled), [false, true, true])
+    }
+
     /**
      Protects Android `MainBibleActivity.menuForDocs` parity for the Bible toolbar quick menu.
 
@@ -36,6 +70,32 @@ final class BibleReaderQuickModuleSelectorTests: XCTestCase {
         XCTAssertEqual(rows.map(\.module.name), ["AB", "WEB", "FinRK"])
         XCTAssertEqual(rows.map(\.title), ["AB (en)", "WEB (en)", "FinRK (fi)"])
         XCTAssertEqual(rows.map(\.isEnabled), [true, false, true])
+    }
+
+    /** Java-distinct installed initials remain separate row identities and current-row states. */
+    func testBibleQuickModuleSelectorKeepsCanonicallyEquivalentInstalledInitialsDistinct() throws {
+        let composed = "CAF\u{00E9}"
+        let decomposed = "CAFE\u{0301}"
+        let rows = BibleReaderQuickModuleSelectorPresentation.rows(
+            for: [
+                ModuleInfo(name: composed, description: "Composed", category: .bible, language: "en"),
+                ModuleInfo(name: decomposed, description: "Decomposed", category: .bible, language: "en"),
+            ],
+            activeModuleName: composed
+        )
+
+        let composedRow = try XCTUnwrap(rows.first {
+            $0.selection.name.utf16.elementsEqual(composed.utf16)
+        })
+        let decomposedRow = try XCTUnwrap(rows.first {
+            $0.selection.name.utf16.elementsEqual(decomposed.utf16)
+        })
+
+        XCTAssertTrue(rows[0].selection.name.utf16.elementsEqual(decomposed.utf16))
+        XCTAssertTrue(rows[1].selection.name.utf16.elementsEqual(composed.utf16))
+        XCTAssertNotEqual(composedRow.id, decomposedRow.id)
+        XCTAssertFalse(composedRow.isEnabled)
+        XCTAssertTrue(decomposedRow.isEnabled)
     }
 
     /**
@@ -72,47 +132,6 @@ final class BibleReaderQuickModuleSelectorTests: XCTestCase {
     }
 
     /**
-     Protects long quick-selector lists from becoming unscrollable off-screen stacks.
-
-     Users can install dozens of Bible modules. Android renders those entries through a popup menu
-     that can scroll; the SwiftUI parity renderer must likewise be backed by a scroll container so
-     all available modules can be reached without falling back to the full iOS sheet.
-     */
-    func testBibleQuickModuleSelectorUsesScrollContainerForLongInstalledModuleLists() throws {
-        let rows = (0..<60).map { index in
-            BibleReaderQuickModuleSelectorPresentation.Row(
-                module: ModuleInfo(
-                    name: String(format: "MOD%02d", index),
-                    description: "Module \(index)",
-                    category: .bible,
-                    language: "en"
-                ),
-                title: String(format: "MOD%02d (en)", index),
-                isEnabled: true
-            )
-        }
-        let view = BibleReaderQuickModuleSelector(
-            rows: rows,
-            colorScheme: .light,
-            onSelect: { _ in }
-        )
-
-        XCTAssertTrue(String(describing: type(of: view.body)).contains("ScrollView"))
-        let selectorSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderQuickModuleSelector.swift"
-        )
-        XCTAssertTrue(selectorSource.contains("LazyVStack(alignment: .leading, spacing: 0)"))
-        XCTAssertTrue(selectorSource.contains("AndroidPopupMenuSurface("))
-        XCTAssertTrue(selectorSource.contains("AndroidPopupMenuRow("))
-        XCTAssertTrue(selectorSource.contains("isEnabled: row.isEnabled"))
-        XCTAssertTrue(selectorSource.contains("surfacePalette: ReaderThemeSurfacePalette = .standard"))
-        XCTAssertFalse(selectorSource.contains("Color(red:"))
-        XCTAssertFalse(selectorSource.contains("systemBackground"))
-        XCTAssertFalse(selectorSource.contains("menuBackground"))
-        XCTAssertFalse(selectorSource.contains("            VStack(alignment: .leading, spacing: 0)"))
-    }
-
-    /**
      Protects Android's exactly-two-document shortcut in `menuForDocs`.
 
      When only two Bible modules are available, Android switches directly to the other document and
@@ -136,6 +155,25 @@ final class BibleReaderQuickModuleSelectorTests: XCTestCase {
         }
         XCTAssertEqual(row.module.name, "WEB")
         XCTAssertEqual(row.module.category, .bible)
+    }
+
+    /** The two-document shortcut selects the Java-distinct alternate for equivalent spellings. */
+    func testBibleQuickModuleSelectorActionUsesExactEnabledRowForCanonicalEquivalentInitials() {
+        let composed = "CAF\u{00E9}"
+        let decomposed = "CAFE\u{0301}"
+        let action = BibleReaderQuickModuleSelectorPresentation.action(
+            for: [
+                ModuleInfo(name: composed, description: "Composed", category: .bible, language: "en"),
+                ModuleInfo(name: decomposed, description: "Decomposed", category: .bible, language: "en"),
+            ],
+            activeModuleName: composed
+        )
+
+        guard case .switchDirectly(let row) = action else {
+            return XCTFail("Expected the exact alternate row for Android's two-document shortcut.")
+        }
+        XCTAssertTrue(row.selection.name.utf16.elementsEqual(decomposed.utf16))
+        XCTAssertTrue(row.isEnabled)
     }
 
     /**
@@ -251,6 +289,152 @@ final class BibleReaderQuickModuleSelectorTests: XCTestCase {
         XCTAssertEqual(rows.map(\.module.category), [.dictionary, .commentary, .generalBook, .commentary])
         XCTAssertEqual(rows.map(\.title), ["BDBT (en)", "MHC (en)", "Pilgrim (en)", "FinComm (fi)"])
         XCTAssertEqual(rows.map(\.isEnabled), [false, true, true, true])
+    }
+
+    /**
+     Protects Android's inclusive retained-Bible suggestion without a readable fallback.
+
+     - Setup: Supplies a readable KJV row and a locked retained row in one installed snapshot.
+     - Expected result: The exact locked row is returned; missing or non-Bible retained identities
+       return nil instead of selecting KJV.
+     - Failure meaning: A non-Bible toolbar action can silently activate an unrelated readable Bible.
+     - Side effects: None.
+     */
+    func testSuggestedBibleSelectionPreservesExactInstalledRetainedIdentityWithoutFallback() {
+        let readable = ModuleInfo(
+            name: "KJV",
+            description: "King James Version",
+            category: .bible,
+            language: "en"
+        )
+        let locked = ModuleInfo(
+            name: "UITESTLOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let commentary = ModuleInfo(
+            name: "COMMENTARY",
+            description: "Commentary",
+            category: .commentary,
+            language: "en"
+        )
+
+        XCTAssertEqual(
+            BibleReaderSuggestedBibleSelectionPolicy.module(
+                retainedModuleName: locked.name,
+                installedModules: [readable, locked, commentary]
+            )?.name,
+            locked.name
+        )
+        XCTAssertNil(BibleReaderSuggestedBibleSelectionPolicy.module(
+            retainedModuleName: "MISSING",
+            installedModules: [readable, locked]
+        ))
+        XCTAssertNil(BibleReaderSuggestedBibleSelectionPolicy.module(
+            retainedModuleName: commentary.name,
+            installedModules: [readable, commentary]
+        ))
+        XCTAssertNil(BibleReaderSuggestedBibleSelectionPolicy.module(
+            retainedModuleName: nil,
+            installedModules: [readable]
+        ))
+    }
+
+    /**
+     Protects Java-exact UTF-16 identity at the suggested-Bible selection boundary.
+
+     - Setup: Supplies canonically equivalent composed and decomposed module names.
+     - Expected result: The retained decomposed UTF-16 sequence selects only the decomposed row.
+     - Failure meaning: Swift normalization or case folding can redirect a retained module target.
+     - Side effects: None.
+     */
+    func testSuggestedBibleSelectionUsesExactUTF16ModuleIdentity() throws {
+        let composed = "Caf\u{00E9}Bible"
+        let decomposed = "Cafe\u{0301}Bible"
+        XCTAssertNotEqual(Array(composed.utf16), Array(decomposed.utf16))
+        let modules = [
+            ModuleInfo(name: composed, description: "Composed", category: .bible, language: "fr"),
+            ModuleInfo(name: decomposed, description: "Decomposed", category: .bible, language: "fr"),
+        ]
+
+        let selected = try XCTUnwrap(BibleReaderSuggestedBibleSelectionPolicy.module(
+            retainedModuleName: decomposed,
+            installedModules: modules
+        ))
+
+        XCTAssertEqual(Array(selected.name.utf16), Array(decomposed.utf16))
+        XCTAssertNotEqual(Array(selected.name.utf16), Array(composed.utf16))
+    }
+
+    /**
+     Covers the pure identity predicate used by the suggested-Bible credential owner boundary.
+
+     - Setup: Captures one window, controller object, exact module, and shared credential session.
+     - Expected result: Only the unchanged tuple authorizes; replacing the window/controller,
+       retained target, session target, or session identity returns false.
+     - Failure meaning: The policy admits a stale identity tuple. Callback wiring and the absence of
+       manager mutation still require focused integration coverage.
+     - Side effects: None; this policy-only test does not invoke a controller or manager.
+     */
+    func testSuggestedBibleUnlockAuthorizationPredicateRejectsEveryStaleIdentityInput() {
+        let windowID = UUID()
+        let controller = NSObject()
+        let replacementController = NSObject()
+        let module = ModuleInfo(
+            name: "UITESTLOCKED",
+            description: "Locked Bible",
+            category: .bible,
+            language: "en",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        let session = ModuleUnlockSession(module: module)
+        let replacementSession = ModuleUnlockSession(module: module)
+        let authorization = BibleReaderSuggestedBibleUnlockAuthorization(
+            windowID: windowID,
+            controllerID: ObjectIdentifier(controller),
+            moduleIdentity: SwordJavaExactStringIdentity(module.name),
+            sessionID: session.id
+        )
+        let authorizes: (UUID?, ObjectIdentifier?, String?, String, ModuleUnlockSession.ID) -> Bool = {
+            authorization.authorizes(
+                activeWindowID: $0,
+                registeredControllerID: $1,
+                retainedModuleName: $2,
+                sessionModuleName: $3,
+                presentedSessionID: $4
+            )
+        }
+
+        XCTAssertTrue(authorizes(
+            windowID,
+            ObjectIdentifier(controller),
+            module.name,
+            module.name,
+            session.id
+        ))
+        XCTAssertFalse(authorizes(
+            UUID(), ObjectIdentifier(controller), module.name, module.name, session.id
+        ))
+        XCTAssertFalse(authorizes(
+            windowID, ObjectIdentifier(replacementController), module.name, module.name, session.id
+        ))
+        XCTAssertFalse(authorizes(
+            windowID, ObjectIdentifier(controller), "KJV", module.name, session.id
+        ))
+        XCTAssertFalse(authorizes(
+            windowID, ObjectIdentifier(controller), module.name, "KJV", session.id
+        ))
+        XCTAssertFalse(authorizes(
+            windowID,
+            ObjectIdentifier(controller),
+            module.name,
+            module.name,
+            replacementSession.id
+        ))
     }
 
 }

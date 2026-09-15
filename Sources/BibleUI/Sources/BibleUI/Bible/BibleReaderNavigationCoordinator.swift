@@ -124,6 +124,9 @@ struct BibleReaderNavigationContext {
     /// Persists mutated workspace/page state.
     let persistState: () -> Void
 
+    /// Scrolls to a target already retained by the current Vue document generation.
+    let scrollToLoadedPosition: (_ position: BibleReaderNavigationPosition, _ highlight: Bool) -> Bool
+
     /// Reloads visible content through the reader controller.
     let loadCurrentContent: () -> Void
 }
@@ -201,7 +204,8 @@ final class BibleReaderNavigationCoordinator {
        - verse: Optional one-based verse; omitted navigation lands at the chapter top.
        - context: Controller-owned lookup, persistence, history, and reload callbacks.
      - Side effects: Mutates controller position through `context`, writes PageManager Bible fields,
-       records history, persists workspace state, and reloads content when the Vue client is ready.
+       records history, persists workspace state, and either scrolls retained content or reloads when
+       the Vue client is ready.
      - Failure modes: If no PageManager is available, controller state and history still update but
        no durable page-position write occurs; if the explicit verse has no ordinal, highlighting is
        skipped while navigation still lands on the requested verse number.
@@ -234,6 +238,11 @@ final class BibleReaderNavigationCoordinator {
         }
 
         guard context.clientReady() else { return }
+        if context.scrollToLoadedPosition(position, verse != nil) {
+            originalNavigationOrdinalRange = nil
+            shouldRestoreScroll = false
+            return
+        }
         context.loadCurrentContent()
     }
 
@@ -403,6 +412,31 @@ final class BibleReaderNavigationCoordinator {
         currentPosition: BibleReaderNavigationPosition,
         ordinalForVerse: (_ book: String, _ chapter: Int, _ verse: Int) -> Int?
     ) -> BibleReaderScrollRestoreTarget {
+        let restoreTarget = contentRestoreTarget(
+            currentPosition: currentPosition,
+            ordinalForVerse: ordinalForVerse
+        )
+        shouldRestoreScroll = false
+        return restoreTarget
+    }
+
+    /**
+     Peeks at the setup target without consuming it before bridge acceptance.
+
+     Asynchronous document preparation can fail or be superseded after source capture. Keeping this
+     read non-mutating lets a retry preserve the same explicit highlight or visible-scroll target.
+
+     - Parameters:
+       - currentPosition: Current Bible position represented by the prepared document.
+       - ordinalForVerse: Active-source lookup for the current verse.
+     - Returns: The exact ordinal or chapter-top marker to pass to Vue `setup_content`.
+     - Side effects: None.
+     - Failure modes: If no ordinal can be resolved for the current verse, returns `.chapterTop`.
+     */
+    func contentRestoreTarget(
+        currentPosition: BibleReaderNavigationPosition,
+        ordinalForVerse: (_ book: String, _ chapter: Int, _ verse: Int) -> Int?
+    ) -> BibleReaderScrollRestoreTarget {
         let restoreTarget: BibleReaderScrollRestoreTarget
         if shouldRestoreScroll {
             restoreTarget = lastScrollTarget
@@ -416,8 +450,22 @@ final class BibleReaderNavigationCoordinator {
         } else {
             restoreTarget = .chapterTop
         }
-        shouldRestoreScroll = false
         return restoreTarget
+    }
+
+    /**
+     Commits a setup target only after the bridge accepts its replacement document.
+
+     - Parameter originalOrdinalRange: Explicit navigation range represented by the accepted setup.
+     - Side effects: Clears one-shot scroll restoration and clears the original range when it still
+       matches the accepted setup.
+     - Failure modes: A superseding original range is preserved for its newer request.
+     */
+    func commitAcceptedContentRestore(originalOrdinalRange: [Int]?) {
+        shouldRestoreScroll = false
+        if self.originalNavigationOrdinalRange == originalOrdinalRange {
+            self.originalNavigationOrdinalRange = nil
+        }
     }
 
     /**

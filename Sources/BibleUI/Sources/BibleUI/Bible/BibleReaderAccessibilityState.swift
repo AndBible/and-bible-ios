@@ -94,6 +94,32 @@ struct BibleReaderRenderedContentState: Equatable {
     }
 }
 
+/**
+ Evaluates detailed reader diagnostics only when the current runtime policy enables their export.
+
+ The provider can query persistence and build bounded My Notes/StudyPad snapshots, so callers must
+ pass that work as a closure instead of eagerly constructing a value before the policy check.
+ */
+enum BibleReaderDiagnosticProvider {
+    /**
+     Resolves a diagnostic value under an explicit export policy.
+
+     - Parameters:
+       - enabled: Whether detailed accessibility diagnostics are enabled for this process.
+       - provider: Potentially expensive snapshot computation.
+     - Returns: The computed value when enabled; otherwise `nil` without invoking `provider`.
+     - Side effects: Invokes `provider` at most once and only when enabled.
+     - Failure modes: Provider failures are caller-defined; this gate does not catch them.
+     */
+    static func value<Value>(
+        enabled: Bool,
+        provider: () -> Value
+    ) -> Value? {
+        guard enabled else { return nil }
+        return provider()
+    }
+}
+
 /// One compact My Notes row token emitted for detailed UI-test accessibility state.
 struct MyNotesAccessibilityNoteToken: Equatable {
     /// Stable verse-reference token for the note row.

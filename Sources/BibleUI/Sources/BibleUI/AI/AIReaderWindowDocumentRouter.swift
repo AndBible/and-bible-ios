@@ -31,7 +31,8 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
        - key: Optional OSIS reference or exact generic page key.
      - Returns: Document and key state read back from the target controller.
      - Side effects: Preflights source authorization and the optional exact key/reference before
-       mutating; success then persists the target pane and emits its replacement content.
+       mutating; success then persists the target pane and admits its replacement content. Entry
+       families wait for their asynchronous selected-key transaction before state is read back.
      - Failure modes: Throws a stable domain error for a missing pane, unknown local
        document, failed module switch, or key the selected document cannot render exactly. Locked
        installed owners never fall through to colliding My Documents or EPUB content.
@@ -51,7 +52,6 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
         let installedInfo = controller.registeredInstalledModuleInfo(named: initials)
         var resolvedInitials = installedInfo?.name ?? initials
         var resolvedName = installedInfo?.description ?? initials
-        var expectedEpubKey: String?
 
         if let installedInfo {
             let preflight = controller.preflightInstalledWindowDocument(
@@ -85,30 +85,29 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
 
         case .dictionary, .glossary:
             try requireSuccessfulSwitch(controller.switchDictionaryDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadDictionaryEntry(key: authorizedKey)
+            if let authorizedKey,
+               controller.currentDictionaryKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                await controller.loadDictionaryEntryAwaitingSelection(key: authorizedKey)
             }
 
         case .generalBook:
             try requireSuccessfulSwitch(controller.switchGeneralBookDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadGeneralBookEntry(key: authorizedKey)
-                guard controller.currentGeneralBookKey.map({
-                    SwordJavaStringIdentity.equals($0, authorizedKey)
-                }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested document key is not available.")
-                }
+            if let authorizedKey,
+               controller.currentGeneralBookKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                await controller.loadGeneralBookEntryAwaitingSelection(key: authorizedKey)
             }
 
         case .map:
             try requireSuccessfulSwitch(controller.switchMapDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadMapEntry(key: authorizedKey)
-                guard controller.currentMapKey.map({
-                    SwordJavaStringIdentity.equals($0, authorizedKey)
-                }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested map key is not available.")
-                }
+            if let authorizedKey,
+               controller.currentMapKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                await controller.loadMapEntryAwaitingSelection(key: authorizedKey)
             }
 
         case .dailyDevotion, .questionable, .essays, .images, .addon, .unknown:
@@ -121,39 +120,32 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
             let pageKey = normalizedKey.flatMap { $0.isEmpty ? nil : $0 }
                 ?? (document.pages ?? []).sorted(by: Self.pageOrder).first?.pageKey
             guard let pageKey,
-                  myDocumentStore.page(bookInitials: resolvedInitials, pageKey: pageKey) != nil,
-                  controller.loadMyDocumentPage(
-                      bookInitials: resolvedInitials,
-                      pageKey: pageKey
-                  ) else {
+                  myDocumentStore.page(bookInitials: resolvedInitials, pageKey: pageKey) != nil else {
                 throw failure("KEY_NOT_FOUND", "The requested My Documents page is not available.")
             }
+            await controller.loadMyDocumentPageAwaitingSelection(
+                bookInitials: resolvedInitials,
+                pageKey: pageKey
+            )
 
             resolvedName = SwordJavaStringIdentity.trim(document.name)
 
         case .epub(let reader):
             resolvedInitials = reader.initials
-            if let normalizedKey, !normalizedKey.isEmpty {
-                guard controller.registeredInstalledModuleInfo(named: resolvedInitials) == nil,
-                      let content = reader.content(forKey: normalizedKey) else {
-                    throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
-                }
-                expectedEpubKey = content.persistedKey
-            }
-            controller.switchEpub(identifier: reader.identifier)
+            let selectedEpubKey = await controller.switchEpubAwaitingSelection(
+                identifier: reader.identifier,
+                key: normalizedKey.flatMap { $0.isEmpty ? nil : $0 }
+            )
             guard controller.activeModuleName(for: .generalBook).map({
                 SwordJavaStringIdentity.equals($0, resolvedInitials)
             }) == true else {
                 throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
             }
-            if let normalizedKey, !normalizedKey.isEmpty {
-                controller.loadEpubEntry(key: normalizedKey)
-                guard let expectedEpubKey,
-                      controller.currentGeneralBookKey.map({
-                          SwordJavaStringIdentity.equals($0, expectedEpubKey)
-                      }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
-                }
+            guard let selectedEpubKey,
+                  controller.currentGeneralBookKey.map({
+                      SwordJavaStringIdentity.equals($0, selectedEpubKey)
+                  }) == true else {
+                throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
             }
             resolvedName = SwordJavaStringIdentity.trim(reader.title)
             }

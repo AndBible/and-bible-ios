@@ -108,7 +108,8 @@ struct BibleReaderDocumentAuthorizationService {
        - resolver: Optional installed snapshot shared by a larger operation.
      - Returns: Deterministic JSword owner, `.missing`, or nil when persisted local metadata cannot
        be read safely.
-     - Side effects: Reads installed/local metadata and opens immutable EPUB generations only.
+     - Side effects: Reads local metadata and opens immutable EPUB generations only after the
+       installed registry declines the token.
      - Failure modes: My Documents metadata failure returns nil before content or visible mutation.
      */
     func owner(
@@ -117,6 +118,123 @@ struct BibleReaderDocumentAuthorizationService {
         resolver: BibleReaderInstalledModuleResolver? = nil
     ) -> BibleReaderInstalledOrLocalDocumentOwner<BibleReaderLocalGeneralBookDocument>? {
         let installedResolver = resolver ?? installedModuleResolver()
+        if let installedInfo = installedResolver.registeredModuleInfo(named: name) {
+            return .installed(
+                info: installedInfo,
+                readableSource: installedResolver.module(named: name)
+            )
+        }
+        guard let localRegistrations = localGeneralBookRegistrations(
+            preferredEpub: preferredEpub
+        ) else { return nil }
+        return installedResolver.resolveDocumentOwner(
+            named: name,
+            localRegistrations: { localRegistrations }
+        )
+    }
+
+    /**
+     Resolves one missing general book from a single complete installed/local registry capture.
+
+     - Parameters:
+       - currentName: Existing pane-owned identity, if any.
+       - savedDefaultName: Value from Android's `default-GENERAL_BOOK` setting.
+       - preferredEpub: Operation-retained EPUB generation to reuse when still current.
+       - resolver: Installed snapshot shared by the surrounding restore.
+     - Returns: Exact saved default, then first readable general book in complete BookSet order; nil
+       when the current owner remains registered, no candidate exists, or capture fails.
+     - Side effects: Captures EPUB/My Documents registration metadata once only after the current
+       token is absent from the installed registry; no content entry is read.
+     - Failure modes: My Documents metadata failure returns nil instead of using a partial fallback.
+     */
+    func generalBookDefaultReplacement(
+        currentName: String?,
+        savedDefaultName: String?,
+        preferredEpub: EpubReader? = nil,
+        resolver: BibleReaderInstalledModuleResolver
+    ) -> BibleReaderDocumentDefaultSelection? {
+        if let currentName,
+           resolver.registeredModuleInfo(named: currentName) != nil {
+            return nil
+        }
+        guard let localRegistrations = localGeneralBookRegistrations(
+            preferredEpub: preferredEpub
+        ) else { return nil }
+        let owner: (String) -> BibleReaderInstalledOrLocalDocumentOwner<
+            BibleReaderLocalGeneralBookDocument
+        > = { name in
+            resolver.resolveDocumentOwner(
+                named: name,
+                localRegistrations: { localRegistrations }
+            )
+        }
+        if let currentName {
+            switch owner(currentName) {
+            case .installed, .local: return nil
+            case .missing: break
+            }
+        }
+        if let savedDefaultName, !savedDefaultName.isEmpty {
+            switch owner(savedDefaultName) {
+            case .installed(let info, let readableSource) where info.category == .generalBook:
+                return .installed(info: info, readableSource: readableSource)
+            case .local(let document):
+                return .local(document)
+            case .installed, .missing:
+                break
+            }
+        }
+        for registeredOwner in resolver.registeredDocumentOwners(
+            localRegistrations: localRegistrations
+        ) {
+            switch registeredOwner {
+            case .installed(let info, let readableSource)
+                where info.category == .generalBook && readableSource != nil:
+                return .installed(info: info, readableSource: readableSource)
+            case .local(let document):
+                return .local(document)
+            case .installed, .missing:
+                continue
+            }
+        }
+        return nil
+    }
+
+    /**
+     Captures readable installed and local general books for Android's commentary toolbar popup.
+
+     - Parameter resolver: Installed snapshot shared by the surrounding menu action.
+     - Returns: Globally admitted general-book owners in BookSet order, or nil when local metadata
+       cannot be captured without risking partial collision resolution.
+     - Side effects: Captures EPUB/My Documents registration metadata once; reads no content entry.
+     - Failure modes: Locked installed general books remain owners but are omitted from this
+       immediately selectable menu projection.
+     */
+    func readableGeneralBookOwners(
+        resolver: BibleReaderInstalledModuleResolver
+    ) -> [BibleReaderDocumentDefaultSelection]? {
+        guard let localRegistrations = localGeneralBookRegistrations(
+            preferredEpub: activeEpubReader
+        ) else { return nil }
+        return resolver.registeredDocumentOwners(
+            localRegistrations: localRegistrations
+        ).compactMap { owner in
+            switch owner {
+            case .installed(let info, let readableSource)
+                where info.category == .generalBook && readableSource != nil:
+                return .installed(info: info, readableSource: readableSource)
+            case .local(let document):
+                return .local(document)
+            case .installed, .missing:
+                return nil
+            }
+        }
+    }
+
+    /** Builds EPUB-then-My Documents registrations through the existing reader-owned sources. */
+    private func localGeneralBookRegistrations(
+        preferredEpub: EpubReader?
+    ) -> [BibleReaderLocalDocumentRegistration<BibleReaderLocalGeneralBookDocument>]? {
         let documents: [MyDocument]
         if let myDocumentStore {
             guard let ordered = try? myDocumentStore.documentsInRegistrationOrder() else {
@@ -149,10 +267,7 @@ struct BibleReaderDocumentAuthorizationService {
                 category: .generalBook
             )
         }
-        return installedResolver.resolveDocumentOwner(
-            named: name,
-            localRegistrations: { localRegistrations }
-        )
+        return localRegistrations
     }
 
     /**

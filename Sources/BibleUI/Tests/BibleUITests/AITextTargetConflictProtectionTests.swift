@@ -242,7 +242,7 @@ final class AITextTargetConflictProtectionTests: BibleUISwordFixtureTestCase {
         if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
             try FileManager.default.removeItem(at: moduleCacheURL)
         }
-        controller.refreshInstalledModules()
+        controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
         XCTAssertEqual(
             controller.registeredInstalledModuleInfo(named: "MYDOC")?.name,
             "NativeAIPageOwner"
@@ -331,13 +331,12 @@ final class AITextTargetConflictProtectionTests: BibleUISwordFixtureTestCase {
             contentType: .osis
         )
         let pageContent = MyDocumentPageContent(pageId: pageID, content: "Page original")
-        page.document = document
-        page.pageContent = pageContent
-        pageContent.page = page
-        document.pages = [page]
         myDocumentContext.insert(document)
         myDocumentContext.insert(page)
         myDocumentContext.insert(pageContent)
+        // Connect registered models once; the declared inverses establish the reverse links.
+        page.document = document
+        page.pageContent = pageContent
         try myDocumentContext.save()
 
         let backing = BibleUIAITextTargetBacking(

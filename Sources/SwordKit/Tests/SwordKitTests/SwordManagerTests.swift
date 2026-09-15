@@ -199,6 +199,7 @@ final class SwordManagerTests: XCTestCase {
             let originalConfig = try Data(contentsOf: fixture.configURL)
             let originalCache = try Data(contentsOf: cacheURL)
 
+            XCTAssertEqual(manager.persistedCipherKey(named: "LOCKEDBIBLE"), "")
             XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .locked)
             XCTAssertNil(manager.readableModule(named: "LOCKEDBIBLE"))
             XCTAssertFalse(
@@ -209,6 +210,10 @@ final class SwordManagerTests: XCTestCase {
 
             XCTAssertTrue(
                 manager.unlockModule(named: "LOCKEDBIBLE", withCipherKey: fixture.cipherKey)
+            )
+            XCTAssertEqual(
+                manager.persistedCipherKey(named: "LOCKEDBIBLE"),
+                fixture.cipherKey
             )
             XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
             XCTAssertEqual(manager.moduleAccessState(named: "LOCKEDBIBLE"), .readable)
@@ -628,6 +633,50 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertEqual(ObjectIdentifier(cached), ObjectIdentifier(first))
         manager.refresh()
         XCTAssertNil(manager.module(named: "CACHED"))
+    }
+
+    /**
+     Verifies reader authorization covers both manager state and the canonical live module tree.
+
+     - Setup: Captures one readable and one missing module, advances an exclusive root mutation,
+       then separately refreshes the manager.
+     - Expected result: Exact access records are retained and either mutation invalidates the prior
+       snapshot without requiring native work at publication time.
+     - Side effects: Creates and removes one isolated RawLD fixture and advances its test root token.
+     - Failure meaning: Prepared reader work could publish across replacement, unlock, or refresh.
+     */
+    func testContentAuthorizationSnapshotInvalidatesAtStoreMutationAndRefresh() throws {
+        let fixture = try makePlainRawLDFixture(modules: [
+            SwordManagerPlainRawLDDefinition(
+                initials: "AUTHORIZED",
+                fullName: "Authorized source",
+                dataStem: "authorized",
+                entryText: "AUTHORIZED_BACKEND"
+            ),
+        ])
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let snapshot = manager.contentAuthorizationSnapshot(for: ["AUTHORIZED", "MISSING"])
+
+        XCTAssertEqual(snapshot.modules.count, 2)
+        XCTAssertEqual(snapshot.modules[0].canonicalName, "AUTHORIZED")
+        XCTAssertEqual(snapshot.modules[0].accessState, .readable)
+        XCTAssertNil(snapshot.modules[1].canonicalName)
+        XCTAssertEqual(snapshot.modules[1].accessState, .unavailable)
+        XCTAssertTrue(manager.isContentAuthorizationCurrent(snapshot))
+
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: fixture.root)
+        try coordinator.withExclusiveTransaction(
+            kind: .remoteSword,
+            prepare: { () },
+            commit: { _ in () }
+        )
+        XCTAssertFalse(manager.isContentAuthorizationCurrent(snapshot))
+
+        let afterStoreMutation = manager.contentAuthorizationSnapshot(for: ["AUTHORIZED"])
+        XCTAssertTrue(manager.isContentAuthorizationCurrent(afterStoreMutation))
+        manager.refresh()
+        XCTAssertFalse(manager.isContentAuthorizationCurrent(afterStoreMutation))
     }
 
     /**

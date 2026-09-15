@@ -564,14 +564,8 @@ struct BibleWindowPane: View {
         scheduleWindowButtonFade()
     }
 
-    /**
-     Schedules Android's two-second window-button fade unless the pane menu holds it visible.
-
-     The fade is disabled under the deterministic UI-test harness because XCUITest workflows tap
-     the button at arbitrary times and Android's timing behavior would make them flaky.
-     */
+    /// Schedules Android's production two-second window-button fade unless its menu is visible.
     private func scheduleWindowButtonFade() {
-        guard !UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return }
         let token = UUID()
         windowButtonFadeToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -1068,11 +1062,11 @@ struct BibleWindowPane: View {
         }
 
     ctrl.onOpenMultiReferenceDocumentInLinksWindow = {
-      [weak ctrl, weak windowManager] documentJSON in
+      [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.loadMultiReferenceDocument(documentJSON)
+                ctrl.loadMultiReferenceDocument(request)
                 return
             }
 
@@ -1083,17 +1077,17 @@ struct BibleWindowPane: View {
             withLinksController(
                 for: linksWindow,
                 using: wm,
-                fallback: { ctrl.loadMultiReferenceDocument(documentJSON) }
+                fallback: { ctrl.loadMultiReferenceDocument(request) }
             ) { targetController in
-                targetController.loadMultiReferenceDocument(documentJSON)
+                targetController.loadMultiReferenceDocument(request)
             }
         }
 
-        ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] emission in
+        ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.renderMemorizeDocument(emission)
+                ctrl.renderMemorizeDocument(request)
                 return
             }
 
@@ -1104,22 +1098,18 @@ struct BibleWindowPane: View {
             withLinksController(
                 for: linksWindow,
                 using: wm,
-                fallback: { ctrl.renderMemorizeDocument(emission) }
+                fallback: { ctrl.renderMemorizeDocument(request) }
             ) { targetController in
-                targetController.renderMemorizeDocument(emission)
+                targetController.renderMemorizeDocument(request)
             }
         }
 
         ctrl.onOpenDefinitionDocumentInLinksWindow = {
-            [weak ctrl, weak windowManager] documentJSON, renderedBook, renderedKey in
+            [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.loadDefinitionDocument(
-                    documentJSON,
-                    renderedBook: renderedBook,
-                    renderedKey: renderedKey
-                )
+                ctrl.loadDefinitionDocument(request)
                 return
             }
 
@@ -1131,18 +1121,10 @@ struct BibleWindowPane: View {
                 for: linksWindow,
                 using: wm,
                 fallback: {
-                    ctrl.loadDefinitionDocument(
-                        documentJSON,
-                        renderedBook: renderedBook,
-                        renderedKey: renderedKey
-                    )
+                    ctrl.loadDefinitionDocument(request)
                 }
             ) { targetController in
-                targetController.loadDefinitionDocument(
-                    documentJSON,
-                    renderedBook: renderedBook,
-                    renderedKey: renderedKey
-                )
+                targetController.loadDefinitionDocument(request)
             }
         }
 

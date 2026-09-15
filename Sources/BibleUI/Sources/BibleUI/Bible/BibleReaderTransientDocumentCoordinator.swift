@@ -12,7 +12,7 @@ import BibleCore
  - Failure modes: The coordinator does not validate `documentJSON`; callers keep responsibility for
    building valid bridge payloads before storing or emitting the request.
  */
-struct BibleReaderTransientDocumentRequest: Equatable {
+struct BibleReaderTransientDocumentRequest: Equatable, Sendable {
     /// Serialized Vue `MultiDocument` payload to emit.
     let documentJSON: String
 
@@ -36,6 +36,36 @@ struct BibleReaderTransientDocumentRequest: Equatable {
 
     /// Optional PageManager key to persist for Android fake-document parity.
     let pageKey: String?
+
+    /// Exact copied source owners for the already-prepared document.
+    let sourceProvenance: BibleReaderRenderSourceProvenance?
+
+    /// Source-owned authorization checked throughout destination publication and replay.
+    let sourceAuthorization: BibleReaderRoutedSourceAuthorization
+
+    init(
+        documentJSON: String,
+        renderedBook: String,
+        renderedKey: String,
+        renderedCategory: DocumentCategory,
+        renderedModuleName: String?,
+        pageCategory: DocumentCategory?,
+        pageDocumentInitials: String?,
+        pageKey: String?,
+        sourceProvenance: BibleReaderRenderSourceProvenance? = nil,
+        sourceAuthorization: BibleReaderRoutedSourceAuthorization
+    ) {
+        self.documentJSON = documentJSON
+        self.renderedBook = renderedBook
+        self.renderedKey = renderedKey
+        self.renderedCategory = renderedCategory
+        self.renderedModuleName = renderedModuleName
+        self.pageCategory = pageCategory
+        self.pageDocumentInitials = pageDocumentInitials
+        self.pageKey = pageKey
+        self.sourceProvenance = sourceProvenance
+        self.sourceAuthorization = sourceAuthorization
+    }
 }
 
 /**
@@ -102,5 +132,17 @@ struct BibleReaderTransientDocumentCoordinator {
         let request = pendingClientReadyRequest
         pendingClientReadyRequest = nil
         return request
+    }
+
+    /**
+     Evicts prepared transient bytes when their captured source authorization is obsolete.
+
+     - Side effects: Clears both active and pending replay slots only for an invalid authorization.
+     - Failure modes: None. Independently owned or still-current source content remains replayable.
+     */
+    mutating func invalidatePreparedReplayForInstalledSourceChange() {
+        guard let activeRequest, !activeRequest.sourceAuthorization.isCurrent() else { return }
+        self.activeRequest = nil
+        pendingClientReadyRequest = nil
     }
 }

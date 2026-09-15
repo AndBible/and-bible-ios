@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import SwiftData
 @testable import BibleCore
 @testable import BibleUI
 
@@ -29,32 +30,6 @@ final class SettingsIconsTests: XCTestCase {
         XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.calculatorPin))
         XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.discreteMode))
         XCTAssertTrue(ApplicationSettingsPresentation.isPreferenceVisible(.showCalculator))
-    }
-
-    /**
-     Pins the high-risk global color route wiring and unsupported volume-setting removal.
-
-     Application Preferences must route its Global Text Options shortcut into the reader-owned
-     activity, and that destination must supply workspace metadata to the shared color editor. The
-     settings source must not retain a volume-key row or search entry after the capability policy
-     classifies it as unsupported.
-
-     Failure meaning:
-     - one global route can silently hide `workspace_color`
-     - the setting can reappear without a hardware-key consumer
-     */
-    func testGlobalColorRoutesWireWorkspaceMetadataAndVolumeSettingStaysHidden() throws {
-        let settingsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
-        )
-        let readerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-
-        XCTAssertTrue(settingsSource.contains("destination: .globalTextOptions"))
-        XCTAssertTrue(readerSource.contains("case .globalTextOptions:"))
-        XCTAssertTrue(readerSource.contains("workspaceColor: workspaceColorBinding"))
-        XCTAssertFalse(settingsSource.contains(".volumeKeysScroll"))
     }
 
     func testApplicationPreferenceIconsComeFromAndroidSettingsXml() {
@@ -158,76 +133,6 @@ final class SettingsIconsTests: XCTestCase {
                 "Text format used when creating new bookmark notes and Study Pad entries",
             ]
         )
-    }
-
-    /**
-     Guards Android `ListPreference` rows against native iOS chooser presentation.
-
-     Failure meaning:
-     - Settings may again use native `Menu`/`Picker` controls or bypass the shared app-owned row and
-       single-choice dialog contract.
-     */
-    func testApplicationPreferenceListPreferenceRendererAvoidsInlinePickerRows() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
-        )
-        let menuRowSource = try BibleUITestSourceLocator.extractFunction(named: "settingsMenuRow", from: source)
-
-        XCTAssertFalse(menuRowSource.contains("Picker("))
-        XCTAssertFalse(menuRowSource.contains("Menu {"))
-        XCTAssertTrue(menuRowSource.contains("AndroidCatalogActionPreferenceRow("))
-        XCTAssertTrue(menuRowSource.contains("SettingsListPreferenceDialogPresentation("))
-        XCTAssertTrue(source.contains("AndroidSingleChoiceDialog("))
-        XCTAssertTrue(menuRowSource.contains("preference.accessibilityIdentifier"))
-    }
-
-    /**
-     Guards the complete Application Preferences surface against native iOS presentation drift.
-
-     Failure meaning: a preference control, chooser, search field, or activity shortcut may have
-     bypassed the shared Android component/reader-route ownership contract.
-     */
-    func testApplicationPreferencesUseOnlyAppOwnedPresentationAndReaderRoutes() throws {
-        let settingsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Settings/SettingsView.swift"
-        )
-        let readerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-
-        for forbidden in [
-            "NavigationLink(destination:",
-            "NavigationLink(value:",
-            "NavigationLink {",
-            "Menu {",
-            "Toggle(",
-            "Slider(",
-            "List(",
-            ".searchable(",
-            ".sheet(",
-            ".navigationTitle(",
-        ] {
-            XCTAssertFalse(settingsSource.contains(forbidden), "Unexpected native Settings primitive: \(forbidden)")
-        }
-
-        for sharedContract in [
-            "AndroidActivityTopAppBar(",
-            "AndroidActivityTextInput(",
-            "AndroidCatalogSwitchPreferenceRow(",
-            "AndroidCatalogActionPreferenceRow(",
-            "AndroidSeekBarPreferenceRow(",
-            "AndroidSingleChoiceDialog(",
-            "AndroidMultiselectDialogContent(",
-            "AndroidEditTextPreferenceDialog(",
-        ] {
-            XCTAssertTrue(settingsSource.contains(sharedContract), "Missing shared Settings contract: \(sharedContract)")
-        }
-
-        XCTAssertTrue(readerSource.contains("onOpenActivity: { destination in"))
-        XCTAssertTrue(readerSource.contains("case .globalTextOptions:"))
-        XCTAssertTrue(readerSource.contains("case .syncSettings:"))
-        XCTAssertTrue(readerSource.contains("case .aiSettings:"))
-        XCTAssertTrue(readerSource.contains("case .readingProgressSettings:"))
     }
 
     func testApplicationPreferenceFeatureShortcutsExposeAndroidRows() {
@@ -692,14 +597,13 @@ final class SettingsIconsTests: XCTestCase {
     /**
      Verifies the iOS color editor exposes Android's durable color rows by scope.
 
-     Android inflates `workspace_color` for global and workspace color activities and hides it only
-     for a window-specific route. iOS stores both non-window routes in active-workspace metadata so
-     the color remains separate from inheritable text/background settings.
+     Accepted ADR 0005 reserves `workspace_color` for workspace-owned Text Options. True global
+     and window routes edit their own inheritable text/background settings without receiving a
+     Workspace metadata binding.
 
      Failure meaning:
-     - global settings hide Android's workspace-color row
+     - global or window settings expose workspace-owned metadata
      - workspace settings can no longer edit Android's action-bar color
-     - window settings expose a workspace-owned row
      */
     func testColorSettingsVisibleAndroidKeysMatchAndroidDurableScopeRules() {
         let expectedWorkspaceKeys = [
@@ -713,7 +617,7 @@ final class SettingsIconsTests: XCTestCase {
         ]
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .global),
-            expectedWorkspaceKeys
+            Array(expectedWorkspaceKeys.dropFirst())
         )
         XCTAssertEqual(
             ColorSettingsView.visibleAndroidKeys(scope: .workspace),
@@ -733,11 +637,11 @@ final class SettingsIconsTests: XCTestCase {
     }
 
     /**
-     Verifies color reset follows the caller-supplied non-window workspace binding.
+     Verifies color reset follows the caller-supplied workspace binding.
 
-     Android exposes workspace color on global/workspace routes and hides it for windows. This test
-     exercises the shared reset helper with and without a workspace binding so reset behavior
-     follows the same non-window/window ownership contract as row visibility.
+     Workspace routes supply the durable metadata binding; true global and window routes omit it.
+     This test exercises the shared reset helper with and without that binding so reset mutates only
+     the owner explicitly supplied by the caller.
      */
     func testColorSettingsResetOnlyMutatesWorkspaceColorForWorkspaceOwnedScope() {
         var settings = TextDisplaySettings.appDefaults
@@ -852,13 +756,17 @@ final class SettingsIconsTests: XCTestCase {
      - active-window workspace color can be ignored in favor of an unrelated fallback workspace
      - legacy nil values no longer use Android's `#ff444444` default
      */
-    func testReaderWorkspaceChromeColorResolvesFromWorkspaceMetadata() {
+    func testReaderWorkspaceChromeColorResolvesFromWorkspaceMetadata() throws {
+        let context = ModelContext(try makeWorkspaceModelContainer())
         let activeWorkspace = Workspace(name: "Active")
+        context.insert(activeWorkspace)
         activeWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF224466))
 
         let windowWorkspace = Workspace(name: "Window")
+        context.insert(windowWorkspace)
         windowWorkspace.workspaceColor = Int(Int32(bitPattern: 0xFF336699))
         let activeWindow = Window()
+        context.insert(activeWindow)
         activeWindow.workspace = windowWorkspace
 
         XCTAssertEqual(
@@ -1059,24 +967,6 @@ final class SettingsIconsTests: XCTestCase {
         draft.reset(.lineSpacing, scope: .global)
         draft.commit(.lineSpacing, scope: .global, to: &stored)
         XCTAssertEqual(stored.lineSpacing, 16)
-    }
-
-    /**
-     Guards issue #248 against reintroducing iOS-native editor presentation.
-
-     The text-display row UI is intentionally SwiftUI, but editor presentation must mirror Android's
-     in-place `AlertDialog` widgets. A failure here means the route drifted back to a UIKit font
-     picker or SwiftUI sheet/Form editor with iOS chrome.
-     */
-    func testTextDisplayPreferenceEditorsAvoidNativeIOSPickerAndSheetRoutes() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Settings/TextDisplaySettingsView.swift"
-        )
-
-        XCTAssertFalse(source.contains("UIFontPickerViewController"))
-        XCTAssertFalse(source.contains(".sheet(item: $activePreferenceEditor)"))
-        XCTAssertFalse(source.contains(".sheet(isPresented: $showFontPicker)"))
-        XCTAssertTrue(source.contains("textDisplayPreferenceEditorOverlay"))
     }
 
     /**

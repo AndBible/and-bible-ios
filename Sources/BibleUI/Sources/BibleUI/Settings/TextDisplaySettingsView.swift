@@ -1,5 +1,7 @@
 // TextDisplaySettingsView.swift — Text display settings
 
+import Combine
+import Foundation
 import SwiftUI
 import BibleCore
 import SwiftData
@@ -200,7 +202,7 @@ struct TextDisplayPreferenceEditorDraft: Equatable, Sendable {
 
  Data dependencies:
  - `settings` is the persisted display-settings model owned by the parent screen
- - `workspaceColor`, when supplied by global/workspace callers, exposes Android's workspace accent
+ - `workspaceColor`, when supplied by workspace callers, exposes Android's workspace accent
    row from the nested color editor while keeping that metadata separate from inherited text-display
    settings; window callers omit it
  - `scope` determines which Android parent-scope links are visible
@@ -303,8 +305,8 @@ public struct TextDisplaySettingsView: View {
        - settings: Shared display settings value to mutate from the form.
        - moduleStoreRootURL: Canonical installed-module root used for admitted add-on fonts.
        - workspaceColor: Optional workspace accent color edited from Android's color settings
-         screen. Global/workspace routes supply this binding; window routes omit it because Android
-         hides `workspace_color` only for window-specific color settings.
+         screen. Workspace routes supply this binding; global and window routes omit it because
+         accepted ADR 0005 reserves this durable metadata for workspace-owned settings.
        - navigationTitle: Optional Android-scope title shown by the surrounding navigation stack.
          Passing `nil` uses the localized global text-options title.
        - scope: Android text-display scope currently being edited.
@@ -932,6 +934,7 @@ public struct TextDisplaySettingsView: View {
             NotificationCenter.default.publisher(
                 for: SwordModuleStore.modulesDidChangeNotification
             )
+            .receive(on: DispatchQueue.main)
         ) { _ in
             providedFontNames = Self.admittedFontNames(
                 moduleStoreRootURL: moduleStoreRootURL

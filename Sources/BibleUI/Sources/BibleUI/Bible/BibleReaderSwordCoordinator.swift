@@ -205,12 +205,34 @@ struct BibleReaderSwordCoordinator {
         settings: TextDisplaySettings,
         defaults: TextDisplaySettings = .appDefaults
     ) {
-        let xrefsOn = settings.showXrefs ?? defaults.showXrefs ?? false
-        let footnotesOn = settings.showFootNotes ?? defaults.showFootNotes ?? false
-        manager.setGlobalOption(.strongsNumbers, enabled: true)
-        manager.setGlobalOption(.morphology, enabled: settings.showMorphology ?? defaults.showMorphology ?? false)
-        manager.setGlobalOption(.footnotes, enabled: footnotesOn)
-        manager.setGlobalOption(.crossReferences, enabled: xrefsOn)
+        for setting in renderOptionSettings(settings: settings, defaults: defaults) {
+            manager.setGlobalOption(setting.option, enabled: setting.enabled)
+        }
+    }
+
+    /**
+     Captures the complete display-option snapshot for one serialized native render operation.
+
+     - Parameters:
+       - settings: Pane-owned display settings copied before background preparation begins.
+       - defaults: Application fallback values for unset options.
+     - Returns: Immutable option assignments in the same order as the synchronous setup path.
+     - Side effects: None.
+     - Failure modes: None; unresolved values use the same false defaults as Android parity setup.
+     */
+    func renderOptionSettings(
+        settings: TextDisplaySettings,
+        defaults: TextDisplaySettings = .appDefaults
+    ) -> [SwordManager.GlobalOptionSetting] {
+        [
+            .init(.strongsNumbers, enabled: true),
+            .init(
+                .morphology,
+                enabled: settings.showMorphology ?? defaults.showMorphology ?? false
+            ),
+            .init(.footnotes, enabled: settings.showFootNotes ?? defaults.showFootNotes ?? false),
+            .init(.crossReferences, enabled: settings.showXrefs ?? defaults.showXrefs ?? false),
+        ]
     }
 
     /**

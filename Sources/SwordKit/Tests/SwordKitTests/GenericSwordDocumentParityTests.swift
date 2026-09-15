@@ -11,6 +11,45 @@ import XCTest
  */
 final class GenericSwordDocumentParityTests: XCTestCase {
     /**
+     Verifies the RawFiles driver supplies decoded structural source through the admitted adapter.
+
+     - Setup: Writes a real sparse KJV RawFiles commentary whose Genesis 1:1 index points to one
+       standalone OSIS file.
+     - Expected result: Exact source text, commentary metadata, BVA projection, and key identity
+       survive; the adjacent empty verse remains an exact empty fragment instead of reusing the
+       prior file.
+     - Failure meaning: R2's generic source capture silently falls back to rendered HTML or omits an
+       Android-supported physical driver while metadata still reports the module as installed.
+     - Side effects: Creates and removes one isolated SWORD root.
+     */
+    func testRawFilesCommentaryLoadsExactDecodedSourceAndKeepsEmptyAdjacentVerseDistinct() throws {
+        XCTAssertEqual(try pinnedAndroidKJVReferenceIndex(book: "Gen", chapter: 1, verse: 1), 4)
+        let fixture = try makeRawFilesFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let module = try XCTUnwrap(manager.module(named: "RAWFILES"))
+        let fragment = try module.rawOSISFragment(forKey: "Gen.1.1")
+
+        XCTAssertEqual(module.info.moduleDriver, "RawFiles")
+        XCTAssertEqual(fragment.source.category, .commentary)
+        XCTAssertEqual(fragment.key, "Gen.1.1")
+        XCTAssertEqual(fragment.osisRef, "Gen.1.1")
+        XCTAssertTrue(fragment.originalXML.contains("Synthetic RawFiles commentary."))
+        XCTAssertTrue(fragment.xml.contains("<BVA"))
+        let empty = try module.rawOSISFragment(forKey: "Gen.1.2")
+        XCTAssertEqual(empty.key, "Gen.1.2")
+        XCTAssertEqual(empty.osisRef, "Gen.1.2")
+        assertStructurallyEmptyXML(empty.originalXML)
+        assertStructurallyEmptyXML(empty.xml)
+        XCTAssertFalse(empty.hasRenderableContent)
+        XCTAssertTrue(empty.anchorTexts.isEmpty)
+        XCTAssertNil(empty.comparablePlainText)
+        XCTAssertEqual(empty.contentOrdinalRange, 0...0)
+        XCTAssertFalse(empty.xml.contains("Synthetic RawFiles commentary."))
+    }
+
+    /**
      Verifies the native RawLD path preserves exact OSIS, dictionary metadata, and source identity.
 
      - Setup: Writes a real two-entry RawLD module using SWORD's documented `.dat`/`.idx` format.
@@ -770,6 +809,144 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         )
         return RawLDFixture(root: root)
     }
+
+    /** Builds one real RawFiles verse-to-file index with a single KJV source entry. */
+    private func makeRawFilesFixture() throws -> RawFilesFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let modsDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent(
+            "modules/comments/rawfiles/rawfiles",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+
+        let fileName = "0000000"
+        let source = #"<verse osisID="Gen.1.1">Synthetic RawFiles commentary.</verse>"#
+        try Data(source.utf8).write(
+            to: dataDirectory.appendingPathComponent(fileName, isDirectory: false)
+        )
+        var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
+        let rowOffset = 4 * 6
+        oldTestamentIndex[rowOffset + 4] = UInt8(fileName.utf8.count)
+        try Data(fileName.utf8).write(
+            to: dataDirectory.appendingPathComponent("ot", isDirectory: false)
+        )
+        try Data(oldTestamentIndex).write(
+            to: dataDirectory.appendingPathComponent("ot.vss", isDirectory: false)
+        )
+        try Data().write(to: dataDirectory.appendingPathComponent("nt", isDirectory: false))
+        try Data().write(to: dataDirectory.appendingPathComponent("nt.vss", isDirectory: false))
+        try Data(repeating: 0, count: 4).write(
+            to: dataDirectory.appendingPathComponent("incfile", isDirectory: false)
+        )
+        try """
+        [RAWFILES]
+        Description=RawFiles Commentary Fixture
+        Abbreviation=RFC
+        Category=Commentaries
+        DataPath=./modules/comments/rawfiles/rawfiles/
+        ModDrv=RawFiles
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=KJV
+        """.write(
+            to: modsDirectory.appendingPathComponent("rawfiles.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        return RawFilesFixture(root: root)
+    }
+
+    /**
+     Derives a reference index directly from the pinned Android/JSword canon resource.
+
+     This intentionally does not call `SwordVersification.referenceIndex`, so the physical
+     RawFiles row asserted by the test is not produced and consumed by the same converter.
+     */
+    private func pinnedAndroidKJVReferenceIndex(
+        book requestedBook: String,
+        chapter requestedChapter: Int,
+        verse requestedVerse: Int
+    ) throws -> Int {
+        let data = try XCTUnwrap(JSwordVersificationRegistry.canonFixtureData())
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let systems = try XCTUnwrap(root["systems"] as? [String: Any])
+        let kjv = try XCTUnwrap(systems["KJV"] as? [String: Any])
+        let books = try XCTUnwrap(kjv["books"] as? [[String: Any]])
+
+        var index = 0
+        for book in books {
+            let osis = try XCTUnwrap(book["osis"] as? String)
+            let chapters = try XCTUnwrap(book["chapters"] as? [Int])
+            if osis != requestedBook {
+                index += chapters.reduce(0) { $0 + $1 + 1 }
+                continue
+            }
+            guard chapters.indices.contains(requestedChapter),
+                  (0...chapters[requestedChapter]).contains(requestedVerse) else {
+                throw RawLDFixtureError.invalidReference
+            }
+            index += chapters[..<requestedChapter].reduce(0) { $0 + $1 + 1 }
+            return index + requestedVerse
+        }
+        throw RawLDFixtureError.invalidReference
+    }
+
+    /** Verifies semantic empty XML without locking the processor's serializer spelling. */
+    private func assertStructurallyEmptyXML(
+        _ xml: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let observer = EmptyXMLStructureObserver()
+        let parser = XMLParser(data: Data(xml.utf8))
+        parser.delegate = observer
+        XCTAssertTrue(parser.parse(), file: file, line: line)
+        XCTAssertEqual(observer.rootElementCount, 1, file: file, line: line)
+        XCTAssertEqual(observer.nestedElementCount, 0, file: file, line: line)
+        XCTAssertFalse(observer.hasNonWhitespaceText, file: file, line: line)
+    }
+}
+
+/** Independent XMLParser observer for semantic empty-fragment assertions. */
+private final class EmptyXMLStructureObserver: NSObject, XMLParserDelegate {
+    private var depth = 0
+    private(set) var rootElementCount = 0
+    private(set) var nestedElementCount = 0
+    private(set) var hasNonWhitespaceText = false
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        if depth == 0 {
+            rootElementCount += 1
+        } else {
+            nestedElementCount += 1
+        }
+        depth += 1
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        depth -= 1
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hasNonWhitespaceText = true
+        }
+    }
 }
 
 /** Temporary real-module fixture returned to one test. */
@@ -778,8 +955,15 @@ private struct RawLDFixture {
     let root: URL
 }
 
+/** Temporary real RawFiles module returned to one test. */
+private struct RawFilesFixture {
+    /// SWORD root containing the config, sparse verse index, and standalone entry file.
+    let root: URL
+}
+
 /** Deterministic fixture-construction failures. */
 private enum RawLDFixtureError: Error {
+    case invalidReference
     case recordTooLarge
     case unsupportedDriver
 }

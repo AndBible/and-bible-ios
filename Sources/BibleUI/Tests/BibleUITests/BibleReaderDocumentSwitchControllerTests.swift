@@ -37,6 +37,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         let action = BibleReaderQuickModuleSelectorPresentation.action(
@@ -73,6 +74,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -109,6 +111,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let pageManager = PageManager(id: window.id)
         pageManager.dictionaryKey = "stale-key"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -143,6 +146,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let pageManager = PageManager(id: window.id)
         pageManager.generalBookKey = "stale-key"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -177,6 +181,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let pageManager = PageManager(id: window.id)
         pageManager.mapKey = "stale-key"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -216,6 +221,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.switchCategory(to: .commentary)
         controller.bridgeDidSetClientReady(bridge)
@@ -279,6 +285,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         pageManager.bibleDocument = "KJV"
         pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
         XCTAssertTrue(controller.installedBibleModules.contains { $0.name == "LOCKED" })
@@ -350,6 +357,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         pageManager.mapDocument = "BaselineMap"
         pageManager.mapKey = "baseline-map-key"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
 
@@ -433,6 +441,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -496,6 +505,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.loadMyNotesDocument()
         XCTAssertTrue(controller.showingMyNotes)
@@ -541,6 +551,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.switchCategory(to: .commentary)
         let baselineCategory = controller.currentCategory
@@ -585,6 +596,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         let baselineBibleModuleName = controller.activeModuleName
         let baselineBibleDocument = pageManager.bibleDocument
@@ -622,6 +634,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let window = Window()
         let pageManager = PageManager(id: window.id)
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         let baselineBibleModuleName = controller.activeModuleName
         let baselineBibleDocument = pageManager.bibleDocument
@@ -663,6 +676,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let pageManager = PageManager(id: window.id)
         pageManager.bibleDocument = "BOGUS"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
 
         controller.restoreSavedPosition()
@@ -704,6 +718,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         let pageManager = PageManager(id: window.id)
         pageManager.bibleDocument = "LOCKED"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -756,6 +771,7 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
         pageManager.mapDocument = "LockedMap"
         pageManager.mapKey = "locked-map-key"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
@@ -812,5 +828,150 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
 
         try data.write(to: prefix.appendingPathExtension("dat"))
         try index.write(to: prefix.appendingPathExtension("idx"))
+    }
+}
+
+// MARK: - Replacement and display configuration contracts
+
+extension BibleReaderDocumentSwitchControllerTests {
+    /**
+     Verifies a Bible document switch begins with Android's atomic theme-preserving replacement.
+
+     Android evaluates `clear_document` and an initial `set_config` carrying the current window
+     palette/night policy in one JavaScript turn before adding replacement content. That ordering
+     prevents Vue defaults or a native host background from becoming visible while the new document
+     is loading.
+
+     - Side effects:
+       - creates a two-Bible controller with a non-default resolved day/night palette
+       - completes the client-ready replay, then switches from KJV to WEB
+       - records the exact JavaScript evaluations queued through `BibleBridge`
+     - Failure modes:
+       - fails if clearing and theme reassertion are dispatched in separate JavaScript evaluations
+       - fails if replacement config is not marked initial or loses the active day-mode colors
+       - fails if replacement content is queued before the atomic clear/config transaction
+     */
+    @MainActor
+    func testBibleDocumentSwitchAtomicallyReassertsCurrentThemeBeforeReplacementContent() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(named: "WEB", description: "Theme parity Bible", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.dayTextColor = Int(Int32(bitPattern: 0xFF213547))
+        displaySettings.dayBackground = Int(Int32(bitPattern: 0xFFDDE7FA))
+        displaySettings.nightTextColor = Int(Int32(bitPattern: 0xFFF0E7FA))
+        displaySettings.nightBackground = Int(Int32(bitPattern: 0xFF2B183C))
+        controller.displaySettings = displaySettings
+        controller.nightMode = false
+
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+
+        controller.switchBibleDocument(to: "WEB")
+        let replacementDeadline = Date(timeIntervalSinceNow: 2)
+        while Date() < replacementDeadline,
+              !recordedScripts()
+                .dropFirst(baselineScriptCount)
+                .contains(where: { $0.contains("emit('clear_document'") }) {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+
+        let switchScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let replacementIndex = try XCTUnwrap(
+            switchScripts.firstIndex { $0.contains("emit('clear_document'") }
+        )
+        let replacementScript = switchScripts[replacementIndex]
+        XCTAssertTrue(
+            replacementScript.contains("emit('set_config'"),
+            "Expected clear_document and set_config in one atomic JavaScript evaluation: \(replacementScript)"
+        )
+        let clearRange = try XCTUnwrap(replacementScript.range(of: "emit('clear_document'"))
+        let configRange = try XCTUnwrap(replacementScript.range(of: "emit('set_config'"))
+        let documentRange = try XCTUnwrap(replacementScript.range(of: "emit('add_documents'"))
+        let setupRange = try XCTUnwrap(replacementScript.range(of: "emit('setup_content'"))
+        XCTAssertLessThan(clearRange.lowerBound, configRange.lowerBound)
+        XCTAssertLessThan(configRange.lowerBound, documentRange.lowerBound)
+        XCTAssertLessThan(documentRange.lowerBound, setupRange.lowerBound)
+
+        let configPayload = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: [replacementScript],
+                event: "set_config"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(configPayload["initial"] as? Bool, true)
+        let appSettings = try XCTUnwrap(configPayload["appSettings"] as? [String: Any])
+        XCTAssertEqual(appSettings["nightMode"] as? Bool, false)
+        let config = try XCTUnwrap(configPayload["config"] as? [String: Any])
+        let colors = try XCTUnwrap(config["colors"] as? [String: Any])
+        XCTAssertEqual(colors["dayBackground"] as? Int, displaySettings.dayBackground)
+        XCTAssertEqual(colors["nightBackground"] as? Int, displaySettings.nightBackground)
+
+        let addDocumentIndex = try XCTUnwrap(
+            switchScripts.firstIndex { $0.contains("emit('add_documents'") }
+        )
+        XCTAssertEqual(replacementIndex, addDocumentIndex)
+    }
+
+    /**
+     Verifies a presentation-only display update pushes config without replacing reader content.
+
+     Issue #377 reports margin edits with no visible reader effect. The staged UI repro proves the
+     margins dialog commits and persists, so this probe pins the next stage: after
+     `updateDisplaySettings`, Vue must receive the reduced `marginSize.maxWidth` while the current
+     WebView document generation remains intact.
+
+     - Side effects: Creates a temporary SWORD fixture root and a recording bridge controller.
+     - Failure modes: Fails when any post-update `set_config` payload omits or reverts the new
+       maximum text width.
+     */
+    @MainActor
+    func testUpdateDisplaySettingsPushesReducedMaxWidthWithoutReplacingContent() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.displaySettings = .appDefaults
+        controller.nightMode = false
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+
+        var narrowed = TextDisplaySettings.appDefaults
+        narrowed.maxWidth = 50
+        controller.updateDisplaySettings(narrowed, nightMode: false)
+        let updateScripts = Array(recordedScripts().dropFirst(baselineScriptCount))
+        let configScripts = updateScripts.filter { $0.contains("emit('set_config'") }
+        XCTAssertFalse(
+            configScripts.isEmpty,
+            "Expected at least one set_config emission after updateDisplaySettings."
+        )
+        for script in configScripts {
+            let payload = try bridgeEmissionPayload(from: [script], event: "set_config")
+            let dictionary = try XCTUnwrap(payload as? [String: Any])
+            let config = try XCTUnwrap(dictionary["config"] as? [String: Any])
+            let marginSize = try XCTUnwrap(config["marginSize"] as? [String: Any])
+            XCTAssertEqual(
+                marginSize["maxWidth"] as? Int,
+                50,
+                "Expected every post-update config payload to carry the reduced maxWidth."
+            )
+        }
+        XCTAssertFalse(
+            updateScripts.contains { $0.contains("emit('clear_document'") },
+            "Presentation-only settings must preserve the loaded reader document generation."
+        )
     }
 }

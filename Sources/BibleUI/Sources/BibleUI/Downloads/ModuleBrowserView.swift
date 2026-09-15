@@ -1,6 +1,7 @@
 // ModuleBrowserView.swift — Module download browser
 
 import Foundation
+import Combine
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
@@ -379,6 +380,9 @@ public struct ModuleBrowserView: View {
     /// Reports whether startup default refresh/install work is still active.
     private let onDefaultDownloadActivityChanged: (Bool) -> Void
 
+    /// Stable repository construction policy selected at the Downloads composition boundary.
+    private let repositoryFactory: () -> ModuleRepository
+
     /// Selected remote/local module category segment, or `nil` for Android's "All types" filter.
     @State private var selectedCategory: ModuleCategory?
 
@@ -418,8 +422,11 @@ public struct ModuleBrowserView: View {
     /// Lazily created SWORD manager used to query locally installed modules.
     @State private var swordManager: SwordManager?
 
-    /// Repository facade used for source loading, catalog refresh, and install actions.
-    @State private var repository = ModuleRepository()
+    /// Repository facade created once when Downloads begins its lifecycle work.
+    @State private var repository: ModuleRepository?
+
+    /// Custom-source manager created once when the user opens that destination.
+    @State private var repositorySourceManager: RepositorySourceManager?
 
     /// Configured remote source definitions loaded from repository configuration.
     @State private var sources: [SourceConfig] = []
@@ -457,14 +464,8 @@ public struct ModuleBrowserView: View {
     /// Module details currently presented from Android's row About action.
     @State private var selectedModuleDetails: ModuleBrowserModuleDetails?
 
-    /// Installed encrypted module whose Android passphrase prompt is visible.
-    @State private var pendingUnlockModule: ModuleInfo?
-
-    /// Cipher key entered for the pending Downloads unlock action.
-    @State private var unlockCipherKey = ""
-
-    /// Rejected-key feedback retained while the passphrase prompt is presented again.
-    @State private var unlockFailureMessage: String?
+    /// Exact installed-module credential flow retained through passphrase and retry decisions.
+    @State private var unlockSession: ModuleUnlockSession?
 
     /// Whether the custom repository manager is pushed from the Downloads overflow menu.
     @State private var showRepositoryManager = false
@@ -596,6 +597,9 @@ public struct ModuleBrowserView: View {
         self.defaultDownloadMode = defaultDownloadMode
         self.surfacePalette = surfacePalette
         self.onDefaultDownloadActivityChanged = onDefaultDownloadActivityChanged
+        self.repositoryFactory = {
+            UITestDownloadFixtureTransport.repositoryIfConfigured() ?? ModuleRepository()
+        }
         let normalizedSearchText = initialSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedFilterIndex = Self.persistedDocumentFilterIndex()
         _selectedCategory = State(
@@ -721,10 +725,6 @@ public struct ModuleBrowserView: View {
                 accessibilityIdentifier: "moduleBrowserScreen",
                 surfaceColor: surfacePalette.backgroundColor
             )
-            moduleBrowserStateExport(
-                visibleModules: visibleModules,
-                installedModulesByName: installedModulesByName
-            )
             AndroidDocumentSelectionActivityScreen(surfacePalette: surfacePalette) {
                 androidTopAppBar
             } filterBar: {
@@ -767,7 +767,12 @@ public struct ModuleBrowserView: View {
     private var documentManagementPresentedDownloadsScreen: some View {
         androidDownloadsLayout
         .navigationDestination(isPresented: $showRepositoryManager) {
-            RepositoryManagerView(surfacePalette: surfacePalette)
+            if let repositorySourceManager {
+                RepositoryManagerView(
+                    sourceManager: repositorySourceManager,
+                    surfacePalette: surfacePalette
+                )
+            }
         }
         .fileImporter(
             isPresented: $showInstallZipImporter,
@@ -790,9 +795,18 @@ public struct ModuleBrowserView: View {
     private var moduleAccessPresentedDownloadsScreen: some View {
         documentManagementPresentedDownloadsScreen
         .overlay {
-            if let module = pendingUnlockModule {
-                ModulePickerUnlockDialog(title: ModuleUnlockActionCoordinator.promptTitle(for: module), message: unlockFailureMessage ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase."), cipherKey: $unlockCipherKey, showUnlockInfo: !module.aboutMetadata.unlockInfo.isEmpty, onUnlock: { attemptUnlock(module) }, onShowUnlockInfo: { showUnlockInformation(for: module) }, onCancel: clearUnlockPrompt)
-            } else if showDownloadErrors {
+            ModuleUnlockFlowView(
+                    session: $unlockSession,
+                    unlockModule: { moduleName, submittedKey in
+                        swordManager?.unlockModule(
+                            named: moduleName,
+                            withCipherKey: submittedKey
+                        ) ?? false
+                    },
+                    onAccepted: completeAcceptedUnlock,
+                    onDeclined: { _ in clearUnlockPrompt() }
+                )
+            if unlockSession == nil, showDownloadErrors {
                 ModulePickerDecisionDialog(title: String(localized: "download_errors", defaultValue: "Download errors"), message: downloadErrors.joined(separator: "\n"), actions: [
                     .init(id: "okay", title: String(localized: "okay", defaultValue: "OK"), role: nil) { showDownloadErrors = false }
                 ])
@@ -865,80 +879,26 @@ public struct ModuleBrowserView: View {
         .task {
             await loadInitialStateIfNeeded()
         }
-        .onReceive(NotificationCenter.default.publisher(for: RepositorySourceManager.sourcesDidChangeNotification)) { _ in
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: RepositorySourceManager.sourcesDidChangeNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { _ in
             Task { @MainActor in
                 reloadRepositorySources()
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: SwordModuleStore.modulesDidChangeNotification)) { _ in
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: SwordModuleStore.modulesDidChangeNotification
+            )
+            .receive(on: DispatchQueue.main)
+        ) { _ in
             Task { @MainActor in
                 refreshInstalledList()
             }
         }
-    }
-
-    /**
-     Builds the compact Downloads state probe consumed by targeted UI smoke tests.
-
-     The export intentionally reports semantic row order and status tokens instead of full row text or
-     layout geometry. That keeps the test anchored to Android's download-list behavior while avoiding
-     brittle pixel or string-wrapping assertions.
-
-     - Parameters:
-       - visibleModules: The currently filtered row sequence shown in Downloads.
-       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
-     - Returns: A one-pixel hidden state export when detailed UI-test accessibility is enabled.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    @ViewBuilder
-    private func moduleBrowserStateExport(
-        visibleModules: [RemoteModuleInfo],
-        installedModulesByName: InstalledModuleLookup
-    ) -> some View {
-        if UITestRuntimeConfiguration.enablesDetailedAccessibilityExports {
-            let value = moduleBrowserAccessibilityValue(
-                visibleModules: visibleModules,
-                installedModulesByName: installedModulesByName
-            )
-            Text(value)
-                .font(.system(size: 1))
-                .frame(width: 1, height: 1)
-                .opacity(0.01)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("moduleBrowserStateExport")
-                .accessibilityValue(value)
-        }
-    }
-
-    /**
-     Produces a stable, parseable Downloads state summary for UI automation.
-
-     - Parameters:
-       - visibleModules: The currently filtered row sequence shown in Downloads.
-       - installedModulesByName: Installed modules keyed by initials for live row-status lookup.
-     - Returns: A semicolon-delimited state string containing row count, order, and row status tokens.
-     - Side effects: none.
-     - Failure modes: none.
-     */
-    private func moduleBrowserAccessibilityValue(
-        visibleModules: [RemoteModuleInfo],
-        installedModulesByName: InstalledModuleLookup
-    ) -> String {
-        let rowLimit = UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit
-        let limitedModules = visibleModules.prefix(rowLimit)
-        let order = limitedModules.map(\.name).joined(separator: "|")
-        let rowTokens = limitedModules
-            .map { module in
-                let status = Self.displayStatus(
-                    for: module,
-                    installedModulesByName: installedModulesByName,
-                    downloadActivities: downloadActivities
-                )
-                return "\(module.name):\(Self.downloadStatusAccessibilityToken(status))"
-            }
-            .joined(separator: ",")
-        return "visible=\(visibleModules.count);refreshing=\(isRefreshing);order=\(order);rows=\(rowTokens)"
     }
 
     /**
@@ -1064,6 +1024,9 @@ public struct ModuleBrowserView: View {
                     accessibilityIdentifier: "moduleBrowserRepositoriesButton"
                 ) {
                     showOverflowMenu = false
+                    if repositorySourceManager == nil {
+                        repositorySourceManager = RepositorySourceManager()
+                    }
                     showRepositoryManager = true
                 }
             }
@@ -1963,9 +1926,10 @@ public struct ModuleBrowserView: View {
                 .padding(.leading, 96)
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            handleRemoteModuleRowTap(module, status: status)
-        }
+        .androidTapLongPressContainer(
+            onTap: { handleRemoteModuleRowTap(module, status: status) },
+            onLongPress: { beginContextualModuleSelection(module) }
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(module.abbreviation)
         .accessibilityValue(Self.downloadStatusAccessibilityToken(status))
@@ -2004,69 +1968,34 @@ public struct ModuleBrowserView: View {
     /**
      Presents the shared Android passphrase flow for an encrypted Downloads row.
 
+     Current Android `DownloadActivity` exposes Unlock for an installed encrypted row but does not
+     dispatch that menu item from its inherited action handler. iOS intentionally keeps the action
+     functional and reuses Android's credential loop from startup and Choose Document; this is a
+     bounded correction to Android's current no-op rather than a claim of identical Downloads wiring.
+
      - Parameter module: Installed encrypted module selected from the row context menu.
      - Side effects: Clears stale input/error state and presents the module-scoped alert.
      - Failure modes: None; manager validation happens only after the user submits a key.
      */
     private func beginUnlock(_ module: ModuleInfo) {
-        unlockCipherKey = ""
-        unlockFailureMessage = nil
-        pendingUnlockModule = module
-    }
-
-    /**
-     Submits a Downloads passphrase through the same manager-backed contract as the reader picker.
-
-     - Parameter module: Installed encrypted module associated with the visible prompt.
-     - Side effects: Validates and persists the key through `SwordManager`, refreshes installed rows on
-       success, or dismisses and re-presents the prompt with invalid-key feedback on rejection.
-     - Failure modes: Missing managers, empty/rejected keys, and persistence failures remain retryable
-       and do not update the installed snapshot.
-     */
-    private func attemptUnlock(_ module: ModuleInfo) {
-        let cipherKey = unlockCipherKey
-        if ModuleUnlockActionCoordinator.submit(
+        unlockSession = ModuleUnlockSession(
             module: module,
-            cipherKey: cipherKey,
-            unlockModule: { moduleName, submittedKey in
-                swordManager?.unlockModule(
-                    named: moduleName,
-                    withCipherKey: submittedKey
-                ) ?? false
-            },
-            onAccepted: {
-                clearUnlockPrompt()
-                refreshInstalledList()
-            }
-        ) {
-            return
-        }
-
-        pendingUnlockModule = nil
-        unlockCipherKey = ""
-        let failureMessage = ModuleUnlockActionCoordinator.failureMessage
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
-        ) {
-            unlockFailureMessage = failureMessage
-            pendingUnlockModule = module
-        }
+            initialCipherKey: swordManager?.persistedCipherKey(named: module.name) ?? ""
+        )
     }
 
     /**
-     Opens installed module metadata from Android's unlock-information action.
+     Applies Downloads-owned work after the shared credential flow records manager acceptance.
 
-     - Parameter module: Locked module whose provider instructions should be shown.
-     - Side effects: Dismisses the passphrase alert and presents the shared About dialog.
-     - Failure modes: The action is exposed only when `UnlockInfo` is non-empty.
+     - Parameter module: Exact installed module accepted by `ModuleUnlockFlowView`.
+     - Side effects: Clears the credential session and refreshes installed rows after real manager
+       validation and persistence.
+     - Failure modes: Rejected and declined credentials never invoke this function, so the installed
+       snapshot remains unchanged.
      */
-    private func showUnlockInformation(for module: ModuleInfo) {
+    private func completeAcceptedUnlock(_: ModuleInfo) {
         clearUnlockPrompt()
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
-        ) {
-            selectedModuleDetails = ModuleBrowserModuleDetails(installedModule: module)
-        }
+        refreshInstalledList()
     }
 
     /**
@@ -2076,9 +2005,7 @@ public struct ModuleBrowserView: View {
      - Failure modes: None.
      */
     private func clearUnlockPrompt() {
-        pendingUnlockModule = nil
-        unlockCipherKey = ""
-        unlockFailureMessage = nil
+        unlockSession = nil
     }
 
     /**
@@ -2154,11 +2081,23 @@ public struct ModuleBrowserView: View {
                     ProgressView(value: Double(progressPercent), total: 100)
                         .frame(maxWidth: .infinity)
                         .tint(surfacePalette.foregroundColor)
+                        .accessibilityIdentifier(
+                            "moduleBrowserInstallProgress::\(module.installIdentity.rawValue)"
+                        )
+                        .accessibilityLabel(
+                            Self.installPhaseText(progress.phase, progressPercent: progressPercent)
+                        )
                 } else {
                     ProgressView()
                         .progressViewStyle(.linear)
                         .frame(maxWidth: .infinity)
                         .tint(surfacePalette.foregroundColor)
+                        .accessibilityIdentifier(
+                            "moduleBrowserInstallProgress::\(module.installIdentity.rawValue)"
+                        )
+                        .accessibilityLabel(
+                            Self.installPhaseText(progress.phase, progressPercent: nil)
+                        )
                 }
 
                 let isCancellable = progress.isCancellable
@@ -2174,6 +2113,9 @@ public struct ModuleBrowserView: View {
                 .opacity(isCancellable ? 1 : 0)
                 .accessibilityHidden(!isCancellable)
                 .accessibilityLabel(String(localized: "cancel"))
+                .accessibilityIdentifier(
+                    "moduleBrowserCancelInstallButton::\(module.installIdentity.rawValue)"
+                )
             }
         case .unavailable:
             Text(String(localized: "unavailable"))
@@ -3066,10 +3008,10 @@ public struct ModuleBrowserView: View {
     }
 
     /**
-     Converts a Downloads row status into a compact token for UI-test state exports.
+     Converts a Downloads row status into the row's concise accessibility value.
 
      - Parameter status: Resolved Android-parity download row status.
-     - Returns: Stable ASCII token used by `moduleBrowserStateExport`.
+     - Returns: Stable ASCII token exposed by the corresponding visible row.
      - Side effects: none.
      - Failure modes: none.
      */
@@ -3208,7 +3150,7 @@ public struct ModuleBrowserView: View {
         didStartInitialStateLoad = true
         isLoadingInitialState = true
 
-        let repository = repository
+        let repository = repositoryOwner()
         let initialState = await Task.detached(priority: .userInitiated) {
             let manager = SwordManager()
             let sources = repository.loadSources()
@@ -3260,7 +3202,30 @@ public struct ModuleBrowserView: View {
      */
     @MainActor
     private func reloadRepositorySources() {
+        let repository = repositoryOwner()
         sources = repository.loadSources()
+    }
+
+    /**
+     Returns the repository facade owned by this Downloads presentation.
+
+     SwiftUI can rebuild a view value many times during a navigation transition. Keeping the
+     initial state empty prevents those value reconstructions from creating URL sessions, module
+     mutation publishers, and storage coordinators. Lifecycle and user-action paths call this
+     helper on the main actor, then retain the same facade for subsequent work.
+
+     - Returns: The existing facade, or a newly created facade retained in view state.
+     - Side effects: Creates and retains one `ModuleRepository` on first use.
+     - Failure modes: None; repository construction is non-failable.
+     */
+    @MainActor
+    private func repositoryOwner() -> ModuleRepository {
+        if let repository {
+            return repository
+        }
+        let created = repositoryFactory()
+        repository = created
+        return created
     }
 
     /**
@@ -3365,6 +3330,7 @@ public struct ModuleBrowserView: View {
             return
         }
 
+        let repository = repositoryOwner()
         let totalInstallBytes = Self.combinedInstallSizeBytes(for: modulesToInstall)
         if let requirement = repository.storageRequirement(estimatedAdditionalBytes: totalInstallBytes),
            !requirement.isSatisfied {
@@ -3426,6 +3392,7 @@ public struct ModuleBrowserView: View {
      - per-source refresh failures are accumulated without aborting usable catalog results
      */
     private func refreshCatalog() {
+        let repository = repositoryOwner()
         isRefreshing = true
         errorMessage = nil
         refreshProgress = nil
@@ -3584,6 +3551,7 @@ public struct ModuleBrowserView: View {
      - repository installation errors are caught and reported without crashing the view
     */
     private func installModule(_ module: RemoteModuleInfo) {
+        let repository = repositoryOwner()
         let identity = module.installIdentity
         guard module.isInstallable else {
             let message = module.unavailableReason
@@ -3612,20 +3580,6 @@ public struct ModuleBrowserView: View {
         downloadActivities[identity] = .inProgress(ModuleInstallProgress(phase: .queued))
         installTaskIDs[identity] = installID
         errorMessage = nil
-
-        if UITestRuntimeConfiguration.shouldHoldDownloadInstall(for: module.name) {
-            installTasks[identity] = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 60_000_000_000)
-                }
-                guard installTaskIDs[identity] == installID else { return }
-                installTasks[identity] = nil
-                installTaskIDs[identity] = nil
-                downloadActivities[identity] = nil
-                markDefaultDownloadModuleFinishedIfNeeded(identity)
-            }
-            return
-        }
 
         let task = Task {
             await Task.yield()
@@ -3755,7 +3709,7 @@ public struct ModuleBrowserView: View {
         let cancelledInstallTasks = installTasks.keys
             .filter { SwordJavaStringIdentity.equals($0.initials, name) }
             .compactMap(cancelInstall)
-        let repository = repository
+        let repository = repositoryOwner()
         let searchIndexService = searchIndexService
 
         Task {
