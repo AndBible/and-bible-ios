@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import sys
+import textwrap
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,11 +104,20 @@ def upload_artifact_steps(workflow_text: str) -> list[tuple[int, str]]:
 
 
 def upload_step_scalar(step_text: str, key: str) -> str:
-    """Returns one scalar `with:` value from an upload-artifact step."""
-    match = re.search(rf"^\s+{re.escape(key)}:\s+(.+?)\s*$", step_text, re.MULTILINE)
+    """Read inline or block scalar content for the upload retention policy check."""
+    match = re.search(rf"^([ \t]+){re.escape(key)}:[ \t]*(.*)$", step_text, re.MULTILINE)
     if match is None:
         raise AssertionError(f"Expected upload-artifact step to declare {key!r}.\n{step_text}")
-    return match.group(1)
+    value = match.group(2).strip()
+    if value not in {"|", "|-", "|+", ">", ">-", ">+"}:
+        return value
+    indentation = len(match.group(1))
+    content = []
+    for line in step_text[match.end():].splitlines():
+        if line.strip() and len(line) - len(line.lstrip(" ")) <= indentation:
+            break
+        content.append(line)
+    return textwrap.dedent("\n".join(content)).strip()
 
 
 def step_offsets(workflow_text: str, step_name: str) -> list[int]:

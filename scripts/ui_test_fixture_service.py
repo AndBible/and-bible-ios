@@ -37,6 +37,72 @@ class FixtureServiceCancelled(FixtureServiceError):
     """Raised when wrapper teardown cancels active fixture work."""
 
 
+class FixtureHostCommandTimeout(FixtureServiceError):
+    """Retains one timed-out host command after bounded termination and reap attempts."""
+
+    def __init__(
+        self,
+        *,
+        command: Sequence[str],
+        timeout_seconds: float,
+        pid: int,
+        elapsed_seconds: float,
+        returncode: int | None,
+        termination_signals_attempted: Sequence[str],
+        direct_child_reaped: bool,
+        process_group_gone: bool | None,
+        cleanup_error: str | None,
+        stdout: str,
+        stderr: str,
+        stdout_truncated: bool | None = False,
+        stderr_truncated: bool | None = False,
+        stdout_original_byte_count: int | None = None,
+        stderr_original_byte_count: int | None = None,
+        stdout_capture_error: str | None = None,
+        stderr_capture_error: str | None = None,
+    ) -> None:
+        super().__init__(f"fixture host command timed out after {timeout_seconds:.1f}s")
+        self.command = tuple(command)
+        self.timeout_seconds = timeout_seconds
+        self.pid = pid
+        self.elapsed_seconds = elapsed_seconds
+        self.returncode = returncode
+        self.termination_signals_attempted = tuple(termination_signals_attempted)
+        self.direct_child_reaped = direct_child_reaped
+        self.process_group_gone = process_group_gone
+        self.cleanup_error = cleanup_error
+        bounded_stdout = _bounded_diagnostic_output(stdout)
+        bounded_stderr = _bounded_diagnostic_output(stderr)
+        self.stdout = str(bounded_stdout["text"])
+        self.stderr = str(bounded_stderr["text"])
+        self.stdout_capture_error = stdout_capture_error
+        self.stderr_capture_error = stderr_capture_error
+        self.stdout_truncated = (
+            None
+            if stdout_capture_error is not None
+            else stdout_truncated or bool(bounded_stdout["truncated"])
+        )
+        self.stderr_truncated = (
+            None
+            if stderr_capture_error is not None
+            else stderr_truncated or bool(bounded_stderr["truncated"])
+        )
+        self.stdout_original_byte_count = (
+            None
+            if stdout_capture_error is not None
+            else stdout_original_byte_count
+            if stdout_original_byte_count is not None
+            else int(bounded_stdout["originalByteCount"])
+        )
+        self.stderr_original_byte_count = (
+            None
+            if stderr_capture_error is not None
+            else stderr_original_byte_count
+            if stderr_original_byte_count is not None
+            else int(bounded_stderr["originalByteCount"])
+        )
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """Bounded subprocess result captured through temporary files."""
@@ -373,15 +439,16 @@ def run_command(
             close_fds=True,
             start_new_session=True,
         )
-        deadline = time.monotonic() + timeout_seconds
+        started_at = time.monotonic()
+        deadline = started_at + timeout_seconds
+        timed_out = False
         try:
             while process.poll() is None:
                 if cancellation.wait(timeout=min(0.05, max(0.0, deadline - time.monotonic()))):
                     raise FixtureServiceCancelled("fixture service stopped during active command")
                 if time.monotonic() >= deadline:
-                    raise FixtureServiceError(
-                        f"fixture host command timed out after {timeout_seconds:.1f}s"
-                    )
+                    timed_out = True
+                    break
         except BaseException:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -396,6 +463,77 @@ def run_command(
                     pass
                 process.wait(timeout=1)
             raise
+        if timed_out:
+            termination_signals_attempted = ["SIGTERM"]
+            cleanup_errors: list[str] = []
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            except OSError as error:
+                cleanup_errors.append(f"SIGTERM failed: {error}")
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception as error:
+                cleanup_errors.append(f"direct-child wait after SIGTERM failed: {error}")
+            direct_child_reaped = process.poll() is not None
+            try:
+                process_group_gone = not _process_group_exists(process.pid)
+            except OSError as error:
+                process_group_gone = None
+                cleanup_errors.append(f"process-group check after SIGTERM failed: {error}")
+            if process_group_gone is not True:
+                termination_signals_attempted.append("SIGKILL")
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError as error:
+                    cleanup_errors.append(f"SIGKILL failed: {error}")
+                if not direct_child_reaped:
+                    try:
+                        process.wait(timeout=1)
+                    except subprocess.TimeoutExpired as error:
+                        cleanup_errors.append(str(error))
+                    except Exception as error:
+                        cleanup_errors.append(f"direct-child wait after SIGKILL failed: {error}")
+                    direct_child_reaped = process.poll() is not None
+                try:
+                    process_group_gone = _wait_for_process_group_exit(process.pid, 0.25)
+                except OSError as error:
+                    process_group_gone = None
+                    cleanup_errors.append(f"final process-group check failed: {error}")
+            if process_group_gone is False:
+                cleanup_errors.append("process group still exists after termination attempts")
+            if not direct_child_reaped:
+                cleanup_errors.append("direct child was not reaped after termination attempts")
+            stdout, stdout_truncated, stdout_byte_count, stdout_capture_error = (
+                _capture_timeout_output(stdout_file, "stdout", cleanup_errors)
+            )
+            stderr, stderr_truncated, stderr_byte_count, stderr_capture_error = (
+                _capture_timeout_output(stderr_file, "stderr", cleanup_errors)
+            )
+            raise FixtureHostCommandTimeout(
+                command=command,
+                timeout_seconds=timeout_seconds,
+                pid=process.pid,
+                elapsed_seconds=time.monotonic() - started_at,
+                returncode=process.returncode,
+                termination_signals_attempted=termination_signals_attempted,
+                direct_child_reaped=direct_child_reaped,
+                process_group_gone=process_group_gone,
+                cleanup_error="; ".join(cleanup_errors) or None,
+                stdout=stdout,
+                stderr=stderr,
+                stdout_truncated=stdout_truncated,
+                stderr_truncated=stderr_truncated,
+                stdout_original_byte_count=stdout_byte_count,
+                stderr_original_byte_count=stderr_byte_count,
+                stdout_capture_error=stdout_capture_error,
+                stderr_capture_error=stderr_capture_error,
+            )
         stdout_file.seek(0)
         stderr_file.seek(0)
         return CommandResult(
@@ -409,6 +547,8 @@ def install_simulator_application(
     *,
     simulator_id: str,
     application_path: Path,
+    bundle_identifier: str | None = None,
+    diagnostic_path: Path | None = None,
     timeout_seconds: float = 60,
     command_runner: CommandRunner = run_command,
 ) -> None:
@@ -419,17 +559,218 @@ def install_simulator_application(
     until ``XCUIApplication.launch()``, which is too late for fixture seeding.
     """
     cancellation = threading.Event()
-    result = command_runner(
-        ("xcrun", "simctl", "install", simulator_id, str(application_path)),
-        timeout_seconds,
-        cancellation,
-    )
+    try:
+        result = command_runner(
+            ("xcrun", "simctl", "install", simulator_id, str(application_path)),
+            timeout_seconds,
+            cancellation,
+        )
+    except FixtureHostCommandTimeout as error:
+        diagnostic_suffix = ""
+        if diagnostic_path is not None:
+            try:
+                write_install_timeout_diagnostic(
+                    path=diagnostic_path,
+                    timeout=error,
+                    simulator_id=simulator_id,
+                    bundle_identifier=bundle_identifier,
+                    application_path=application_path,
+                    command_runner=command_runner,
+                )
+                diagnostic_suffix = f"; diagnostic: {diagnostic_path}"
+            except Exception as diagnostic_error:
+                bounded_error = _bounded_diagnostic_output(
+                    str(diagnostic_error),
+                    limit=4_096,
+                )
+                diagnostic_suffix = (
+                    "; diagnostic capture failed without replacing the install timeout: "
+                    f"{bounded_error['text']}"
+                )
+        raise FixtureServiceError(
+            "verified UI target installation timed out "
+            f"after {error.timeout_seconds:.1f}s on simulator {simulator_id}"
+            f"{diagnostic_suffix}"
+        ) from error
     if result.returncode != 0:
         diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
         raise FixtureServiceError(
             "cannot install the verified UI target application "
             f"on simulator {simulator_id}: exit {result.returncode}: {diagnostic}"
         )
+
+
+def _read_bounded_temporary_output(
+    file: io.BufferedRandom,
+    limit: int = 32_768,
+) -> tuple[str, bool, int]:
+    """Read only the tail of one seekable command output file."""
+    file.seek(0, os.SEEK_END)
+    original_byte_count = file.tell()
+    file.seek(max(0, original_byte_count - limit))
+    retained = file.read(limit).decode("utf-8", errors="replace")
+    return retained, original_byte_count > limit, original_byte_count
+
+
+def _capture_timeout_output(
+    file: io.BufferedRandom,
+    label: str,
+    cleanup_errors: list[str],
+) -> tuple[str, bool | None, int | None, str | None]:
+    """Retain a bounded output tail without replacing the command timeout."""
+    try:
+        text, truncated, original_byte_count = _read_bounded_temporary_output(file)
+        return text, truncated, original_byte_count, None
+    except Exception as error:
+        bounded_error = _bounded_diagnostic_output(str(error), limit=4_096)
+        capture_error = f"{label} capture failed: {bounded_error['text']}"
+        cleanup_errors.append(capture_error)
+        return "", None, None, capture_error
+
+
+def _process_group_exists(process_group_id: int) -> bool:
+    """Return whether the host still reports any process in one owned process group."""
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _wait_for_process_group_exit(process_group_id: int, timeout_seconds: float) -> bool:
+    """Bound the final existence check after a process-group termination signal."""
+    deadline = time.monotonic() + timeout_seconds
+    while _process_group_exists(process_group_id):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+    return True
+
+
+def _bounded_diagnostic_output(value: str, limit: int = 32_768) -> dict[str, object]:
+    """Return bounded UTF-8 diagnostic text without reading process environment values."""
+    encoded = value.encode("utf-8", errors="replace")
+    if len(encoded) <= limit:
+        return {"text": value, "truncated": False, "originalByteCount": len(encoded)}
+    retained = encoded[-limit:].decode("utf-8", errors="replace")
+    return {"text": retained, "truncated": True, "originalByteCount": len(encoded)}
+
+
+def _diagnostic_command_record(
+    command: Sequence[str],
+    command_runner: CommandRunner,
+) -> dict[str, object]:
+    """Run one bounded read-only CoreSimulator probe and retain failures as data."""
+    try:
+        result = command_runner(command, 5, threading.Event())
+        return {
+            "command": list(command),
+            "timeoutSeconds": 5,
+            "returncode": result.returncode,
+            "stdout": _bounded_diagnostic_output(result.stdout),
+            "stderr": _bounded_diagnostic_output(result.stderr),
+        }
+    except FixtureHostCommandTimeout as error:
+        return {
+            "command": list(command),
+            "timeoutSeconds": 5,
+            "timedOut": True,
+            "pid": error.pid,
+            "elapsedSeconds": error.elapsed_seconds,
+            "returncode": error.returncode,
+            "terminationSignalsAttempted": list(error.termination_signals_attempted),
+            "directChildReaped": error.direct_child_reaped,
+            "processGroupGone": error.process_group_gone,
+            "cleanupError": (
+                _bounded_diagnostic_output(error.cleanup_error, limit=4_096)
+                if error.cleanup_error is not None
+                else None
+            ),
+            "stdout": {
+                "text": error.stdout,
+                "truncated": error.stdout_truncated,
+                "originalByteCount": error.stdout_original_byte_count,
+                "captureError": error.stdout_capture_error,
+            },
+            "stderr": {
+                "text": error.stderr,
+                "truncated": error.stderr_truncated,
+                "originalByteCount": error.stderr_original_byte_count,
+                "captureError": error.stderr_capture_error,
+            },
+        }
+    except Exception as error:
+        return {
+            "command": list(command),
+            "error": _bounded_diagnostic_output(str(error), limit=4_096),
+        }
+
+
+def write_install_timeout_diagnostic(
+    *,
+    path: Path,
+    timeout: FixtureHostCommandTimeout,
+    simulator_id: str,
+    bundle_identifier: str | None,
+    application_path: Path,
+    command_runner: CommandRunner = run_command,
+) -> None:
+    """Atomically retain one bounded, install-specific timeout record."""
+    payload = {
+        "formatVersion": 1,
+        "phase": "ui-target-install",
+        "simulatorID": simulator_id,
+        "bundleIdentifier": bundle_identifier,
+        "applicationPath": str(application_path),
+        "timedCommand": list(timeout.command),
+        "timeoutSeconds": timeout.timeout_seconds,
+        "pid": timeout.pid,
+        "elapsedSeconds": timeout.elapsed_seconds,
+        "returncode": timeout.returncode,
+        "terminationSignalsAttempted": list(timeout.termination_signals_attempted),
+        "directChildReaped": timeout.direct_child_reaped,
+        "processGroupGone": timeout.process_group_gone,
+        "cleanupError": (
+            _bounded_diagnostic_output(timeout.cleanup_error, limit=4_096)
+            if timeout.cleanup_error is not None
+            else None
+        ),
+        "stdout": {
+            "text": timeout.stdout,
+            "truncated": timeout.stdout_truncated,
+            "originalByteCount": timeout.stdout_original_byte_count,
+            "captureError": timeout.stdout_capture_error,
+        },
+        "stderr": {
+            "text": timeout.stderr,
+            "truncated": timeout.stderr_truncated,
+            "originalByteCount": timeout.stderr_original_byte_count,
+            "captureError": timeout.stderr_capture_error,
+        },
+        "postTimeoutProbes": [
+            _diagnostic_command_record(
+                ("xcrun", "simctl", "list", "devices", "available"),
+                command_runner,
+            ),
+            _diagnostic_command_record(
+                ("xcrun", "simctl", "listapps", simulator_id),
+                command_runner,
+            ),
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary_path, path)
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 @dataclass(frozen=True)

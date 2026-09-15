@@ -1338,7 +1338,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
-          path: .artifacts/*.xcresult
+          path: |
+            .artifacts/*.xcresult
+            .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 14
@@ -1348,7 +1350,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: andbible-xcresult-${{ github.run_id }}-${{ matrix.artifact_suffix }}
-          path: .artifacts/*.xcresult
+          path: |
+            .artifacts/*.xcresult
+            .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 14

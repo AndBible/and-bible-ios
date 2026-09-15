@@ -7,7 +7,9 @@ import io
 import json
 import os
 import pathlib
+import signal
 import socket
+import subprocess
 import threading
 import sys
 import tempfile
@@ -22,6 +24,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from ui_test_fixture_service import (
     CommandResult,
+    FixtureHostCommandTimeout,
     FixtureServiceConfiguration,
     FixtureServiceError,
     UITestFixtureService,
@@ -135,6 +138,7 @@ class FixtureServiceTestCase(unittest.TestCase):
 
     def test_install_simulator_application_reports_exact_host_failure(self) -> None:
         application_path = self.root / "Products" / "AndBible.app"
+        diagnostic_path = self.root / "artifacts" / "ui.fixture-host-diagnostic.json"
         self.runner.results["unknown"] = CommandResult(
             13,
             "",
@@ -148,8 +152,177 @@ class FixtureServiceTestCase(unittest.TestCase):
             install_simulator_application(
                 simulator_id=SIMULATOR_ID,
                 application_path=application_path,
+                bundle_identifier=BUNDLE_ID,
+                diagnostic_path=diagnostic_path,
                 command_runner=self.runner,
             )
+        self.assertFalse(diagnostic_path.exists())
+        self.assertEqual(
+            self.runner.commands,
+            [["xcrun", "simctl", "install", SIMULATOR_ID, str(application_path)]],
+        )
+
+    def test_command_timeout_reaps_process_and_retains_partial_output(self) -> None:
+        with self.assertRaises(FixtureHostCommandTimeout) as captured:
+            run_command(
+                (
+                    sys.executable,
+                    "-c",
+                    "import sys,time; sys.stdout.write('x' * 40000 + 'TAIL-SENTINEL\\n'); "
+                    "sys.stdout.flush(); "
+                    "print('partial-error', file=sys.stderr, flush=True); time.sleep(10)",
+                ),
+                0.5,
+                threading.Event(),
+            )
+
+        error = captured.exception
+        self.assertGreaterEqual(error.elapsed_seconds, 0.5)
+        self.assertEqual(error.termination_signals_attempted, ("SIGTERM",))
+        self.assertEqual(error.returncode, -signal.SIGTERM)
+        self.assertTrue(error.direct_child_reaped)
+        self.assertTrue(error.process_group_gone)
+        self.assertIsNone(error.cleanup_error)
+        self.assertTrue(error.stdout_truncated)
+        self.assertEqual(error.stdout_original_byte_count, 40_014)
+        self.assertLessEqual(len(error.stdout.encode("utf-8")), 32_768)
+        self.assertTrue(error.stdout.endswith("TAIL-SENTINEL\n"))
+        self.assertIsNone(error.stdout_capture_error)
+        self.assertIn("partial-error", error.stderr)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(error.pid, 0)
+
+    def test_command_timeout_retains_unreaped_parent_as_diagnostic_state(self) -> None:
+        process = mock.Mock(pid=5151, returncode=None)
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired(["fixture"], 1)
+
+        with mock.patch(
+            "ui_test_fixture_service.subprocess.Popen",
+            return_value=process,
+        ), mock.patch("ui_test_fixture_service.os.killpg") as kill_mock, mock.patch(
+            "ui_test_fixture_service._read_bounded_temporary_output",
+            side_effect=[OSError("stdout unavailable"), ("stderr", False, 6)],
+        ):
+            kill_mock.side_effect = lambda _pid, signal_number: (
+                None if signal_number != 0 else None
+            )
+            with self.assertRaises(FixtureHostCommandTimeout) as captured:
+                run_command(("fixture",), 0.01, threading.Event())
+
+        error = captured.exception
+        self.assertEqual(error.termination_signals_attempted, ("SIGTERM", "SIGKILL"))
+        self.assertFalse(error.direct_child_reaped)
+        self.assertFalse(error.process_group_gone)
+        self.assertIsNone(error.returncode)
+        self.assertIn("timed out", error.cleanup_error or "")
+        self.assertIn("stdout capture failed: stdout unavailable", error.cleanup_error or "")
+        self.assertEqual(error.stdout, "")
+        self.assertIsNone(error.stdout_truncated)
+        self.assertIsNone(error.stdout_original_byte_count)
+        self.assertEqual(error.stdout_capture_error, "stdout capture failed: stdout unavailable")
+        self.assertEqual(error.stderr, "stderr")
+        self.assertEqual(kill_mock.call_args_list[0], mock.call(5151, signal.SIGTERM))
+        self.assertIn(mock.call(5151, signal.SIGKILL), kill_mock.call_args_list)
+
+    def test_install_timeout_writes_exact_bounded_diagnostic_without_retry(self) -> None:
+        application_path = self.root / "Products" / "AndBible.app"
+        diagnostic_path = self.root / "artifacts" / "ui.fixture-host-diagnostic.json"
+        commands: list[list[str]] = []
+
+        def timeout_then_diagnose(command, timeout, _cancellation) -> CommandResult:
+            command = list(command)
+            commands.append(command)
+            if "install" in command:
+                raise FixtureHostCommandTimeout(
+                    command=command,
+                    timeout_seconds=timeout,
+                    pid=4242,
+                    elapsed_seconds=60.25,
+                    returncode=None,
+                    termination_signals_attempted=("SIGTERM", "SIGKILL"),
+                    direct_child_reaped=False,
+                    process_group_gone=False,
+                    cleanup_error="Command did not exit after SIGKILL",
+                    stdout="start\n" + ("x" * 40_000),
+                    stderr="CoreSimulator stalled\n",
+                )
+            if "listapps" in command:
+                raise FixtureServiceError("listapps unavailable")
+            return CommandResult(0, f"{SIMULATOR_ID} (Booted)\n", "")
+
+        with self.assertRaisesRegex(
+            FixtureServiceError,
+            "verified UI target installation timed out after 60.0s",
+        ):
+            install_simulator_application(
+                simulator_id=SIMULATOR_ID,
+                application_path=application_path,
+                bundle_identifier=BUNDLE_ID,
+                diagnostic_path=diagnostic_path,
+                command_runner=timeout_then_diagnose,
+            )
+
+        payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["phase"], "ui-target-install")
+        self.assertEqual(payload["simulatorID"], SIMULATOR_ID)
+        self.assertEqual(payload["bundleIdentifier"], BUNDLE_ID)
+        self.assertEqual(payload["applicationPath"], str(application_path))
+        self.assertEqual(payload["pid"], 4242)
+        self.assertEqual(payload["terminationSignalsAttempted"], ["SIGTERM", "SIGKILL"])
+        self.assertFalse(payload["directChildReaped"])
+        self.assertFalse(payload["processGroupGone"])
+        self.assertEqual(
+            payload["cleanupError"]["text"],
+            "Command did not exit after SIGKILL",
+        )
+        self.assertTrue(payload["stdout"]["truncated"])
+        self.assertEqual(payload["stdout"]["originalByteCount"], 40_006)
+        self.assertEqual(payload["stderr"]["text"], "CoreSimulator stalled\n")
+        self.assertEqual(
+            payload["postTimeoutProbes"][1]["error"]["text"],
+            "listapps unavailable",
+        )
+        self.assertEqual(
+            commands,
+            [
+                ["xcrun", "simctl", "install", SIMULATOR_ID, str(application_path)],
+                ["xcrun", "simctl", "list", "devices", "available"],
+                ["xcrun", "simctl", "listapps", SIMULATOR_ID],
+            ],
+        )
+
+    def test_install_timeout_remains_primary_when_diagnostic_write_fails(self) -> None:
+        def timed_out(command, timeout, _cancellation) -> CommandResult:
+            raise FixtureHostCommandTimeout(
+                command=command,
+                timeout_seconds=timeout,
+                pid=4343,
+                elapsed_seconds=60,
+                returncode=-signal.SIGTERM,
+                termination_signals_attempted=("SIGTERM",),
+                direct_child_reaped=True,
+                process_group_gone=True,
+                cleanup_error=None,
+                stdout="",
+                stderr="",
+            )
+
+        with mock.patch(
+            "ui_test_fixture_service.write_install_timeout_diagnostic",
+            side_effect=OSError("artifact volume unavailable"),
+        ), self.assertRaises(FixtureServiceError) as captured:
+            install_simulator_application(
+                simulator_id=SIMULATOR_ID,
+                application_path=self.root / "AndBible.app",
+                bundle_identifier=BUNDLE_ID,
+                diagnostic_path=self.root / "diagnostic.json",
+                command_runner=timed_out,
+            )
+
+        self.assertIn("installation timed out after 60.0s", str(captured.exception))
+        self.assertIn("diagnostic capture failed", str(captured.exception))
+        self.assertIsInstance(captured.exception.__cause__, FixtureHostCommandTimeout)
 
     def publish_request(self, payload: dict[str, object]) -> dict[str, object]:
         request_id = str(payload["requestID"])

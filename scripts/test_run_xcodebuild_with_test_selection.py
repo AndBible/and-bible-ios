@@ -23,6 +23,7 @@ from run_xcodebuild_with_test_selection import (
     UITestApplicationProduct,
     build_xcodebuild_command,
     discover_single_xctestrun_path,
+    fixture_host_diagnostic_path,
     fixture_service_configuration,
     main,
     parse_test_selection_args,
@@ -393,6 +394,16 @@ class SelectedUITestDeveloperDirTests(unittest.TestCase):
 
 
 class XctestrunEnvironmentTests(unittest.TestCase):
+    def test_fixture_host_diagnostic_path_is_bound_to_requested_result_bundle(self) -> None:
+        self.assertEqual(
+            fixture_host_diagnostic_path(
+                ".artifacts/AndBibleTests-ui-shard-4.xcresult"
+            ),
+            pathlib.Path(
+                ".artifacts/AndBibleTests-ui-shard-4.fixture-host-diagnostic.json"
+            ),
+        )
+
     def test_simulator_id_from_destination_requires_one_canonical_uuid(self) -> None:
         self.assertEqual(
             simulator_id_from_destination(
@@ -509,6 +520,8 @@ class XctestrunEnvironmentTests(unittest.TestCase):
             {
                 "simulator_id": SIMULATOR_ID,
                 "application_path": pathlib.Path("/products/AndBible.app"),
+                "bundle_identifier": "org.andbible.ios",
+                "diagnostic_path": None,
             },
         )
         self.assertNotIn("UITEST_FIXTURE_SERVICE_DIRECTORY", environment)
@@ -1333,6 +1346,10 @@ class MainTests(unittest.TestCase):
             install_mock.assert_called_once_with(
                 simulator_id=SIMULATOR_ID,
                 application_path=application_path.resolve(),
+                bundle_identifier="org.andbible.ios",
+                diagnostic_path=pathlib.Path(
+                    ".artifacts/AndBibleTests-ui.fixture-host-diagnostic.json"
+                ),
             )
             result_bundle_mock.assert_called_once_with(
                 ".artifacts/AndBibleTests-ui.xcresult",

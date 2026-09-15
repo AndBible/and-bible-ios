@@ -238,6 +238,7 @@ def ui_test_fixture_service_session(
     destination: str,
     environment: MutableMapping[str, str],
     application_path: Path,
+    install_diagnostic_path: Path | None = None,
     service_factory: Callable[..., UITestFixtureService] | None = None,
     application_installer: Callable[..., None] | None = None,
 ) -> Iterator[Path]:
@@ -254,6 +255,8 @@ def ui_test_fixture_service_session(
         (application_installer or install_simulator_application)(
             simulator_id=configuration.simulator_id,
             application_path=application_path,
+            bundle_identifier=configuration.bundle_identifier,
+            diagnostic_path=install_diagnostic_path,
         )
         service.start()
         environment["UITEST_FIXTURE_SERVICE_DIRECTORY"] = str(service_directory)
@@ -278,6 +281,14 @@ def discover_single_xctestrun_path(derived_data_path: str | None) -> str | None:
     if len(xctestrun_paths) != 1:
         return None
     return xctestrun_paths[0]
+
+
+def fixture_host_diagnostic_path(result_bundle_path: str) -> Path:
+    """Return the install-timeout artifact adjacent to the requested result bundle."""
+    result_path = Path(result_bundle_path)
+    if not result_path.name:
+        raise ValueError("result bundle path must name a file")
+    return result_path.with_suffix(".fixture-host-diagnostic.json")
 
 
 def _xctestrun_test_targets(xctestrun: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -862,6 +873,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         destination=args.destination,
                         environment=os.environ,
                         application_path=application_product.path,
+                        install_diagnostic_path=fixture_host_diagnostic_path(
+                            args.result_bundle_path
+                        ),
                     )
                 )
             except (ValueError, FixtureServiceError) as error:
