@@ -517,10 +517,12 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     /// Reference to the web view for sending responses.
     public weak var webView: WKWebView?
 
-    /// Test-only recorder for emitted JavaScript when no live WKWebView is constructed.
-    ///
-    /// Its synchronous invocation is not a production WebKit reentrancy boundary. Tests that need
-    /// to supersede publication must do so through a native callback or an asynchronous phase.
+    /**
+     Test-only recorder for emitted JavaScript when no live WKWebView is constructed.
+
+     Its synchronous invocation is not a production WebKit reentrancy boundary. Tests that need
+     to supersede publication must do so through a native callback or an asynchronous phase.
+     */
     var javaScriptEvaluationObserver: ((String) -> Void)?
 
     /// Whether the ambiguous selection modal should be size-limited.
