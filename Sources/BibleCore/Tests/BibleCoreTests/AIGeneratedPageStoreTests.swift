@@ -7,9 +7,10 @@ import XCTest
 /**
  Protects Android's generated-page transaction and strict/loose cache lookup contracts.
 
- Tests use an in-memory My Documents graph without `Setting`, so the production sync-journal helper
- deliberately takes its documented graph-only direct-save path. Marker delivery uses an isolated
- event center and is synchronous, making assertions deterministic without sleeps.
+ Most tests use an in-memory My Documents graph without `Setting`, so the production sync-journal
+ helper deliberately takes its documented graph-only direct-save path. The sparse cache-query
+ contract uses the complete app schema over process-lifetime SQLite stores. Marker delivery uses an
+ isolated event center and is synchronous, making assertions deterministic without sleeps.
  */
 @MainActor
 final class AIGeneratedPageStoreTests: XCTestCase {
@@ -259,6 +260,172 @@ final class AIGeneratedPageStoreTests: XCTestCase {
         )
       )
     )
+  }
+
+  /**
+   Verifies sparse cache lookup preserves live-owner selection after primary-row filtering.
+
+   - Setup: Persists two matching live pages with the same newest timestamp, matching rows with
+     incomplete owners, and newer live rows that violate each strict or loose predicate component.
+   - Expected result: Strict and loose lookup both return the live page with the greater stable UUID,
+     preserving the established timestamp and UUID ordering after dangling rows are omitted.
+   - Failure meaning: A bounded fetch changed Android's exact matching, allowed a missing page owner
+     to win, or made equal-time cache selection nondeterministic.
+   - Side effects: Creates complete process-lifetime cloud/local SQLite fixture stores.
+   */
+  func testCacheLookupIgnoresUnrelatedAndDanglingRowsBeforeStableLiveSelection() throws {
+    let directory = try makeProcessLifetimePersistentStoreDirectory(
+      label: "ai-cache-bounded-lookup"
+    )
+    let container = try makePersistentContainer(in: directory)
+    let context = ModelContext(container)
+    context.autosaveEnabled = false
+    let store = AIGeneratedPageStore(
+      modelContext: context,
+      isDocumentInitialsUnavailable: { _ in false }
+    )
+    let promptID = try XCTUnwrap(
+      UUID(uuidString: "11111111-1111-1111-1111-111111111111")
+    )
+    let cacheContext = cacheContext(selectedText: "bounded lookup")
+    let contextHash = try cacheContext.computeHash()
+    let document = MyDocument(name: "AI Documents", initials: "AIDocuments")
+    context.insert(document)
+
+    func insertLiveEntry(
+      pageID: UUID,
+      pageKey: String,
+      createdAt: TimeInterval,
+      sourcePromptID: UUID,
+      start: Int?,
+      end: Int?,
+      hash: String?
+    ) -> MyDocumentPage {
+      let page = MyDocumentPage(
+        id: pageID,
+        title: pageKey,
+        pageKey: pageKey,
+        createdAt: Date(timeIntervalSince1970: createdAt)
+      )
+      let cache = AiPageCacheEntry(
+        pageId: pageID,
+        sourcePromptId: sourcePromptID,
+        kjvOrdinalStart: start,
+        kjvOrdinalEnd: end,
+        contextHash: hash
+      )
+      context.insert(page)
+      context.insert(cache)
+      page.document = document
+      cache.page = page
+      return page
+    }
+
+    let lowerPage = insertLiveEntry(
+      pageID: try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222")),
+      pageKey: "lower",
+      createdAt: 10,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+    let higherPage = insertLiveEntry(
+      pageID: try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333")),
+      pageKey: "higher",
+      createdAt: 10,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-prompt",
+      createdAt: 20,
+      sourcePromptID: UUID(),
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-start",
+      createdAt: 21,
+      sourcePromptID: promptID,
+      start: 5,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: "wrong-start"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-end",
+      createdAt: 22,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: 5,
+      hash: "wrong-end"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "nil-start",
+      createdAt: 23,
+      sourcePromptID: promptID,
+      start: nil,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: "nil-start"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "nil-end",
+      createdAt: 24,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: nil,
+      hash: "nil-end"
+    )
+
+    let ownerlessPage = MyDocumentPage(
+      id: UUID(),
+      title: "Ownerless",
+      pageKey: "ownerless",
+      createdAt: Date(timeIntervalSince1970: 30)
+    )
+    let ownerlessCache = AiPageCacheEntry(
+      pageId: ownerlessPage.id,
+      sourcePromptId: promptID,
+      kjvOrdinalStart: cacheContext.kjvOrdinalStart,
+      kjvOrdinalEnd: cacheContext.kjvOrdinalEnd,
+      contextHash: contextHash
+    )
+    let pagelessCache = AiPageCacheEntry(
+      pageId: UUID(),
+      sourcePromptId: promptID,
+      kjvOrdinalStart: cacheContext.kjvOrdinalStart,
+      kjvOrdinalEnd: cacheContext.kjvOrdinalEnd,
+      contextHash: contextHash
+    )
+    context.insert(ownerlessPage)
+    context.insert(ownerlessCache)
+    context.insert(pagelessCache)
+    ownerlessCache.page = ownerlessPage
+    try context.save()
+
+    let expected = AIGeneratedPageLocation(
+      pageID: higherPage.id,
+      documentInitials: document.initials,
+      pageKey: higherPage.pageKey
+    )
+    XCTAssertEqual(
+      try store.cachedPage(for: prompt(id: promptID, strict: true), context: cacheContext),
+      expected
+    )
+    XCTAssertEqual(
+      try store.cachedPage(for: prompt(id: promptID, strict: false), context: cacheContext),
+      expected
+    )
+    withExtendedLifetime(container) {}
   }
 
   /**
@@ -686,6 +853,32 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     return try ModelContainer(
       for: schema,
       configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+    )
+  }
+
+  /** Opens the complete app schema over separate process-lifetime cloud and local SQLite stores. */
+  private func makePersistentContainer(in directory: URL) throws -> ModelContainer {
+    let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+      + AIModelRegistration.cloudSyncableModels
+    let localModels = BibleCoreBaseModelRegistration.localModels
+      + AIModelRegistration.localOnlyModels
+    let schema = Schema(cloudModels + localModels)
+    return try ModelContainer(
+      for: schema,
+      configurations: [
+        ModelConfiguration(
+          "AICacheBoundedLookupCloud",
+          schema: Schema(cloudModels),
+          url: directory.appendingPathComponent("AndBible.store"),
+          cloudKitDatabase: .none
+        ),
+        ModelConfiguration(
+          "AICacheBoundedLookupLocal",
+          schema: Schema(localModels),
+          url: directory.appendingPathComponent("LocalStore.store"),
+          cloudKitDatabase: .none
+        ),
+      ]
     )
   }
 

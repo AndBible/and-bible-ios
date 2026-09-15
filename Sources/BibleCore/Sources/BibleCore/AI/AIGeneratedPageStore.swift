@@ -145,7 +145,8 @@ public final class AIGeneratedPageStore {
      - prompt: Effective prompt containing strict-versus-loose cache policy.
      - context: Captured output-affecting source context.
    - Returns: Newest matching live page, or `nil` when Android would execute a fresh run.
-   - Side effects: Reads SwiftData through a fresh context.
+   - Side effects: Fetches entries matching the scalar predicate through a fresh SwiftData context,
+     then resolves live page/document ownership for deterministic selection.
    - Throws: Context hashing or SwiftData fetch failures.
    */
   public func cachedPage(
@@ -153,14 +154,8 @@ public final class AIGeneratedPageStore {
     context: CacheableContext
   ) throws -> AIGeneratedPageLocation? {
     let modelContext = ModelContext(modelContainer)
-    let entries: [AiPageCacheEntry]
-    do {
-      entries = try modelContext.fetch(FetchDescriptor<AiPageCacheEntry>())
-    } catch {
-      throw AIGeneratedPageStoreError.persistenceFailed(error.localizedDescription)
-    }
-
-    let matches: [AiPageCacheEntry]
+    let descriptor: FetchDescriptor<AiPageCacheEntry>
+    let promptID = prompt.id
     if prompt.strictContextMatching {
       let hash: String
       do {
@@ -168,20 +163,31 @@ public final class AIGeneratedPageStore {
       } catch {
         throw AIGeneratedPageStoreError.invalidSourceContext
       }
-      matches = entries.filter {
-        $0.sourcePromptId == prompt.id && $0.contextHash == hash
-      }
+      descriptor = FetchDescriptor(
+        predicate: #Predicate {
+          $0.sourcePromptId == promptID && $0.contextHash == hash
+        }
+      )
     } else {
       guard let start = context.kjvOrdinalStart,
         let end = context.kjvOrdinalEnd
       else {
         return nil
       }
-      matches = entries.filter {
-        $0.sourcePromptId == prompt.id
+      descriptor = FetchDescriptor(
+        predicate: #Predicate {
+          $0.sourcePromptId == promptID
           && $0.kjvOrdinalStart == start
           && $0.kjvOrdinalEnd == end
-      }
+        }
+      )
+    }
+
+    let matches: [AiPageCacheEntry]
+    do {
+      matches = try modelContext.fetch(descriptor)
+    } catch {
+      throw AIGeneratedPageStoreError.persistenceFailed(error.localizedDescription)
     }
 
     return
