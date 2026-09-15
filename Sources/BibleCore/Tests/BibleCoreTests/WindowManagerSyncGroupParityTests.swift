@@ -31,7 +31,7 @@ final class WindowManagerSyncGroupParityTests: XCTestCase {
             canProvidePosition: true,
             position: WindowSynchronizationPosition(ordinal: 902, key: "John.3.16")
         )
-        manager.registerController(source, for: peer.id)
+        manager.registerController(source, for: peer)
 
         var callbackCount = 0
         manager.onSyncVerseChanged = { sourceWindow, ordinal, key in
@@ -76,14 +76,14 @@ final class WindowManagerSyncGroupParityTests: XCTestCase {
         }
         manager.registerController(
             SyncSourceFixture(canProvidePosition: false, position: nil),
-            for: ineligiblePeer.id
+            for: ineligiblePeer
         )
         manager.registerController(
             SyncSourceFixture(
                 canProvidePosition: true,
                 position: WindowSynchronizationPosition(ordinal: 77, key: "Exod.2.3")
             ),
-            for: eligiblePeer.id
+            for: eligiblePeer
         )
 
         var selectedSourceID: UUID?
@@ -126,12 +126,21 @@ final class WindowManagerSyncGroupParityTests: XCTestCase {
     /**
      Creates the minimal in-memory workspace schema required by these manager tests.
 
+     Window cloning preserves Android-only PageManager fidelity through one local `Setting` lookup,
+     so the fixture includes that established dependency without registering unrelated app models.
+
      - Returns: An isolated SwiftData container discarded after each test.
      - Side Effects: Allocates only in-memory model storage.
      - Failure Modes: Rethrows SwiftData schema/container construction errors.
      */
     private func makeContainer() throws -> ModelContainer {
-        let schema = Schema([Workspace.self, Window.self, PageManager.self, HistoryItem.self])
+        let schema = Schema([
+            Workspace.self,
+            Window.self,
+            PageManager.self,
+            HistoryItem.self,
+            Setting.self,
+        ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
     }

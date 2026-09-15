@@ -36,6 +36,28 @@ enum BibleReaderPreparationPublicationDisposition: Equatable, Sendable {
     case accepted
 }
 
+/**
+ Reports whether one exact prepared request committed its selected native key before publication
+ settled.
+
+ This receipt separates Android's selected page-manager state from WebView replacement acceptance.
+ A non-nil `committedKey` is emitted only by the selected-intent mutation for the same request;
+ matching controller state left by an earlier request cannot manufacture a successful receipt.
+
+ - Side effects: None. The value copies the terminal publication disposition and any exact key
+   committed by the request before that disposition settled.
+ - Failure modes: `committedKey` remains nil for prepared error documents that never commit a
+   source key. It may remain non-nil when later publication settles as failed, cancelled, stale, or
+   dispatched-stale; callers must reject those dispositions because the earlier native mutation
+   does not prove that an obsolete request still owns the selected state.
+ */
+struct BibleReaderPreparationSelectionSettlement: Equatable, Sendable {
+    /// Terminal result of the bridge publication attempt associated with this selection request.
+    let publicationDisposition: BibleReaderPreparationPublicationDisposition
+    /// Exact key committed by this request's selected-intent mutation, if that mutation ran.
+    let committedKey: String?
+}
+
 /** One synchronous native mutation paired with the exact authorization required after it. */
 struct BibleReaderPreparationSynchronousMutation<Result> {
     /// Native selected-state, persistence, or explicit callback side effect.

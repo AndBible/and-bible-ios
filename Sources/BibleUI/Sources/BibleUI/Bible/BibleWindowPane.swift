@@ -142,7 +142,7 @@ struct BibleWindowPane: View {
         if let controller {
             return controller.webViewSession
         }
-        if let registeredController = windowManager.controllers[window.id] as? BibleReaderController {
+        if let registeredController = windowManager.registeredController(for: window) as? BibleReaderController {
             return registeredController.webViewSession
         }
         return renderSeed.webViewSession
@@ -344,24 +344,29 @@ struct BibleWindowPane: View {
             selectionBookmarkPopup
         }
         .onAppear {
-            if controller == nil {
+            guard windowManager.managesWindow(window) else {
+                discardRejectedPaneController(controller)
+                return
+            }
+            guard let controller else {
                 initializeController()
-            } else {
-                let workspaceStore = WorkspaceStore(modelContext: modelContext)
-                let settingsStore = SettingsStore(modelContext: modelContext)
-                // Display settings can change while this pane is unmounted (minimized window,
-                // covered destination); .onChange cannot observe that, and configureController's
-                // plain assignment never re-renders. Detect drift first and push it through the
-                // full update path so restored panes match the current settings.
-                let displaySettingsDrifted = controller!.displaySettings != displaySettings
-                    || controller!.nightMode != nightMode
-        configureController(
-          controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
-        configureAICoordinator(for: controller!)
-                registerController(controller!)
-                if displaySettingsDrifted {
-                    controller!.updateDisplaySettings(displaySettings, nightMode: nightMode)
-                }
+                return
+            }
+            let workspaceStore = WorkspaceStore(modelContext: modelContext)
+            let settingsStore = SettingsStore(modelContext: modelContext)
+            // Display settings can change while this pane is unmounted (minimized window,
+            // covered destination); .onChange cannot observe that, and configureController's
+            // plain assignment never re-renders. Detect drift first and push it through the
+            // full update path so restored panes match the current settings.
+            let displaySettingsDrifted = controller.displaySettings != displaySettings
+                || controller.nightMode != nightMode
+            configureController(
+                controller, workspaceStore: workspaceStore, settingsStore: settingsStore
+            )
+            configureAICoordinator(for: controller)
+            guard registerController(controller) else { return }
+            if displaySettingsDrifted {
+                controller.updateDisplaySettings(displaySettings, nightMode: nightMode)
             }
         }
         .onChange(of: nightMode) { _, newValue in
@@ -735,7 +740,7 @@ struct BibleWindowPane: View {
 
     /// Controller currently registered for this immutable pane target.
     private var resolvedWindowMenuController: BibleReaderController? {
-        controller ?? windowManager.controllers[window.id] as? BibleReaderController
+        controller ?? windowManager.registeredController(for: window) as? BibleReaderController
     }
 
     /// Copies the pane's typed Android-compatible reference and URL.
@@ -791,11 +796,16 @@ struct BibleWindowPane: View {
      */
     private func initializeController() {
         guard controller == nil else { return }
+        guard windowManager.managesWindow(window) else {
+            discardRejectedPaneController(controller)
+            return
+        }
 
         let workspaceStore = WorkspaceStore(modelContext: modelContext)
         let store = SettingsStore(modelContext: modelContext)
 
-        if let existingController = windowManager.controllers[window.id] as? BibleReaderController {
+        if let existingController = windowManager.registeredController(for: window)
+            as? BibleReaderController {
             controller = existingController
             configureController(existingController, workspaceStore: workspaceStore, settingsStore: store)
       configureAICoordinator(for: existingController)
@@ -1556,23 +1566,45 @@ struct BibleWindowPane: View {
     )
   }
 
-    /// Registers the pane controller and nudges SwiftUI to re-evaluate registry-backed UI.
-    private func registerController(_ ctrl: BibleReaderController) {
+    /**
+     Registers this controller against the pane's exact managed `Window` object.
+
+     Registration publishes the controller and clears pending readiness synchronously. A rejected
+     claim means this pane belongs to a deleted or replaced graph; the pane detaches its local
+     reference and retires it only when no registry slot owns that object.
+
+     - Returns: `true` when exact-window admission succeeds; `false` after rejected pane cleanup.
+     */
+    @discardableResult
+    private func registerController(_ ctrl: BibleReaderController) -> Bool {
         // Register controller with WindowManager — the single source of truth.
         // BibleReaderView reads from windowManager.controllers via focusedController,
         // and controllerVersion ensures SwiftUI re-evaluates the toolbar.
-        windowManager.registerController(ctrl, for: window.id)
-
-        // Re-register asynchronously to guarantee a re-render.  The synchronous
-        // registration above runs during onAppear, which SwiftUI may coalesce with
-        // the current layout pass — preventing controllerVersion from triggering a
-        // toolbar update.  The async call bumps controllerVersion in a new run-loop
-        // iteration where SwiftUI reliably picks up the change.
-        let wm = windowManager
-        let wid = window.id
-        Task { @MainActor in
-            wm.registerController(ctrl, for: wid)
+        guard windowManager.registerController(ctrl, for: window) else {
+            discardRejectedPaneController(ctrl)
+            return false
         }
+        return true
+    }
+
+    /**
+     Detaches a controller rejected by exact-window admission without retiring another pane's owner.
+
+     - Parameter ctrl: Controller currently retained by this pane, if one exists.
+     - Side Effects: Retires only an unowned local controller and clears this pane's local references.
+     - Failure Modes: A controller still present anywhere in the registry is detached locally but not
+       retired because `WindowManager` owns its lifecycle.
+     - Concurrency: Call synchronously on the main-actor pane lifecycle path.
+     */
+    private func discardRejectedPaneController(_ ctrl: BibleReaderController?) {
+        if let ctrl,
+           !windowManager.controllers.values.contains(where: { $0 === ctrl }) {
+            ctrl.windowControllerWillUnregister()
+        }
+        if controller === ctrl {
+            controller = nil
+        }
+        aiRunCoordinator = nil
     }
 
     /**

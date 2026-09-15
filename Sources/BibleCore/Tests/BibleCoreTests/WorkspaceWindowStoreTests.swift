@@ -360,7 +360,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: firstWindow.id))
         XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
 
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
         XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
@@ -381,7 +381,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "New Window Readiness")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
 
@@ -389,7 +389,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
         XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([secondWindow.id]))
 
-        windowManager.registerController(NSObject(), for: secondWindow.id)
+        windowManager.registerController(NSObject(), for: secondWindow)
 
         XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
     }
@@ -410,7 +410,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Add Window Active List")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
 
@@ -624,7 +624,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Maximized Add")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
         windowManager.maximizeWindow(firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
@@ -651,7 +651,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Hidden Readiness")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
 

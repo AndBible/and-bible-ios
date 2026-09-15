@@ -3,6 +3,31 @@
 import Foundation
 import Observation
 
+/**
+ Receives one final notification after ``WindowManager`` releases its last registry slot.
+
+ The protocol keeps lifecycle ownership in BibleCore without importing a concrete UI controller.
+ Implementations should cancel controller-local work and detach pane state synchronously. Registry
+ membership has already been removed when the callback runs, so reentrant lookups cannot recover
+ the retired owner. Duplicate registration of the same object does not invoke this callback.
+ */
+public protocol WindowControllerRegistrationLifecycle: AnyObject {
+    /**
+     Retires controller work after its final registry ownership has been removed.
+
+     - Side effects: Defined by the conformer; reader controllers cancel preparation and detach.
+     - Failure modes: None. Implementations must be idempotent because object teardown may overlap
+       with other owner-local cleanup.
+     - Concurrency: Called synchronously on the same actor or queue mutating ``WindowManager``.
+     */
+    func windowControllerWillUnregister()
+}
+
+/** Exact managed-window identity currently owning one controller slot. */
+private struct WindowControllerRegistrationOwner {
+    let windowIdentity: ObjectIdentifier
+}
+
 /// Manages window lifecycle, layout, and synchronization within workspaces.
 @Observable
 public final class WindowManager {
@@ -25,7 +50,19 @@ public final class WindowManager {
      Uses AnyObject to avoid circular dependency (BibleCore can't import BibleUI).
      BibleReaderView casts to BibleReaderController.
      */
-    public var controllers: [UUID: AnyObject] = [:]
+    public private(set) var controllers: [UUID: AnyObject] = [:]
+
+    /// Exact graph identity paired with each public controller entry.
+    @ObservationIgnored
+    private var controllerRegistrationOwners: [UUID: WindowControllerRegistrationOwner] = [:]
+
+    /// Window slots that cannot be mutated reentrantly from their retirement callback.
+    @ObservationIgnored
+    private var controllerRegistrationBlockedWindowIDs: Set<UUID> = []
+
+    /// Nonzero while a workspace transition exposes its new graph and retires the prior graph.
+    @ObservationIgnored
+    private var controllerRegistrationSuspensionDepth = 0
 
     /**
      Incremented on every controller register/unregister to guarantee SwiftUI
@@ -126,21 +163,93 @@ public final class WindowManager {
     // MARK: - Controller Registry
 
     /**
-     Registers a pane controller and marks its window ready for pane-scoped actions.
+     Reports whether an exact `Window` object belongs to the current managed graph.
+
+     - Parameter window: Concrete graph object whose membership should be checked.
+     - Returns: `true` only when the active workspace contains this exact object for its stable ID.
+     - Side Effects: None.
+     - Failure Modes: Returns `false` during an unbound workspace state or for a stale same-ID object.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner; production uses the main
+       thread.
+     */
+    public func managesWindow(_ window: Window) -> Bool {
+        activeWorkspace != nil
+            && allWindows.contains { $0.id == window.id && $0 === window }
+    }
+
+    /**
+     Returns the controller owned by an exact currently managed `Window` object.
+
+     - Parameter window: Concrete graph object whose registered owner is requested.
+     - Returns: The registered controller only when its owner record is bound to this exact object.
+     - Side Effects: None.
+     - Failure Modes: Returns `nil` for an unmanaged/stale object, an unregistered slot, or an owner
+       record that no longer matches the current graph.
+     - Concurrency: Call synchronously on the serialized workspace/pane lifecycle owner; callers must
+       not retain the result as proof after another lifecycle mutation.
+     */
+    public func registeredController(for window: Window) -> AnyObject? {
+        guard managesWindow(window),
+              let owner = controllerRegistrationOwners[window.id],
+              owner.windowIdentity == ObjectIdentifier(window) else {
+            return nil
+        }
+        return controllers[window.id]
+    }
+
+    /**
+     Registers a pane controller against the exact `Window` object currently managed for its ID.
 
      - Parameters:
-       - controller: Controller created by the visible pane.
-       - windowId: Identifier of the window now backed by `controller`.
-     - Side Effects: Mutates the controller registry, clears pending readiness for `windowId`, and
-       increments `controllerVersion` so SwiftUI consumers re-read registry-backed state.
-     - Failure Modes: None; repeated registration for the same window replaces the stored
-       controller.
-     - Note: This is the normal transition from pending to ready.
+       - controller: Pane controller claiming the slot.
+       - window: Concrete SwiftData graph object used to configure that controller.
+     - Returns: `true` while the controller still owns the exact managed slot after synchronous
+       retirement callbacks and graph reconciliation; `false` when admission is rejected or a
+       callback removes the newly installed owner.
+     - Side Effects: Installs the controller, records the exact graph object, clears pending
+       readiness, increments `controllerVersion` once, and retires a displaced final owner after
+       removal.
+     - Failure Modes: A same-ID object outside the current managed graph is rejected before mutation.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner; a synchronous retirement
+       callback may inspect the installed replacement but cannot reclaim or unregister this slot.
      */
-    public func registerController(_ controller: AnyObject, for windowId: UUID) {
-        controllers[windowId] = controller
-        controllerPendingWindowIds.remove(windowId)
+    @discardableResult
+    public func registerController(
+        _ controller: AnyObject,
+        for window: Window
+    ) -> Bool {
+        let windowID = window.id
+        guard controllerRegistrationSuspensionDepth == 0,
+              !controllerRegistrationBlockedWindowIDs.contains(windowID),
+              managesWindow(window) else {
+            return false
+        }
+
+        let replaced = controllers.updateValue(controller, forKey: windowID)
+        controllerRegistrationOwners[windowID] = WindowControllerRegistrationOwner(
+            windowIdentity: ObjectIdentifier(window)
+        )
+        controllerPendingWindowIds.remove(windowID)
         controllerVersion += 1
+
+        if let replaced, replaced !== controller,
+           !controllers.values.contains(where: { $0 === replaced }) {
+            withControllerRegistrationBlocked(for: [windowID]) {
+                (replaced as? WindowControllerRegistrationLifecycle)?
+                    .windowControllerWillUnregister()
+            }
+        }
+
+        // Retirement may synchronously change the managed window graph while this slot is blocked.
+        // Reconcile once the block is released so such a change cannot strand the replacement.
+        reconcileControllerRegistrationsWithCurrentGraph()
+        guard controllers[windowID] === controller,
+              let owner = controllerRegistrationOwners[windowID],
+              let managedWindow = allWindows.first(where: { $0.id == windowID }),
+              owner.windowIdentity == ObjectIdentifier(managedWindow) else {
+            return false
+        }
+        return true
     }
 
     /**
@@ -148,13 +257,46 @@ public final class WindowManager {
 
      - Parameter windowId: Identifier whose controller should be dropped.
      - Side Effects: Mutates controller and readiness registries, then increments
-       `controllerVersion`.
-     - Failure Modes: Missing controller entries are ignored.
+       `controllerVersion`; a removed final owner is notified synchronously after its slot vanishes.
+     - Failure Modes: Missing entries still bump the version for compatibility. Calls reentered from
+       retirement or workspace transition are ignored so they cannot evict a newly installed owner.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func unregisterController(for windowId: UUID) {
-        controllers.removeValue(forKey: windowId)
+        guard controllerRegistrationSuspensionDepth == 0,
+              !controllerRegistrationBlockedWindowIDs.contains(windowId) else {
+            return
+        }
+        let removed = controllers.removeValue(forKey: windowId)
+        controllerRegistrationOwners.removeValue(forKey: windowId)
         controllerPendingWindowIds.remove(windowId)
         controllerVersion += 1
+        if let removed, !controllers.values.contains(where: { $0 === removed }) {
+            withControllerRegistrationBlocked(for: [windowId]) {
+                (removed as? WindowControllerRegistrationLifecycle)?
+                    .windowControllerWillUnregister()
+            }
+        }
+    }
+
+    /**
+     Prevents synchronous retirement callbacks from reclaiming or evicting their former slots.
+
+     - Parameters:
+       - windowIDs: Slots held unavailable until `body` returns.
+       - body: Retirement notification work allowed to inspect already-published registry state.
+     - Side Effects: Adds temporary registration blocks and preserves any enclosing blocks.
+     - Failure Modes: A reentrant claim/unregister for a blocked ID becomes a no-op.
+     - Concurrency: Requires the same serialized owner as every registry mutation.
+     */
+    private func withControllerRegistrationBlocked(
+        for windowIDs: Set<UUID>,
+        _ body: () -> Void
+    ) {
+        let newlyBlocked = windowIDs.subtracting(controllerRegistrationBlockedWindowIDs)
+        controllerRegistrationBlockedWindowIDs.formUnion(windowIDs)
+        defer { controllerRegistrationBlockedWindowIDs.subtract(newlyBlocked) }
+        body()
     }
 
     /**
@@ -177,17 +319,33 @@ public final class WindowManager {
      - Parameter workspace: Workspace selected by the app, possibly resolved through another
        `ModelContext`.
      - Side Effects: Clears registered pane controllers, rebinds the workspace by ID into the
-       manager-owned store when possible, refreshes visible/all window lists, and updates active
-       window fallback.
+       manager-owned store when possible, refreshes visible/all window lists, rebinds active focus,
+       then retires prior controllers while registration remains suspended.
      - Failure Modes: If the workspace cannot be resolved through the manager store, the supplied
-       instance is retained and refresh may expose no windows until the store can fetch it.
+       instance is retained and refresh may expose no windows until the store can fetch it. Reentrant
+       registry mutations from retirement callbacks are rejected against the authoritative new graph.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func setActiveWorkspace(_ workspace: Workspace) {
-        // Clear controllers from the previous workspace to prevent stale entries
+        // Capture by object identity so one controller temporarily backing two slots retires once.
+        let retiredControllers = controllers.values.reduce(into: [ObjectIdentifier: AnyObject]()) {
+            $0[ObjectIdentifier($1)] = $1
+        }
+        let registryChanged = !controllers.isEmpty
         controllers.removeAll()
+        controllerRegistrationOwners.removeAll()
         controllerPendingWindowIds.removeAll()
+
+        controllerRegistrationSuspensionDepth += 1
+        defer { controllerRegistrationSuspensionDepth -= 1 }
         activeWorkspace = workspaceStore.workspace(id: workspace.id) ?? workspace
         refreshWindows()
+        if registryChanged {
+            controllerVersion += 1
+        }
+        retiredControllers.values.forEach {
+            ($0 as? WindowControllerRegistrationLifecycle)?.windowControllerWillUnregister()
+        }
     }
 
     /**
@@ -225,6 +383,12 @@ public final class WindowManager {
      Refresh the visible windows list from the active workspace.
      Respects maximized state, filters minimized windows, and applies Android's display grouping
      so links windows render after normal content panes without mutating persisted order numbers.
+
+     - Side Effects: Rebinds `allWindows`, `visibleWindows`, and `activeWindow` to the current
+       SwiftData graph; retires controllers whose same-ID `Window` object was replaced; reconciles
+       pending visible controller readiness.
+     - Failure Modes: A missing active workspace clears published window/readiness collections.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func refreshWindows() {
         guard let workspace = activeWorkspace else {
@@ -238,6 +402,7 @@ public final class WindowManager {
             workspaceStore.persistChanges()
         }
         allWindows = displayOrderedWindows(persistedWindows)
+        reconcileControllerRegistrationsWithCurrentGraph()
 
         // If a window is maximized, only show that one
         if let maxId = workspace.maximizedWindowId,
@@ -252,10 +417,31 @@ public final class WindowManager {
             }
         }
 
-        if activeWindow == nil || !visibleWindows.contains(where: { $0.id == activeWindow?.id }) {
-            activeWindow = visibleWindows.first
-        }
+        let selectedWindowID = activeWindow?.id
+        activeWindow = selectedWindowID.flatMap { selectedID in
+            visibleWindows.first(where: { $0.id == selectedID })
+        } ?? visibleWindows.first
         reconcileControllerReadiness()
+    }
+
+    /**
+     Retires controllers whose original SwiftData `Window` object is no longer the current graph
+     object for that stable ID.
+
+     - Side Effects: Unregisters each stale slot in deterministic ID order and synchronously notifies
+       each final owner after removal.
+     - Failure Modes: Current exact-object owners are preserved; an empty registry is a no-op.
+     - Concurrency: Requires the serialized workspace/pane lifecycle owner.
+     */
+    private func reconcileControllerRegistrationsWithCurrentGraph() {
+        let staleWindowIDs = controllerRegistrationOwners.compactMap { windowID, owner in
+            guard let managedWindow = allWindows.first(where: { $0.id == windowID }),
+                  ObjectIdentifier(managedWindow) == owner.windowIdentity else {
+                return windowID
+            }
+            return nil
+        }.sorted { $0.uuidString < $1.uuidString }
+        staleWindowIDs.forEach { unregisterController(for: $0) }
     }
 
     /**

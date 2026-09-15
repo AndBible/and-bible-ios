@@ -261,7 +261,8 @@ private struct BibleReaderEncodedMemorizeDocument: Sendable {
  nonisolated contexts.
  */
 @Observable
-public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelegate {
+public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelegate,
+    WindowControllerRegistrationLifecycle {
     /// Native/Vue bridge dedicated to this controller's reader window.
     let bridge: BibleBridge
 
@@ -312,6 +313,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private var activeMyNotesReference: MyNotesChapterReference?
     /// Explicit KJVA My Notes destination requested before the Vue client was ready.
     private var pendingClientReadyMyNotesTarget: MyNotesTarget?
+    private var pendingClientReadyMyNotesRequest: BibleReaderAwaitedSelectionRequest?
     /// Monotonic marker used by lightweight UI-test exports when My Notes state or documents rebuild.
     private(set) var myNotesMutationRevision = 0
 
@@ -325,6 +327,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private(set) var activeStudyPadLabelName: String?
     /// Optional StudyPad row requested before the Vue client was ready.
     private var pendingClientReadyStudyPadBookmarkId: UUID?
+    private var pendingClientReadyStudyPadRequest: BibleReaderAwaitedSelectionRequest?
+    /// Request retained with a prepared Multi/Compare result until the bridge client is ready.
+    private var pendingClientReadyTransientRequest: BibleReaderAwaitedSelectionRequest?
+    /// Awaited selection currently authorized to claim preparation generations in this pane.
+    private var activeAwaitedSelectionRequest: BibleReaderAwaitedSelectionRequest?
+    /// Defers ordinary client-ready replay while a current Compare/Multi source capture is running.
+    private var compositePreparationAwaitingClientReady = false
     /// Whether the WebView is in editing mode (Quill editor active).
     private(set) var editingInWebView = false
     /// Whether the Vue reader client currently reports an open modal for this pane.
@@ -1375,6 +1384,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Precondition: Construct on the main actor. Delegate installation is synchronously checked
        because `BibleBridgeDelegate` conformance owns WebKit-delivered UI actions there.
      */
+    deinit {
+        activeAwaitedSelectionRequest?.complete(.cancelled)
+        pendingClientReadyMyNotesRequest?.complete(.cancelled)
+        pendingClientReadyStudyPadRequest?.complete(.cancelled)
+        pendingClientReadyTransientRequest?.complete(.cancelled)
+    }
+
     public init(
         bridge: BibleBridge,
         webViewSession: BibleWebViewSession? = nil,
@@ -1508,23 +1524,245 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Failure modes: None; wrapping increment preserves ordering for the practical process lifetime.
      */
     @discardableResult
-    private func beginReplacingContentIntent(cancelPreparedWork: Bool = true) -> UInt64 {
+    private func beginReplacingContentIntent(
+        cancelPreparedWork: Bool = true,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) -> UInt64 {
+        supersedeAwaitedSelectionRequest(except: requestOwner)
         contentIntentGeneration &+= 1
+        if let requestOwner {
+            claimAwaitedSelectionRequest(requestOwner, generation: contentIntentGeneration)
+        }
         if cancelPreparedWork {
             documentPreparationCoordinator.cancelAll()
         }
         return contentIntentGeneration
     }
 
-    /** Suspends an AI route until one asynchronous selected-intent request reaches a terminal state. */
+    /**
+     Retires pane-owned asynchronous work after WindowManager releases its final registry slot.
+
+     - Side effects: Detaches this controller's bridge delegate and pane-interaction callbacks,
+       cancels all preparation, settles the live waiter, evicts every prepared replay, clears
+       special-document rebuild state, marks the bridge client unavailable, and detaches the
+       persisted window reference.
+     - Failure modes: Repeated retirement is idempotent; already-terminal requests ignore completion.
+     - Concurrency: WindowManager invokes this synchronously on its registry owner. Reader registry
+       mutation is main-thread-owned and guarded here with a dispatch precondition. Delegate
+       identity is checked before detaching so retirement cannot clear a replacement controller.
+     */
+    public func windowControllerWillUnregister() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        if bridge.delegate === self {
+            bridge.delegate = nil
+            bridge.onAnyMessage = nil
+            bridge.onNativeUserInteraction = nil
+            bridge.onNativeScrollDeltaY = nil
+            bridge.onNativeHorizontalSwipe = nil
+        }
+        documentPreparationCoordinator.cancelAll()
+        if let request = activeAwaitedSelectionRequest {
+            evictPreparedReplay(ownedBy: request)
+            settleAwaitedSelectionRequest(request, .cancelled)
+        }
+        pendingClientReadyMyNotesRequest?.complete(.cancelled)
+        pendingClientReadyStudyPadRequest?.complete(.cancelled)
+        pendingClientReadyTransientRequest?.complete(.cancelled)
+        pendingClientReadyMyNotesRequest = nil
+        pendingClientReadyStudyPadRequest = nil
+        pendingClientReadyTransientRequest = nil
+        pendingClientReadyMyNotesTarget = nil
+        pendingClientReadyStudyPadBookmarkId = nil
+        specialDocumentCoordinator.evictPreparedReplay()
+        activeCompositeRebuildRequest = nil
+        compositePreparationAwaitingClientReady = false
+        clientReady = false
+        activeWindow = nil
+    }
+
+    /**
+     Starts and waits for one request-owned asynchronous reader selection.
+
+     - Parameter start: Synchronous main-owner admission closure. It must either claim the supplied
+       request through ``beginReplacingContentIntent(cancelPreparedWork:requestOwner:)`` or settle
+       it when preflight rejects the request.
+     - Returns: The request's exactly-once terminal publication disposition.
+     - Side effects: Cancels an older request and evicts only its prepared replay bytes before
+       installing the new owner. Selected PageManager and special-document identity remain intact.
+     - Failure modes: A deallocated controller settles through normal preparation cancellation.
+     - Concurrency: Task cancellation is recorded by the request and revalidated on the main actor.
+     */
     @MainActor
     private func awaitPreparationSelectionSettlement(
-        _ start: (@escaping () -> Void) -> Void
-    ) async {
-        await withCheckedContinuation { continuation in
-            start {
-                continuation.resume()
+        _ start: (BibleReaderAwaitedSelectionRequest) -> Void
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        guard !Task.isCancelled else { return .cancelled }
+        let request = BibleReaderAwaitedSelectionRequest()
+        supersedeAwaitedSelectionRequest(except: request)
+        activeAwaitedSelectionRequest = request
+        start(request)
+        return await request.wait()
+    }
+
+    /**
+     Waits for publication and returns the exact selected key recorded by the same request owner.
+
+     - Parameter start: Admission closure receiving the stable request passed through every retry.
+     - Returns: Terminal publication disposition and this request's committed-key receipt.
+     - Side effects: Performs the same supersession, cancellation, and continuation work as
+       ``awaitPreparationSelectionSettlement(_:)``.
+     - Failure modes: Requests that never reach selected-intent commit return a nil key even when
+       older controller state happens to match the requested key.
+     */
+    @MainActor
+    private func awaitPreparationSelectionSettlementWithCommittedKey(
+        _ start: (BibleReaderAwaitedSelectionRequest) -> Void
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        var requestOwner: BibleReaderAwaitedSelectionRequest?
+        let disposition = await awaitPreparationSelectionSettlement { request in
+            requestOwner = request
+            start(request)
+        }
+        return BibleReaderPreparationSelectionSettlement(
+            publicationDisposition: disposition,
+            committedKey: requestOwner?.committedKey()
+        )
+    }
+
+    /**
+     Advances a stable awaited request to the generation allocated for its latest attempt.
+
+     - Parameters:
+       - request: Stable owner shared by the initial attempt, retry, and client-ready replay.
+       - generation: Controller content generation allocated synchronously for this attempt.
+     - Side effects: Replaces the request's cancellation claim and may queue cancellation on the
+       main actor when its task was already cancelled.
+     - Failure modes: A request that no longer owns the controller slot is settled as cancelled.
+     - Concurrency: Called by main-thread controller admission; queued cancellation revalidates the
+       request identity and generation on the main actor before mutating state.
+     */
+    private func claimAwaitedSelectionRequest(
+        _ request: BibleReaderAwaitedSelectionRequest,
+        generation: UInt64
+    ) {
+        guard activeAwaitedSelectionRequest === request else {
+            request.complete(.cancelled)
+            return
+        }
+        request.claim(generation: generation) { [weak self, weak request] claim in
+            Task { @MainActor [weak self, weak request] in
+                guard let self, let request,
+                      self.activeAwaitedSelectionRequest === request,
+                      self.contentIntentGeneration == claim.generation,
+                      request.owns(claim) else { return }
+                self.cancelAwaitedSelectionRequest(request)
             }
+        }
+    }
+
+    /**
+     Checks that a preparation completion still belongs to the latest admitted attempt.
+
+     - Parameters:
+       - request: Optional awaited owner; nil denotes an ordinary non-awaiting controller request.
+       - generation: Generation captured when the worker attempt was admitted.
+     - Returns: `true` only while the controller and, when present, request own that generation.
+     - Side effects: Acquires the request lock when an owner is present.
+     - Failure modes: Terminal, superseded, stale-generation, and different-owner completions fail
+       closed so they cannot publish, retry, or settle a newer request.
+     - Concurrency: Evaluated on the controller's publication executor after worker completion.
+     */
+    private func awaitedSelectionAttemptIsCurrent(
+        _ request: BibleReaderAwaitedSelectionRequest?,
+        generation: UInt64
+    ) -> Bool {
+        guard let request else { return contentIntentGeneration == generation }
+        return activeAwaitedSelectionRequest === request
+            && contentIntentGeneration == generation
+            && request.owns(generation: generation)
+    }
+
+    /**
+     Completes one request and releases the controller slot when it still owns that slot.
+
+     - Parameters:
+       - request: Optional request to settle; nil is an intentional no-op for ordinary callers.
+       - disposition: Terminal publication result returned to the awaiting caller.
+     - Side effects: Resumes the request waiter exactly once and clears controller ownership only
+       when this completion won and the same request remains active.
+     - Failure modes: Repeated or late settlement is ignored by the one-shot request owner.
+     - Concurrency: Called on the controller publication executor; continuation resumption is
+       thread-safe inside the request.
+     */
+    private func settleAwaitedSelectionRequest(
+        _ request: BibleReaderAwaitedSelectionRequest?,
+        _ disposition: BibleReaderPreparationPublicationDisposition
+    ) {
+        guard let request else { return }
+        let completed = request.complete(disposition)
+        if completed, activeAwaitedSelectionRequest === request {
+            activeAwaitedSelectionRequest = nil
+        }
+    }
+
+    /**
+     Cancels current preparation and prepared replay without erasing accepted selected state.
+
+     - Parameter request: Request expected to own the controller's active awaited-selection slot.
+     - Side effects: Cancels coordinator work, evicts request-owned serialized replay, advances the
+       content generation, clears the Compare-ready gate, and settles the waiter as cancelled.
+     - Failure modes: A stale cancellation for a request that no longer owns the slot is a no-op.
+     - Concurrency: Invoked on the main actor after the queued cancellation claim is revalidated.
+     */
+    private func cancelAwaitedSelectionRequest(_ request: BibleReaderAwaitedSelectionRequest) {
+        guard activeAwaitedSelectionRequest === request else { return }
+        documentPreparationCoordinator.cancelAll()
+        evictPreparedReplay(ownedBy: request)
+        contentIntentGeneration &+= 1
+        compositePreparationAwaitingClientReady = false
+        settleAwaitedSelectionRequest(request, .cancelled)
+    }
+
+    /**
+     Supersedes any different current request before a replacement attempt is admitted.
+
+     - Parameter retainedRequest: Owner allowed to survive admission of its retry or replay.
+     - Side effects: Cancels preparation, evicts replay bytes owned by the displaced request, and
+       settles that request as cancelled while retaining accepted selected identity.
+     - Failure modes: No active request, or the same retained request, is an intentional no-op.
+     - Concurrency: Runs synchronously on the controller admission executor before generation claim.
+     */
+    private func supersedeAwaitedSelectionRequest(
+        except retainedRequest: BibleReaderAwaitedSelectionRequest?
+    ) {
+        guard let current = activeAwaitedSelectionRequest, current !== retainedRequest else {
+            return
+        }
+        documentPreparationCoordinator.cancelAll()
+        evictPreparedReplay(ownedBy: current)
+        settleAwaitedSelectionRequest(current, .cancelled)
+    }
+
+    /**
+     Removes serialized replay owned by a terminal request while preserving selected identities.
+
+     My Notes retains ``activeMyNotesTarget``; StudyPad retains its active label; Multi retains its
+     PageManager key and composite families retain ``activeCompositeRebuildRequest``. A later
+     client-ready event therefore rebuilds from selected source state instead of publishing bytes
+     prepared by a cancelled request.
+     */
+    private func evictPreparedReplay(ownedBy request: BibleReaderAwaitedSelectionRequest) {
+        if pendingClientReadyMyNotesRequest === request {
+            pendingClientReadyMyNotesRequest = nil
+            pendingClientReadyMyNotesTarget = nil
+        }
+        if pendingClientReadyStudyPadRequest === request {
+            pendingClientReadyStudyPadRequest = nil
+            pendingClientReadyStudyPadBookmarkId = nil
+        }
+        if pendingClientReadyTransientRequest === request {
+            pendingClientReadyTransientRequest = nil
+            specialDocumentCoordinator.evictPreparedReplay()
         }
     }
 
@@ -1916,6 +2154,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private func clearPendingSpecialDocumentReplay() {
         pendingClientReadyMyNotesTarget = nil
         pendingClientReadyStudyPadBookmarkId = nil
+        pendingClientReadyMyNotesRequest = nil
+        pendingClientReadyStudyPadRequest = nil
+        pendingClientReadyTransientRequest = nil
+        specialDocumentCoordinator.evictPreparedReplay()
+        activeCompositeRebuildRequest = nil
     }
 
   /**
@@ -3821,8 +4064,28 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         name: String,
         recordsToolbarDefault: Bool
     ) -> Bool {
+        switch publishEmptyMyDocumentSelectionDisposition(
+            expectedID: expectedID,
+            initials: initials,
+            name: name,
+            recordsToolbarDefault: recordsToolbarDefault
+        ) {
+        case .accepted, .bridgeRejected, .dispatchedStale:
+            return true
+        case .cancelled, .failed, .stale:
+            return false
+        }
+    }
+
+    private func publishEmptyMyDocumentSelectionDisposition(
+        expectedID: UUID,
+        initials: String,
+        name: String,
+        recordsToolbarDefault: Bool,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) -> BibleReaderPreparationPublicationDisposition {
         dispatchPrecondition(condition: .onQueue(.main))
-        beginReplacingContentIntent()
+        beginReplacingContentIntent(requestOwner: requestOwner)
         let destination = preparationPublicationOwner.captureDestination()
         let ownerIsCurrent: () -> Bool = { [weak self] in
             guard let self,
@@ -3840,7 +4103,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     localized: "error_no_content",
                     defaultValue: "No content for this passage"
                 )
-              ) else { return false }
+              ) else { return .failed(.settle) }
         let outcome: BibleReaderDocumentPreparationOutcome<String> = .prepared(document)
         let toolbarDefaultMutation: BibleReaderPreparationSynchronousMutation<String>? =
             recordsToolbarDefault
@@ -3892,12 +4155,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 self.applyNightModeBackground()
             }
         )
-        switch disposition {
-        case .accepted, .bridgeRejected, .dispatchedStale:
-            return true
-        case .cancelled, .failed, .stale:
-            return false
-        }
+        return disposition
     }
 
     /**
@@ -3980,6 +4238,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Load the appropriate content for the current category.
     public func loadCurrentContent() {
+        if compositePreparationAwaitingClientReady {
+            return
+        }
         if isShowingAndroidMultiDocument {
             if let activeRequest = specialDocumentCoordinator.activeRequest(
                 isShowingAndroidMultiDocument: isShowingAndroidMultiDocument
@@ -4002,6 +4263,16 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             // A persisted fake document keeps its own identity even when its source was relocked.
             // Never reinterpret that authorization failure as ordinary commentary content.
             _ = loadRestoredAndroidMemorizeDocument()
+            return
+        }
+
+        if let pendingRequest = pendingClientReadyTransientRequest {
+            pendingClientReadyTransientRequest = nil
+            if let activeCompositeRebuildRequest {
+                rebuildCompositeDocument(activeCompositeRebuildRequest, requestOwner: pendingRequest)
+            } else {
+                settleAwaitedSelectionRequest(pendingRequest, .failed(.settle))
+            }
             return
         }
 
@@ -4077,6 +4348,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
        extraction-setting invalidation.
      - Failure modes: Bridge rejection keeps the prior committed rebuild request active.
      */
+    @MainActor
+    func loadMultiReferenceDocumentAwaitingSelection(
+        _ request: BibleReaderMultiReferenceRenderRequest
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        await awaitPreparationSelectionSettlement { requestOwner in
+            _ = self.prepareCompositeDocument(
+                .multiReferences(request.sourceRequest),
+                routeMultiToLinksWindow: false,
+                requestOwner: requestOwner
+            )
+        }
+    }
+
     func loadMultiReferenceDocument(_ request: BibleReaderMultiReferenceRenderRequest) {
         loadTransientMultiDocument(
             request.initialDocumentJSON,
@@ -4109,7 +4393,10 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Failure modes: Returns `false` when the saved key is missing, malformed, references no
        installed source documents, or cannot be encoded.
      */
-    private func loadRestoredAndroidMultiDocument(pageKey: String? = nil) -> Bool {
+    private func loadRestoredAndroidMultiDocument(
+        pageKey: String? = nil,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) -> Bool {
         guard let resolvedPageKey = pageKey ?? currentGeneralBookKey,
               !AndroidSpecialDocumentIdentity.parseBookAndKeyListReference(
                 resolvedPageKey
@@ -4121,8 +4408,24 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     activeModuleName: activeModuleName.isEmpty ? nil : activeModuleName
                 )
             ),
-            routeMultiToLinksWindow: false
+            routeMultiToLinksWindow: false,
+            requestOwner: requestOwner
         )
+    }
+
+    /** Waits for one restored Multi request's final bridge publication disposition. */
+    @MainActor
+    func loadRestoredAndroidMultiDocumentAwaitingSelection(
+        pageKey: String
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        await awaitPreparationSelectionSettlement { requestOwner in
+            if !loadRestoredAndroidMultiDocument(
+                pageKey: pageKey,
+                requestOwner: requestOwner
+            ) {
+                settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
+            }
+        }
     }
 
     /**
@@ -4383,6 +4686,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         )
     }
 
+    @MainActor
+    func loadCompareDocumentAwaitingSelection(
+        _ request: BibleReaderComparePreparationRequest
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        await awaitPreparationSelectionSettlement { requestOwner in
+            _ = self.prepareCompositeDocument(
+                .compare(request),
+                routeMultiToLinksWindow: false,
+                requestOwner: requestOwner
+            )
+        }
+    }
+
     /**
      Schedules a Multi or Compare source operation through the shared preparation pipeline.
 
@@ -4406,7 +4722,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private func prepareCompositeDocument(
         _ request: BibleReaderCompositePreparationRequest,
         routeMultiToLinksWindow: Bool,
-        retriesOneStaleResult: Bool = true
+        retriesOneStaleResult: Bool = true,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) -> Bool {
         let outwardMultiOpen = routeMultiToLinksWindow
             ? onOpenMultiReferenceDocumentInLinksWindow
@@ -4420,7 +4737,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         if routesOutward { transientPreparationGeneration &+= 1 }
         let outwardGeneration = transientPreparationGeneration
         let generation = routesOutward
-            ? contentIntentGeneration : beginReplacingContentIntent()
+            ? contentIntentGeneration
+            : beginReplacingContentIntent(requestOwner: requestOwner)
+        if !routesOutward, !clientReady {
+            compositePreparationAwaitingClientReady = true
+        }
         let paneID = activeWindow?.id
         let workspaceID = activeWindow?.workspace?.id
         let destination = preparationPublicationOwner.captureDestination()
@@ -4525,7 +4846,17 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             },
             isAuthorized: baseAuthorization
         ) { [weak self] outcome in
-            guard let self else { return }
+            guard let self else {
+                requestOwner?.complete(.cancelled)
+                return
+            }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
+            if !routesOutward, self.contentIntentGeneration == generation {
+                self.compositePreparationAwaitingClientReady = false
+            }
             let sourceAuthorization: BibleReaderRoutedSourceAuthorization?
             if case .prepared(let prepared) = outcome {
                 sourceAuthorization = self.routedSourceAuthorization(
@@ -4593,7 +4924,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                             && sourceAuthorization?.isCurrent() == true
                     },
                     queueBridge: { [weak self] prepared in
-                        guard let self, let sourceAuthorization else { return false }
+                        guard let self, self.clientReady, let sourceAuthorization else { return false }
                         return self.dispatchTransientDocument(
                             self.transientDocumentRequest(
                                 for: prepared,
@@ -4620,9 +4951,20 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 _ = self.prepareCompositeDocument(
                     request,
                     routeMultiToLinksWindow: routeMultiToLinksWindow,
-                    retriesOneStaleResult: false
+                    retriesOneStaleResult: false,
+                    requestOwner: requestOwner
                 )
+                return
             }
+            if disposition == .bridgeRejected, !routesOutward, !self.clientReady {
+                if let previous = self.pendingClientReadyTransientRequest,
+                   previous !== requestOwner {
+                    self.settleAwaitedSelectionRequest(previous, .cancelled)
+                }
+                self.pendingClientReadyTransientRequest = requestOwner
+                return
+            }
+            self.settleAwaitedSelectionRequest(requestOwner, disposition)
         }
         return true
     }
@@ -5015,9 +5357,28 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         _ request: BibleReaderTransientDocumentRequest,
         rebuildRequest: BibleReaderCompositeRebuildRequest? = nil
     ) -> Bool {
-        _ = beginReplacingContentIntent()
+        publishTransientDocument(request, rebuildRequest: rebuildRequest) == .accepted
+    }
+
+    /**
+     Publishes one prepared transient request and reports its final bridge disposition.
+
+     - Parameters:
+       - request: Prepared transient payload whose source authorization is revalidated at publish.
+       - rebuildRequest: Selected composite inputs retained for later reconstruction.
+       - requestOwner: Stable awaited-selection owner retained across client-ready replay. Passing it
+         prevents replay admission from superseding and cancelling its own waiter.
+     - Returns: Final bridge publication disposition.
+     - Side effects: Starts a new content-intent generation owned by `requestOwner` when supplied.
+     */
+    private func publishTransientDocument(
+        _ request: BibleReaderTransientDocumentRequest,
+        rebuildRequest: BibleReaderCompositeRebuildRequest? = nil,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) -> BibleReaderPreparationPublicationDisposition {
+        _ = beginReplacingContentIntent(requestOwner: requestOwner)
         let destination = preparationPublicationOwner.captureDestination()
-        let disposition = preparationPublicationOwner.publishQueuedBridge(
+        return preparationPublicationOwner.publishQueuedBridge(
             BibleReaderDocumentPreparationOutcome.prepared(request),
             destination: destination,
             failurePolicy: .settle,
@@ -5038,7 +5399,6 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 self?.commitTransientAcceptedRender(request, rebuildRequest: rebuildRequest)
             }
         )
-        return disposition == .accepted
     }
 
     /** Creates the native transient destination identity for one prepared composite result. */
@@ -5115,6 +5475,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         _ request: BibleReaderTransientDocumentRequest,
         rebuildRequest: BibleReaderCompositeRebuildRequest?
     ) {
+        pendingClientReadyMyNotesTarget = nil
+        pendingClientReadyMyNotesRequest = nil
+        pendingClientReadyStudyPadBookmarkId = nil
+        pendingClientReadyStudyPadRequest = nil
+        specialDocumentCoordinator.evictPreparedReplay()
         activeCompositeRebuildRequest = rebuildRequest
         specialDocumentCoordinator.store(request, clientReady: clientReady)
         showingMyNotes = false
@@ -6008,16 +6373,15 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         generation: UInt64,
         isSelectedSource: @escaping () -> Bool,
         retriesOneStaleResult: Bool = true,
-        selectionSettlement: (() -> Void)? = nil
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        resetAuxiliaryContentState()
         let unavailableLoader = auxiliaryContentLoader()
         guard let module = request.module else {
             unavailableLoader.publishUnavailableModuleEntry(
                 request,
                 message: request.noModuleMessage
             )
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
         guard let entryKey = request.requestedKey ?? request.currentKey else {
@@ -6025,7 +6389,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 request,
                 message: request.noSelectionMessage
             )
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
         guard let moduleName = request.moduleName,
@@ -6039,7 +6403,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 request,
                 message: "No \(request.noContentNoun) available for \"\(entryKey)\"."
             )
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
         let destination = preparationPublicationOwner.captureDestination()
@@ -6139,9 +6503,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             isAuthorized: baseAuthorization
         ) { [weak self] outcome in
             guard let self else {
-                selectionSettlement?()
+                requestOwner?.complete(.cancelled)
                 return
             }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
             let loader = self.auxiliaryContentLoader()
             let disposition = self.preparationPublicationOwner.publishQueuedBridge(
                 outcome,
@@ -6162,7 +6530,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 },
                 selectedIntent: .init(
                     commit: { prepared in
+                        self.clearPendingSpecialDocumentReplay()
                         loader.commitPreparedSelection(prepared, request: request)
+                        if case .document(_, _, let resolvedKey, _, _, _, _) = prepared {
+                            requestOwner?.recordCommittedKey(resolvedKey)
+                        }
                     },
                     isCurrentAfterCommit: { prepared in
                         guard baseAuthorization() else { return false }
@@ -6196,14 +6568,17 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             if disposition == .stale(.requestFreshCurrent) {
                 self.loadPreparedAuxiliaryModuleEntry(
                     request: request,
-                    generation: self.beginReplacingContentIntent(cancelPreparedWork: false),
+                    generation: self.beginReplacingContentIntent(
+                        cancelPreparedWork: false,
+                        requestOwner: requestOwner
+                    ),
                     isSelectedSource: isSelectedSource,
                     retriesOneStaleResult: false,
-                    selectionSettlement: selectionSettlement
+                    requestOwner: requestOwner
                 )
                 return
             }
-            selectionSettlement?()
+            self.settleAwaitedSelectionRequest(requestOwner, disposition)
         }
     }
 
@@ -6222,23 +6597,45 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /** Waits until the requested dictionary key either commits or settles without selection. */
     @MainActor
-    func loadDictionaryEntryAwaitingSelection(key: String) async {
-        await awaitPreparationSelectionSettlement { completion in
-            self.prepareDictionaryEntry(key: key, selectionSettlement: completion)
+    func loadDictionaryEntryAwaitingSelection(key: String) async -> BibleReaderPreparationPublicationDisposition {
+        return await awaitPreparationSelectionSettlement { requestOwner in
+            self.prepareDictionaryEntry(key: key, requestOwner: requestOwner)
+        }
+    }
+
+    /**
+     Waits for one exact dictionary request and reports only its own committed selected key.
+
+     - Parameter key: Exact preflight-authorized dictionary key.
+     - Returns: Terminal publication disposition plus the key committed by this request, if any.
+     - Side effects: Runs the ordinary dictionary preparation, persistence, and bridge dispatch.
+     - Failure modes: An error document that never selects a source returns no key. A later failed,
+       cancelled, or stale disposition may accompany an earlier key receipt and must still be
+       rejected by the caller.
+     */
+    @MainActor
+    func loadDictionaryEntryAwaitingCommittedSelection(
+        key: String
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        await awaitPreparationSelectionSettlementWithCommittedKey { requestOwner in
+            self.prepareDictionaryEntry(
+                key: key,
+                requestOwner: requestOwner
+            )
         }
     }
 
     /** Routes one dictionary request to its active backend with an optional causal settlement. */
     private func prepareDictionaryEntry(
         key: String?,
-        selectionSettlement: (() -> Void)? = nil
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         if let module = activeSQLiteDictionaryModule {
             loadSQLiteDictionaryEntry(
                 module: module,
                 requestedKey: key,
-                selectionSettlement: selectionSettlement
+                requestOwner: requestOwner
             )
             return
         }
@@ -6271,7 +6668,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 return self.activeDictionaryModule === module
                     && self.activeSQLiteDictionaryModule == nil
             },
-            selectionSettlement: selectionSettlement
+            requestOwner: requestOwner
         )
     }
 
@@ -6289,9 +6686,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     module: BibleReaderSQLiteModuleHandle,
     requestedKey: String?,
     retriesOneStaleResult: Bool = true,
-    selectionSettlement: (() -> Void)? = nil
+    requestOwner: BibleReaderAwaitedSelectionRequest? = nil
   ) {
-    resetAuxiliaryContentState()
     guard let key = requestedKey ?? currentDictionaryKey else {
       emitSQLiteAuxiliaryError(
         category: .dictionary,
@@ -6300,7 +6696,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         key: "none",
         message: "Select an entry from the key browser to view its definition."
       )
-      selectionSettlement?()
+      settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
       return
     }
     let generation = contentIntentGeneration
@@ -6439,9 +6835,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
       isAuthorized: baseAuthorization
     ) { [weak self] outcome in
       guard let self else {
-        selectionSettlement?()
+        requestOwner?.complete(.cancelled)
         return
       }
+      guard self.awaitedSelectionAttemptIsCurrent(
+        requestOwner,
+        generation: generation
+      ) else { return }
       let loader = self.auxiliaryContentLoader()
       let disposition = self.preparationPublicationOwner.publishQueuedBridge(
         outcome,
@@ -6461,7 +6861,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         },
         selectedIntent: .init(
           commit: { prepared in
+            self.clearPendingSpecialDocumentReplay()
             loader.commitPreparedSelection(prepared, request: publicationRequest)
+            if case .document(_, _, let resolvedKey, _, _, _, _) = prepared {
+              requestOwner?.recordCommittedKey(resolvedKey)
+            }
           },
           isCurrentAfterCommit: { prepared in
             guard baseAuthorization() else { return false }
@@ -6493,15 +6897,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         }
       )
       if disposition == .stale(.requestFreshCurrent) {
+        _ = self.beginReplacingContentIntent(
+          cancelPreparedWork: false,
+          requestOwner: requestOwner
+        )
         self.loadSQLiteDictionaryEntry(
           module: module,
           requestedKey: key,
           retriesOneStaleResult: false,
-          selectionSettlement: selectionSettlement
+          requestOwner: requestOwner
         )
         return
       }
-      selectionSettlement?()
+      self.settleAwaitedSelectionRequest(requestOwner, disposition)
     }
   }
 
@@ -6588,28 +6996,52 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /** Waits until the requested general-book key either commits or settles without selection. */
     @MainActor
-    func loadGeneralBookEntryAwaitingSelection(key: String) async {
-        await awaitPreparationSelectionSettlement { completion in
-            self.prepareGeneralBookEntry(key: key, selectionSettlement: completion)
+    func loadGeneralBookEntryAwaitingSelection(key: String?) async -> BibleReaderPreparationPublicationDisposition {
+        return await awaitPreparationSelectionSettlement { requestOwner in
+            self.prepareGeneralBookEntry(key: key, requestOwner: requestOwner)
+        }
+    }
+
+    /**
+     Waits for one installed general-book request and returns its request-owned key receipt.
+
+     - Parameter key: Exact preflight-authorized general-book key.
+     - Returns: Terminal publication disposition and this request's committed key, if any.
+     - Side effects: Runs the ordinary source preparation, selected-key persistence, and bridge
+       dispatch in their established order.
+     - Failure modes: An error document that never selects a source returns no key. A later failed,
+       cancelled, or stale disposition may accompany an earlier key receipt and must still be
+       rejected by the caller. Local EPUB and My Documents routes do not emit this installed-source
+       receipt and use their dedicated settlement methods.
+     */
+    @MainActor
+    func loadInstalledGeneralBookEntryAwaitingCommittedSelection(
+        key: String
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        await awaitPreparationSelectionSettlementWithCommittedKey { requestOwner in
+            self.prepareGeneralBookEntry(
+                key: key,
+                requestOwner: requestOwner
+            )
         }
     }
 
     /** Routes one general-book request to its exact local or installed owner. */
     private func prepareGeneralBookEntry(
         key: String?,
-        selectionSettlement: (() -> Void)? = nil
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
         if activeEpubReader != nil {
             prepareEpubEntry(
                 key: key,
                 jumpToOrdinal: nil,
                 retriesOneStaleResult: true,
-                selectionSettlement: { _ in selectionSettlement?() }
+                selectionSettlement: nil,
+                requestOwner: requestOwner
             )
             return
         }
         guard let initials = activeGeneralBookModuleName else {
-            beginReplacingContentIntent()
             let request = BibleReaderAuxiliaryModuleEntryRequest(
                     category: .generalBook,
                     module: nil,
@@ -6629,11 +7061,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 request,
                 message: request.noModuleMessage
             )
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
         guard let owner = installedOrLocalGeneralBookOwner(named: initials) else {
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
 
@@ -6657,36 +7089,39 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     selectedOrdinalRange: nil,
                     expectedFragment: nil,
                     expectedDocumentID: retainedEmptyDocumentID,
-                    selectionSettlement: selectionSettlement
+                    requestOwner: requestOwner
                 )
-                if !admitted { selectionSettlement?() }
+                if !admitted {
+                    settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
+                }
             } else {
-                _ = publishEmptyMyDocumentSelection(
+                let disposition = publishEmptyMyDocumentSelectionDisposition(
                     expectedID: retainedEmptyDocumentID ?? document.id,
                     initials: canonicalInitials,
                     name: document.name,
-                    recordsToolbarDefault: false
+                    recordsToolbarDefault: false,
+                    requestOwner: requestOwner
                 )
-                selectionSettlement?()
+                settleAwaitedSelectionRequest(requestOwner, disposition)
             }
             return
 
         case .local(.epub):
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
 
         case .installed(let info, let readableSource):
             guard info.category == .generalBook,
                   let readableSource,
                   case .sword(let module) = readableSource else {
-                selectionSettlement?()
+                settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
                 return
             }
             if activeGeneralBookModule.map({
               SwordJavaStringIdentity.equals($0.info.name, info.name)
             }) != true {
                 if case .failed = switchGeneralBookModule(to: info.name) {
-                    selectionSettlement?()
+                    settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
                     return
                 }
             }
@@ -6694,12 +7129,12 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 module: module,
                 moduleName: info.name,
                 key: key,
-                selectionSettlement: selectionSettlement
+                requestOwner: requestOwner
             )
             return
 
         case .missing:
-            selectionSettlement?()
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
     }
@@ -6720,9 +7155,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         module: SwordModule,
         moduleName: String,
         key: String?,
-        selectionSettlement: (() -> Void)? = nil
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let request = BibleReaderAuxiliaryModuleEntryRequest(
                 category: .generalBook,
                 module: module,
@@ -6752,7 +7187,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 return self.activeGeneralBookModule === module
                     && self.activeEpubReader == nil
             },
-            selectionSettlement: selectionSettlement
+            requestOwner: requestOwner
         )
     }
 
@@ -6763,18 +7198,39 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /** Waits until the requested map key either commits or settles without selection. */
     @MainActor
-    func loadMapEntryAwaitingSelection(key: String) async {
-        await awaitPreparationSelectionSettlement { completion in
-            self.prepareMapEntry(key: key, selectionSettlement: completion)
+    func loadMapEntryAwaitingSelection(key: String) async -> BibleReaderPreparationPublicationDisposition {
+        return await awaitPreparationSelectionSettlement { requestOwner in
+            self.prepareMapEntry(key: key, requestOwner: requestOwner)
+        }
+    }
+
+    /**
+     Waits for one exact map request and reports its own committed selected key.
+
+     - Parameter key: Exact preflight-authorized map key.
+     - Returns: Terminal publication disposition plus the key committed by this request, if any.
+     - Side effects: Runs the normal map preparation, selected-key persistence, and bridge dispatch.
+     - Failure modes: Failure before selection returns no key. A later failed, stale, or cancelled
+       disposition may accompany an earlier receipt and must still be rejected by the caller.
+     */
+    @MainActor
+    func loadMapEntryAwaitingCommittedSelection(
+        key: String
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        await awaitPreparationSelectionSettlementWithCommittedKey { requestOwner in
+            self.prepareMapEntry(
+                key: key,
+                requestOwner: requestOwner
+            )
         }
     }
 
     /** Prepares one map request with an optional causal selection settlement. */
     private func prepareMapEntry(
         key: String?,
-        selectionSettlement: (() -> Void)? = nil
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let module = activeMapModule
         let request = BibleReaderAuxiliaryModuleEntryRequest(
                 category: .map,
@@ -6803,7 +7259,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 guard let self else { return false }
                 return self.activeMapModule === module
             },
-            selectionSettlement: selectionSettlement
+            requestOwner: requestOwner
         )
     }
 
@@ -6905,21 +7361,34 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     }
 
     /**
-     Selects one EPUB and waits for its requested key to settle in native selected state.
+     Selects one EPUB and returns the requested key committed by that exact preparation.
 
      This is the causal AI-routing boundary. It performs one activation and one preparation, so the
      requested key cannot race the ordinary first-entry load used by the interactive switch API.
-     WebView rejection still preserves the authorized selected key for client-ready replay.
+     WebView rejection still preserves the authorized selected key for client-ready replay, while
+     stale, cancelled, and failed candidates return no request-owned key receipt.
+
+     - Parameters:
+       - identifier: Stable EPUB library identifier to reopen and authorize.
+       - key: Optional original/composite key; nil resolves the first readable entry.
+     - Returns: Terminal publication disposition plus the exact committed EPUB key, if any.
+     - Side effects: Prepares and commits at most one candidate activation and bridge replacement.
+     - Failure modes: Missing owners and invalid keys that never select a source return no key. A
+       later cancelled or stale disposition may accompany an earlier key receipt and must still be
+       rejected by the caller; no prior EPUB selection is reused as success evidence.
      */
     @MainActor
-    func switchEpubAwaitingSelection(identifier: String, key: String?) async -> String? {
-        await withCheckedContinuation { continuation in
+    func switchEpubAwaitingSelection(
+        identifier: String,
+        key: String?
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        await awaitPreparationSelectionSettlementWithCommittedKey { requestOwner in
             guard let reader = EpubReader(identifier: identifier),
                   let localDocument = self.localGeneralBookDocument(
                     named: reader.initials,
                     preferredEpub: reader
                   ), case .epub = localDocument else {
-                continuation.resume(returning: nil)
+                self.settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
                 return
             }
             self.prepareEpubEntry(
@@ -6928,9 +7397,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 retriesOneStaleResult: true,
                 candidateReader: reader,
                 activationIdentifier: identifier,
-                selectionSettlement: { selectedKey in
-                    continuation.resume(returning: selectedKey)
-                }
+                selectionSettlement: nil,
+                requestOwner: requestOwner
             )
         }
     }
@@ -7067,6 +7535,23 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         )
     }
 
+    /** Waits for one active EPUB key's final publication disposition. */
+    @MainActor
+    func loadEpubEntryAwaitingSelection(
+        key: String?,
+        jumpToOrdinal: Int? = nil
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        await awaitPreparationSelectionSettlement { requestOwner in
+            self.prepareEpubEntry(
+                key: key,
+                jumpToOrdinal: jumpToOrdinal,
+                retriesOneStaleResult: true,
+                selectionSettlement: nil,
+                requestOwner: requestOwner
+            )
+        }
+    }
+
     /** Runs one EPUB preparation with an explicitly bounded stale-result retry policy. */
     private func prepareEpubEntry(
         key: String?,
@@ -7074,14 +7559,15 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         retriesOneStaleResult: Bool,
         candidateReader: EpubReader? = nil,
         activationIdentifier: String? = nil,
-        selectionSettlement: ((String?) -> Void)? = nil
+        selectionSettlement: ((String?) -> Void)? = nil,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
         guard let reader = candidateReader ?? activeEpubReader else {
             selectionSettlement?(nil)
+            settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             return
         }
-        beginReplacingContentIntent()
-        resetAuxiliaryContentState()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let requestedKey = key ?? currentGeneralBookKey
         let destination = preparationPublicationOwner.captureDestination()
         let paneID = destination.paneID
@@ -7250,8 +7736,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         ) { [weak self] outcome in
             guard let self else {
                 selectionSettlement?(nil)
+                requestOwner?.complete(.cancelled)
                 return
             }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
             let preparedKey: String?
             if case .prepared(let prepared) = outcome {
                 preparedKey = prepared.content.persistedKey
@@ -7273,6 +7764,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 },
                 selectedIntent: .init(
                     commit: { prepared in
+                        self.clearPendingSpecialDocumentReplay()
+                        self.resetAuxiliaryContentState()
                         if let activationIdentifier {
                             self.activateEpub(
                                 reader,
@@ -7296,6 +7789,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                                 self.onPersistState?()
                             }
                         }
+                        requestOwner?.recordCommittedKey(prepared.content.persistedKey)
                     },
                     isCurrentAfterCommit: { prepared in
                         postSelectionAuthorization()
@@ -7347,7 +7841,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     retriesOneStaleResult: false,
                     candidateReader: reader,
                     activationIdentifier: activationIdentifier,
-                    selectionSettlement: selectionSettlement
+                    selectionSettlement: selectionSettlement,
+                    requestOwner: requestOwner
                 )
                 return
             case .failed, .stale, .cancelled, .bridgeRejected, .dispatchedStale, .accepted:
@@ -7359,6 +7854,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             case .failed, .stale, .cancelled:
                 selectionSettlement?(nil)
             }
+            self.settleAwaitedSelectionRequest(requestOwner, disposition)
         }
     }
 
@@ -8545,26 +9041,57 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      accessibility/export state aligned.
      */
     private func reloadVisibleDocumentAfterClientReady() {
-    if let pendingClientReadyRequest = specialDocumentCoordinator.consumePendingClientReadyRequest()
-    {
-            emitTransientMultiDocument(
+        if compositePreparationAwaitingClientReady {
+            return
+        }
+        if let pendingClientReadyRequest = specialDocumentCoordinator
+            .consumePendingClientReadyRequest() {
+            let requestOwner = pendingClientReadyTransientRequest
+            pendingClientReadyTransientRequest = nil
+            let disposition = publishTransientDocument(
                 pendingClientReadyRequest,
-                rebuildRequest: activeCompositeRebuildRequest
+                rebuildRequest: activeCompositeRebuildRequest,
+                requestOwner: requestOwner
             )
+            settleAwaitedSelectionRequest(requestOwner, disposition)
             return
         }
 
         if showingMyNotes {
-            guard let target = pendingClientReadyMyNotesTarget ?? activeMyNotesTarget else { return }
+            guard let target = pendingClientReadyMyNotesTarget ?? activeMyNotesTarget else {
+                settleAwaitedSelectionRequest(
+                    pendingClientReadyMyNotesRequest,
+                    .failed(.settle)
+                )
+                pendingClientReadyMyNotesRequest = nil
+                return
+            }
             pendingClientReadyMyNotesTarget = nil
-            loadMyNotesDocument(target: target)
+            let requestOwner = pendingClientReadyMyNotesRequest
+            pendingClientReadyMyNotesRequest = nil
+            loadMyNotesDocument(target: target, requestOwner: requestOwner)
             return
         }
 
-        if showingStudyPad, let activeStudyPadLabelId {
+        if showingStudyPad {
+            guard let activeStudyPadLabelId else {
+                settleAwaitedSelectionRequest(
+                    pendingClientReadyStudyPadRequest,
+                    .failed(.settle)
+                )
+                pendingClientReadyStudyPadRequest = nil
+                return
+            }
             let pendingBookmarkId = pendingClientReadyStudyPadBookmarkId
             pendingClientReadyStudyPadBookmarkId = nil
-            loadStudyPadDocument(labelId: activeStudyPadLabelId, bookmarkId: pendingBookmarkId)
+            let requestOwner = pendingClientReadyStudyPadRequest
+            pendingClientReadyStudyPadRequest = nil
+            prepareStudyPadDocument(
+                labelId: activeStudyPadLabelId,
+                bookmarkId: pendingBookmarkId,
+                retriesOneStaleResult: true,
+                requestOwner: requestOwner
+            )
             return
         }
 
@@ -8593,12 +9120,16 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Concurrency: Compare retains normal content-intent generation checks; synchronous families
        complete on the main-actor controller.
      */
-    private func rebuildCompositeDocument(_ request: BibleReaderCompositeRebuildRequest) {
+    private func rebuildCompositeDocument(
+        _ request: BibleReaderCompositeRebuildRequest,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) {
         switch request {
         case .prepared(let sourceRequest):
             _ = prepareCompositeDocument(
                 sourceRequest,
-                routeMultiToLinksWindow: false
+                routeMultiToLinksWindow: false,
+                requestOwner: requestOwner
             )
         case .definition(let prior):
             _ = prepareDefinitionDocument(
@@ -10318,17 +10849,49 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     func loadMyDocumentPageAwaitingSelection(
         bookInitials: String,
         pageKey: String
-    ) async {
-        await awaitPreparationSelectionSettlement { completion in
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        return await awaitPreparationSelectionSettlement { requestOwner in
             let admitted = prepareMyDocumentPage(
                 requestedInitials: bookInitials,
                 requestedKey: pageKey,
                 selectedOrdinalRange: nil,
                 expectedFragment: nil,
-                selectionSettlement: completion
+                requestOwner: requestOwner
             )
             if !admitted {
-                completion()
+                settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
+            }
+        }
+    }
+
+    /**
+     Waits for one My Documents request and reports the page committed by that exact request.
+
+     - Parameters:
+       - bookInitials: Exact initials or Android-compatible local document alias.
+       - pageKey: Exact page key in the resolved document.
+     - Returns: Terminal publication disposition and the request-owned committed page key, if any.
+     - Side effects: Performs the ordinary immutable preparation and selected PageManager commit;
+       WebView rejection does not undo the replayable native selection.
+     - Failure modes: Admission failure before selection returns no key. A later cancelled or stale
+       disposition may accompany an earlier key receipt and must still be rejected by the caller;
+       matching prior selected state cannot create a receipt.
+     */
+    @MainActor
+    func loadMyDocumentPageAwaitingCommittedSelection(
+        bookInitials: String,
+        pageKey: String
+    ) async -> BibleReaderPreparationSelectionSettlement {
+        await awaitPreparationSelectionSettlementWithCommittedKey { requestOwner in
+            let admitted = self.prepareMyDocumentPage(
+                requestedInitials: bookInitials,
+                requestedKey: pageKey,
+                selectedOrdinalRange: nil,
+                expectedFragment: nil,
+                requestOwner: requestOwner
+            )
+            if !admitted {
+                self.settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
             }
         }
     }
@@ -10366,14 +10929,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         expectedFragment: BibleReaderBookmarkNavigationMyDocumentFragment?,
         expectedDocumentID: UUID? = nil,
         retriesOneStaleResult: Bool = true,
-        selectionSettlement: (() -> Void)? = nil,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil,
         selectionCommitted: ((BibleReaderPreparedMyDocument) -> Void)? = nil
     ) -> Bool {
         guard myDocumentStore != nil,
               !requestedInitials.isEmpty,
               !requestedKey.isEmpty else { return false }
 
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let paneID = activeWindow?.id
         let workspaceID = activeWindow?.workspace?.id
         let destination = preparationPublicationOwner.captureDestination()
@@ -10524,9 +11087,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             isAuthorized: baseAuthorization
         ) { [weak self] outcome in
             guard let self else {
-                selectionSettlement?()
+                requestOwner?.complete(.cancelled)
                 return
             }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
             let exactOwnerIsCurrent: (BibleReaderEncodedMyDocument) -> Bool = {
                 [weak self] result in
                 guard let self else { return false }
@@ -10559,7 +11126,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                         guard expectedDocumentID.map({
                             $0 == result.prepared.documentID
                         }) ?? true else { return }
+                        self.clearPendingSpecialDocumentReplay()
                         self.commitMyDocumentSelectionIntent(result.prepared)
+                        requestOwner?.recordCommittedKey(result.prepared.pageKey)
                     },
                     isCurrentAfterCommit: exactOwnerIsCurrent
                 ),
@@ -10608,13 +11177,15 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     expectedFragment: expectedFragment,
                     expectedDocumentID: expectedDocumentID,
                     retriesOneStaleResult: false,
-                    selectionSettlement: selectionSettlement,
+                    requestOwner: requestOwner,
                     selectionCommitted: selectionCommitted
                 )
-                if !retryAdmitted { selectionSettlement?() }
+                if !retryAdmitted {
+                    self.settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
+                }
                 return
             }
-            selectionSettlement?()
+            self.settleAwaitedSelectionRequest(requestOwner, disposition)
         }
         return true
     }
@@ -11265,6 +11836,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Failure modes: If the requested row or active verse cannot resolve to a KJVA My Notes page,
        logs the failure and leaves the current reader document unchanged.
      */
+    /** Waits for an explicit KJVA My Notes request's accepted or rejected publication. */
+    @MainActor
+    func loadMyNotesDocumentAwaitingSelection(
+        jumpToOrdinal: Int
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        guard let target = myNotesTarget(kjvaOrdinal: jumpToOrdinal) else {
+            return .failed(.settle)
+        }
+        return await awaitPreparationSelectionSettlement { requestOwner in
+            loadMyNotesDocument(target: target, requestOwner: requestOwner)
+        }
+    }
+
     public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
         guard let target = currentMyNotesTarget(jumpToOrdinal: jumpToOrdinal) else {
             logger.error("Failed to resolve the KJVA My Notes target")
@@ -11316,24 +11900,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     private func loadMyNotesDocument(
         target: MyNotesTarget,
-        retriesOneStaleResult: Bool = true
+        retriesOneStaleResult: Bool = true,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let destination = preparationPublicationOwner.captureDestination()
-        persistMyNotesPageCategory(visible: true)
         guard clientReady else {
-            stageMyNotesTargetForReplay(target)
+            stageMyNotesTargetForReplay(
+                target,
+                requestOwner: requestOwner
+            )
             return
         }
         pendingClientReadyMyNotesTarget = nil
-        activeMyNotesTarget = target
-        activeMyNotesReference = nil
-        showingMyNotes = true
-        showingStudyPad = false
-        activeStudyPadLabelId = nil
-        activeStudyPadLabelName = nil
-        editingInWebView = false
-        clearNativeSelectionState()
 
         let paneID = activeWindow?.id
         let workspaceID = activeWindow?.workspace?.id
@@ -11368,8 +11947,6 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             guard let self else { return false }
             return self.contentIntentGeneration == generation
                 && self.clientReady
-                && self.showingMyNotes
-                && self.activeMyNotesTarget == target
                 && self.activeWindow?.id == paneID
                 && self.activeWindow?.workspace?.id == workspaceID
                 && self.swordManager === manager
@@ -11459,7 +12036,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             },
             isAuthorized: baseAuthorization
         ) { [weak self] outcome in
-            guard let self else { return }
+            guard let self else {
+                requestOwner?.complete(.cancelled)
+                return
+            }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
             let sourceGenerationChanged = manager != nil
                 && manager?.contentAuthorizationGeneration != managerGeneration
             let disposition = self.preparationPublicationOwner.publishQueuedBridge(
@@ -11481,7 +12065,18 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 },
                 selectedIntent: .init(
                     commit: { [weak self] result in
-                        self?.activeMyNotesReference = result.prepared.reference
+                        guard let self else { return }
+                        self.specialDocumentCoordinator.evictPreparedReplay()
+                        self.activeCompositeRebuildRequest = nil
+                        self.persistMyNotesPageCategory(visible: true)
+                        self.activeMyNotesTarget = target
+                        self.activeMyNotesReference = result.prepared.reference
+                        self.showingMyNotes = true
+                        self.showingStudyPad = false
+                        self.activeStudyPadLabelId = nil
+                        self.activeStudyPadLabelName = nil
+                        self.editingInWebView = false
+                        self.clearNativeSelectionState()
                     },
                     isCurrentAfterCommit: { [weak self] result in
                         guard let self,
@@ -11515,19 +12110,34 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             switch disposition {
             case .failed(.requestFreshCurrent) where retriesOneStaleResult,
                  .stale(.requestFreshCurrent) where retriesOneStaleResult:
-                self.loadMyNotesDocument(target: target, retriesOneStaleResult: false)
+                self.loadMyNotesDocument(
+                    target: target,
+                    retriesOneStaleResult: false,
+                    requestOwner: requestOwner
+                )
             case .accepted, .bridgeRejected, .dispatchedStale, .cancelled,
                  .failed(.settle), .failed(.requestFreshCurrent),
                  .stale(.settle), .stale(.requestFreshCurrent):
-                break
+                self.settleAwaitedSelectionRequest(requestOwner, disposition)
             }
         }
     }
 
     /** Retains one resolved My Notes target without starting a second visible preparation. */
-    private func stageMyNotesTargetForReplay(_ target: MyNotesTarget) {
+    private func stageMyNotesTargetForReplay(
+        _ target: MyNotesTarget,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
+    ) {
+        if let previous = pendingClientReadyMyNotesRequest, previous !== requestOwner {
+            settleAwaitedSelectionRequest(previous, .cancelled)
+        }
+        specialDocumentCoordinator.evictPreparedReplay()
+        activeCompositeRebuildRequest = nil
         pendingClientReadyMyNotesTarget = target
+        pendingClientReadyMyNotesRequest = requestOwner
         activeMyNotesTarget = target
+        activeMyNotesReference = nil
+        persistMyNotesPageCategory(visible: true)
         showingMyNotes = true
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -11922,6 +12532,22 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Failure modes: Missing bookmark persistence or a stale label leaves the current reader state
        unchanged and emits no bridge event.
      */
+    /** Waits for an exact StudyPad owner's final publication disposition. */
+    @MainActor
+    func loadStudyPadDocumentAwaitingSelection(
+        labelId: UUID,
+        bookmarkId: UUID? = nil
+    ) async -> BibleReaderPreparationPublicationDisposition {
+        await awaitPreparationSelectionSettlement { requestOwner in
+            prepareStudyPadDocument(
+                labelId: labelId,
+                bookmarkId: bookmarkId,
+                retriesOneStaleResult: true,
+                requestOwner: requestOwner
+            )
+        }
+    }
+
     public func loadStudyPadDocument(labelId: UUID, bookmarkId: UUID? = nil) {
         prepareStudyPadDocument(
             labelId: labelId,
@@ -11934,14 +12560,24 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private func prepareStudyPadDocument(
         labelId: UUID,
         bookmarkId: UUID?,
-        retriesOneStaleResult: Bool
+        retriesOneStaleResult: Bool,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
-        let generation = beginReplacingContentIntent()
+        let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let destination = preparationPublicationOwner.captureDestination()
-        persistMyNotesPageCategory(visible: false)
         guard clientReady else {
-            guard let label = bookmarkService?.label(id: labelId) else { return }
+            guard let label = bookmarkService?.label(id: labelId) else {
+                settleAwaitedSelectionRequest(requestOwner, .failed(.settle))
+                return
+            }
             let labelName = AndroidLabelPresentation.displayName(for: label)
+            if let previous = pendingClientReadyStudyPadRequest, previous !== requestOwner {
+                settleAwaitedSelectionRequest(previous, .cancelled)
+            }
+            specialDocumentCoordinator.evictPreparedReplay()
+            activeCompositeRebuildRequest = nil
+            pendingClientReadyStudyPadRequest = requestOwner
+            persistMyNotesPageCategory(visible: false)
             showingMyNotes = false
             showingStudyPad = true
             activeStudyPadLabelId = labelId
@@ -12144,7 +12780,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             },
             isAuthorized: baseAuthorization
         ) { [weak self] outcome in
-            guard let self else { return }
+            guard let self else {
+                requestOwner?.complete(.cancelled)
+                return
+            }
+            guard self.awaitedSelectionAttemptIsCurrent(
+                requestOwner,
+                generation: generation
+            ) else { return }
             let sourceGenerationChanged = manager != nil
                 && manager?.contentAuthorizationGeneration != managerGeneration
             let disposition = self.preparationPublicationOwner.publishQueuedBridge(
@@ -12165,6 +12808,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 selectedIntent: .init(
                     commit: { [weak self] result in
                         guard let self else { return }
+                        self.specialDocumentCoordinator.evictPreparedReplay()
+                        self.activeCompositeRebuildRequest = nil
+                        self.persistMyNotesPageCategory(visible: false)
                         self.showingMyNotes = false
                         self.activeMyNotesReference = nil
                         self.showingStudyPad = true
@@ -12207,12 +12853,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 self.prepareStudyPadDocument(
                     labelId: labelId,
                     bookmarkId: bookmarkId,
-                    retriesOneStaleResult: false
+                    retriesOneStaleResult: false,
+                    requestOwner: requestOwner
                 )
             case .accepted, .bridgeRejected, .dispatchedStale, .cancelled,
                  .failed(.settle), .failed(.requestFreshCurrent),
                  .stale(.settle), .stale(.requestFreshCurrent):
-                break
+                self.settleAwaitedSelectionRequest(requestOwner, disposition)
             }
         }
     }

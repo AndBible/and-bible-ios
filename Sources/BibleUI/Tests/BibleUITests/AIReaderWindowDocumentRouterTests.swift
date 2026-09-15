@@ -44,7 +44,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         controller.myDocumentStore = store
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         let router = AIReaderWindowDocumentRouter(
             windowManager: windowManager,
             myDocumentStore: store
@@ -101,7 +101,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = window
         window.pageManager?.bibleDocument = "KJV"
         window.pageManager?.currentCategoryName = DocumentCategory.bible.pageManagerKey
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         controller.bridgeDidSetClientReady(bridge)
         XCTAssertEqual(manager.moduleAccessState(named: "LOCKED"), .locked)
 
@@ -180,7 +180,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = window
         window.pageManager?.bibleDocument = "KJV"
         window.pageManager?.currentCategoryName = DocumentCategory.bible.pageManagerKey
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         XCTAssertEqual(manager.moduleAccessState(named: "LockedComm"), .locked)
@@ -260,7 +260,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = window
         window.pageManager?.bibleDocument = "KJV"
         window.pageManager?.currentCategoryName = DocumentCategory.bible.pageManagerKey
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
 
@@ -374,7 +374,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         let readinessBoundary = scripts().count
         controller.bridgeDidSetClientReady(bridge)
         _ = try await awaitBridgeEmission(
@@ -408,6 +408,72 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         }
     }
 
+    /**
+     Reports Android-style selected state for installed auxiliary documents before WebView readiness.
+
+     Each category first commits an exact new key through a bridge-rejected preparation, then repeats
+     the same-key and nil-key requests through the synchronous retained-selection path. This proves
+     the AI result belongs to the current request without making Vue publication an acknowledgment
+     protocol.
+     */
+    func testInstalledAuxiliaryMatrixReturnsSelectedStateWithoutBridgeAcceptance() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let targets = [
+            ("RouterSelectedDictionary", "Lexicons / Dictionaries", DocumentCategory.dictionary),
+            ("RouterSelectedBook", "Generic Books", DocumentCategory.generalBook),
+            ("RouterSelectedMap", "Maps", DocumentCategory.map),
+        ]
+        for (initials, category, _) in targets {
+            try writeAIReaderRawLDModule(
+                named: initials,
+                category: category,
+                entries: [("TARGET", "<div><p>\(initials) selected content.</p></div>")],
+                in: modulePath
+            )
+        }
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let workspaceContainer = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: workspaceContainer.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "AI selected auxiliary state")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let controller = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        windowManager.registerController(controller, for: window)
+        let myDocumentContainer = try makeMyDocumentModelContainer()
+        let router = AIReaderWindowDocumentRouter(
+            windowManager: windowManager,
+            myDocumentStore: MyDocumentStore(modelContext: myDocumentContainer.mainContext)
+        )
+
+        for (initials, _, category) in targets {
+            let first = try await router.setDocument(
+                windowID: window.id,
+                documentInitials: initials,
+                key: "TARGET"
+            )
+            let same = try await router.setDocument(
+                windowID: window.id,
+                documentInitials: initials,
+                key: "TARGET"
+            )
+            let retained = try await router.setDocument(
+                windowID: window.id,
+                documentInitials: initials,
+                key: nil
+            )
+
+            XCTAssertEqual(first.documentInitials, initials)
+            XCTAssertEqual(first.currentKey, "TARGET")
+            XCTAssertEqual(same.currentKey, "TARGET")
+            XCTAssertEqual(retained.currentKey, "TARGET")
+            XCTAssertEqual(controller.currentCategory, category)
+            XCTAssertNil(controller.committedRenderState.identity)
+        }
+    }
+
     /** EPUB href resolution stays off-main and returns the worker-canonicalized selected key. */
     func testEpubRouteReturnsCanonicalKeyAfterPreparedCandidateActivation() async throws {
         let archiveURL = try makeDefaultLibraryEpubArchiveFixture(
@@ -427,13 +493,30 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         controller.bridgeDidSetClientReady(bridge)
         let myDocumentContainer = try makeMyDocumentModelContainer()
         let router = AIReaderWindowDocumentRouter(
             windowManager: windowManager,
             myDocumentStore: MyDocumentStore(modelContext: myDocumentContainer.mainContext)
         )
+
+        let inactiveBoundary = scripts().count
+        do {
+            _ = try await router.setDocument(
+                windowID: window.id,
+                documentInitials: reader.initials,
+                key: "OPS/text/missing.xhtml"
+            )
+            XCTFail("Expected an inactive EPUB's missing href to preserve the key error.")
+        } catch let error as BibleUIAgentDomainError {
+            XCTAssertEqual(error.code, "KEY_NOT_FOUND")
+        }
+        XCTAssertNil(controller.activeEpubIdentifier)
+        XCTAssertNil(controller.currentGeneralBookKey)
+        XCTAssertFalse(scripts().dropFirst(inactiveBoundary).contains {
+            $0.contains("add_documents")
+        })
         let boundary = scripts().count
 
         let observed = try await router.setDocument(
@@ -470,6 +553,44 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(scripts().dropFirst(invalidBoundary).contains {
             $0.contains("add_documents")
         })
+    }
+
+    /** A prepared EPUB selection succeeds before WebView readiness without borrowing prior state. */
+    func testEpubRouteReturnsCommittedSelectionWhenBridgeRejectsReplacement() async throws {
+        let archiveURL = try makeDefaultLibraryEpubArchiveFixture(
+            title: "AI Router pre-ready EPUB \(UUID().uuidString)"
+        )
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let workspaceContainer = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: workspaceContainer.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "AI pre-ready EPUB")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        windowManager.registerController(controller, for: window)
+        let myDocumentContainer = try makeMyDocumentModelContainer()
+        let router = AIReaderWindowDocumentRouter(
+            windowManager: windowManager,
+            myDocumentStore: MyDocumentStore(modelContext: myDocumentContainer.mainContext)
+        )
+
+        let observed = try await router.setDocument(
+            windowID: window.id,
+            documentInitials: reader.initials,
+            key: "OPS/text/second.xhtml#target"
+        )
+
+        XCTAssertEqual(observed.documentInitials, reader.initials)
+        XCTAssertEqual(observed.currentKey, "2")
+        XCTAssertEqual(controller.activeEpubIdentifier, identifier)
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertNil(controller.committedRenderState.identity)
     }
 
     /**
@@ -536,7 +657,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         )
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         let myDocumentContainer = try makeMyDocumentModelContainer()
         let router = AIReaderWindowDocumentRouter(
             windowManager: windowManager,
@@ -629,7 +750,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         )
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         let readinessBoundary = scripts().count
         controller.bridgeDidSetClientReady(bridge)
         _ = try await awaitBridgeEmission(
@@ -666,6 +787,107 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         XCTAssertNil(controller.currentDictionaryKey)
         XCTAssertNil(window.pageManager?.dictionaryKey)
         XCTAssertFalse(scripts().dropFirst(boundary).contains { $0.contains("add_documents") })
+    }
+
+    /**
+     A cancelled same-page request cannot borrow an identical selection committed earlier.
+
+     The first request establishes the exact document and page. The second request is stopped in
+     source capture and cancelled while that prior native selection remains visible. Success would
+     therefore prove that routing used matching ambient state instead of this request's receipt.
+     */
+    func testCancelledSamePageMyDocumentRouteCannotBorrowPriorSelection() async throws {
+        let myDocumentContainer = try makeMyDocumentModelContainer()
+        let context = myDocumentContainer.mainContext
+        let document = MyDocument(name: "Same page cancellation", initials: "SamePageCancel")
+        let page = MyDocumentPage(title: "Page", pageKey: "page", contentType: .markdown)
+        let content = MyDocumentPageContent(pageId: page.id, content: "Existing selection")
+        context.insert(document)
+        context.insert(page)
+        context.insert(content)
+        page.document = document
+        page.pageContent = content
+        document.pages = [page]
+        try context.save()
+
+        let blockedCaptureEntered = expectation(description: "same-page capture entered")
+        let releaseCapture = DispatchSemaphore(value: 0)
+        defer { releaseCapture.signal() }
+        let shouldBlockCapture = AIReaderLockedValue(false)
+        let worker = DispatchQueue(
+            label: "org.andbible.tests.ai-router-same-page-cancellation",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture, key.family.rawValue == "my-document" else { return }
+                let shouldBlock = shouldBlockCapture.withValue { enabled -> Bool in
+                    guard enabled else { return false }
+                    enabled = false
+                    return true
+                }
+                guard shouldBlock else { return }
+                blockedCaptureEntered.fulfill()
+                releaseCapture.wait()
+            }
+        )
+        let workspaceContainer = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: workspaceContainer.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "AI same-page cancellation")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let store = MyDocumentStore(modelContext: context)
+        let bridge = BibleBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: try makeTemporarySwordFixturePath())
+        )
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.myDocumentStore = store
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        windowManager.registerController(controller, for: window)
+        controller.bridgeDidSetClientReady(bridge)
+        let router = AIReaderWindowDocumentRouter(windowManager: windowManager, myDocumentStore: store)
+
+        let first = try await router.setDocument(
+            windowID: window.id,
+            documentInitials: document.initials,
+            key: page.pageKey
+        )
+        XCTAssertEqual(first.currentKey, page.pageKey)
+        shouldBlockCapture.withValue { $0 = true }
+
+        let second = Task { @MainActor in
+            do {
+                _ = try await router.setDocument(
+                    windowID: window.id,
+                    documentInitials: document.initials,
+                    key: page.pageKey
+                )
+                return nil as BibleUIAgentDomainError?
+            } catch {
+                return error as? BibleUIAgentDomainError
+            }
+        }
+        await fulfillment(of: [blockedCaptureEntered], timeout: 3)
+        coordinator.cancelAll()
+        let error = await second.value
+        releaseCapture.signal()
+        await drainPreparationWorker(worker)
+
+        XCTAssertEqual(error?.code, "NAVIGATION_FAILED")
+        XCTAssertEqual(controller.activeGeneralBookModuleName, document.initials)
+        XCTAssertEqual(controller.currentGeneralBookKey, page.pageKey)
+        XCTAssertEqual(window.pageManager?.generalBookDocument, document.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, page.pageKey)
+        withExtendedLifetime((myDocumentContainer, workspaceContainer)) {}
     }
 
     /**
@@ -734,7 +956,7 @@ final class AIReaderWindowDocumentRouterTests: BibleUISwordFixtureTestCase {
         controller.myDocumentStore = store
         self.retainReaderWindowGraph(window)
         controller.activeWindow = window
-        windowManager.registerController(controller, for: window.id)
+        windowManager.registerController(controller, for: window)
         let router = AIReaderWindowDocumentRouter(windowManager: windowManager, myDocumentStore: store)
 
         let firstRoute = Task { @MainActor in
