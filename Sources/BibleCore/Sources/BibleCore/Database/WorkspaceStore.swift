@@ -109,19 +109,26 @@ public final class WorkspaceStore {
     }
 
     /**
-     * Clones a workspace together with its window graph and navigation history.
-     * - Parameters:
-     *   - source: Workspace to clone.
-     *   - newName: User-visible name for the cloned workspace.
-     * - Returns: The cloned workspace.
-     * - Side Effects: Inserts a new workspace graph, shifts later workspace order numbers, deep-copies windows,
-     *   page managers, history items, and Android-only page fidelity, remaps links-window references,
-     *   assigns Android's default workspace color when the source has no stored color, and saves
-     *   `modelContext`.
-     * - Failure: Save errors are swallowed.
-     * - Note: Window IDs are remapped so links-window references, maximized-window references, and page-manager
-     *   ownership remain internally consistent.
-     * - Complexity: Roughly linear in the number of windows plus history items attached to the source workspace.
+     Clones a workspace together with its window graph and current page state.
+
+     Android copies each `Window` and `PageManager` into the new workspace but does not copy the
+     source windows' History rows. Each cloned window therefore starts with an empty navigation
+     history while retaining the source pane's current document and position.
+
+     - Parameters:
+       - source: Workspace to clone.
+       - newName: User-visible name for the cloned workspace.
+     - Returns: The cloned workspace.
+     - Side Effects: Inserts a new workspace graph, shifts later workspace order numbers, deep-copies
+       windows, page managers, and Android-only page fidelity, remaps links-window references,
+       assigns Android's default workspace color when the source has no stored color, and saves
+       `modelContext`.
+     - Failure Modes: Save errors are swallowed under the store's existing eager-save contract.
+     - Note: Window IDs are remapped so links-window references, maximized-window references, and
+       page-manager ownership remain internally consistent. History remains owned by the source
+       window identities.
+     - Complexity: Roughly linear in the number of windows and page-manager fidelity rows attached
+       to the source workspace.
      */
     @discardableResult
     public func cloneWorkspace(_ source: Workspace, newName: String) -> Workspace {
@@ -171,14 +178,7 @@ public final class WorkspaceStore {
                 clonedPageManagerWindowIDs.append((source: srcWindow.id, clone: newWindow.id))
             }
 
-            // Deep-copy HistoryItems
-            for item in srcWindow.historyItems ?? [] {
-                let newItem = HistoryItem(document: item.document, key: item.key)
-                newItem.anchorOrdinal = item.anchorOrdinal
-                newItem.createdAt = item.createdAt
-                newItem.window = newWindow
-                modelContext.insert(newItem)
-            }
+            // Android workspace clones start each new window with an empty history stack.
         }
 
         // Remap links window references

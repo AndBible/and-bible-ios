@@ -158,11 +158,12 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     /**
      Protects the core workspace graph lifecycle used by workspace management UI.
 
-     The test creates, renames, clones, and deletes workspaces with windows and history entries in an
-     in-memory production schema. The expected result is that clone ordering, cloned window identity,
-     page-manager/history cloning, and delete cleanup all round trip together. A failure indicates
-     `WorkspaceStore` can corrupt workspace ordering, share mutable child rows between clones, or
-     leave stale workspace records behind.
+     The test creates, renames, clones, and deletes workspaces with windows and source-owned history
+     entries in an in-memory production schema. The expected result is that clone ordering, cloned
+     window identity, page-manager state, empty cloned history, and delete cleanup all round trip
+     together. A failure indicates `WorkspaceStore` can corrupt workspace ordering, share mutable
+     child rows between clones, copy Android's live history into a new workspace, or leave stale
+     workspace records behind.
      */
     func testWorkspaceStoreCreateRenameCloneAndDeleteRoundTripsWorkspaceGraph() throws {
         let container = try makeWorkspaceModelContainer()
@@ -193,8 +194,11 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertEqual(clonedWindows.count, sourceWindows.count)
         XCTAssertTrue(Set(clonedWindows.map(\.id)).isDisjoint(with: Set(sourceWindows.map(\.id))))
         XCTAssertEqual(clonedWindows.compactMap(\.pageManager).count, sourceWindows.compactMap(\.pageManager).count)
-        XCTAssertEqual(clonedWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 },
-                       sourceWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 })
+        XCTAssertEqual(
+            sourceWindows.flatMap { store.history(windowId: $0.id) }.map(\.key).sorted(),
+            ["Gen.1.1", "Gen.1.2"]
+        )
+        XCTAssertTrue(clonedWindows.allSatisfy { store.history(windowId: $0.id).isEmpty })
 
         store.delete(clone)
 
