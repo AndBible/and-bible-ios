@@ -232,6 +232,81 @@ class BuildXcodebuildCommandTests(unittest.TestCase):
             ],
         )
 
+    def test_test_without_building_can_disable_diagnostic_collection_explicitly(self) -> None:
+        """Forward only the public per-run Xcode policy while retaining result output."""
+        command = build_xcodebuild_command(
+            project=None,
+            scheme=None,
+            configuration=None,
+            destination="id=DEVICE",
+            derived_data_path=None,
+            result_bundle_path=".artifacts/KnownFailure.xcresult",
+            code_signing_allowed="NO",
+            selection_args_text=(
+                "-only-testing:BibleCoreTests/SettingsStoreTests/testKnownFailure"
+            ),
+            action="test-without-building",
+            xctestrun_path=".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+            collect_test_diagnostics="never",
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "xcodebuild",
+                "-xctestrun",
+                ".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                "-destination",
+                "id=DEVICE",
+                "-resultBundlePath",
+                ".artifacts/KnownFailure.xcresult",
+                "-collect-test-diagnostics",
+                "never",
+                "CODE_SIGNING_ALLOWED=NO",
+                "-only-testing:BibleCoreTests/SettingsStoreTests/testKnownFailure",
+                "test-without-building",
+            ],
+        )
+
+    def test_diagnostic_collection_policy_is_rejected_for_build_only_action(self) -> None:
+        """Avoid presenting a test-only diagnostic control on a build-only operation."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "can only be used with test-without-building",
+        ):
+            build_xcodebuild_command(
+                project="AndBible.xcodeproj",
+                scheme="AndBible",
+                configuration="Debug",
+                destination="id=DEVICE",
+                derived_data_path=".derivedData",
+                result_bundle_path=".artifacts/AndBibleBuild.xcresult",
+                code_signing_allowed="NO",
+                selection_args_text="",
+                action="build-for-testing",
+                collect_test_diagnostics="never",
+            )
+
+    def test_diagnostic_collection_policy_rejects_nonpublic_values(self) -> None:
+        """Keep arbitrary or private xcodebuild flags out of the wrapper contract."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "must be on-failure, never, or omitted",
+        ):
+            build_xcodebuild_command(
+                project=None,
+                scheme=None,
+                configuration=None,
+                destination="id=DEVICE",
+                derived_data_path=None,
+                result_bundle_path=".artifacts/Tests.xcresult",
+                code_signing_allowed="NO",
+                selection_args_text="",
+                action="test-without-building",
+                xctestrun_path=".derivedData/Build/Products/AndBible_iphonesimulator.xctestrun",
+                collect_test_diagnostics="automatic",
+            )
+
 
 class SelectedUITestDeveloperDirTests(unittest.TestCase):
     @mock.patch("run_xcodebuild_with_test_selection.os.readlink")
@@ -860,6 +935,69 @@ class XctestrunEnvironmentTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
+    @mock.patch(
+        "run_xcodebuild_with_test_selection.result_bundle_reports_passing_tests",
+        return_value=True,
+    )
+    @mock.patch("run_xcodebuild_with_test_selection.subprocess.run")
+    def test_main_forwards_explicit_test_diagnostic_policy_without_changing_reconciliation(
+        self,
+        run_mock: mock.Mock,
+        result_bundle_mock: mock.Mock,
+    ) -> None:
+        """Forward one public policy and still reconcile the exact selected identity."""
+        selection = "-only-testing:AndBibleTests/AndBibleTests/testKnownFailure"
+        exit_code = main(
+            [
+                "--project",
+                "AndBible.xcodeproj",
+                "--scheme",
+                "AndBible",
+                "--configuration",
+                "Debug",
+                "--destination",
+                "id=DEVICE",
+                "--derived-data-path",
+                ".derivedData",
+                "--result-bundle-path",
+                ".artifacts/KnownFailure.xcresult",
+                f"--test-selection-args={selection}",
+                "--collect-test-diagnostics",
+                "never",
+                "--action",
+                "test-without-building",
+            ]
+        )
+
+        self.assertEqual(exit_code, 0)
+        run_mock.assert_called_once_with(
+            [
+                "xcodebuild",
+                "-project",
+                "AndBible.xcodeproj",
+                "-scheme",
+                "AndBible",
+                "-configuration",
+                "Debug",
+                "-destination",
+                "id=DEVICE",
+                "-derivedDataPath",
+                ".derivedData",
+                "-resultBundlePath",
+                ".artifacts/KnownFailure.xcresult",
+                "-collect-test-diagnostics",
+                "never",
+                "CODE_SIGNING_ALLOWED=NO",
+                selection,
+                "test-without-building",
+            ],
+            check=True,
+        )
+        result_bundle_mock.assert_called_once_with(
+            ".artifacts/KnownFailure.xcresult",
+            ["AndBibleTests/AndBibleTests/testKnownFailure"],
+        )
+
     @mock.patch(
         "run_xcodebuild_with_test_selection.result_bundle_reports_passing_tests",
         return_value=True,

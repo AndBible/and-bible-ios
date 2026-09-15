@@ -470,9 +470,35 @@ def build_xcodebuild_command(
     selection_args_text: str,
     action: str,
     xctestrun_path: str | None = None,
+    collect_test_diagnostics: str | None = None,
 ) -> list[str]:
-    """Construct the full xcodebuild invocation for project or .xctestrun mode."""
+    """Construct one explicit project or ``.xctestrun`` xcodebuild invocation.
+
+    ``collect_test_diagnostics`` accepts only Xcode's public ``on-failure`` and
+    ``never`` values. Omitting it preserves Xcode's default diagnostic behavior.
+    The option is rejected for build-only actions because they execute no tests.
+
+    Returns the deterministic argument vector without starting a subprocess.
+    Raises ``ValueError`` for invalid mode inputs or diagnostic policy values.
+    """
     selection_args = parse_test_selection_args(selection_args_text)
+    supported_diagnostic_policies = {"on-failure", "never"}
+    if (
+        collect_test_diagnostics is not None
+        and collect_test_diagnostics not in supported_diagnostic_policies
+    ):
+        raise ValueError(
+            "collect_test_diagnostics must be on-failure, never, or omitted."
+        )
+    if collect_test_diagnostics is not None and action != "test-without-building":
+        raise ValueError(
+            "collect_test_diagnostics can only be used with test-without-building."
+        )
+    diagnostic_arguments = (
+        ["-collect-test-diagnostics", collect_test_diagnostics]
+        if collect_test_diagnostics is not None
+        else []
+    )
     if xctestrun_path is not None:
         if action != "test-without-building":
             raise ValueError("xctestrun_path can only be used with test-without-building.")
@@ -484,6 +510,7 @@ def build_xcodebuild_command(
             destination,
             "-resultBundlePath",
             result_bundle_path,
+            *diagnostic_arguments,
             f"CODE_SIGNING_ALLOWED={code_signing_allowed}",
             *selection_args,
             action,
@@ -518,6 +545,7 @@ def build_xcodebuild_command(
         derived_data_path,
         "-resultBundlePath",
         result_bundle_path,
+        *diagnostic_arguments,
         f"CODE_SIGNING_ALLOWED={code_signing_allowed}",
         *selection_args,
         action,
@@ -541,6 +569,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-case-class")
     parser.add_argument("--code-signing-allowed", default="NO")
     parser.add_argument("--xctestrun-path")
+    parser.add_argument(
+        "--collect-test-diagnostics",
+        choices=("on-failure", "never"),
+        help=(
+            "Set Xcode's public test-diagnostics policy for this test run. "
+            "Omit to preserve Xcode's default on-failure behavior."
+        ),
+    )
     parser.add_argument(
         "--action",
         required=True,
@@ -759,6 +795,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "the following arguments are required without --xctestrun-path: "
                 + ", ".join(missing_args)
             )
+    if args.collect_test_diagnostics is not None and args.action != "test-without-building":
+        parser.error(
+            "--collect-test-diagnostics can only be used with --action test-without-building"
+        )
 
     selection_args_text = args.test_selection_args
     if selection_args_text is None:
@@ -838,6 +878,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             selection_args_text=selection_args_text,
             action=args.action,
             xctestrun_path=effective_xctestrun_path,
+            collect_test_diagnostics=args.collect_test_diagnostics,
         )
         print("Running:", shlex.join(command))
         try:

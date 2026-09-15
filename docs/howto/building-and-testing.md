@@ -87,6 +87,12 @@ specific artifact from several products. Use a new result-bundle path for each r
 CI artifact, use the verified fixture tool, manifest and SWORD paths returned by its importer.
 The same wrapper owns preparation and exact execution reconciliation in both cases.
 
+For repeated investigation of an already known failing selection, pass
+`--collect-test-diagnostics never` to skip Xcode's per-device diagnostic collection for that run.
+This public Xcode option does not change test outcomes, result-bundle creation, selected-test
+identity reconciliation, or wrapper failure handling. Omit the option for ordinary validation so
+Xcode retains its default on-failure diagnostics. The wrapper rejects it for `build-for-testing`.
+
 See [UI sharding](ui-test-sharding.md) for full selections, product reuse, fixture isolation and
 execution-cost evidence. See [performance measurements](performance-measurements.md) for the separate
 Release scheme and measurement boundaries.
