@@ -519,6 +519,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     static let emptyRenderedContentState = BibleReaderRenderedContentState.empty.encodedValue
     private static let issueTrackerURLString = "https://github.com/AndBible/and-bible/issues"
     private(set) var committedRenderState: BibleReaderCommittedRenderState = .empty
+    /// Content-intent generation whose payload the bridge most recently accepted.
+    private var committedRenderGeneration: UInt64?
     var renderedContentState: String {
         committedRenderState.identity?.diagnosticState.encodedValue
             ?? BibleReaderController.emptyRenderedContentState
@@ -1418,6 +1420,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             sourceProvenance: sourceProvenance,
             extractionDependency: extractionDependency
         )
+        committedRenderGeneration = contentIntentGeneration
     }
 
     /// Whether the visible page is Android's synthetic `Multi` general-book document.
@@ -8702,6 +8705,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
         _ = beginReplacingContentIntent()
         committedRenderState = .empty
+        committedRenderGeneration = nil
         specialDocumentCoordinator.invalidatePreparedReplayForInstalledSourceChange()
 
         // A retained EPUB object owns one immutable generation. Release it before the shared
@@ -10491,9 +10495,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      Side effects:
      - arms synchronized-scroll feedback suppression
      - updates native target state and its page manager to the synchronized verse
-     - emits `scroll_to_verse` only when the target chapter is already loaded
+     - emits `scroll_to_verse` only when the target chapter belongs to the committed generation
+     - retains an identical pending target without redundant persistence or old-DOM scrolling
+     - supersedes a different pending target through the selected document family's replacement path
      - prepares intro-inclusive replacement content directly for cross-chapter verse-zero targets
-     - delegates ordinary cross-chapter verses to `navigateTo`
+     - replaces unloaded Bible chapters passively without recording navigation history
 
      Failure modes:
      - returns without mutation when the target module cannot resolve the source book or verse
@@ -10502,6 +10508,53 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         guard let book = bookName(forOsisId: osisBookId),
       let targetOrdinal = verseOrdinal(osisBookId: osisBookId, chapter: chapter, verse: verse)
     else {
+            return
+        }
+        if clientReady, !hasCommittedSynchronizationSurface() {
+            let alreadyOwnsTarget = currentBook == book
+                && currentChapter == chapter
+                && currentVerse == verse
+            if documentPreparationCoordinator.hasActiveReplacement, alreadyOwnsTarget {
+                // The accepted replacement already owns this semantic destination. Let it publish
+                // once without persisting or scrolling an ordinal into the older committed DOM.
+                return
+            }
+            if !alreadyOwnsTarget {
+                synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: targetOrdinal)
+                applySynchronizedVersePosition(
+                    book: book,
+                    chapter: chapter,
+                    verse: verse,
+                    ordinal: targetOrdinal
+                )
+                if currentCategory == .bible {
+                    pendingLinkNavigationOrdinalRange = [targetOrdinal, targetOrdinal]
+                }
+            }
+            // A different target supersedes live obsolete preparation. An identical target whose
+            // earlier replacement already settled without commitment retries the retained intent.
+            // Neither case may send an ordinal into the older committed DOM.
+            loadCurrentContent()
+            return
+        }
+        guard !alreadyDisplaysSynchronizedPosition(
+            book: book,
+            chapter: chapter,
+            verse: verse
+        ) else { return }
+
+        if currentCategory == .commentary {
+            synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: targetOrdinal)
+            applySynchronizedVersePosition(
+                book: book,
+                chapter: chapter,
+                verse: verse,
+                ordinal: targetOrdinal
+            )
+            // Android reloads synchronized commentary for every distinct Verse key, including
+            // movement within one Bible chapter. Commentary blocks are not Bible chapter rows and
+            // cannot consume a target-Bible ordinal as an in-page scroll.
+            loadCurrentContent()
             return
         }
 
@@ -10531,10 +10584,123 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             return
         }
 
-        navigateTo(book: book, chapter: chapter, verse: verse)
+        applySynchronizedVersePosition(
+            book: book,
+            chapter: chapter,
+            verse: verse,
+            ordinal: targetOrdinal
+        )
+        pendingLinkNavigationOrdinalRange = [targetOrdinal, targetOrdinal]
+        // Passive WindowSync movement updates the shared Bible key without recording explicit
+        // navigation history, then replaces content only because the target chapter is not loaded.
+        loadCurrentContent()
     }
 
-    /** Applies one immutable typed sync coordinate captured before WindowManager debounce. */
+    /**
+     Tests whether one mapped synchronized position already owns the committed visible generation.
+
+     Native coordinate equality alone is insufficient while the client is bootstrapping or content
+     replacement is pending. Bible targets require an accepted exact-module render whose loaded range
+     contains the mapped chapter. Commentary targets additionally require a current accepted route whose
+     source coordinate maps to the target position. These witnesses ensure a no-op never suppresses the
+     first required render.
+
+     - Parameters:
+       - book: Target-local display book resolved after versification conversion.
+       - chapter: Target-local chapter.
+       - verse: Target-local verse.
+     - Returns: `true` only when the same position is already visible in the current committed render.
+     - Side effects: None.
+     - Failure modes: Pre-ready, special-document, stale-source, and uncommitted states return `false`.
+     */
+    private func alreadyDisplaysSynchronizedPosition(
+        book: String,
+        chapter: Int,
+        verse: Int
+    ) -> Bool {
+        guard hasCommittedSynchronizationSurface(),
+              currentBook == book,
+              currentChapter == chapter,
+              currentVerse == verse else { return false }
+
+        guard currentCategory == .commentary else { return currentCategory == .bible }
+        guard let target = commentaryNavigationAvailability.current,
+              let route = commentaryInfiniteScrollCoordinator.route(
+                matchingRenderedKey: target.key,
+                generation: contentIntentGeneration
+              ),
+              let mapped = VersificationMapper.convertStrictly(
+                osisBookId: target.osisBookID,
+                chapter: target.chapter,
+                verse: target.verse,
+                from: target.sourceVersification,
+                to: activeSourceVersificationName()
+              )?.reference else { return false }
+        return mapped.osisBookId == osisBookId(for: book)
+            && mapped.chapter == chapter
+            && mapped.verse == verse
+            && route.navigation.current == target
+    }
+
+    /**
+     Tests whether the selected ordinary family owns a bridge-accepted synchronization surface.
+
+     A native selection can outlive a failed or rejected replacement, while the DOM still displays
+     an older generation. Bible ownership therefore requires the exact accepted module and a loaded
+     current chapter. Commentary ownership requires the exact accepted current route and current
+     source dependencies. Only such a surface may consume an in-page synchronized scroll.
+
+     - Returns: `true` only when the selected family and native position match committed content.
+     - Side effects: None.
+     - Failure modes: Pre-ready, special-document, stale-source, and uncommitted states return `false`.
+     */
+    private func hasCommittedSynchronizationSurface() -> Bool {
+        guard clientReady,
+              committedRenderGeneration == contentIntentGeneration,
+              !showingMyNotes,
+              !showingStudyPad,
+              !isShowingAndroidMultiDocument,
+              !isShowingAndroidMemorizeDocument,
+              let identity = committedRenderState.identity,
+              identity.category == currentCategory else { return false }
+
+        switch currentCategory {
+        case .bible:
+            return SwordJavaExactStringIdentity(identity.moduleName ?? "")
+                == SwordJavaExactStringIdentity(activeModuleName)
+                && committedRenderState.sourceProvenance.containsExactModule(activeModuleName)
+                && infiniteScrollCoordinator.contains(book: currentBook, chapter: currentChapter)
+        case .commentary:
+            guard let moduleName = identity.moduleName,
+                  let activeCommentaryModuleName,
+                  SwordJavaExactStringIdentity(moduleName)
+                    == SwordJavaExactStringIdentity(activeCommentaryModuleName),
+                  committedRenderState.sourceProvenance.containsExactModule(moduleName),
+                  let target = commentaryNavigationAvailability.current,
+                  let route = commentaryInfiniteScrollCoordinator.route(
+                    matchingRenderedKey: target.key,
+                    generation: contentIntentGeneration
+                  ) else { return false }
+            return route.navigation.current == target
+                && sourceDependenciesAreCurrent(route.sourceDependencies)
+        default:
+            return false
+        }
+    }
+
+    /**
+     Applies one immutable typed sync coordinate captured before WindowManager debounce.
+
+     Android updates every synchronized target's shared `currentBible` key, but only Bible,
+     commentary, and the existing My Notes projection update visible content. Bible may scroll a
+     verified loaded chapter; synchronized commentary replaces its block for every distinct key;
+     non-verse families retain their document and visible position.
+
+     - Parameter position: Source-owned verse coordinate with its original versification.
+     - Side effects: Updates the pane's shared Bible coordinate and persists it when changed; may
+       replace or scroll content only for a supported verse family.
+     - Failure modes: Invalid or unmappable source coordinates leave native and rendered state intact.
+     */
     func applyWindowSynchronizationPosition(_ position: WindowSynchronizationPosition) {
         if showingMyNotes {
             guard let intent = BibleReaderMyNotesIntentAdmission.sourceChapter(
@@ -10581,7 +10747,29 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             verse: position.verse,
             from: position.sourceVersification,
             to: activeSourceVersificationName()
-        )?.reference else { return }
+        )?.reference,
+              let book = bookName(forOsisId: mapped.osisBookId),
+              let ordinal = verseOrdinal(
+                osisBookId: mapped.osisBookId,
+                chapter: mapped.chapter,
+                verse: mapped.verse
+              ) else { return }
+
+        let isVerseSynchronizableFamily = !showingStudyPad
+            && !isShowingAndroidMultiDocument
+            && !isShowingAndroidMemorizeDocument
+            && (currentCategory == .bible || currentCategory == .commentary)
+        guard isVerseSynchronizableFamily else {
+            // Android updates every synchronized pane's shared currentBible key, while dictionary,
+            // general-book, StudyPad, Multi, Memorize, and other non-verse pages retain their DOM.
+            applySynchronizedVersePosition(
+                book: book,
+                chapter: mapped.chapter,
+                verse: mapped.verse,
+                ordinal: ordinal
+            )
+            return
+        }
         scrollToSynchronizedVerse(
             osisBookId: mapped.osisBookId,
             chapter: mapped.chapter,

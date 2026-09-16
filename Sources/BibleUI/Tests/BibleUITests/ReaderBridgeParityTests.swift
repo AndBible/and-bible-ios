@@ -1312,13 +1312,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             chapter: synchronizedReference.chapter,
             verse: synchronizedReference.verse
         )
-        let synchronizedScrollPayload = try XCTUnwrap(
-            bridgeEmissionPayload(
-                from: Array(scripts().dropFirst(synchronizedScrollBoundary)),
-                event: "scroll_to_verse"
-            ) as? [String: Any]
-        )
-        XCTAssertEqual(synchronizedScrollPayload["ordinal"] as? Int, 4)
+        // Android leaves an already-selected commentary Verse alone; no Bible ordinal belongs in
+        // its structural-block DOM. Subsequent genuine row callbacks still persist the anchor.
+        XCTAssertEqual(scripts().count, synchronizedScrollBoundary)
         let reverseBroadcast = expectation(description: "commentary sync feedback stays passive")
         reverseBroadcast.isInverted = true
         windowManager.onSyncVerseChanged = { _, _ in reverseBroadcast.fulfill() }
@@ -3039,6 +3035,262 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, deletedBook)
         XCTAssertEqual(controller.currentChapter, deletedChapter)
         XCTAssertEqual(controller.currentVerse, deletedVerse)
+    }
+
+
+    /** Commentary no-ops require the visible accepted route and never scroll a pending old DOM. */
+    @MainActor
+    func testCommentaryTypedSyncNoOpAndPendingReplacementOwnership() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(named: "CALVINSYNCNOOP", in: modulePath)
+        let sword = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let worker = DispatchQueue(label: "org.andbible.tests.commentary-sync-noop")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = store.createWorkspace(name: "Commentary typed sync no-op")
+        let window = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(workspace)
+        manager.activeWindow = window
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: sword,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.activeWindow = window
+        controller.workspaceStore = store
+        controller.windowManagerRef = manager
+        XCTAssertTrue(manager.registerController(controller, for: window))
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
+        let commentaryBoundary = scripts().count
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINSYNCNOOP"), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: commentaryBoundary
+        )
+
+        let unexpectedSettledPersistence = expectation(
+            description: "settled commentary no-op does not persist"
+        )
+        unexpectedSettledPersistence.isInverted = true
+        controller.onPersistState = { unexpectedSettledPersistence.fulfill() }
+        var boundary = scripts().count
+        let genesisOne = WindowSynchronizationPosition(
+            sourceVersification: "KJV",
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 1
+        )
+        controller.applyWindowSynchronizationPosition(genesisOne)
+        XCTAssertEqual(scripts().count, boundary)
+        await fulfillment(of: [unexpectedSettledPersistence], timeout: 0.6)
+
+        let settledChangePersistence = expectation(
+            description: "changed settled commentary persists shared position once"
+        )
+        var settledChangePersistCount = 0
+        controller.onPersistState = {
+            settledChangePersistCount += 1
+            if settledChangePersistCount == 1 { settledChangePersistence.fulfill() }
+        }
+        let settledChangeBoundary = scripts().count
+        controller.applyWindowSynchronizationPosition(WindowSynchronizationPosition(
+            sourceVersification: "KJV",
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 22
+        ))
+        XCTAssertEqual(
+            scripts().dropFirst(settledChangeBoundary)
+                .filter { $0.contains("emit('scroll_to_verse'") }.count,
+            0
+        )
+        let settledChangeEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: settledChangeBoundary
+        )
+        let settledChangeDocument = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: settledChangeEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(settledChangeDocument["key"] as? String, "Gen.1.22")
+        XCTAssertEqual(settledChangeDocument["osisRef"] as? String, "Gen.1.22")
+        let settledChangeFragment = try XCTUnwrap(
+            settledChangeDocument["osisFragment"] as? [String: Any]
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(settledChangeFragment["xml"] as? String)
+                .contains("What is the force of this benediction")
+        )
+        await fulfillment(of: [settledChangePersistence], timeout: 1)
+        XCTAssertEqual(settledChangePersistCount, 1)
+
+        let resetPersistence = expectation(
+            description: "commentary reset shared position persists"
+        )
+        controller.onPersistState = { resetPersistence.fulfill() }
+        let resetBoundary = scripts().count
+        controller.applyWindowSynchronizationPosition(genesisOne)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: resetBoundary
+        )
+        await fulfillment(of: [resetPersistence], timeout: 1)
+        let unexpectedPendingPersistence = expectation(
+            description: "equal pending commentary does not persist"
+        )
+        unexpectedPendingPersistence.isInverted = true
+        controller.onPersistState = { unexpectedPendingPersistence.fulfill() }
+
+        worker.suspend()
+        boundary = scripts().count
+        controller.loadCurrentContent()
+        controller.applyWindowSynchronizationPosition(genesisOne)
+        XCTAssertEqual(scripts().count, boundary)
+        await fulfillment(of: [unexpectedPendingPersistence], timeout: 0.6)
+        controller.onPersistState = nil
+        worker.resume()
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: boundary)
+        XCTAssertEqual(
+            scripts().dropFirst(boundary).filter { $0.contains("emit('add_documents'") }.count,
+            1
+        )
+
+        worker.suspend()
+        boundary = scripts().count
+        controller.loadCurrentContent()
+        let changedPendingPersistence = expectation(
+            description: "changed pending commentary persists shared position once"
+        )
+        var changedPendingPersistCount = 0
+        controller.onPersistState = {
+            changedPendingPersistCount += 1
+            if changedPendingPersistCount == 1 { changedPendingPersistence.fulfill() }
+        }
+        controller.applyWindowSynchronizationPosition(WindowSynchronizationPosition(
+            sourceVersification: "KJV",
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 22
+        ))
+        XCTAssertEqual(
+            scripts().dropFirst(boundary).filter { $0.contains("emit('scroll_to_verse'") }.count,
+            0
+        )
+        XCTAssertEqual(controller.currentVerse, 22)
+        worker.resume()
+        let changedEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let changedDocument = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: changedEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(changedDocument["key"] as? String, "Gen.1.22")
+        XCTAssertEqual(changedDocument["osisRef"] as? String, "Gen.1.22")
+        let changedFragment = try XCTUnwrap(
+            changedDocument["osisFragment"] as? [String: Any]
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(changedFragment["xml"] as? String)
+                .contains("What is the force of this benediction")
+        )
+        XCTAssertEqual(
+            scripts().dropFirst(boundary).filter { $0.contains("emit('add_documents'") }.count,
+            1
+        )
+        XCTAssertEqual(controller.committedRenderState.identity?.category, .commentary)
+        await fulfillment(of: [changedPendingPersistence], timeout: 1)
+        XCTAssertEqual(changedPendingPersistCount, 1)
+        coordinator.cancelAll()
+        withExtendedLifetime((container, store, manager)) {}
+    }
+
+    /** Non-verse panes adopt the shared Bible coordinate without replacing or scrolling their DOM. */
+    @MainActor
+    func testDictionaryTypedSyncUpdatesSharedBiblePositionWithoutDOMMutation() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeRawLDModule(
+            named: "SYNCDICT",
+            category: "Lexicons / Dictionaries",
+            description: "Synchronization dictionary",
+            entries: [("G0001", "<entryFree n=\"G0001\"><p>Retained dictionary page.</p></entryFree>")],
+            in: modulePath
+        )
+        let sword = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = store.createWorkspace(name: "Dictionary passive synchronization")
+        let window = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(workspace)
+        manager.activeWindow = window
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: sword)
+        controller.activeWindow = window
+        controller.workspaceStore = store
+        controller.windowManagerRef = manager
+        XCTAssertTrue(manager.registerController(controller, for: window))
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
+        XCTAssertEqual(
+            controller.switchDictionaryDocument(to: "SYNCDICT"),
+            .switchedRequiringKeySelection
+        )
+        let dictionaryBoundary = scripts().count
+        controller.loadDictionaryEntry(key: "G0001")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: dictionaryBoundary
+        )
+        let committedDictionary = controller.committedRenderState
+        let pageManager = try XCTUnwrap(window.pageManager)
+        XCTAssertEqual(pageManager.dictionaryDocument, "SYNCDICT")
+        XCTAssertEqual(pageManager.dictionaryKey, "G0001")
+
+        let syncBoundary = scripts().count
+        let persisted = expectation(description: "dictionary shared Bible position persists once")
+        var persistCount = 0
+        controller.onPersistState = {
+            persistCount += 1
+            if persistCount == 1 { persisted.fulfill() }
+        }
+        controller.applyWindowSynchronizationPosition(WindowSynchronizationPosition(
+            sourceVersification: "KJV",
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 1
+        ))
+        controller.applyWindowSynchronizationPosition(WindowSynchronizationPosition(
+            sourceVersification: "KJV",
+            osisBookId: "Gen",
+            chapter: 2,
+            verse: 1
+        ))
+
+        XCTAssertEqual(scripts().count, syncBoundary)
+        XCTAssertEqual(controller.committedRenderState, committedDictionary)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.dictionaryDocument, "SYNCDICT")
+        XCTAssertEqual(pageManager.dictionaryKey, "G0001")
+        await fulfillment(of: [persisted], timeout: 1)
+        XCTAssertEqual(persistCount, 1)
+        withExtendedLifetime((container, store, manager)) {}
     }
 }
 

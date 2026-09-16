@@ -542,6 +542,24 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
         return .started(requestID: operation.requestID)
     }
 
+    /**
+     Reports whether replacement preparation still owns the live coordinator lane.
+
+     Callers use this main-owner snapshot to distinguish an accepted render that is still preparing
+     from a generation that already settled without publication. The lane remains active throughout
+     its synchronous completion callback, so publication can commit before this becomes false.
+
+     - Returns: `true` only while an uncancelled replacement operation remains admitted.
+     - Side effects: None.
+     - Failure modes: Requires the main dispatch queue, matching coordinator mutation ownership.
+     */
+    var hasActiveReplacement: Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        // Cancellation removes the lane before settling callbacks; terminal publication removes it
+        // after the synchronous callback has had its opportunity to commit the document.
+        return activeOperations[.replacement] != nil
+    }
+
     /** Cancels every pending result and settles its registered completion as cancelled. */
     func cancelAll() {
         dispatchPrecondition(condition: .onQueue(.main))

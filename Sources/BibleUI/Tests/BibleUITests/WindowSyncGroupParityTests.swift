@@ -62,7 +62,7 @@ final class WindowSyncGroupParityTests: BibleUISwordFixtureTestCase {
      value; consulting the source controller later would select the replacement Genesis position.
      */
     @MainActor
-    func testInstalledSynchronizationMapsCapturedMyNotesKJVAPositionIntoVulgateTarget() throws {
+    func testInstalledSynchronizationMapsCapturedMyNotesKJVAPositionIntoVulgateTarget() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
@@ -107,6 +107,7 @@ final class WindowSyncGroupParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(targetController.switchModule(to: "VulgTest"), .switched)
         XCTAssertTrue(targetController.navigateTo(book: "Psalms", chapter: 10, verse: 2))
         targetController.bridgeDidSetClientReady(targetBridge)
+        _ = try await awaitBridgeEmission(from: targetScripts, event: "add_documents", after: 0)
         XCTAssertEqual(targetController.currentChapter, 10)
         XCTAssertEqual(targetController.currentVerse, 2)
         XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 2)
