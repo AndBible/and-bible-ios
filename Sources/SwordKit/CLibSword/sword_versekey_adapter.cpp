@@ -196,7 +196,8 @@ extern "C" int SWVersification_getReferenceIndex(
     int chapter,
     int verse,
     long *indexOut) {
-    if (!osisBookName || !*osisBookName || !indexOut || chapter <= 0 || verse < 0) {
+    if (!osisBookName || !*osisBookName || !indexOut || chapter < 0 || verse < 0 ||
+        (chapter == 0 && verse != 0)) {
         return 1;
     }
 
@@ -217,7 +218,7 @@ extern "C" int SWVersification_getReferenceIndex(
     }
     const sword::VersificationMgr::Book *book = system->getBook(oneBasedBook - 1);
     if (!book || chapter > book->getChapterMax() ||
-        verse > book->getVerseMax(chapter)) {
+        (chapter > 0 && verse > book->getVerseMax(chapter))) {
         return 1;
     }
 
@@ -254,11 +255,13 @@ extern "C" int SWVersification_getReferenceForIndex(
     int chapter = 0;
     int verse = 0;
     if (system->getVerseFromOffset(index, &oneBasedBook, &chapter, &verse) != 0 ||
-        oneBasedBook <= 0 || chapter <= 0 || verse < 0) {
+        oneBasedBook <= 0 || chapter < 0 || verse < 0 ||
+        (chapter == 0 && verse != 0)) {
         return 1;
     }
     const sword::VersificationMgr::Book *book = system->getBook(oneBasedBook - 1);
-    if (!book || chapter > book->getChapterMax() || verse > book->getVerseMax(chapter)) {
+    if (!book || chapter > book->getChapterMax() ||
+        (chapter > 0 && verse > book->getVerseMax(chapter))) {
         return 1;
     }
 

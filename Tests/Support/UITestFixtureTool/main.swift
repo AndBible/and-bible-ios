@@ -42,6 +42,8 @@ private enum FixtureScenario: String, CaseIterable {
     case commentaryModule = "commentary-module"
     case commentaryModuleThreeWindows = "commentary-module-three-windows"
     case calvinCommentaryPerformance = "calvin-commentary-performance"
+    /// Real Calvin blocks around an empty verse, with a stable large-text reading setup.
+    case calvinCommentaryScrollRestoration = "calvin-commentary-scroll-restoration"
     case searchIndexed = "search-indexed"
     case searchCompletePreview = "search-complete-preview"
     case searchCompletePreviewMulti = "search-complete-preview-multi"
@@ -491,6 +493,13 @@ private final class FixtureContext {
         case .calvinCommentaryPerformance:
             try seedCalvinCommentaryPerformanceModule()
             settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
+        case .calvinCommentaryScrollRestoration:
+            try seedCalvinCommentaryPerformanceModule()
+            settingsStore.setString(.toolbarButtonActions, value: "swap-activity")
+            baseline.pageManager.bibleVerseNo = 22
+            var display = TextDisplaySettings()
+            display.fontSize = 20
+            baseline.pageManager.textDisplaySettings = display
         case .searchIndexed:
             try seedKJVFixtureSearchIndex()
         case .searchCompletePreview:

@@ -1108,6 +1108,7 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager,
             documentPreparationCoordinator: coordinator
         )
+        controller.displaySettings.showSectionTitles = true
 
         controller.loadCurrentContent()
         controller.loadCurrentContent()
@@ -1128,10 +1129,10 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
             ) as? [String: Any]
         )
         XCTAssertEqual(document["bookInitials"] as? String, "KJV")
-        XCTAssertEqual(document["key"] as? String, "Gen.1")
+        XCTAssertEqual(document["key"] as? String, "Gen.0-Gen.1")
         XCTAssertEqual(document["chapterNumber"] as? Int, 1)
         let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
-        XCTAssertEqual(fragment["osisRef"] as? String, "Gen.1")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Gen.0-Gen.1")
         XCTAssertTrue(
             try XCTUnwrap(fragment["xml"] as? String).contains("In the beginning"),
             "The accepted emission must contain the captured KJV chapter, not no-content fallback"
@@ -1166,6 +1167,7 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager,
             documentPreparationCoordinator: coordinator
         )
+        controller.displaySettings.showSectionTitles = true
 
         controller.loadCurrentContent()
         manager.refresh()
@@ -1180,7 +1182,7 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
                 as? [String: Any]
         )
         XCTAssertEqual(document["bookInitials"] as? String, "KJV")
-        XCTAssertEqual(document["key"] as? String, "Gen.1")
+        XCTAssertEqual(document["key"] as? String, "Gen.0-Gen.1")
         let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
         XCTAssertTrue(try XCTUnwrap(fragment["xml"] as? String).contains("In the beginning"))
     }
@@ -1222,6 +1224,7 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager,
             documentPreparationCoordinator: coordinator
         )
+        controller.displaySettings.showSectionTitles = true
         controller.activeWindow = firstWindow
 
         controller.loadCurrentContent()
@@ -1237,7 +1240,7 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
                 as? [String: Any]
         )
         XCTAssertEqual(document["bookInitials"] as? String, "KJV")
-        XCTAssertEqual(document["key"] as? String, "Gen.1")
+        XCTAssertEqual(document["key"] as? String, "Gen.0-Gen.1")
         XCTAssertEqual(controller.activeWindow?.id, secondWindow.id)
         XCTAssertEqual(controller.activeWindow?.workspace?.id, secondWorkspace.id)
     }

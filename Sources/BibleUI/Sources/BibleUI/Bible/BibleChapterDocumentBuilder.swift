@@ -139,14 +139,26 @@ struct BibleChapterDocumentBuilder {
         }
     }
 
-    /** Projects one immutable native capture into the complete reader chapter XML. */
-    static func projectChapter(_ capture: CapturedChapter) -> LoadedChapterContent? {
+    /**
+     Projects one immutable native capture into complete reader chapter XML.
+
+     - Parameters:
+       - capture: Exact copied chapter source and optional structural introductions.
+       - includesBookIntroduction: Whether chapter one begins with its captured book introduction.
+     - Returns: Repaired reader XML with at least one positive verse, or nil when no verse survives.
+     - Side effects: Performs in-memory structural repair only.
+     - Failure modes: Empty or wholly irreparable positive-verse captures fail closed.
+     */
+    static func projectChapter(
+        _ capture: CapturedChapter,
+        includesBookIntroduction: Bool = true
+    ) -> LoadedChapterContent? {
         var verseCount = 0
         var currentVerseChunk: [VerseEntry] = []
         var xmlParts: [String] = []
         var hasChapterMarker = false
 
-        if let bookIntroXML = projectedIntroduction(
+        if includesBookIntroduction, let bookIntroXML = projectedIntroduction(
             capture.bookIntroduction,
             moduleInitials: capture.moduleInitials
         ) {
@@ -211,6 +223,36 @@ struct BibleChapterDocumentBuilder {
             xml: xml,
             verseCount: verseCount,
             addChapter: !hasChapterMarker
+        )
+    }
+
+    /**
+     Projects only the exact book-introduction fragment captured with chapter one.
+
+     Android's `getWholeChapter(book.0.0, showIntros: false)` renders the compact `Book.0` range;
+     it does not append chapter-one verses. The native capture still reads chapter one to preserve
+     the existing bounded source transaction, while this projection publishes only the repaired
+     book-introduction children.
+
+     - Parameter capture: Immutable chapter-one capture with optional book-introduction source XML.
+     - Returns: One intro-only reader fragment, or nil when the exact book introduction is absent or
+       irreparable.
+     - Side effects: Performs in-memory structural repair only.
+     - Failure modes: Rejects non-chapter-one captures and missing/empty repaired introductions.
+     */
+    static func projectBookIntroduction(_ capture: CapturedChapter) -> LoadedChapterContent? {
+        guard capture.chapter == 1,
+              let introduction = projectedIntroduction(
+                capture.bookIntroduction,
+                moduleInitials: capture.moduleInitials
+              ) else { return nil }
+        var xmlParts: [String] = []
+        appendPreservedOsisContent(introduction, to: &xmlParts)
+        guard !xmlParts.isEmpty else { return nil }
+        return LoadedChapterContent(
+            xml: "<div>\(xmlParts.joined())</div>",
+            verseCount: 0,
+            addChapter: !introduction.contains("<chapter")
         )
     }
 

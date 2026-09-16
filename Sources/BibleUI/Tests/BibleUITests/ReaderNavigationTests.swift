@@ -26,6 +26,149 @@ import struct SwiftUI.Color
  */
 final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
+    /** Edge authorization uses the selected block key while routes keep rendered range identity. */
+    func testCommentaryInfiniteScrollSeparatesSelectedEdgeFromRenderedRangeKey() {
+        let first = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.1",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
+            sourceOrdinal: 4
+        )
+        let second = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.2",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 2),
+            sourceOrdinal: 5
+        )
+        let wrong = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.1-Gen.1.3",
+            selectedKey: "Gen.1.3",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 3),
+            sourceOrdinal: 6
+        )
+        let renderedRange = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.1-Gen.1.2",
+            selectedKey: "Gen.1.2",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
+            sourceOrdinal: 4
+        )
+        var coordinator = BibleReaderCommentaryInfiniteScrollCoordinator()
+        coordinator.seed(
+            generation: 41,
+            navigation: .init(current: first, previous: nil, next: second),
+            sourceDependencies: [.independent]
+        )
+
+        coordinator.commit(
+            second,
+            scope: .append,
+            navigation: .init(current: wrong, previous: first, next: nil),
+            sourceDependencies: [.independent],
+            generation: 41
+        )
+        XCTAssertEqual(coordinator.candidate(for: .append, generation: 41), second)
+        XCTAssertNil(coordinator.route(matchingRenderedKey: wrong.key, generation: 41))
+
+        coordinator.commit(
+            second,
+            scope: .append,
+            edgeNavigation: .init(current: second, previous: first, next: wrong),
+            visibleNavigation: .init(current: renderedRange, previous: nil, next: first),
+            sourceDependencies: [.independent],
+            generation: 41
+        )
+        XCTAssertEqual(coordinator.candidate(for: .append, generation: 41), wrong)
+        XCTAssertNil(coordinator.route(matchingRenderedKey: second.key, generation: 41))
+        XCTAssertEqual(
+            coordinator.route(matchingRenderedKey: renderedRange.key, generation: 41)?
+                .navigation.current,
+            renderedRange
+        )
+        XCTAssertEqual(
+            coordinator.route(matchingRenderedKey: renderedRange.key, generation: 41)?
+                .navigation.next,
+            first
+        )
+
+        coordinator.seed(
+            generation: 42,
+            navigation: .init(current: nil, previous: first, next: second),
+            sourceDependencies: [.independent]
+        )
+        XCTAssertNil(coordinator.candidate(for: .prepend, generation: 42))
+        XCTAssertNil(coordinator.candidate(for: .append, generation: 42))
+    }
+
+    /** Java-distinct keys remain distinct while one mapped source ordinal retains both routes. */
+    func testCommentaryInfiniteScrollUsesJavaExactKeysAndRetainsOrdinalCollisions() {
+        let composed = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.é",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
+            sourceOrdinal: 4
+        )
+        let decomposed = BibleReaderCommentaryNavigationTarget(
+            key: "Gen.1.e\u{301}",
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
+            sourceOrdinal: 4
+        )
+        XCTAssertNotEqual(Array(composed.key.utf16), Array(decomposed.key.utf16))
+        XCTAssertFalse(SwordJavaStringIdentity.equals(composed.key, decomposed.key))
+        XCTAssertNotEqual(composed, decomposed)
+        var coordinator = BibleReaderCommentaryInfiniteScrollCoordinator()
+        coordinator.seed(
+            generation: 51,
+            navigation: .init(current: composed, previous: nil, next: decomposed),
+            sourceDependencies: [.independent]
+        )
+        coordinator.commit(
+            composed,
+            scope: .append,
+            navigation: .init(current: composed, previous: nil, next: nil),
+            sourceDependencies: [.independent],
+            generation: 51
+        )
+        XCTAssertEqual(coordinator.candidate(for: .append, generation: 51), decomposed)
+        XCTAssertEqual(coordinator.routes(matchingSourceOrdinal: 4, generation: 51).count, 1)
+
+        coordinator.commit(
+            decomposed,
+            scope: .append,
+            navigation: .init(current: decomposed, previous: composed, next: nil),
+            sourceDependencies: [.independent],
+            generation: 51
+        )
+
+        let composedRouteKey = coordinator
+            .route(matchingRenderedKey: composed.key, generation: 51)?
+            .navigation.current?.key ?? ""
+        XCTAssertEqual(Array(composedRouteKey.utf16), Array(composed.key.utf16))
+        XCTAssertFalse(SwordJavaStringIdentity.equals(composedRouteKey, decomposed.key))
+        let decomposedRouteKey = coordinator
+            .route(matchingRenderedKey: decomposed.key, generation: 51)?
+            .navigation.current?.key ?? ""
+        XCTAssertEqual(Array(decomposedRouteKey.utf16), Array(decomposed.key.utf16))
+        XCTAssertFalse(SwordJavaStringIdentity.equals(decomposedRouteKey, composed.key))
+        XCTAssertEqual(coordinator.routes(matchingSourceOrdinal: 4, generation: 51).count, 2)
+
+        let sameKeyNewOrdinal = BibleReaderCommentaryNavigationTarget(
+            key: composed.key,
+            sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 2),
+            sourceOrdinal: 5
+        )
+        coordinator.seed(
+            generation: 52,
+            navigation: .init(current: composed, previous: nil, next: sameKeyNewOrdinal),
+            sourceDependencies: [.independent]
+        )
+        coordinator.commit(
+            sameKeyNewOrdinal,
+            scope: .append,
+            navigation: .init(current: sameKeyNewOrdinal, previous: composed, next: nil),
+            sourceDependencies: [.independent],
+            generation: 52
+        )
+        XCTAssertTrue(coordinator.routes(matchingSourceOrdinal: 4, generation: 52).isEmpty)
+        XCTAssertEqual(coordinator.routes(matchingSourceOrdinal: 5, generation: 52).count, 1)
+    }
+
     @MainActor
     func testBridgeSendResponseEmitsCallIdResponseJavaScript() {
         let bridge = BibleBridge()
@@ -3544,11 +3687,11 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies explicit verse navigation highlights the JSword/SWORD ordinal for the selected verse.
+     Verifies explicit chapter-one navigation keeps Android's intro-inclusive rendered range.
 
-     Android stores the navigation target as the active versification's verse ordinal, including
-     intro slots. The KJV test fixture module supplies the expected ordinal here so this test fails if
-     iOS reverts to literal verse numbers while still emitting an `originalOrdinalRange` field.
+     With section titles enabled, Android renders chapter one as `Gen.0-Gen.1` while retaining the
+     selected verse-five ordinal as the highlighted endpoint. The document, nested fragment, setup,
+     and highlight must therefore agree on their two distinct identities.
      */
     @MainActor
     func testLoadCurrentContentHighlightsExplicitVerseNavigationTarget() throws {
@@ -3559,8 +3702,21 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let expectedOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 5)
         )
+        let expectedRange = [
+            try XCTUnwrap(SwordVersification.referenceIndex(
+                for: .init(osisBookId: "Gen", chapter: 0, verse: 0),
+                versification: "KJV"
+            )),
+            try XCTUnwrap(SwordVersification.referenceIndex(
+                for: .init(osisBookId: "Gen", chapter: 1, verse: 31),
+                versification: "KJV"
+            )),
+        ]
 
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        var displaySettings = TextDisplaySettings.appDefaults
+        displaySettings.showSectionTitles = true
+        controller.displaySettings = displaySettings
 
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
         controller.loadCurrentContent()
@@ -3574,6 +3730,17 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             addDocumentsScript.contains("\"originalOrdinalRange\":[\(expectedOrdinal),\(expectedOrdinal)]"),
             "Expected explicit verse navigation to preserve the original highlighted target. Script: \(addDocumentsScript)"
         )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        XCTAssertEqual(document["key"] as? String, "Gen.0-Gen.1")
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.0-Gen.1")
+        XCTAssertEqual(document["annotateRef"] as? String, "Gen.0-Gen.1")
+        XCTAssertEqual(document["ordinalRange"] as? [Int], expectedRange)
+        XCTAssertEqual(fragment["key"] as? String, "KJV--Gen.0-Gen.1")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Gen.0-Gen.1")
+        XCTAssertEqual(fragment["ordinalRange"] as? [Int], expectedRange)
         let setup = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "setup_content") as? [String: Any]
         )
@@ -3583,7 +3750,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(setup["ordinalEnd"] as? Int, expectedOrdinal)
         XCTAssertEqual(setup["highlight"] as? Bool, true)
         XCTAssertEqual(setup["bookInitials"] as? String, "KJV")
-        XCTAssertEqual(setup["osisRef"] as? String, "Gen.1")
+        XCTAssertEqual(setup["osisRef"] as? String, "Gen.0-Gen.1")
     }
 
     /**
@@ -5361,6 +5528,83 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Keeps a disabled-intros Book.0 replacement distinct from an overlapping enabled-intros load.
+
+     The first Matthew 0:0 request is queued with section titles enabled and would render
+     `Matt.0-Matt.1`. Before native capture starts, the same selected endpoint is requested again
+     with section titles disabled. Android's latest setting renders only `Matt.0`; the requests must
+     not coalesce merely because their selected book/chapter and forced heading capture agree.
+
+     - Side effects: Suspends one private preparation queue, changes reader settings once, and
+       publishes the accepted replacement through a recording bridge.
+     - Failure modes: Fails when the stale enabled-intros document publishes, the disabled-intros
+       request is coalesced away, or the accepted document/setup/config describe different modes.
+     */
+    @MainActor
+    func testBookIntroductionSettingChangeSupersedesOverlappingRenderedRange() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let workerQueue = DispatchQueue(
+            label: "ReaderNavigationTests-book-introduction-setting-race"
+        )
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        var settings = TextDisplaySettings.appDefaults
+        settings.showSectionTitles = true
+        controller.displaySettings = settings
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "setup_content", after: 0)
+        let boundary = scripts().count
+
+        workerQueue.suspend()
+        var workerIsSuspended = true
+        defer {
+            if workerIsSuspended {
+                workerQueue.resume()
+            }
+        }
+        XCTAssertTrue(controller.navigateTo(book: "Matthew", chapter: 0, verse: 0))
+        settings.showSectionTitles = false
+        controller.updateDisplaySettings(settings, nightMode: false)
+        workerQueue.resume()
+        workerIsSuspended = false
+
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: boundary
+        )
+        let documents = try bridgeEmissionPayloads(
+            from: emissions,
+            event: "add_documents"
+        ).compactMap { $0 as? [String: Any] }
+        let document = try XCTUnwrap(documents.last)
+        let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        )
+        let config = try XCTUnwrap(
+            (try setConfigPayload(from: emissions))["config"] as? [String: Any]
+        )
+
+        XCTAssertEqual(documents.count, 1)
+        XCTAssertEqual(document["key"] as? String, "Matt.0")
+        XCTAssertEqual(document["osisRef"] as? String, "Matt.0")
+        XCTAssertEqual(fragment["key"] as? String, "KJV--Matt.0")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Matt.0")
+        XCTAssertEqual(setup["osisRef"] as? String, "Matt.0")
+        XCTAssertEqual(config["showSectionTitles"] as? Bool, false)
+        XCTAssertEqual(controller.currentBook, "Matthew")
+        XCTAssertEqual(controller.currentChapter, 0)
+        XCTAssertEqual(controller.currentVerse, 0)
+    }
+
+    /**
      Verifies a Vue-owned morphology edit preserves a typed Multi document generation.
 
      The production multi-link route retains complete OSIS markup, including morphology attributes.
@@ -6685,6 +6929,40 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies synchronized targets retain an annotation-derived chapter introduction.
+
+     A valid SWORD commentary annotation can publish verse zero. Android copies that Verse to each
+     synchronized pane, so the target must resolve its own intro-inclusive ordinal, update native
+     page state, and emit the same local ordinal instead of silently rejecting verse zero.
+     */
+    @MainActor
+    func testSynchronizedScrollRetainsAnnotationChapterIntroduction() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
+        controller.bridgeDidSetClientReady(bridge)
+        let setupScriptCount = recordedScripts().count
+        let introOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Gen", chapter: 1)
+        )
+
+        controller.scrollToSynchronizedVerse(osisBookId: "Gen", chapter: 1, verse: 0)
+
+        let scripts = Array(recordedScripts().dropFirst(setupScriptCount))
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: scripts, event: "scroll_to_verse") as? [String: Any]
+        )
+        XCTAssertEqual(payload["ordinal"] as? Int, introOrdinal)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertEqual(pageManager.bibleVerseNo, 0)
+    }
+
+    /**
      Protects Android's visible-verse old/new guard for synchronized windows.
 
      Android only posts a synchronized verse-change event when
@@ -7540,6 +7818,51 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(state.loadedScrolls.count, 1)
         XCTAssertEqual(state.loadedScrolls.first?.position, state.position)
         XCTAssertEqual(state.loadedScrolls.first?.highlight, true)
+        XCTAssertNil(coordinator.originalNavigationOrdinalRange)
+    }
+
+    /**
+     Rejects a stale book-introduction proof before any navigation effect becomes observable.
+
+     The coordinator receives an exact zero-verse request whose claimed ordinal differs from the
+     active context lookup. This models a source replacement between planning and application while
+     keeping the test independent of controller-private pending-range storage.
+
+     - Side effects: None; all context callbacks are in-memory spies.
+     - Failure modes: Fails if stale proof changes position, PageManager state, history, persistence,
+       loaded-range scroll, reload state, or explicit navigation ownership.
+     */
+    func testReaderNavigationCoordinatorRejectsStaleIntroductionProofAtomically() {
+        let coordinator = BibleReaderNavigationCoordinator()
+        let original = BibleReaderNavigationPosition(book: "Genesis", chapter: 1, verse: 5)
+        let state = NavigationCoordinatorStateBox(position: original)
+        let pageManager = PageManager()
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 5
+        let context = makeNavigationCoordinatorContext(
+            state: state,
+            pageManager: pageManager,
+            acceptsLoadedScroll: true
+        )
+
+        coordinator.navigateTo(
+            book: "Genesis",
+            chapter: 0,
+            verse: 0,
+            verifiedIntroductionOrdinal: 999,
+            context: context
+        )
+
+        XCTAssertEqual(state.position, original)
+        XCTAssertEqual(state.positionWriteCount, 0)
+        XCTAssertTrue(state.history.isEmpty)
+        XCTAssertEqual(state.persistCount, 0)
+        XCTAssertEqual(state.loadCount, 0)
+        XCTAssertTrue(state.loadedScrolls.isEmpty)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 5)
         XCTAssertNil(coordinator.originalNavigationOrdinalRange)
     }
 

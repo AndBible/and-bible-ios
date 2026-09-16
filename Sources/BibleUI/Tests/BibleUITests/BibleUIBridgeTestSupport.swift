@@ -296,3 +296,20 @@ func assertJSONKeys(_ object: [String: Any], _ expected: [String], file: StaticS
         line: line
     )
 }
+
+/**
+ Decodes every recorded payload for one bridge event in emission order.
+
+ - Parameters:
+   - scripts: Recorded JavaScript bridge calls.
+   - event: Event name to select.
+ - Returns: Parsed payloads in the same order Vue received them.
+ - Side effects: None.
+ - Failure modes: Throws if any selected bridge wrapper or payload is malformed.
+ */
+func bridgeEmissionPayloads(from scripts: [String], event: String) throws -> [Any] {
+    let prefix = "bibleView.emit('\(event)', "
+    return try scripts
+        .filter { $0.contains(prefix) }
+        .map { try bridgeEmissionPayload(from: [$0], event: event) }
+}

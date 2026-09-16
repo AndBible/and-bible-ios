@@ -14,11 +14,44 @@ import SwordKit
  module carrying the same identity.
  */
 struct BibleReaderSQLiteModuleCatalog {
-    /// Latest validated discovery snapshot retained privately so raw unchecked modules cannot leak.
-    private var library: SQLiteDocumentModuleLibrary?
+    /** Exact facade identity of one handle admitted into the current catalog snapshot. */
+    private struct CurrentHandleIdentity: Hashable {
+        /// Process-local identity of the immutable runtime facade.
+        let moduleIdentity: ObjectIdentifier
 
-    /// Stable handles in Android registration order for JSword-compatible name resolution.
-    private var handlesInRegistrationOrder: [BibleReaderSQLiteModuleHandle] = []
+        /// Java-exact initials paired with that facade identity at publication.
+        let initials: SwordJavaExactStringIdentity
+    }
+
+    /** One completed discovery/admission publication retained as an indivisible value. */
+    private struct Snapshot {
+        /// Validated discovery owner retaining the raw readers behind every admitted handle.
+        let library: SQLiteDocumentModuleLibrary
+
+        /// Stable handles in Android registration order for JSword-compatible name resolution.
+        let handlesInRegistrationOrder: [BibleReaderSQLiteModuleHandle]
+
+        /// Exact facade memberships derived once from the admitted handles above.
+        let currentHandleIdentities: Set<CurrentHandleIdentity>
+
+        /** Builds exact membership for one already-admitted handle sequence. */
+        init(
+            library: SQLiteDocumentModuleLibrary,
+            handlesInRegistrationOrder: [BibleReaderSQLiteModuleHandle]
+        ) {
+            self.library = library
+            self.handlesInRegistrationOrder = handlesInRegistrationOrder
+            currentHandleIdentities = Set(handlesInRegistrationOrder.map { module in
+                CurrentHandleIdentity(
+                    moduleIdentity: ObjectIdentifier(module),
+                    initials: SwordJavaExactStringIdentity(module.info.name)
+                )
+            })
+        }
+    }
+
+    /// Latest validated discovery, admitted handles, and exact current-handle membership.
+    private var snapshot: Snapshot?
 
     /**
      Shared BookSet registrations retaining exact SQLite handles and parsed config metadata.
@@ -30,7 +63,7 @@ struct BibleReaderSQLiteModuleCatalog {
     private var bookSetRegistrations: [
         BibleReaderInstalledBookSetRegistration<BibleReaderSQLiteModuleHandle>
     ] {
-        handlesInRegistrationOrder.map { module in
+        (snapshot?.handlesInRegistrationOrder ?? []).map { module in
             BibleReaderInstalledBookSetRegistration(
                 value: module,
                 initials: module.info.name,
@@ -94,8 +127,10 @@ struct BibleReaderSQLiteModuleCatalog {
         retaining library: SQLiteDocumentModuleLibrary,
         admittedModulesInRegistrationOrder: [BibleReaderSQLiteModuleHandle]
     ) {
-        self.library = library
-        handlesInRegistrationOrder = admittedModulesInRegistrationOrder
+        snapshot = Snapshot(
+            library: library,
+            handlesInRegistrationOrder: admittedModulesInRegistrationOrder
+        )
     }
 
     /**
@@ -143,7 +178,37 @@ struct BibleReaderSQLiteModuleCatalog {
      - Failure modes: Returns an empty array before reload or when no module is readable.
      */
     func modulesInRegistrationOrder() -> [BibleReaderSQLiteModuleHandle] {
-        handlesInRegistrationOrder
+        snapshot?.handlesInRegistrationOrder ?? []
+    }
+
+    /**
+     Tests whether an exact SQLite facade still belongs to the latest admitted catalog snapshot.
+
+     Both object identity and Java-exact UTF-16 initials must match the same published handle.
+     A fresh handle carrying reused initials therefore cannot authorize work prepared against an
+     older reload, while canonically equivalent Java-distinct initials remain independent.
+
+     - Parameters:
+       - moduleIdentity: `ObjectIdentifier` captured from the immutable facade being validated.
+       - initials: Raw module initials captured with that facade.
+     - Returns: True only when the exact facade/initials pair was admitted by the latest reload.
+     - Side effects: None; membership reads the already-built catalog snapshot without discovery,
+       registry replay, filesystem access, or handle creation.
+     - Failure modes: Returns false before reload, after an empty reload, for a retired facade, or
+       when either object identity or exact UTF-16 initials differs.
+     - Concurrency: The coordinator must serialize this value-type catalog's reloads with reads;
+       each reload assigns one complete immutable snapshot so readers never observe a mixed index.
+     */
+    func containsCurrentHandle(
+        moduleIdentity: ObjectIdentifier,
+        initials: String
+    ) -> Bool {
+        snapshot?.currentHandleIdentities.contains(
+            CurrentHandleIdentity(
+                moduleIdentity: moduleIdentity,
+                initials: SwordJavaExactStringIdentity(initials)
+            )
+        ) ?? false
     }
 
     /**

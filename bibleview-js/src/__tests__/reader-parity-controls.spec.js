@@ -478,6 +478,52 @@ describe("reading tracker", () => {
 });
 
 describe("infinite scroll edge state", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        Reflect.deleteProperty(document.body, "scrollHeight");
+        Object.defineProperty(window, "pageYOffset", {
+            value: 0,
+            writable: true,
+            configurable: true,
+        });
+        document.body.innerHTML = "";
+    });
+
+    /**
+     * Protects Android's ordinary commentary adjacent-block capability.
+     *
+     * The setup supplies a non-AI commentary OSIS document with automatic scrolling enabled. A
+     * passing test proves automatic scroll and the manual navigation controls share the same enabled
+     * capability instead of retaining the iOS-only commentary exclusion.
+     */
+    it("enables adjacent-block navigation for ordinary commentary", async () => {
+        let controls;
+        const documents = reactive([bibleDocument({
+            type: "osis",
+            bookCategory: "COMMENTARY",
+            isAiDocument: false,
+        })]);
+        const Harness = defineComponent({
+            template: "<div id=\"bottom\"></div>",
+            setup() {
+                controls = useInfiniteScroll(
+                    {requestPreviousChapter: vi.fn(), requestNextChapter: vi.fn()},
+                    {scrollYAtStart: ref(0)},
+                    documents,
+                    {infiniteScroll: true},
+                );
+                return {};
+            },
+        });
+
+        const wrapper = mount(Harness);
+        await nextTick();
+
+        expect(controls.documentSupportsChapterNavigation.value).toBe(true);
+        expect(controls.infiniteScrollIsEnabled.value).toBe(true);
+        wrapper.unmount();
+    });
+
     /**
      * Protects the single-page AI document navigation contract.
      *
@@ -518,21 +564,27 @@ describe("infinite scroll edge state", () => {
     /**
      * Protects manual navigation state when a chapter edge does not exist.
      *
-     * The setup requests content at the top and bottom and receives Android's `null` sentinel for each
-     * missing edge. A passing test proves the top/start edge does not incorrectly set `reachedEnd`,
-     * and that both edge sentinels prevent repeated manual bridge calls and loading indicators.
+     * The setup requests commentary blocks at the top and bottom and receives Android's `null`
+     * sentinel for each missing edge. A passing test proves the top/start edge does not incorrectly
+     * set `reachedEnd`, and that both directional sentinels prevent repeated manual bridge calls and
+     * loading indicators.
      */
-    it("does not re-request chapters after edge sentinels are reached", async () => {
+    it("does not re-request commentary blocks after directional null sentinels", async () => {
         let controls;
         const requestPreviousChapter = vi.fn().mockResolvedValue(null);
         const requestNextChapter = vi.fn().mockResolvedValue(null);
+        const documents = reactive([bibleDocument({
+            type: "osis",
+            bookCategory: "COMMENTARY",
+            isAiDocument: false,
+        })]);
         const Harness = defineComponent({
             template: "<div id=\"bottom\"></div>",
             setup() {
                 controls = useInfiniteScroll(
                     {requestPreviousChapter, requestNextChapter},
                     {scrollYAtStart: ref(0)},
-                    reactive([]),
+                    documents,
                     {infiniteScroll: false},
                 );
                 return {};
@@ -568,6 +620,193 @@ describe("infinite scroll edge state", () => {
         expect(controls.loadingAtEnd.value).toBe(false);
         wrapper.unmount();
     });
+
+    /**
+     * Protects document-generation ownership while a commentary prepend request is unresolved.
+     *
+     * The setup clears the current document before the native promise settles. A passing test proves
+     * the obsolete response cannot enter the replacement document list or alter directional edge state.
+     */
+    it("rejects a commentary prepend response from a cleared generation", async () => {
+        let controls;
+        let resolvePrevious;
+        const requestPreviousChapter = vi.fn(() => new Promise(resolve => {
+            resolvePrevious = resolve;
+        }));
+        const documents = reactive([bibleDocument({
+            id: "current",
+            type: "osis",
+            bookCategory: "COMMENTARY",
+            isAiDocument: false,
+        })]);
+        const Harness = defineComponent({
+            template: "<div id=\"bottom\"></div>",
+            setup() {
+                controls = useInfiniteScroll(
+                    {requestPreviousChapter, requestNextChapter: vi.fn()},
+                    {scrollYAtStart: ref(0)},
+                    documents,
+                    {infiniteScroll: false},
+                );
+                return {};
+            },
+        });
+        const wrapper = mount(Harness);
+        await nextTick();
+
+        controls.loadTextAtTop();
+        controls.documentsCleared();
+        documents.splice(0);
+        resolvePrevious(bibleDocument({
+            id: "stale-previous",
+            type: "osis",
+            bookCategory: "COMMENTARY",
+            isAiDocument: false,
+        }));
+        await flushPromises();
+
+        expect(documents).toEqual([]);
+        expect(controls.reachedStart.value).toBe(false);
+        expect(controls.reachedEnd.value).toBe(false);
+        wrapper.unmount();
+    });
+
+    /**
+     * Protects viewport ownership when a resolved commentary prepend is held for touch release.
+     *
+     * jsdom has no layout engine, so the test supplies deterministic body-height and marker-position
+     * measurements to the production compensation algorithm. A passing test proves both touchend and
+     * touchcancel insert once and offset scrolling by the measured height delta, leaving the existing
+     * marker at the same modeled viewport position.
+     */
+    it.each(["touchend", "touchcancel"])(
+        "preserves the commentary marker when deferred prepend resumes on %s",
+        async releaseEvent => {
+            let controls;
+            const previous = bibleDocument({
+                id: "previous",
+                type: "osis",
+                bookCategory: "COMMENTARY",
+                isAiDocument: false,
+            });
+            const documents = reactive([bibleDocument({
+                id: "current",
+                type: "osis",
+                bookCategory: "COMMENTARY",
+                isAiDocument: false,
+            })]);
+            const scrollYAtStart = ref(120);
+            Object.defineProperty(window, "pageYOffset", {
+                value: 120,
+                writable: true,
+                configurable: true,
+            });
+            Object.defineProperty(document.body, "scrollHeight", {
+                get: () => 400 + Math.max(0, documents.length - 1) * 300,
+                configurable: true,
+            });
+            const marker = document.createElement("span");
+            marker.id = "existing-commentary-marker";
+            marker.getBoundingClientRect = () => ({
+                top: 700 + Math.max(0, documents.length - 1) * 300 - window.pageYOffset,
+            });
+            document.body.appendChild(marker);
+            const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((_x, y) => {
+                window.pageYOffset = y;
+            });
+            const Harness = defineComponent({
+                template: "<div id=\"bottom\"></div>",
+                setup() {
+                    controls = useInfiniteScroll(
+                        {
+                            requestPreviousChapter: vi.fn().mockResolvedValue(previous),
+                            requestNextChapter: vi.fn(),
+                        },
+                        {scrollYAtStart},
+                        documents,
+                        {infiniteScroll: false},
+                    );
+                    return {};
+                },
+            });
+            const wrapper = mount(Harness, {attachTo: document.body});
+            await nextTick();
+            const markerTopBefore = marker.getBoundingClientRect().top;
+
+            window.dispatchEvent(new Event("touchstart"));
+            controls.loadTextAtTop();
+            await flushPromises();
+            expect(documents.map(document => document.id)).toEqual(["current"]);
+
+            window.dispatchEvent(new Event(releaseEvent));
+            await flushPromises();
+            await nextTick();
+
+            expect(documents.map(document => document.id)).toEqual(["previous", "current"]);
+            expect(scrollTo).toHaveBeenCalledWith(0, 420);
+            expect(marker.getBoundingClientRect().top).toBe(markerTopBefore);
+
+            window.dispatchEvent(new Event(releaseEvent));
+            await flushPromises();
+            expect(documents.map(document => document.id)).toEqual(["previous", "current"]);
+            wrapper.unmount();
+            marker.remove();
+        },
+    );
+
+    /**
+     * Protects replacement while a resolved commentary prepend is waiting for touch release.
+     *
+     * The setup resolves the native request under touch, clears the document, and then releases the
+     * touch. A passing test proves neither touchend nor touchcancel can revive the retired response.
+     */
+    it.each(["touchend", "touchcancel"])(
+        "drops a touch-deferred commentary prepend after clear on %s",
+        async releaseEvent => {
+            let controls;
+            const documents = reactive([bibleDocument({
+                id: "current",
+                type: "osis",
+                bookCategory: "COMMENTARY",
+                isAiDocument: false,
+            })]);
+            const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+            const Harness = defineComponent({
+                template: "<div id=\"bottom\"></div>",
+                setup() {
+                    controls = useInfiniteScroll(
+                        {
+                            requestPreviousChapter: vi.fn().mockResolvedValue(bibleDocument({
+                                id: "stale-previous",
+                                type: "osis",
+                                bookCategory: "COMMENTARY",
+                                isAiDocument: false,
+                            })),
+                            requestNextChapter: vi.fn(),
+                        },
+                        {scrollYAtStart: ref(0)},
+                        documents,
+                        {infiniteScroll: false},
+                    );
+                    return {};
+                },
+            });
+            const wrapper = mount(Harness);
+            await nextTick();
+
+            window.dispatchEvent(new Event("touchstart"));
+            controls.loadTextAtTop();
+            await flushPromises();
+            controls.documentsCleared();
+            documents.splice(0);
+            window.dispatchEvent(new Event(releaseEvent));
+            await flushPromises();
+
+            expect(documents).toEqual([]);
+            expect(scrollTo).not.toHaveBeenCalled();
+            wrapper.unmount();
+        },
+    );
 });
 
 describe("reader config refresh", () => {

@@ -26,17 +26,18 @@ struct BibleReaderNavigationBook: Equatable {
  Current visible Bible position for a reader pane.
 
  The value is copied into and out of `BibleReaderController` through closures so the coordinator can
- plan mutations without retaining an observable controller. All numbers are one-based and already
- validated by the caller's active module/compatibility lookup.
+ plan mutations without retaining an observable controller. Ordinary locations are one-based;
+ chapter/book introductions use verse zero (and chapter zero for a book introduction) only after an
+ explicit ordinal proof from the caller's active source.
  */
 struct BibleReaderNavigationPosition: Equatable {
     /// User-facing book name.
     let book: String
 
-    /// One-based chapter number.
+    /// One-based chapter, or zero for a verified book introduction.
     let chapter: Int
 
-    /// One-based verse number.
+    /// One-based verse, or zero for a verified book/chapter introduction.
     let verse: Int
 }
 
@@ -167,7 +168,8 @@ final class BibleReaderNavigationCoordinator {
        - ordinalForVerse: Active-module lookup used to convert the restored verse into an anchor.
      - Side effects: Clears explicit navigation highlighting and replaces the stored scroll target.
      - Failure modes: If the verse has no ordinal or is verse one, restoration falls back to the
-       chapter top to preserve Android's top-of-chapter behavior.
+       chapter top to preserve Android's top-of-chapter behavior. Verse zero restores only when the
+       caller's active source resolves its exact introduction ordinal.
      */
     func restoreSavedPosition(
         _ position: BibleReaderNavigationPosition,
@@ -175,7 +177,11 @@ final class BibleReaderNavigationCoordinator {
     ) {
         originalNavigationOrdinalRange = nil
         shouldRestoreScroll = false
-        if position.verse > 1,
+        if position.verse == 0,
+           let ordinal = ordinalForVerse(position.book, position.chapter, 0) {
+            lastScrollTarget = .ordinal(ordinal)
+            shouldRestoreScroll = true
+        } else if position.verse > 1,
            let ordinal = ordinalForVerse(position.book, position.chapter, position.verse) {
             lastScrollTarget = .ordinal(ordinal)
         } else {
@@ -204,29 +210,58 @@ final class BibleReaderNavigationCoordinator {
      - Parameters:
        - book: User-facing book name to make visible.
        - chapter: One-based chapter number.
-       - verse: Optional one-based verse; omitted navigation lands at the chapter top.
+       - verse: Optional one-based verse; omitted navigation lands at the chapter top. Zero is
+         accepted only with `verifiedIntroductionOrdinal`.
+       - verifiedIntroductionOrdinal: Exact active-source ordinal proving the requested zero verse.
        - context: Controller-owned lookup, persistence, history, and reload callbacks.
+     - Returns: True after the requested location passes validation and mutates reader state; false
+       before mutation when an introduction proof is absent or stale.
      - Side effects: Mutates controller position through `context`, writes PageManager Bible fields,
        records history, persists workspace state, and either scrolls retained content or reloads when
        the Vue client is ready.
      - Failure modes: If no PageManager is available, controller state and history still update but
        no durable page-position write occurs; if the explicit verse has no ordinal, highlighting is
-       skipped while navigation still lands on the requested verse number.
+       skipped while navigation still lands on the requested verse number. An invalid introduction
+       proof returns before reader state, history, or persistence changes.
      */
-    func navigateTo(book: String, chapter: Int, verse: Int? = nil, context: BibleReaderNavigationContext) {
-        let resolvedVerse = max(1, verse ?? 1)
+    @discardableResult
+    func navigateTo(
+        book: String,
+        chapter: Int,
+        verse: Int? = nil,
+        verifiedIntroductionOrdinal: Int? = nil,
+        context: BibleReaderNavigationContext
+    ) -> Bool {
+        let introductionOrdinal: Int?
+        if let verifiedIntroductionOrdinal {
+            guard verse == 0,
+                  chapter >= 0,
+                  context.ordinalForVerse(book, chapter, 0) == verifiedIntroductionOrdinal else {
+                return false
+            }
+            introductionOrdinal = verifiedIntroductionOrdinal
+        } else {
+            introductionOrdinal = nil
+        }
+
+        let resolvedVerse = introductionOrdinal == nil ? max(1, verse ?? 1) : 0
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: resolvedVerse)
         context.setCurrentPosition(position)
 
-        if let explicitVerse = verse,
-           let ordinal = context.ordinalForVerse(book, chapter, max(1, explicitVerse)) {
+        if let ordinal = introductionOrdinal {
+            originalNavigationOrdinalRange = [ordinal, ordinal]
+        } else if let explicitVerse = verse,
+                  let ordinal = context.ordinalForVerse(book, chapter, max(1, explicitVerse)) {
             originalNavigationOrdinalRange = [ordinal, ordinal]
         } else {
             originalNavigationOrdinalRange = nil
         }
 
-        if resolvedVerse > 1,
-           let ordinal = context.ordinalForVerse(book, chapter, resolvedVerse) {
+        if let ordinal = introductionOrdinal {
+            lastScrollTarget = .ordinal(ordinal)
+            shouldRestoreScroll = true
+        } else if resolvedVerse > 1,
+                  let ordinal = context.ordinalForVerse(book, chapter, resolvedVerse) {
             lastScrollTarget = .ordinal(ordinal)
             shouldRestoreScroll = true
         } else {
@@ -240,13 +275,14 @@ final class BibleReaderNavigationCoordinator {
             context.persistState()
         }
 
-        guard context.clientReady() else { return }
+        guard context.clientReady() else { return true }
         if context.scrollToLoadedPosition(position, verse != nil) {
             originalNavigationOrdinalRange = nil
             shouldRestoreScroll = false
-            return
+            return true
         }
         context.loadCurrentContent()
+        return true
     }
 
     /**
@@ -342,7 +378,7 @@ final class BibleReaderNavigationCoordinator {
         lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
         let keyParts = key.split(separator: ".", omittingEmptySubsequences: true)
-        if keyParts.count >= 2 {
+        if keyParts.count >= 2, Int(keyParts[1]) != nil {
             updateVisiblePositionFromKey(
                 osisId: String(keyParts[0]),
                 chapterText: String(keyParts[1]),
@@ -560,7 +596,8 @@ final class BibleReaderNavigationCoordinator {
        - context: Controller-owned lookup, state, and persistence callbacks.
      - Side effects: Mutates controller position and PageManager fields when the key identifies a
        changed book/chapter or when the same-chapter ordinal resolves to a different verse.
-     - Failure modes: Non-numeric chapter strings are ignored to preserve the previous position.
+     - Failure modes: Non-numeric chapter strings are handled by the caller's typed ordinal
+       fallback because intro-inclusive document keys can be ranges such as `Matt.0-Matt.1`.
      */
     private func updateVisiblePositionFromKey(
         osisId: String,

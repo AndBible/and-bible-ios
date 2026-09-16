@@ -1346,6 +1346,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentVerse, 2)
         XCTAssertFalse(controller.hasNext)
         XCTAssertEqual(controller.committedRenderState.identity?.key, "Gen.1.1")
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 6)
 
         bridge.javaScriptEvaluationObserver = acceptedEvaluator
         let replayBaseline = scripts().count
@@ -1361,11 +1362,1158 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let nextRange = try XCTUnwrap(nextDocument["commentaryRange"] as? [String: Any])
         XCTAssertEqual(controller.currentVerse, 2)
         XCTAssertEqual(nextRange["startOsisRef"] as? String, "Gen.1.2")
+        // Android invalidates the previous key's local anchor when the new document is accepted.
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 0)
+
+        let rebuiltAppendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8101)
+        let rebuiltAppendResult = try await awaitBridgeScript(
+            from: scripts,
+            after: rebuiltAppendBoundary,
+            description: "client-rebuilt commentary append"
+        ) { $0.hasPrefix("bibleView.response(8101,") }
+        let rebuiltAppend = try XCTUnwrap(rebuiltAppendResult)
+        XCTAssertTrue(rebuiltAppend.contains(#""key":"Gen.1.3""#))
 
         controller.activeWindow = nil
         controller.bridge(bridge, didScrollToOrdinal: 4, key: "Gen.1.2", atChapterTop: false)
         XCTAssertEqual(controller.currentVerse, 2)
-        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 6)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 0)
+    }
+
+    /**
+     Reproduces Calvin's namespaced annotation through real module capture and bridge publication.
+
+     The fixture retains Calvin's actual Genesis 1:22 and 1:24 OSIS, leaves 1:23 empty, and supplies
+     bounded neighboring blocks. Android rejects the `Bible:` annotation as a verse reference and
+     falls back to the selected key. One append must therefore return 1:24, and its visible callback
+     must move the shared scripture position and request anchor persistence once without reloading.
+     This observes the controller's persistence request and live PageManager state, not a durable
+     store/relaunch. The separate real-Calvin app journey checks viewport restoration.
+
+     Failure means source annotation metadata suppressed a valid edge, an empty verse became a
+     document, an accepted appended key could not route its local anchor, or duplicate telemetry
+     triggered another persistence request. No prepared payload or navigation route is injected.
+     */
+    @MainActor
+    func testCalvinAnnotationFallbackAppendsAcrossEmptyVerseAndRoutesVisiblePosition() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(named: "CALVINSCROLL", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 22
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        controller.bridgeDidSetClientReady(bridge)
+        let replacementBoundary = scripts().count
+
+        controller.switchCommentaryDocument(to: "CALVINSCROLL")
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+        let initial = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(initial["key"] as? String, "Gen.1.22")
+        XCTAssertEqual(initial["annotateRef"] as? String, "Gen.1.22")
+        XCTAssertEqual(initial["osisRef"] as? String, "Gen.1.22")
+        let initialFragment = try XCTUnwrap(initial["osisFragment"] as? [String: Any])
+        XCTAssertTrue(try XCTUnwrap(initialFragment["xml"] as? String).contains("Bible:Gen.1.22"))
+
+        let appendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8151)
+        let responseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: appendBoundary,
+            description: "Calvin append past the empty verse"
+        ) { $0.hasPrefix("bibleView.response(8151,") }
+        let response = try XCTUnwrap(responseResult)
+        let appended = try bridgeResponseObject(from: response)
+        XCTAssertEqual(appended["key"] as? String, "Gen.1.24")
+        XCTAssertEqual(appended["annotateRef"] as? String, "Gen.1.24")
+        let appendedKey = try XCTUnwrap(appended["osisRef"] as? String)
+        XCTAssertEqual(appendedKey, "Gen.1.24")
+        let appendedFragment = try XCTUnwrap(appended["osisFragment"] as? [String: Any])
+        XCTAssertTrue(try XCTUnwrap(appendedFragment["xml"] as? String).contains("Bible:Gen.1.24"))
+        XCTAssertEqual(scripts().dropFirst(appendBoundary).filter {
+            $0.hasPrefix("bibleView.response(8151,")
+        }.count, 1)
+
+        let localRange = try XCTUnwrap(appended["ordinalRange"] as? [Int])
+        let localAnchor = try XCTUnwrap(localRange.first)
+        let persisted = expectation(description: "visible appended Calvin block requests persistence")
+        persisted.assertForOverFulfill = true
+        var persistCount = 0
+        controller.onPersistState = {
+            persistCount += 1
+            persisted.fulfill()
+        }
+        defer { controller.onPersistState = nil }
+        let visibleBoundary = scripts().count
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: appendedKey,
+            atChapterTop: false
+        )
+        await fulfillment(of: [persisted], timeout: 2)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 24)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+        XCTAssertEqual(persistCount, 1)
+        XCTAssertTrue(try bridgeEmissionPayloads(
+            from: Array(scripts().dropFirst(visibleBoundary)),
+            event: "add_documents"
+        ).isEmpty)
+
+        let duplicatePersist = expectation(description: "duplicate Calvin telemetry stays quiet")
+        duplicatePersist.isInverted = true
+        controller.onPersistState = { duplicatePersist.fulfill() }
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: appendedKey,
+            atChapterTop: false
+        )
+        await fulfillment(of: [duplicatePersist], timeout: 0.45)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
+        XCTAssertTrue(try bridgeEmissionPayloads(
+            from: Array(scripts().dropFirst(visibleBoundary)),
+            event: "add_documents"
+        ).isEmpty)
+
+        controller.onPersistState = nil
+        let previousBoundary = scripts().count
+        controller.navigatePrevious()
+        let previousEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: previousBoundary
+        )
+        let previous = try XCTUnwrap(
+            bridgeEmissionPayload(from: previousEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(previous["key"] as? String, "Gen.1.22")
+        XCTAssertEqual(controller.currentVerse, 22)
+    }
+
+    /**
+     Keeps selected-block append ownership separate from annotation-derived visible navigation.
+
+     Genesis 1:24 deliberately annotates the valid range 1:21–22. Android uses that range's start
+     after the visible callback, while its append lane still advances past the selected 1:24 block.
+     The real module therefore must append 1:25 but navigate the toolbar from 1:21 to 1:22. Either
+     result coming from the other coordinate exposes a conflated navigation owner.
+     */
+    @MainActor
+    func testCommentaryAnnotationRangeSeparatesAppendEdgeFromVisibleToolbarPosition() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(
+            named: "CALVINRANGE",
+            in: modulePath,
+            annotationForVerse24: "Gen.1.21-Gen.1.22"
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 22
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        controller.bridgeDidSetClientReady(bridge)
+        let replacementBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "CALVINRANGE")
+        _ = try await awaitBridgeEmission(
+            from: scripts, event: "add_documents", after: replacementBoundary
+        )
+
+        let firstBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8152)
+        let firstResponse = try await awaitBridgeScript(
+            from: scripts, after: firstBoundary, description: "append with a different annotation range"
+        ) { $0.hasPrefix("bibleView.response(8152,") }
+        let appended = try bridgeResponseObject(from: XCTUnwrap(firstResponse))
+        XCTAssertEqual(appended["key"] as? String, "Gen.1.24")
+        let renderedKey = try XCTUnwrap(appended["osisRef"] as? String)
+        XCTAssertEqual(renderedKey, "Gen.1.21-Gen.1.22")
+        XCTAssertEqual(appended["annotateRef"] as? String, renderedKey)
+        let localRange = try XCTUnwrap(appended["ordinalRange"] as? [Int])
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: try XCTUnwrap(localRange.first),
+            key: renderedKey,
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 21)
+        XCTAssertEqual(pageManager.bibleVerseNo, 21)
+
+        let secondBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8153)
+        let secondResponse = try await awaitBridgeScript(
+            from: scripts, after: secondBoundary, description: "append keeps the selected outer edge"
+        ) { $0.hasPrefix("bibleView.response(8153,") }
+        let nextAppended = try bridgeResponseObject(from: XCTUnwrap(secondResponse))
+        XCTAssertEqual(nextAppended["key"] as? String, "Gen.1.25")
+        XCTAssertEqual(controller.currentVerse, 21)
+
+        let toolbarBoundary = scripts().count
+        controller.navigateNext()
+        let toolbarEmissions = try await awaitBridgeEmission(
+            from: scripts, event: "add_documents", after: toolbarBoundary
+        )
+        let toolbarDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: toolbarEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(toolbarDocument["key"] as? String, "Gen.1.22")
+        XCTAssertEqual(controller.currentVerse, 22)
+    }
+
+    /** Verifies Android's whole-chapter annotation retains its verse-zero introduction position. */
+    @MainActor
+    func testCommentaryChapterAnnotationRetainsIntroductionPosition() async throws {
+        try await assertCommentaryAnnotationIntroduction("Gen.1", chapter: 1, ordinal: 3)
+    }
+
+    /** Verifies Android's whole-book annotation retains its chapter/verse-zero introduction. */
+    @MainActor
+    func testCommentaryBookAnnotationRetainsIntroductionPosition() async throws {
+        try await assertCommentaryAnnotationIntroduction("Gen", chapter: 0, ordinal: 2)
+    }
+
+    /**
+     Verifies toolbar Previous walks backward from a rendered chapter introduction.
+
+     A real Genesis 1:24 commentary row annotates the start of Genesis chapter two. After Vue makes
+     that chapter introduction visible, Android asks the commentary walker for the prior non-empty
+     block rather than treating the annotation's null intro entry as a terminal boundary. The
+     public toolbar action must therefore return the fixture's nearest Genesis 1:26 block. Failure
+     means verse-zero navigation was retained but its backward edge was discarded or normalized.
+     */
+    @MainActor
+    func testCommentaryChapterIntroductionToolbarPreviousWalksToPriorBlock() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(
+            named: "CALVININTROPREVIOUS",
+            in: modulePath,
+            annotationForVerse24: "Gen.2"
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 24
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 24)
+        controller.bridgeDidSetClientReady(bridge)
+        let replacementBoundary = scripts().count
+
+        controller.switchCommentaryDocument(to: "CALVININTROPREVIOUS")
+
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.2")
+        let localRange = try XCTUnwrap(document["ordinalRange"] as? [Int])
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: try XCTUnwrap(localRange.first),
+            key: "Gen.2",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertTrue(controller.hasPrevious)
+
+        let previousBoundary = scripts().count
+        controller.navigatePrevious()
+        let previousEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: previousBoundary
+        )
+        let previous = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: previousEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(previous["key"] as? String, "Gen.1.26")
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 26)
+    }
+
+    /**
+     Exercises one real annotated document through publication, visible telemetry, and sync lookup.
+
+     Expected chapter/ordinal values come from Android VerseRangeFactory under KJV; introductions
+     must not be coerced to scripture verse one or silently rejected. Each caller owns a separate
+     temporary module and controller. This helper checks live positions and captured sync metadata;
+     it neither injects routes nor claims an on-disk relaunch result.
+     */
+    @MainActor
+    private func assertCommentaryAnnotationIntroduction(
+        _ annotation: String,
+        chapter: Int,
+        ordinal: Int
+    ) async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(
+            named: "CALVININTRO", in: modulePath, annotationForVerse24: annotation
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 24
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 24)
+        controller.bridgeDidSetClientReady(bridge)
+        let boundary = scripts().count
+        controller.switchCommentaryDocument(to: "CALVININTRO")
+        let emissions = try await awaitBridgeEmission(
+            from: scripts, event: "add_documents", after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["key"] as? String, "Gen.1.24")
+        let renderedKey = try XCTUnwrap(document["osisRef"] as? String)
+        XCTAssertEqual(renderedKey, annotation)
+        XCTAssertEqual(document["annotateRef"] as? String, renderedKey)
+        let localRange = try XCTUnwrap(document["ordinalRange"] as? [Int])
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: try XCTUnwrap(localRange.first),
+            key: renderedKey,
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, chapter)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, chapter)
+        XCTAssertEqual(pageManager.bibleVerseNo, 0)
+        let synchronized = try XCTUnwrap(controller.synchronizedVerseReference(ordinal: ordinal))
+        XCTAssertEqual(synchronized.osisBookId, "Gen")
+        XCTAssertEqual(synchronized.chapter, chapter)
+        XCTAssertEqual(synchronized.verse, 0)
+    }
+
+    /**
+     Verifies a visible chapter introduction synchronizes a target already showing that chapter.
+
+     A real annotated commentary document supplies `Gen.1` through the normal bridge callback and
+     WindowManager sync route. The target must retain the exact chapter-introduction coordinate,
+     emit its own SWORD ordinal through the existing `scroll_to_verse` event, and avoid replacing
+     the already-loaded Bible document. Failure means target synchronization still rejects verse
+     zero or coerces it to verse one. Only in-memory PageManager state is observed.
+     */
+    @MainActor
+    func testCommentaryChapterIntroductionSynchronizesLoadedTargetAtVerseZero() async throws {
+        try await assertCommentaryIntroductionSynchronizesTarget(
+            annotation: "Gen.1",
+            targetInitialBook: "Genesis",
+            expectedChapter: 1,
+            expectedOrdinal: 3,
+            expectedReplacementRange: nil
+        )
+    }
+
+    /**
+     Verifies a visible book introduction survives synchronized cross-book replacement.
+
+     The source reaches `Gen.0.0` from a real whole-book commentary annotation while the target is
+     showing Exodus. Android retains the exact selected introduction, loads the chapter-zero through
+     chapter-one Bible document, and anchors setup at the target-local book-introduction ordinal.
+     The test observes the public bridge payload plus live controller/PageManager state; it does not
+     inject a prepared route or claim durable relaunch coverage. Failure means cross-book sync snaps
+     chapter or verse zero to one, omits the introduction from the replacement, or loses its anchor.
+     */
+    @MainActor
+    func testCommentaryBookIntroductionSynchronizesCrossBookWithoutCoordinateCoercion() async throws {
+        try await assertCommentaryIntroductionSynchronizesTarget(
+            annotation: "Gen",
+            targetInitialBook: "Exodus",
+            expectedChapter: 0,
+            expectedOrdinal: 2,
+            expectedReplacementRange: [2, 34]
+        )
+    }
+
+    /**
+     Preserves a chapter introduction when synchronization replaces another chapter of the same book.
+
+     Genesis 2:0 follows chapter one's final KJV ordinal 34; its introduction is 35 and verse 25
+     ends at 60. Unlike same-loaded synchronization, this path must include the introduction in a
+     newly prepared Bible document and its setup anchor. Failure means the replacement special-case
+     covers only a whole-book introduction or still clamps the visible chapter-introduction verse.
+     */
+    @MainActor
+    func testCommentaryChapterIntroductionSynchronizesAcrossChaptersWithoutCoordinateCoercion() async throws {
+        try await assertCommentaryIntroductionSynchronizesTarget(
+            annotation: "Gen.2",
+            targetInitialBook: "Genesis",
+            expectedChapter: 2,
+            expectedOrdinal: 35,
+            expectedReplacementRange: [35, 60]
+        )
+    }
+
+    /**
+     Opens a retained Bible book-introduction reference while the pane is showing commentary.
+
+     Window-menu actions are category independent on Android: the retained Bible endpoint still
+     passes through the active installed Bible's exact 0:0 proof, while the pane remains commentary.
+     A book introduction absent from that source must fail without changing the accepted position.
+
+     - Side effects: Seeds one commentary module and mutates one in-memory pane/PageManager.
+     - Failure modes: Fails when commentary callers bypass the shared verse-zero proof, clamp the
+       accepted endpoint, switch categories, or partially mutate state after an unowned endpoint.
+     */
+    @MainActor
+    func testCommentaryWindowMenuUsesCommonBookIntroductionAdmission() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(
+            named: "CALVININTROMENU",
+            in: modulePath,
+            annotationForVerse24: "Gen.1.24"
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+
+        controller.scrollToSynchronizedVerse(osisBookId: "Matt", chapter: 0, verse: 0)
+        let retainedReference = try XCTUnwrap(controller.windowMenuReference())
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 24)
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
+        let commentaryBoundary = scripts().count
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVININTROMENU"), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: commentaryBoundary
+        )
+        XCTAssertEqual(controller.currentCategory, .commentary)
+
+        try controller.navigateToWindowMenuReference(retainedReference)
+
+        XCTAssertEqual(controller.currentCategory, .commentary)
+        XCTAssertEqual(controller.currentBook, "Matthew")
+        XCTAssertEqual(controller.currentChapter, 0)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
+        XCTAssertEqual(pageManager.bibleChapterNo, 0)
+        XCTAssertEqual(pageManager.bibleVerseNo, 0)
+
+        let acceptedPosition = (
+            controller.currentBook,
+            controller.currentChapter,
+            controller.currentVerse,
+            pageManager.bibleBibleBook,
+            pageManager.bibleChapterNo,
+            pageManager.bibleVerseNo
+        )
+        XCTAssertFalse(controller.navigateTo(book: "Tobit", chapter: 0, verse: 0))
+        XCTAssertEqual(controller.currentBook, acceptedPosition.0)
+        XCTAssertEqual(controller.currentChapter, acceptedPosition.1)
+        XCTAssertEqual(controller.currentVerse, acceptedPosition.2)
+        XCTAssertEqual(pageManager.bibleBibleBook, acceptedPosition.3)
+        XCTAssertEqual(pageManager.bibleChapterNo, acceptedPosition.4)
+        XCTAssertEqual(pageManager.bibleVerseNo, acceptedPosition.5)
+        XCTAssertEqual(controller.currentCategory, .commentary)
+    }
+
+    /**
+     Drives one real annotation introduction through the production source and target controllers.
+
+     - Parameters:
+       - annotation: Whole-chapter or whole-book annotation authored into the real commentary.
+       - targetInitialBook: Bible book already accepted in the synchronized target pane.
+       - expectedChapter: Exact visible chapter retained from the annotation start.
+       - expectedOrdinal: Target-local KJV introduction ordinal.
+       - expectedReplacementRange: Expected target document bounds, or nil when already loaded.
+     - Side effects: Creates a temporary SWORD module, an in-memory workspace with two synchronized
+       panes, and bridge recordings; no durable store or application singleton is changed.
+     - Throws: Fixture, model-container, bridge-decoding, and asynchronous publication failures.
+     - Failure modes: Fails when source authorization, WindowManager routing, target-local ordinal
+       resolution, replacement setup, or exact PageManager coordinates diverge from Android.
+     */
+    @MainActor
+    private func assertCommentaryIntroductionSynchronizesTarget(
+        annotation: String,
+        targetInitialBook: String,
+        expectedChapter: Int,
+        expectedOrdinal: Int,
+        expectedReplacementRange: [Int]?
+    ) async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(
+            named: expectedReplacementRange != nil ? "CALVINSYNCREPLACE" : "CALVINSYNCCHAPTER",
+            in: modulePath,
+            annotationForVerse24: annotation
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (sourceBridge, sourceScripts) = makeRecordingBridge()
+        let (targetBridge, targetScripts) = makeRecordingBridge()
+        let sourceController = BibleReaderController(
+            bridge: sourceBridge,
+            swordManagerOverride: manager
+        )
+        let targetController = BibleReaderController(
+            bridge: targetBridge,
+            swordManagerOverride: manager
+        )
+        var targetDisplaySettings = TextDisplaySettings.appDefaults
+        targetDisplaySettings.showSectionTitles = true
+        targetController.displaySettings = targetDisplaySettings
+
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: ModelContext(container))
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Commentary introduction sync")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        retainReaderWindowGraph(sourceWindow)
+        retainReaderWindowGraph(targetWindow)
+        let sourcePageManager = try XCTUnwrap(sourceWindow.pageManager)
+        let targetPageManager = try XCTUnwrap(targetWindow.pageManager)
+        sourceController.activeWindow = sourceWindow
+        sourceController.windowManagerRef = windowManager
+        targetController.activeWindow = targetWindow
+        targetController.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(sourceController, for: sourceWindow))
+        XCTAssertTrue(windowManager.registerController(targetController, for: targetWindow))
+        windowManager.activeWindow = sourceWindow
+
+        let targetInitialBoundary = targetScripts().count
+        targetController.navigateTo(book: targetInitialBook, chapter: 1, verse: 5)
+        targetController.bridgeDidSetClientReady(targetBridge)
+        _ = try await awaitBridgeEmission(
+            from: targetScripts,
+            event: "add_documents",
+            after: targetInitialBoundary
+        )
+
+        let sourceInitialBoundary = sourceScripts().count
+        sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 24)
+        sourceController.bridgeDidSetClientReady(sourceBridge)
+        _ = try await awaitBridgeEmission(
+            from: sourceScripts,
+            event: "add_documents",
+            after: sourceInitialBoundary
+        )
+        let commentaryBoundary = sourceScripts().count
+        sourceController.switchCommentaryDocument(
+            to: expectedReplacementRange != nil ? "CALVINSYNCREPLACE" : "CALVINSYNCCHAPTER"
+        )
+        let commentaryEmissions = try await awaitBridgeEmission(
+            from: sourceScripts,
+            event: "add_documents",
+            after: commentaryBoundary
+        )
+        let commentaryDocument = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: commentaryEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(commentaryDocument["osisRef"] as? String, annotation)
+        let localRange = try XCTUnwrap(commentaryDocument["ordinalRange"] as? [Int])
+        let localAnchor = try XCTUnwrap(localRange.first)
+
+        let synchronized = expectation(description: "introduction reaches synchronized target")
+        synchronized.assertForOverFulfill = true
+        windowManager.onSyncVerseChanged = { [weak windowManager] eventSource, ordinal, key in
+            guard let windowManager else { return }
+            XCTAssertEqual(eventSource.id, sourceWindow.id)
+            XCTAssertEqual(ordinal, expectedOrdinal)
+            XCTAssertEqual(key, "Gen.\(expectedChapter).0")
+            let reference = (windowManager.controllers[eventSource.id] as? BibleReaderController)?
+                .synchronizedVerseReference(ordinal: ordinal)
+            XCTAssertEqual(reference?.osisBookId, "Gen")
+            XCTAssertEqual(reference?.chapter, expectedChapter)
+            XCTAssertEqual(reference?.verse, 0)
+            for window in windowManager.synchronizedVerseUpdateTargets(for: eventSource) {
+                (windowManager.controllers[window.id] as? BibleReaderController)?
+                    .scrollToSynchronizedVerse(
+                        osisBookId: reference?.osisBookId ?? "",
+                        chapter: reference?.chapter ?? -1,
+                        verse: reference?.verse ?? -1
+                    )
+            }
+            synchronized.fulfill()
+        }
+
+        let targetActionBoundary = targetScripts().count
+        sourceController.bridge(
+            sourceBridge,
+            didScrollToOrdinal: localAnchor,
+            key: annotation,
+            atChapterTop: false
+        )
+        await fulfillment(of: [synchronized], timeout: 2)
+
+        XCTAssertEqual(sourceController.currentBook, "Genesis")
+        XCTAssertEqual(sourceController.currentChapter, expectedChapter)
+        XCTAssertEqual(sourceController.currentVerse, 0)
+        XCTAssertEqual(sourcePageManager.bibleChapterNo, expectedChapter)
+        XCTAssertEqual(sourcePageManager.bibleVerseNo, 0)
+        XCTAssertEqual(targetController.currentBook, "Genesis")
+        XCTAssertEqual(targetController.currentChapter, expectedChapter)
+        XCTAssertEqual(targetController.currentVerse, 0)
+        XCTAssertEqual(targetPageManager.bibleBibleBook, 0)
+        XCTAssertEqual(targetPageManager.bibleChapterNo, expectedChapter)
+        XCTAssertEqual(targetPageManager.bibleVerseNo, 0)
+
+        if let expectedReplacementRange {
+            let emissions = try await awaitBridgeEmission(
+                from: targetScripts,
+                event: "add_documents",
+                after: targetActionBoundary
+            )
+            let document = try XCTUnwrap(
+                bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+            )
+            let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+            let expectedRenderedReference = expectedChapter == 0
+                ? "Gen.0-Gen.1"
+                : "Gen.\(expectedChapter)"
+            XCTAssertEqual(document["bookCategory"] as? String, "BIBLE")
+            XCTAssertEqual(document["key"] as? String, expectedRenderedReference)
+            XCTAssertEqual(document["osisRef"] as? String, expectedRenderedReference)
+            XCTAssertEqual(document["annotateRef"] as? String, expectedRenderedReference)
+            XCTAssertEqual(document["ordinalRange"] as? [Int], expectedReplacementRange)
+            XCTAssertEqual(fragment["key"] as? String, "KJV--\(expectedRenderedReference)")
+            XCTAssertEqual(fragment["osisRef"] as? String, expectedRenderedReference)
+            XCTAssertEqual(fragment["ordinalRange"] as? [Int], expectedReplacementRange)
+            let setup = try XCTUnwrap(
+                bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+            )
+            XCTAssertEqual(setup["jumpToAnchor"] as? Int, expectedOrdinal)
+            XCTAssertEqual(setup["ordinalStart"] as? Int, expectedOrdinal)
+            XCTAssertEqual(setup["ordinalEnd"] as? Int, expectedOrdinal)
+            XCTAssertEqual(setup["osisRef"] as? String, expectedRenderedReference)
+
+            let visibleChapter = max(1, expectedChapter)
+            let visibleVerseOrdinal = try XCTUnwrap(
+                manager.module(named: "KJV")?.verseOrdinal(
+                    osisBookId: "Gen",
+                    chapter: visibleChapter,
+                    verse: 5
+                )
+            )
+            targetController.bridge(
+                targetBridge,
+                didScrollToOrdinal: visibleVerseOrdinal,
+                key: expectedRenderedReference,
+                atChapterTop: false
+            )
+            XCTAssertEqual(targetController.currentChapter, visibleChapter)
+            XCTAssertEqual(targetController.currentVerse, 5)
+            targetController.bridge(
+                targetBridge,
+                didScrollToOrdinal: expectedOrdinal,
+                key: expectedRenderedReference,
+                atChapterTop: false
+            )
+            XCTAssertEqual(targetController.currentChapter, expectedChapter)
+            XCTAssertEqual(targetController.currentVerse, 0)
+            XCTAssertEqual(targetPageManager.bibleChapterNo, expectedChapter)
+            XCTAssertEqual(targetPageManager.bibleVerseNo, 0)
+        } else {
+            let emissions = Array(targetScripts().dropFirst(targetActionBoundary))
+            let scroll = try XCTUnwrap(
+                bridgeEmissionPayload(from: emissions, event: "scroll_to_verse") as? [String: Any]
+            )
+            XCTAssertEqual(scroll["ordinal"] as? Int, expectedOrdinal)
+            XCTAssertTrue(try bridgeEmissionPayloads(
+                from: emissions, event: "add_documents"
+            ).isEmpty)
+        }
+    }
+
+    /**
+     Verifies real SWORD commentary blocks append once and authorize their visible source route.
+
+     - Setup: Opens Genesis 1:2 from the compressed structural commentary, then submits two
+       concurrent append requests for its exact next linked block.
+     - Expected result: One request receives Genesis 1:3 and commits the edge; the coalesced loser
+       receives null. Visible callbacks for accepted append and prepend blocks persist local anchors,
+       move shared Bible state, and promote each block's toolbar neighbors.
+     - Failure meaning: Commentary infinite scroll advances before bridge acceptance, publishes a
+       duplicate edge, treats local BVA as a Bible ordinal, or authorizes an unaccepted neighbor.
+     */
+    @MainActor
+    func testSwordCommentaryInfiniteScrollAppendsAcceptedBlockAndRoutesVisiblePosition() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCompressedCommentaryAlias(named: "SCROLLCOMM", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 2
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        controller.bridgeDidSetClientReady(bridge)
+        let replacementBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "SCROLLCOMM")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+
+        let responseBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8111)
+        controller.bridge(bridge, requestMoreToEnd: 8112)
+        let firstResponseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: responseBoundary,
+            description: "first coalesced commentary append response"
+        ) { $0.hasPrefix("bibleView.response(8111,") }
+        let secondResponseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: responseBoundary,
+            description: "second coalesced commentary append response"
+        ) { $0.hasPrefix("bibleView.response(8112,") }
+        _ = try XCTUnwrap(firstResponseResult)
+        _ = try XCTUnwrap(secondResponseResult)
+        let responses = Array(scripts().dropFirst(responseBoundary)).filter {
+            $0.hasPrefix("bibleView.response(8111,")
+                || $0.hasPrefix("bibleView.response(8112,")
+        }
+        XCTAssertEqual(responses.count, 2)
+        XCTAssertEqual(responses.filter { $0.hasPrefix("bibleView.response(8111,") }.count, 1)
+        XCTAssertEqual(responses.filter { $0.hasPrefix("bibleView.response(8112,") }.count, 1)
+        XCTAssertEqual(responses.filter { $0.hasSuffix("null);") }.count, 1)
+        let accepted = try XCTUnwrap(responses.first { $0.contains(#""key":"Gen.1.3""#) })
+        let payload = try bridgeResponseObject(from: accepted)
+        let localRange = try XCTUnwrap(payload["ordinalRange"] as? [Int])
+        let localAnchor = try XCTUnwrap(localRange.last)
+
+        let appendedPersisted = expectation(description: "accepted appended commentary persists")
+        var appendedPersistCount = 0
+        controller.onPersistState = {
+            appendedPersistCount += 1
+            appendedPersisted.fulfill()
+        }
+        let appendedScriptBoundary = scripts().count
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: "Gen.1.3",
+            atChapterTop: false
+        )
+        await fulfillment(of: [appendedPersisted], timeout: 2)
+        XCTAssertEqual(controller.currentVerse, 3)
+        XCTAssertEqual(pageManager.bibleVerseNo, 3)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+        XCTAssertTrue(controller.hasPrevious)
+        XCTAssertEqual(appendedPersistCount, 1)
+        XCTAssertEqual(scripts().count, appendedScriptBoundary)
+
+        let duplicateAppendPersist = expectation(
+            description: "duplicate appended commentary callback stays quiet"
+        )
+        duplicateAppendPersist.isInverted = true
+        controller.onPersistState = { duplicateAppendPersist.fulfill() }
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: "Gen.1.3",
+            atChapterTop: false
+        )
+        await fulfillment(of: [duplicateAppendPersist], timeout: 0.4)
+        XCTAssertEqual(scripts().count, appendedScriptBoundary)
+        controller.onPersistState = nil
+
+        let prependBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToBeginning: 8113)
+        let prependResponseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: prependBoundary,
+            description: "commentary accepted prepend"
+        ) { $0.hasPrefix("bibleView.response(8113,") }
+        let prependResponse = try XCTUnwrap(prependResponseResult)
+        let prependPayload = try bridgeResponseObject(from: prependResponse)
+        XCTAssertEqual(prependPayload["key"] as? String, "Gen.1.1")
+        let prependRange = try XCTUnwrap(prependPayload["ordinalRange"] as? [Int])
+        let prependAnchor = try XCTUnwrap(prependRange.last)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: prependAnchor,
+            key: "Gen.1.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, prependAnchor)
+
+        let boundaryResponse = scripts().count
+        controller.bridge(bridge, requestMoreToBeginning: 8115)
+        let boundary = try await awaitBridgeScript(
+            from: scripts,
+            after: boundaryResponse,
+            description: "commentary lower boundary response"
+        ) { $0.hasPrefix("bibleView.response(8115,") }
+        XCTAssertEqual(boundary, "bibleView.response(8115, null);")
+
+        let staleBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8114)
+        let staleResponseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: staleBoundary,
+            description: "commentary block later invalidated by manager refresh"
+        ) { $0.hasPrefix("bibleView.response(8114,") }
+        let staleResponse = try XCTUnwrap(staleResponseResult)
+        let stalePayload = try bridgeResponseObject(from: staleResponse)
+        XCTAssertEqual(stalePayload["key"] as? String, "Gen.1.4")
+        let staleRange = try XCTUnwrap(stalePayload["ordinalRange"] as? [Int])
+        let staleAnchor = try XCTUnwrap(staleRange.last)
+        manager.refresh()
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: staleAnchor,
+            key: "Gen.1.4",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, prependAnchor)
+    }
+
+    /**
+     Verifies replacement cancellation settles a queued commentary append and releases its lane.
+
+     - Setup: Suspends the real preparation worker after accepting Genesis 1:1, queues an append,
+       then navigates the selected commentary to verse two before releasing the worker.
+     - Expected result: The obsolete Promise settles with null, the replacement publishes verse
+       two at local ordinal zero, and a later append succeeds with verse three through the same
+       lane.
+     - Failure meaning: Cancelled adjacent work can advance the range, leave Vue waiting, overwrite
+       a newer replacement, or retain the serialized worker lane.
+     */
+    @MainActor
+    func testSwordCommentaryReplacementCancelsQueuedAppendAndLaneRecovers() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCompressedCommentaryAlias(named: "CANCELCOMM", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let worker = DispatchQueue(label: "org.andbible.tests.commentary-adjacent-cancel")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        let initialBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "CANCELCOMM")
+        let initialEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
+        let initialDocument = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: initialEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        let initialRange = try XCTUnwrap(initialDocument["ordinalRange"] as? [Int])
+        let initialAnchor = try XCTUnwrap(initialRange.last)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: initialAnchor,
+            key: try XCTUnwrap(initialDocument["osisRef"] as? String),
+            atChapterTop: false
+        )
+
+        worker.suspend()
+        let cancellationBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8121)
+        controller.navigateNext()
+        worker.resume()
+        let cancelled = try await awaitBridgeScript(
+            from: scripts,
+            after: cancellationBoundary,
+            description: "cancelled commentary append"
+        ) { $0.hasPrefix("bibleView.response(8121,") }
+        XCTAssertEqual(cancelled, "bibleView.response(8121, null);")
+        let replacement = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: cancellationBoundary
+        )
+        let replacementDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: replacement, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(replacementDocument["key"] as? String, "Gen.1.2")
+        let replacementSetup = try XCTUnwrap(
+            bridgeEmissionPayload(from: replacement, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(replacementSetup["jumpToOrdinal"] as? Int, 0)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 0)
+
+        let recoveredBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8122)
+        let recoveredResult = try await awaitBridgeScript(
+            from: scripts,
+            after: recoveredBoundary,
+            description: "recovered commentary append lane"
+        ) { $0.hasPrefix("bibleView.response(8122,") }
+        let recovered = try XCTUnwrap(recoveredResult)
+        XCTAssertTrue(recovered.contains(#""key":"Gen.1.3""#))
+    }
+
+    /** A bridge-rejected commentary response cannot advance the accepted outer edge. */
+    @MainActor
+    func testSwordCommentaryRejectedAppendDoesNotAdvanceAcceptedEdge() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCompressedCommentaryAlias(named: "REJECTCOMM", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let rejectedPublication = expectation(description: "rejected append reaches publication")
+        let rejectedPublicationSettled = expectation(
+            description: "rejected append returns from publication"
+        )
+        let rejectNextPublication = CommentaryPublicationGate()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .publication,
+                      key.family.rawValue == "sword-commentary",
+                      rejectNextPublication.consumeIfOpen() else { return }
+                rejectedPublication.fulfill()
+                DispatchQueue.main.async {
+                    rejectedPublicationSettled.fulfill()
+                }
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = Window()
+        window.pageManager = PageManager(id: window.id)
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        let initialBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "REJECTCOMM")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
+
+        let acceptedEvaluator = bridge.javaScriptEvaluationObserver
+        bridge.javaScriptEvaluationObserver = nil
+        rejectNextPublication.open()
+        controller.bridge(bridge, requestMoreToEnd: 8131)
+        await fulfillment(
+            of: [rejectedPublication, rejectedPublicationSettled],
+            timeout: 3,
+            enforceOrder: true
+        )
+        bridge.javaScriptEvaluationObserver = acceptedEvaluator
+
+        let retryBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8132)
+        let retryResult = try await awaitBridgeScript(
+            from: scripts,
+            after: retryBoundary,
+            description: "retry after bridge-rejected commentary append"
+        ) { $0.hasPrefix("bibleView.response(8132,") }
+        let retry = try XCTUnwrap(retryResult)
+        XCTAssertTrue(retry.contains(#""key":"Gen.1.2""#))
+
+        controller.windowControllerWillUnregister()
+        let (retiredProbeBridge, retiredProbeScripts) = makeRecordingBridge()
+        controller.bridge(retiredProbeBridge, requestMoreToEnd: 8133)
+        XCTAssertEqual(
+            retiredProbeScripts().last,
+            "bibleView.response(8133, null);"
+        )
+    }
+
+    /**
+     Verifies a source-Bible relock retires both pending adjacency and the earlier local viewport.
+
+     The test accepts a real commentary anchor, relocks KJV during append capture, and proves the
+     Promise settles null. After unlocking, a fresh append succeeds, but a full commentary reload
+     must start at ordinal zero because the manager authorization generation changed.
+
+     - Side effects: Mutates a temporary SWORD descriptor/cache and records bridge emissions.
+     - Failure modes: Fixture I/O, source capture, and asynchronous publication can throw or time
+       out; deferred cleanup always releases the capture gate.
+     */
+    @MainActor
+    func testSwordSourceBibleRelockDuringCommentaryAppendSettlesWithoutAdvancing() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCompressedCommentaryAlias(named: "RELOCKCOMM", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let captureEntered = expectation(description: "commentary append capture entered")
+        let releaseCapture = DispatchSemaphore(value: 0)
+        let blockNextCapture = CommentaryPublicationGate()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture,
+                      key.family.rawValue == "sword-commentary",
+                      blockNextCapture.consumeIfOpen() else { return }
+                captureEntered.fulfill()
+                _ = releaseCapture.wait(timeout: .now() + 3)
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        let window = Window()
+        window.pageManager = PageManager(id: window.id)
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        let initialBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "RELOCKCOMM")
+        let initialEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBoundary
+        )
+        let initialDocument = try XCTUnwrap(
+            bridgeEmissionPayload(
+                from: initialEmissions,
+                event: "add_documents"
+            ) as? [String: Any]
+        )
+        let initialRange = try XCTUnwrap(initialDocument["ordinalRange"] as? [Int])
+        let initialAnchor = try XCTUnwrap(initialRange.last)
+        let initialKey = try XCTUnwrap(initialDocument["osisRef"] as? String)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: initialAnchor,
+            key: initialKey,
+            atChapterTop: false
+        )
+        XCTAssertEqual(window.pageManager?.commentaryAnchorOrdinal, initialAnchor)
+
+        blockNextCapture.open()
+        let appendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8141)
+        await fulfillment(of: [captureEntered], timeout: 3)
+        var released = false
+        defer {
+            if !released { releaseCapture.signal() }
+        }
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/kjv.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertFalse(config.contains("\nCipherKey="))
+        config += "\nCipherKey=\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/modules-conf.cache")
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            try FileManager.default.removeItem(at: cacheURL)
+        }
+        manager.refresh()
+        XCTAssertEqual(manager.moduleAccessState(named: "KJV"), .locked)
+        released = true
+        releaseCapture.signal()
+
+        let response = try await awaitBridgeScript(
+            from: scripts,
+            after: appendBoundary,
+            description: "relocked commentary append response"
+        ) { $0.hasPrefix("bibleView.response(8141,") }
+        XCTAssertEqual(response, "bibleView.response(8141, null);")
+
+        try config.replacingOccurrences(of: "\nCipherKey=\n", with: "\n").write(
+            to: configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            try FileManager.default.removeItem(at: cacheURL)
+        }
+        manager.refresh()
+        XCTAssertEqual(manager.moduleAccessState(named: "KJV"), .readable)
+        let retryBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8142)
+        let retryResult = try await awaitBridgeScript(
+            from: scripts,
+            after: retryBoundary,
+            description: "commentary append after source-Bible authorization returns"
+        ) { $0.hasPrefix("bibleView.response(8142,") }
+        let retry = try XCTUnwrap(retryResult)
+        XCTAssertTrue(retry.contains(#""key":"Gen.1.2""#))
+
+        let roundTripBoundary = scripts().count
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "RELOCKCOMM"), .switched)
+        let roundTrip = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: roundTripBoundary
+        )
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: roundTrip, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, 0)
+        XCTAssertEqual(window.pageManager?.commentaryAnchorOrdinal, 0)
     }
 
     /**
@@ -1714,6 +2862,172 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.mapKey, exactKey)
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.map.pageManagerKey)
     }
+
+    /**
+     Verifies Calvin's accepted sentence BVA survives a Bible/commentary category round trip only
+     while the exact commentary key still owns it.
+
+     The real Calvin fixture yields document-local ordinal 11 inside Genesis 1:24. The test accepts
+     that visible callback, visits the same KJV position, and returns through the public document
+     switches. Vue must receive ordinal 11 in `setup_content`. A later visit to Genesis 1:22 must
+     receive zero, proving an old local ordinal cannot attach to a different commentary block. A
+     recreated controller also receives zero because the raw persisted ordinal lacks a source-key
+     receipt.
+
+     - Side effects: Installs temporary SWORD fixtures and records bridge replacement emissions.
+     - Failure modes: Fixture capture and asynchronous bridge publication can throw or time out.
+     */
+    @MainActor
+    func testCalvinCommentaryRoundTripRestoresOnlyExactAcceptedLocalAnchor() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedCalvinAnnotationCommentary(named: "CALVINRESTORE", in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 22
+        retainReaderWindowGraph(window, attaching: pageManager)
+        let modelContext = try XCTUnwrap(window.modelContext)
+        try modelContext.save()
+        controller.activeWindow = window
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        controller.bridgeDidSetClientReady(bridge)
+
+        var boundary = scripts().count
+        controller.switchCommentaryDocument(to: "CALVINRESTORE")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        boundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 8191)
+        let awaitedResponse = try await awaitBridgeScript(
+            from: scripts,
+            after: boundary,
+            description: "Calvin 1:24 viewport source"
+        ) { $0.hasPrefix("bibleView.response(8191,") }
+        let response = try XCTUnwrap(awaitedResponse)
+        let appended = try bridgeResponseObject(from: response)
+        XCTAssertEqual(appended["osisRef"] as? String, "Gen.1.24")
+        let range = try XCTUnwrap(appended["ordinalRange"] as? [Int])
+        XCTAssertEqual(range.count, 2)
+        XCTAssertTrue((range[0]...range[1]).contains(11))
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: 11,
+            key: "Gen.1.24",
+            atChapterTop: false
+        )
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 11)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
+
+        // A relationship replacement may preserve the mutable domain UUID while changing the
+        // backing row. Old DOM telemetry must not mutate or authorize that new PageManager.
+        let replacementPageManager = PageManager(id: window.id)
+        replacementPageManager.currentCategoryName = DocumentCategory.commentary.pageManagerKey
+        replacementPageManager.commentaryDocument = "CALVINRESTORE"
+        replacementPageManager.commentaryAnchorOrdinal = 3
+        window.modelContext?.insert(replacementPageManager)
+        window.pageManager = replacementPageManager
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: 12,
+            key: "Gen.1.24",
+            atChapterTop: false
+        )
+        XCTAssertEqual(replacementPageManager.commentaryAnchorOrdinal, 3)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 11)
+        window.pageManager = pageManager
+
+        boundary = scripts().count
+        XCTAssertEqual(controller.switchBibleDocument(to: "KJV"), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        boundary = scripts().count
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINRESTORE"), .switched)
+        let restored = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: boundary
+        )
+        let restoredSetup = try XCTUnwrap(
+            bridgeEmissionPayload(from: restored, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(restoredSetup["jumpToOrdinal"] as? Int, 11)
+
+        boundary = scripts().count
+        XCTAssertEqual(controller.switchBibleDocument(to: "KJV"), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        boundary = scripts().count
+        XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINRESTORE"), .switched)
+        let reset = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: boundary
+        )
+        let resetSetup = try XCTUnwrap(
+            bridgeEmissionPayload(from: reset, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(resetSetup["jumpToOrdinal"] as? Int, 0)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 0)
+
+        // Simulate legacy/imported state that has a raw ordinal but no authoritative source receipt.
+        pageManager.commentaryAnchorOrdinal = 11
+        let (restoredBridge, restoredScripts) = makeRecordingBridge()
+        let restoredController = BibleReaderController(
+            bridge: restoredBridge,
+            swordManagerOverride: manager
+        )
+        restoredController.activeWindow = window
+        restoredController.restoreSavedPosition()
+        restoredController.bridgeDidSetClientReady(restoredBridge)
+        let relaunched = try await awaitBridgeEmission(
+            from: restoredScripts,
+            event: "setup_content",
+            after: 0
+        )
+        let relaunchedSetup = try XCTUnwrap(
+            bridgeEmissionPayload(from: relaunched, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(relaunchedSetup["jumpToOrdinal"] as? Int, 0)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 0)
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: 4,
+            key: "Gen.1.22",
+            atChapterTop: false
+        )
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 4)
+        let deletedBook = controller.currentBook
+        let deletedChapter = controller.currentChapter
+        let deletedVerse = controller.currentVerse
+        modelContext.delete(window)
+        XCTAssertTrue(window.isDeleted)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: 5,
+            key: "Gen.1.22",
+            atChapterTop: false
+        )
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, 4)
+        XCTAssertEqual(controller.currentBook, deletedBook)
+        XCTAssertEqual(controller.currentChapter, deletedChapter)
+        XCTAssertEqual(controller.currentVerse, deletedVerse)
+    }
 }
 
 /** Lock-owned switch used by the commentary rejection observer across worker/main test phases. */
@@ -1741,23 +3055,6 @@ private func parsedJSONObject(_ json: String) throws -> [String: Any] {
     try XCTUnwrap(
         JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
     )
-}
-
-/**
- Decodes every recorded payload for one bridge event in emission order.
-
- - Parameters:
-   - scripts: Recorded JavaScript bridge calls.
-   - event: Event name to select.
- - Returns: Parsed payloads in the same order Vue received them.
- - Side effects: None.
- - Failure modes: Throws if any selected bridge wrapper or payload is malformed.
- */
-private func bridgeEmissionPayloads(from scripts: [String], event: String) throws -> [Any] {
-    let prefix = "bibleView.emit('\(event)', "
-    return try scripts
-        .filter { $0.contains(prefix) }
-        .map { try bridgeEmissionPayload(from: [$0], event: event) }
 }
 
 /**
@@ -1793,6 +3090,21 @@ private func waitUntil(timeout: TimeInterval = 2, _ condition: () -> Bool) -> Bo
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
     }
     return condition()
+}
+
+/** Decodes the object argument from one exact `bibleView.response` test script. */
+private func bridgeResponseObject(from script: String) throws -> [String: Any] {
+    guard let comma = script.firstIndex(of: ","), script.hasSuffix(");") else {
+        throw ReaderBridgeFixtureError.malformedBridgeResponse
+    }
+    let jsonStart = script.index(after: comma)
+    let jsonEnd = script.index(script.endIndex, offsetBy: -2)
+    let json = script[jsonStart..<jsonEnd].trimmingCharacters(in: .whitespaces)
+    let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
+    guard let object = value as? [String: Any] else {
+        throw ReaderBridgeFixtureError.malformedBridgeResponse
+    }
+    return object
 }
 
 /** Drains main-queue completion work after a semaphore-controlled background operation returns. */
@@ -1892,6 +3204,96 @@ private func seedCompressedCommentaryAlias(named moduleName: String, in modulePa
 }
 
 /**
+ Installs actual Calvin OSIS records in a small, real RawFiles commentary for controller testing.
+
+ The JSON retains the public-domain CalvinCommentaries Genesis 1:22 and 1:24 source bytes, including
+ milestone divs and their `Bible:` annotation references. The wrapper gives RawFiles the direct
+ verse element expected by its source reader. A synthetic 1:1 entry admits Genesis through the
+ Android DocumentBibleBooks opening-verse probe; without it, the walker correctly has no book to
+ traverse. Synthetic 1:21/1:25/1:26 neighbors bound lookahead, while 1:23 deliberately has no index
+ entry. The full compressed Calvin module is exercised by the app test.
+
+ - Parameters:
+   - moduleName: Unique descriptor name in this test's copied SWORD tree.
+   - modulePath: Temporary module root owned and removed by BibleUISwordFixtureTestCase.
+   - annotationForVerse24: Optional controlled replacement for its annotation attributes, used to
+     contrast valid annotation ranges with the original rejected namespace. Other XML is retained.
+ - Side effects: Reads the retained fixture and writes only that temporary module's files/config.
+ - Failure modes: Throws for a missing/malformed fixture or filesystem error; never downloads data.
+ */
+private func seedCalvinAnnotationCommentary(
+    named moduleName: String,
+    in modulePath: String,
+    annotationForVerse24: String? = nil
+) throws {
+    let fixturePath = "Sources/BibleUI/Tests/BibleUITests/Fixtures/calvin-commentary-genesis.json"
+    let repositoryRoot = try BibleUITestSourceLocator.repositoryRoot(containing: fixturePath)
+    let records = try JSONDecoder().decode(
+        [String: String].self,
+        from: Data(contentsOf: repositoryRoot.appendingPathComponent(fixturePath))
+    )
+    let preceding = "<p>Preceding bounded commentary block.</p>"
+    let following = "<p>Following bounded commentary block.</p>"
+    var verse24 = try XCTUnwrap(records["Gen.1.24"])
+    if let annotationForVerse24 {
+        verse24 = verse24.replacingOccurrences(
+            of: "Bible:Gen.1.24",
+            with: annotationForVerse24
+        )
+    }
+    let entries: [(verse: Int, xml: String)] = [
+        (1, "<p>Opening entry for the Android book inventory probe.</p>"),
+        (21, preceding),
+        (22, try XCTUnwrap(records["Gen.1.22"])),
+        (24, verse24),
+        (25, following),
+        (26, "<p>Second following bounded commentary block.</p>"),
+    ]
+    let root = URL(fileURLWithPath: modulePath, isDirectory: true)
+    let moduleKey = moduleName.lowercased()
+    let dataDirectory = root.appendingPathComponent(
+        "modules/comments/rawfiles/\(moduleKey)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+    var contents = Data()
+    var index = Data(repeating: 0, count: 24_115 * 6)
+    for (number, entry) in entries.enumerated() {
+        let fileName = String(format: "%07d", number)
+        let fileNameBytes = Data(fileName.utf8)
+        var row = Data()
+        row.appendLittleEndianFixture(UInt32(contents.count))
+        row.appendLittleEndianFixture(UInt16(fileNameBytes.count))
+        // KJV RawFiles reserves four records before Genesis 1:1 (record 4).
+        let rowOffset = (entry.verse + 3) * 6
+        index.replaceSubrange(rowOffset..<(rowOffset + 6), with: row)
+        contents.append(fileNameBytes)
+        let source = "<verse osisID=\"Gen.1.\(entry.verse)\">\(entry.xml)</verse>"
+        try Data(source.utf8).write(to: dataDirectory.appendingPathComponent(fileName))
+    }
+    try contents.write(to: dataDirectory.appendingPathComponent("ot"))
+    try index.write(to: dataDirectory.appendingPathComponent("ot.vss"))
+    try Data().write(to: dataDirectory.appendingPathComponent("nt"))
+    try Data().write(to: dataDirectory.appendingPathComponent("nt.vss"))
+    try Data(repeating: 0, count: 4).write(to: dataDirectory.appendingPathComponent("incfile"))
+    try """
+    [\(moduleName)]
+    Description=Calvin annotation regression
+    Category=Commentaries
+    DataPath=./modules/comments/rawfiles/\(moduleKey)/
+    ModDrv=RawFiles
+    SourceType=OSIS
+    Encoding=UTF-8
+    Lang=en
+    Versification=KJV
+    """.write(
+        to: root.appendingPathComponent("mods.d/\(moduleKey).conf"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+/**
  Installs one real KJV RawFiles commentary block spanning Genesis 1:1-2.
 
  Both physical verse-index rows point to the same standalone OSIS file. Its direct annotation owns
@@ -1954,6 +3356,8 @@ private func seedRawFilesCoveringCommentary(named moduleName: String, in moduleP
 private enum ReaderBridgeFixtureError: Error {
     /// RawLD uses a 16-bit record length and 32-bit offset.
     case recordTooLarge
+    /// A recorded Promise response did not contain one JSON object.
+    case malformedBridgeResponse
 }
 
 private extension Data {

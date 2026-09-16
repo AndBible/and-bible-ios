@@ -181,10 +181,33 @@ struct BibleReaderSQLiteRuntimeCoordinator {
     func unshadowedSQLiteModules(
         category: ModuleCategory? = nil
     ) -> [BibleReaderSQLiteModuleHandle] {
-        guard let installedModuleResolver else { return [] }
-        return installedModuleResolver.registeredSQLiteModulesInRegistrationOrder().filter {
+        catalog.modulesInRegistrationOrder().filter {
             category == nil || $0.info.category == category
         }
+    }
+
+    /**
+     Tests whether an exact SQLite facade belongs to the latest completed runtime reload.
+
+     - Parameters:
+       - moduleIdentity: Process-local identity captured from the immutable runtime handle.
+       - initials: Raw initials captured with that handle.
+     - Returns: True only when both values identify one handle admitted to the current catalog.
+     - Side effects: None; this consults the catalog's immutable membership and does not repeat
+       SQLite discovery or Android's native-plus-custom registration admission.
+     - Failure modes: Returns false before reload, for native-shadowed candidates, for handles from
+       older reloads, and for Java-distinct initials that do not exactly match the current handle.
+     - Concurrency: Callers use the same serialized runtime ownership boundary as `reload`; the
+       catalog publishes handles and membership together in one immutable snapshot.
+     */
+    func isCurrentSQLiteModule(
+        moduleIdentity: ObjectIdentifier,
+        initials: String
+    ) -> Bool {
+        catalog.containsCurrentHandle(
+            moduleIdentity: moduleIdentity,
+            initials: initials
+        )
     }
 
     /**

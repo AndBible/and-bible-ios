@@ -545,19 +545,21 @@ public enum SwordOSISFragmentProcessor {
     }
 
     /**
-     Reads Android's nested direct-child `<div annotateRef>` metadata.
+     Reads annotation metadata only from Android's first direct no-namespace div.
+
+     Later sibling divs and deeper descendants cannot replace the first div's annotation. This
+     preserves `Element.getChild("div")` ownership even when the first div has no annotation.
 
      - Parameter root: Outer `BookData` fragment div.
-     - Returns: Non-empty annotation reference, or `nil`.
-     - Side effects: None.
-     - Failure modes: None.
+     - Returns: The first direct div's non-empty annotation reference, or `nil`.
+     - Side effects: None; source order and XML remain unchanged.
+     - Failure modes: Missing divs and missing or empty attributes return `nil`.
      */
     private static func directAnnotateRef(in root: SwordXMLNode) -> String? {
-        for div in directChildElements(named: "div", in: root) {
-            let value = div.attribute(named: "annotateRef") ?? ""
-            if !value.isEmpty { return value }
-        }
-        return nil
+        guard let div = directChildElements(named: "div", in: root).first,
+              let value = div.attribute(named: "annotateRef"),
+              !value.isEmpty else { return nil }
+        return value
     }
 
     /**

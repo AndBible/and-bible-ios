@@ -118,7 +118,7 @@ public enum BookmarkNavigationTargetError: Error, Equatable, LocalizedError, Sen
     /// Persisted KJVA coordinates do not identify an addressable Bible verse range.
     case invalidBibleOrdinals(start: Int, end: Int)
 
-    /// Source ordinals are missing, non-positive, or reversed.
+    /// Source ordinals are missing, non-positive, reversed, or not concrete scripture references.
     case invalidSourceOrdinals(start: Int, end: Int)
 
     /// The source versification is empty or unsupported by the pinned JSword registry.
@@ -194,11 +194,7 @@ public enum BookmarkNavigationTargetResolver {
               let sourceFinish = JSwordCanon.reference(
                   forIndex: sourceEnd,
                   versification: sourceVersification
-              ),
-              sourceStart.chapter > 0,
-              sourceStart.verse > 0,
-              sourceFinish.chapter > 0,
-              sourceFinish.verse > 0 else {
+              ) else {
             throw BookmarkNavigationTargetError.invalidSourceOrdinals(
                 start: bookmark.ordinalStart,
                 end: bookmark.ordinalEnd
@@ -210,10 +206,12 @@ public enum BookmarkNavigationTargetResolver {
             : bookmark.kjvOrdinalStart
         guard bookmark.kjvOrdinalStart > 0,
               kjvaEnd >= bookmark.kjvOrdinalStart,
-              let start = JSwordKJVAVersification.verseReference(
+              let start = JSwordKJVAVersification.referenceIncludingIntroductions(
                   ordinal: bookmark.kjvOrdinalStart
               ),
-              let end = JSwordKJVAVersification.verseReference(ordinal: kjvaEnd) else {
+              let end = JSwordKJVAVersification.referenceIncludingIntroductions(
+                  ordinal: kjvaEnd
+              ) else {
             throw BookmarkNavigationTargetError.invalidBibleOrdinals(
                 start: bookmark.kjvOrdinalStart,
                 end: bookmark.kjvOrdinalEnd

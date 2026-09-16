@@ -98,6 +98,33 @@ final class PackagedVueRenderingTests: XCTestCase {
     }
 
     /**
+     Verifies a commentary prepend held by an active touch preserves the rendered viewport.
+
+     Each case loads the packaged production bundle, requests the previous commentary block through
+     the visible manual control, and returns the payload through `BibleBridge.sendResponse`. The DOM
+     is measured before the native response and after `touchend` or `touchcancel`; the existing marker
+     must retain its actual WebKit viewport position while the prior block appears exactly once.
+     */
+    func testTouchHeldCommentaryPrependPreservesViewportOnReleaseAndCancellation() async throws {
+        for releaseEvent in ["touchend", "touchcancel"] {
+            try await assertTouchHeldCommentaryPrependPreservesViewport(releaseEvent: releaseEvent)
+        }
+    }
+
+    /**
+     Verifies replacement retires a resolved commentary prepend before the held touch is released.
+
+     The native response is allowed to resolve and enter the touch-deferred state before one packaged
+     replacement clears the document generation. Releasing with either touch terminal event must leave
+     only the replacement DOM; the retired commentary block and prior document cannot reappear.
+     */
+    func testClearedTouchHeldCommentaryResponseCannotReviveOnReleaseOrCancellation() async throws {
+        for releaseEvent in ["touchend", "touchcancel"] {
+            try await assertClearedTouchHeldCommentaryResponseCannotRevive(releaseEvent: releaseEvent)
+        }
+    }
+
+    /**
      Owns an attached production WebView for one test and releases its native window on completion.
 
      Uses the same bootstrap, coordinator, resource resolution and retained session as the app.
@@ -136,6 +163,142 @@ final class PackagedVueRenderingTests: XCTestCase {
         }
     }
 
+    /** Exercises one real-WebKit touch terminal path for valid commentary prepend compensation. */
+    private func assertTouchHeldCommentaryPrependPreservesViewport(releaseEvent: String) async throws {
+        let surface = Surface()
+        defer { surface.close() }
+        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+
+        XCTAssertTrue(surface.bridge.replaceDocument(
+            configData: manualNavigationConfig(initial: true),
+            documentData: try commentary(id: "current", block: 2, start: 101),
+            setupData: try setup(elementID: "v-110")
+        ))
+        try await waitForVisibleCommentaryEntry(
+            110,
+            text: "Fixture commentary 2 entry 10",
+            in: surface.webView
+        )
+        let started = try await surface.webView.evaluateJavaScript("""
+        (() => {
+            const marker = document.getElementById('v-110');
+            const load = document.querySelector('.chapter-nav.top button:nth-child(2)');
+            if (!marker || !load) return false;
+            window.__commentaryMarkerTop = marker.getBoundingClientRect().top;
+            window.dispatchEvent(new Event('touchstart'));
+            load.click();
+            return true;
+        })()
+        """) as? Bool
+        XCTAssertEqual(started, true, "Expected the packaged commentary control to start one request")
+        try await waitUntil(surface.webView, expression:
+            "document.querySelector('.chapter-nav.top button:nth-child(2)')?.disabled === true"
+        )
+
+        XCTAssertTrue(surface.bridge.sendResponse(
+            callId: 0,
+            value: try commentary(id: "previous", block: 1, start: 1)
+        ))
+        try await waitUntil(surface.webView, expression: """
+        document.getElementById('doc-previous') === null
+            && document.querySelector('.chapter-nav.top button:nth-child(2)')?.disabled === false
+        """)
+
+        let released = try await surface.webView.evaluateJavaScript(
+            "window.dispatchEvent(new Event('\(releaseEvent)')); true"
+        ) as? Bool
+        XCTAssertEqual(released, true)
+        try await waitUntil(surface.webView, expression: """
+        (async () => {
+            const marker = document.getElementById('v-110');
+            const previous = document.getElementById('doc-previous');
+            if (!marker || !previous) return false;
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            return Math.abs(marker.getBoundingClientRect().top - window.__commentaryMarkerTop) < 1;
+        })()
+        """)
+
+        let identities = try await surface.webView.evaluateJavaScript(
+            "Array.from(document.querySelectorAll('.document')).map(e => e.id).join(',')"
+        ) as? String
+        XCTAssertEqual(identities, "doc-previous,doc-current")
+        let markerTopValue = try await surface.webView.evaluateJavaScript(
+            "document.getElementById('v-110').getBoundingClientRect().top"
+        )
+        let originalMarkerTopValue = try await surface.webView.evaluateJavaScript(
+            "window.__commentaryMarkerTop"
+        )
+        let markerTop = try XCTUnwrap(markerTopValue as? NSNumber).doubleValue
+        let originalMarkerTop = try XCTUnwrap(originalMarkerTopValue as? NSNumber).doubleValue
+        XCTAssertEqual(markerTop, originalMarkerTop, accuracy: 1)
+    }
+
+    /** Exercises one real-WebKit terminal path after a deferred response loses its generation. */
+    private func assertClearedTouchHeldCommentaryResponseCannotRevive(releaseEvent: String) async throws {
+        let surface = Surface()
+        defer { surface.close() }
+        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+
+        XCTAssertTrue(surface.bridge.replaceDocument(
+            configData: manualNavigationConfig(initial: true),
+            documentData: try commentary(id: "retired", block: 2, start: 101),
+            setupData: try setup(elementID: "v-110")
+        ))
+        try await waitForVisibleCommentaryEntry(
+            110,
+            text: "Fixture commentary 2 entry 10",
+            in: surface.webView
+        )
+        let started = try await surface.webView.evaluateJavaScript("""
+        (() => {
+            const load = document.querySelector('.chapter-nav.top button:nth-child(2)');
+            if (!load) return false;
+            window.dispatchEvent(new Event('touchstart'));
+            load.click();
+            return true;
+        })()
+        """) as? Bool
+        XCTAssertEqual(started, true)
+        try await waitUntil(surface.webView, expression:
+            "document.querySelector('.chapter-nav.top button:nth-child(2)')?.disabled === true"
+        )
+
+        XCTAssertTrue(surface.bridge.sendResponse(
+            callId: 0,
+            value: try commentary(id: "stale-previous", block: 1, start: 1)
+        ))
+        try await waitUntil(surface.webView, expression: """
+        document.getElementById('doc-stale-previous') === null
+            && document.querySelector('.chapter-nav.top button:nth-child(2)')?.disabled === false
+        """)
+
+        XCTAssertTrue(surface.bridge.replaceDocument(
+            configData: manualNavigationConfig(initial: true),
+            documentData: try commentary(id: "replacement", block: 3, start: 201),
+            setupData: try setup(elementID: "v-210")
+        ))
+        try await waitForVisibleCommentaryEntry(
+            210,
+            text: "Fixture commentary 3 entry 10",
+            in: surface.webView
+        )
+        _ = try await surface.webView.evaluateJavaScript(
+            "window.dispatchEvent(new Event('\(releaseEvent)')); true"
+        )
+        try await waitUntil(surface.webView, expression: """
+        (async () => {
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            const ids = Array.from(document.querySelectorAll('.document')).map(e => e.id);
+            return ids.join(',') === 'doc-replacement'
+                && document.body.innerText.includes('Fixture commentary 3 entry 10')
+                && !document.body.innerText.includes('Fixture commentary 1')
+                && !document.body.innerText.includes('Fixture commentary 2');
+        })()
+        """)
+    }
+
     /** Returns a complete independent Bible fixture in the shared Android client document shape. */
     private func chapter(id: String, chapter: Int, start: Int) throws -> String {
         let xml = "<div>" + (0..<25).map { offset in
@@ -160,14 +323,55 @@ final class PackagedVueRenderingTests: XCTestCase {
         return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
     }
 
+    /** Returns one ordinary non-AI commentary block in the shared Android OSIS document shape. */
+    private func commentary(id: String, block: Int, start: Int) throws -> String {
+        let xml = "<div>" + (0..<25).map { offset in
+            "<div><verse osisID=\"Gen.\(block).\(offset + 1)\" verseOrdinal=\"\(start + offset)\">"
+                + "Fixture commentary \(block) entry \(offset + 1). "
+                + String(repeating: "Rendered commentary content for viewport testing. ", count: 5)
+                + "</verse></div>"
+        }.joined() + "</div>"
+        let fragment = OsisFragment(
+            xml: xml, key: "Gen.\(block)", keyName: "Commentary block \(block)", v11n: "KJV",
+            bookInitials: "FixtureCommentary", osisRef: "Gen.\(block)",
+            ordinalRange: [start, start + 24]
+        )
+        let fragmentObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(fragment))
+        let payload: [String: Any] = [
+            "id": id, "type": "osis", "osisFragment": fragmentObject,
+            "bookInitials": "FixtureCommentary", "bookCategory": "COMMENTARY",
+            "bookAbbreviation": "Fixture commentary", "bookName": "Fixture commentary",
+            "key": "Gen.\(block)", "v11n": "KJV", "osisRef": "Gen.\(block)",
+            "annotateRef": "Gen.\(block)", "genericBookmarks": [],
+            "ordinalRange": [start, start + 24], "isNativeHtml": false,
+            "highlightedOrdinalRange": NSNull(), "isAiDocument": false,
+            "commentaryRange": [
+                "startOsisRef": "Gen.\(block).1", "endOsisRef": "Gen.\(block).25",
+                "name": "Commentary block \(block)",
+            ],
+        ]
+        return String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+    }
+
     /** Returns presentation configuration without overriding production animation behavior. */
     private func config(night: Bool, initial: Bool) -> String {
         "{\"config\":{},\"appSettings\":{\"nightMode\":\(night),\"windowId\":\"render-test\"},\"initial\":\(initial)}"
     }
 
+    /** Returns production config with Android's manual adjacent-content controls visible. */
+    private func manualNavigationConfig(initial: Bool) -> String {
+        "{\"config\":{\"infiniteScroll\":false},\"appSettings\":{\"nightMode\":false,\"windowId\":\"render-test\"},\"initial\":\(initial)}"
+    }
+
     /** Returns the Android setup payload for the independently specified ordinal. */
     private func setup(ordinal: Int) -> String {
         "{\"jumpToOrdinal\":\(ordinal),\"topOffset\":0,\"bottomOffset\":0}"
+    }
+
+    /** Returns setup targeting an exact generic OSIS DOM marker rather than a Bible-only ordinal ID. */
+    private func setup(elementID: String) throws -> String {
+        let quotedID = String(decoding: try JSONEncoder().encode(elementID), as: UTF8.self)
+        return "{\"jumpToId\":\(quotedID),\"topOffset\":0,\"bottomOffset\":0}"
     }
 
     /**
@@ -191,8 +395,63 @@ final class PackagedVueRenderingTests: XCTestCase {
         """)
     }
 
-    /** Polls a read-only DOM predicate while yielding the main actor; fails with the current DOM. */
-    private func waitUntil(_ webView: WKWebView, expression: String) async throws {
+    /**
+     Awaits one visible generic OSIS verse wrapper using its production `v-<ordinal>` identity.
+
+     Commentary is rendered by `OsisDocument`, whose verses intentionally lack Bible-only `o-*`
+     anchor IDs. The observer uses the outer `v-*` wrapper, verifies text and nonzero WebKit geometry,
+     and requires the viewport position to remain stable across two animation frames.
+     */
+    private func waitForVisibleCommentaryEntry(
+        _ ordinal: Int,
+        text: String,
+        in webView: WKWebView
+    ) async throws {
+        let quotedText = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
+        try await waitUntil(webView, expression: """
+        (async () => {
+            const element = document.getElementById('v-\(ordinal)');
+            if (!element || !element.textContent.includes(\(quotedText))) return false;
+            const r = element.getBoundingClientRect();
+            if (!(r.width > 0 && r.height > 0 && r.top >= -1 && r.top < innerHeight && r.bottom > 0)) return false;
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            return element.isConnected && Math.abs(element.getBoundingClientRect().top - r.top) < 1;
+        })()
+        """, diagnostics: """
+        JSON.stringify((() => {
+            const marker = document.getElementById('v-\(ordinal)');
+            const rect = marker?.getBoundingClientRect();
+            return {
+                requestedMarker: 'v-\(ordinal)',
+                markerConnected: marker?.isConnected ?? false,
+                markerRect: rect ? {
+                    top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height
+                } : null,
+                verseMarkerIDs: Array.from(document.querySelectorAll('[id^="v-"], [id^="o-"]'))
+                    .slice(0, 60).map(element => element.id),
+                documentIDs: Array.from(document.querySelectorAll('.document')).map(element => element.id),
+                documentCategories: Array.from(document.querySelectorAll('.document'))
+                    .map(element => element.dataset.bookCategory),
+                scrollY: window.scrollY,
+                innerHeight: window.innerHeight,
+                infiniteScroll: window.bibleViewDebug?.config?.infiniteScroll,
+            };
+        })())
+        """)
+    }
+
+    /**
+     Polls a read-only DOM predicate while yielding the main actor.
+
+     An optional read-only diagnostic expression is evaluated only after timeout so renderer-specific
+     failures can report identity, geometry, and configuration without changing the interaction path.
+     */
+    private func waitUntil(
+        _ webView: WKWebView,
+        expression: String,
+        diagnostics: String? = nil
+    ) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(15))
         while ContinuousClock.now < deadline {
             if (try? await webView.callAsyncJavaScript(
@@ -201,7 +460,18 @@ final class PackagedVueRenderingTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(40))
         }
         let body = (try? await webView.evaluateJavaScript("document.body.innerText")) as? String ?? "no DOM"
-        XCTFail("Timed out waiting for rendered content: \(expression)\n\(body.prefix(1500))")
+        let diagnosticValue: String
+        if let diagnostics {
+            diagnosticValue = (try? await webView.callAsyncJavaScript(
+                "return (\(diagnostics));", arguments: [:], in: nil, contentWorld: .page
+            )) as? String ?? "diagnostics unavailable"
+        } else {
+            diagnosticValue = "no additional diagnostics requested"
+        }
+        XCTFail(
+            "Timed out waiting for rendered content: \(expression)\n"
+                + "Diagnostics: \(diagnosticValue)\n\(body.prefix(1500))"
+        )
         throw NSError(domain: "PackagedVueRenderingTests", code: 1)
     }
 

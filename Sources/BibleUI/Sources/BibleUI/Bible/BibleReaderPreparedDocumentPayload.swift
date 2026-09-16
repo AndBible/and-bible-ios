@@ -74,6 +74,7 @@ private struct BibleReaderAIDocMarkerIdentity: Hashable, Sendable {
  */
 struct BibleReaderBibleDocumentOwnerIdentity: Hashable, Sendable {
     let osisBookID: BibleReaderPreparationExactText
+    let renderedOSISReference: BibleReaderPreparationExactText
     let bookName: BibleReaderPreparationExactText
     let chapter: Int
     let isNewTestament: Bool
@@ -88,6 +89,7 @@ struct BibleReaderBibleDocumentOwnerIdentity: Hashable, Sendable {
 
     init(
         osisBookID: String,
+        renderedOSISReference: String,
         bookName: String,
         chapter: Int,
         isNewTestament: Bool,
@@ -101,6 +103,7 @@ struct BibleReaderBibleDocumentOwnerIdentity: Hashable, Sendable {
         setupIdentity: String
     ) {
         self.osisBookID = BibleReaderPreparationExactText(osisBookID)
+        self.renderedOSISReference = BibleReaderPreparationExactText(renderedOSISReference)
         self.bookName = BibleReaderPreparationExactText(bookName)
         self.chapter = chapter
         self.isNewTestament = isNewTestament
@@ -118,6 +121,7 @@ struct BibleReaderBibleDocumentOwnerIdentity: Hashable, Sendable {
 /** Persistence-owner values frozen before Bible source preparation leaves the main owner. */
 struct BibleReaderBibleDocumentOwnerSnapshot: Sendable {
     let osisBookId: String
+    let renderedOSISReference: String
     let bookName: String
     let chapter: Int
     let isNewTestament: Bool
@@ -137,7 +141,7 @@ struct BibleReaderBibleDocumentOwnerSnapshot: Sendable {
         source: BibleReaderPreparedSourceMetadata,
         renderedBookmarks: [BibleBookmarkData]
     ) -> BibleReaderPreparedDocumentPayload {
-        let key = "\(osisBookId).\(chapter)"
+        let key = renderedOSISReference
         return BibleReaderPreparedDocumentPayload(
             osisBookId: osisBookId,
             bookName: bookName,
@@ -402,17 +406,38 @@ struct BibleReaderEncodedBibleChapter: Sendable {
 }
 
 extension BibleReaderBibleChapterSourceCapture {
-    /** Performs only source-independent chapter projection. */
-    func projectedChapter() -> BibleReaderProjectedBibleChapter? {
+    /**
+     Performs only source-independent chapter projection.
+
+     - Parameters:
+       - bookIntroductionOnly: Whether a selected book introduction with section titles disabled
+         must omit the otherwise captured chapter-one verses.
+       - includesBookIntroduction: Whether a full chapter-one projection begins with the captured
+         book-introduction fragment.
+     - Returns: The projected immutable document, or nil when the requested intro-only source is not
+       available. SQLite captures do not expose structural introduction XML and therefore fail an
+       intro-only request closed.
+     */
+    func projectedChapter(
+        bookIntroductionOnly: Bool = false,
+        includesBookIntroduction: Bool = true
+    ) -> BibleReaderProjectedBibleChapter? {
         switch self {
         case .sword(let capture, let source, let structure):
-            guard let loaded = BibleChapterDocumentBuilder.projectChapter(capture) else { return nil }
+            let loaded = bookIntroductionOnly
+                ? BibleChapterDocumentBuilder.projectBookIntroduction(capture)
+                : BibleChapterDocumentBuilder.projectChapter(
+                    capture,
+                    includesBookIntroduction: includesBookIntroduction
+                )
+            guard let loaded else { return nil }
             return BibleReaderProjectedBibleChapter(
                 loadedChapter: loaded,
                 source: source,
                 structure: structure
             )
         case .sqlite(let capture, let source, let structure):
+            guard !bookIntroductionOnly else { return nil }
             guard let loaded = SQLiteBibleChapterDocumentBuilder.projectChapter(capture) else { return nil }
             return BibleReaderProjectedBibleChapter(
                 loadedChapter: loaded,

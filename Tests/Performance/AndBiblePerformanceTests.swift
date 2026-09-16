@@ -305,7 +305,7 @@ extension AndBibleUITests {
      This source marker complements WebView body verification so shared Genesis text cannot satisfy
      a commentary or Bible endpoint under the wrong installed module.
      */
-    private func waitForVisiblePerformanceModuleSubtitle(
+    func waitForVisiblePerformanceModuleSubtitle(
         _ subtitle: String,
         in app: XCUIApplication
     ) {

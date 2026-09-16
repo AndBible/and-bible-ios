@@ -67,6 +67,32 @@ final class SwordVersificationTests: XCTestCase {
      would make range expansion shift every mapping after a superscription.
      */
     func testCanonReferenceIndexesRoundTripVerseAndIntroduction() throws {
+        let bookIntroduction = SwordVersification.Reference(
+            osisBookId: "Gen",
+            chapter: 0,
+            verse: 0
+        )
+        let bookIntroductionIndex = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: bookIntroduction, versification: "KJVA")
+        )
+        XCTAssertEqual(
+            SwordVersification.reference(forIndex: bookIntroductionIndex, versification: "KJVA"),
+            bookIntroduction
+        )
+
+        let chapterIntroduction = SwordVersification.Reference(
+            osisBookId: "Gen",
+            chapter: 1,
+            verse: 0
+        )
+        let chapterIntroductionIndex = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: chapterIntroduction, versification: "KJVA")
+        )
+        XCTAssertEqual(
+            SwordVersification.reference(forIndex: chapterIntroductionIndex, versification: "KJVA"),
+            chapterIntroduction
+        )
+
         let verse = SwordVersification.Reference(osisBookId: "Gen", chapter: 1, verse: 1)
         let verseIndex = try XCTUnwrap(
             SwordVersification.referenceIndex(for: verse, versification: "KJVA")
@@ -76,6 +102,8 @@ final class SwordVersificationTests: XCTestCase {
             SwordVersification.reference(forIndex: verseIndex, versification: "KJVA"),
             verse
         )
+        XCTAssertLessThan(bookIntroductionIndex, chapterIntroductionIndex)
+        XCTAssertLessThan(chapterIntroductionIndex, verseIndex)
 
         let introduction = SwordVersification.Reference(osisBookId: "Ps", chapter: 51, verse: 0)
         let introductionIndex = try XCTUnwrap(

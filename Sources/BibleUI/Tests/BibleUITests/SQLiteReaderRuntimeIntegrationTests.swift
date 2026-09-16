@@ -727,6 +727,243 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies MyBible commentary keeps selected-key identity for source-authored annotations.
+
+     Android wraps each SQLite row in a generated direct `<div>` and inspects only that wrapper for
+     `annotateRef`; an authored inner attribute is therefore structural XML, whether its value is
+     invalid (`Bible:`) or otherwise a valid KJVA range. Each fresh fixture selects Genesis 1:2,
+     routes visible telemetry through that emitted key, and appends from the selected block's outer
+     edge to Genesis 1:4. The test copies and mutates only temporary SQLite files and records
+     in-memory bridge/PageManager state; no parser result or prepared route is injected. Failure
+     means inner source markup was promoted to document identity or replaced linked-block ownership.
+     */
+    @MainActor
+    func testSQLiteCommentaryAuthoredAnnotationsKeepSelectedKeyAndAppendEdge() async throws {
+        for annotation in ["Bible:Gen.1.22", "Gen.1.21-Gen.1.22"] {
+            let modulePath = try makeTemporarySwordFixturePath()
+            try installAllSQLiteFixtures(in: modulePath)
+            let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mybible/commentary.SQLite3")
+            try executeSQLite(
+                """
+                DELETE FROM commentaries;
+                INSERT INTO commentaries (
+                    book_number, chapter_number_from, verse_number_from,
+                    chapter_number_to, verse_number_to, text
+                ) VALUES
+                  (
+                    10, 1, 1, 1, 2,
+                    '<div annotateRef="\(annotation)"><p>Annotated first block.</p></div>'
+                  ),
+                  (10, 1, 4, 1, 5, '<p>Selected-edge next block.</p>');
+                """,
+                at: commentaryURL
+            )
+            let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+            let (bridge, scripts) = makeRecordingBridge()
+            let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+            let pageManager = attachWindow(to: controller)
+            controller.bridgeDidSetClientReady(bridge)
+            controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+            let boundary = scripts().count
+
+            controller.switchCommentaryDocument(to: "MyBible-commentary")
+
+            let emissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "add_documents",
+                after: boundary
+            )
+            let document = try latestDocumentPayload(from: emissions)
+            XCTAssertEqual(document["key"] as? String, "Gen.1.2", annotation)
+            let renderedKey = try XCTUnwrap(document["osisRef"] as? String)
+            XCTAssertEqual(renderedKey, "Gen.1.2", annotation)
+            XCTAssertEqual(document["annotateRef"] as? String, renderedKey, annotation)
+            let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+            XCTAssertTrue(
+                try XCTUnwrap(fragment["xml"] as? String)
+                    .contains("annotateRef=\"\(annotation)\""),
+                annotation
+            )
+            let localRange = try XCTUnwrap(document["ordinalRange"] as? [Int])
+            let localAnchor = try XCTUnwrap(localRange.first)
+
+            controller.bridge(
+                bridge,
+                didScrollToOrdinal: localAnchor,
+                key: renderedKey,
+                atChapterTop: false
+            )
+
+            XCTAssertEqual(controller.currentBook, "Genesis", annotation)
+            XCTAssertEqual(controller.currentChapter, 1, annotation)
+            XCTAssertEqual(controller.currentVerse, 2, annotation)
+            XCTAssertEqual(pageManager.bibleVerseNo, 2, annotation)
+            XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor, annotation)
+
+            let appendBoundary = scripts().count
+            controller.bridge(bridge, requestMoreToEnd: 4191)
+            let response = try await awaitBridgeScript(
+                from: scripts,
+                after: appendBoundary,
+                description: "SQLite append after inner annotation \(annotation)"
+            ) { $0.hasPrefix("bibleView.response(4191,") }
+            let appended = try bridgeResponseObject(from: XCTUnwrap(response))
+            XCTAssertEqual(appended["key"] as? String, "Gen.1.4", annotation)
+            XCTAssertEqual(appended["osisRef"] as? String, "Gen.1.4", annotation)
+            XCTAssertEqual(controller.currentVerse, 2, annotation)
+        }
+    }
+
+    /**
+     Verifies SQLite chapter/book annotation text cannot create introduction navigation.
+
+     Android accepts `Gen.1` and `Gen` for a real SwordBook annotation, but MyBible commentary puts
+     both strings inside its generated wrapper. The selected Genesis 1:2 route must remain visible,
+     synchronized, and persisted rather than moving to verse-zero coordinates. The assertions cover
+     live controller/PageManager state only, not a durable save or relaunch. Each case mutates a
+     separate temporary database; failure means the SWORD-only annotation lookup leaked into SQLite
+     or synchronization retained a verse-zero route that the visible document never owned.
+     */
+    @MainActor
+    func testSQLiteCommentaryChapterAndBookAnnotationTextCannotMoveToIntroductions() async throws {
+        for annotation in ["Gen.1", "Gen"] {
+            let modulePath = try makeTemporarySwordFixturePath()
+            try installAllSQLiteFixtures(in: modulePath)
+            let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+                .appendingPathComponent("mybible/commentary.SQLite3")
+            try executeSQLite(
+                """
+                DELETE FROM commentaries;
+                INSERT INTO commentaries (
+                    book_number, chapter_number_from, verse_number_from,
+                    chapter_number_to, verse_number_to, text
+                ) VALUES (
+                    10, 1, 1, 1, 2,
+                    '<div annotateRef="\(annotation)"><p>Introduction-looking annotation.</p></div>'
+                );
+                """,
+                at: commentaryURL
+            )
+            let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+            let (bridge, scripts) = makeRecordingBridge()
+            let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+            let pageManager = attachWindow(to: controller)
+            controller.bridgeDidSetClientReady(bridge)
+            controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+            let boundary = scripts().count
+
+            controller.switchCommentaryDocument(to: "MyBible-commentary")
+
+            let emissions = try await awaitBridgeEmission(
+                from: scripts,
+                event: "add_documents",
+                after: boundary
+            )
+            let document = try latestDocumentPayload(from: emissions)
+            let renderedKey = try XCTUnwrap(document["osisRef"] as? String)
+            XCTAssertEqual(document["key"] as? String, "Gen.1.2", annotation)
+            XCTAssertEqual(renderedKey, "Gen.1.2", annotation)
+            XCTAssertEqual(document["annotateRef"] as? String, renderedKey, annotation)
+            let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+            XCTAssertTrue(
+                try XCTUnwrap(fragment["xml"] as? String)
+                    .contains("annotateRef=\"\(annotation)\""),
+                annotation
+            )
+            let localRange = try XCTUnwrap(document["ordinalRange"] as? [Int])
+            let localAnchor = try XCTUnwrap(localRange.first)
+
+            controller.bridge(
+                bridge,
+                didScrollToOrdinal: localAnchor,
+                key: renderedKey,
+                atChapterTop: false
+            )
+
+            XCTAssertEqual(controller.currentBook, "Genesis", annotation)
+            XCTAssertEqual(controller.currentChapter, 1, annotation)
+            XCTAssertEqual(controller.currentVerse, 2, annotation)
+            XCTAssertEqual(pageManager.bibleChapterNo, 1, annotation)
+            XCTAssertEqual(pageManager.bibleVerseNo, 2, annotation)
+            XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor, annotation)
+            let selectedOrdinal = try XCTUnwrap(
+                manager.module(named: controller.activeModuleName)?.verseOrdinal(
+                    osisBookId: "Gen",
+                    chapter: 1,
+                    verse: 2
+                )
+            )
+            let synchronized = try XCTUnwrap(
+                controller.synchronizedVerseReference(ordinal: selectedOrdinal)
+            )
+            XCTAssertEqual(synchronized.osisBookId, "Gen", annotation)
+            XCTAssertEqual(synchronized.chapter, 1, annotation)
+            XCTAssertEqual(synchronized.verse, 2, annotation)
+        }
+    }
+
+    /**
+     Verifies MyBible dictionary content never promotes a scripture-looking raw annotation.
+
+     Android parses `annotateRef` only for a real `SwordBook`; a SQLite dictionary is a
+     `SwordDictionary`. Its exact dictionary key therefore owns both public annotation fields and
+     persisted selection while the source attribute remains visible in structural XML. The test
+     mutates one temporary dictionary and in-memory pane; failure means source markup changed either
+     exact-key publication or the shared Bible position.
+     */
+    @MainActor
+    func testSQLiteDictionaryIgnoresValidRawScriptureAnnotation() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let dictionaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/dictionary.SQLite3")
+        try executeSQLite(
+            """
+            UPDATE dictionary
+            SET definition = '<div annotateRef="Gen.1.21-Gen.1.22"><p>Hebrew definition</p></div>'
+            WHERE topic = 'H0430';
+            """,
+            at: dictionaryURL
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let pageManager = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        XCTAssertEqual(
+            controller.switchDictionaryDocument(to: "MyBible-dictionary"),
+            .switchedRequiringKeySelection
+        )
+        let boundary = scripts().count
+
+        controller.loadDictionaryEntry(key: "H0430")
+
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try latestDocumentPayload(from: emissions)
+        XCTAssertEqual(document["key"] as? String, "H0430")
+        XCTAssertEqual(document["annotateRef"] as? String, "H0430")
+        XCTAssertEqual(document["osisRef"] as? String, "H0430")
+        let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        XCTAssertEqual(fragment["osisRef"] as? String, "H0430")
+        XCTAssertTrue(
+            try XCTUnwrap(fragment["xml"] as? String)
+                .contains("annotateRef=\"Gen.1.21-Gen.1.22\"")
+        )
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 2)
+        XCTAssertEqual(controller.currentDictionaryKey, "H0430")
+        XCTAssertEqual(pageManager.dictionaryKey, "H0430")
+    }
+
+    /**
      Verifies reader previous/next actions use linked blocks for SQLite commentary modules.
 
      - Setup: Adds a second two-verse commentary block after an empty separator, selects the first
@@ -804,6 +1041,235 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(payload["key"] as? String, "Gen.1.1")
         XCTAssertEqual(range["startOsisRef"] as? String, "Gen.1.1")
         XCTAssertEqual(range["endOsisRef"] as? String, "Gen.1.2")
+    }
+
+    /**
+     Verifies a real SQLite linked block appends without replacing selected commentary state.
+
+     - Setup: Extends the MyBible fixture with a Genesis 1:4-5 middle block and an Exodus 1:1-2
+       final block after the fixture's empty Genesis separator, then requests append and prepend.
+     - Expected result: Responses contain the distinct outer blocks. Visible callbacks persist
+       their block-local anchors, move shared Bible state, and expose captured neighbor routes,
+       while requests beyond the accepted range boundaries return null.
+     - Failure meaning: SQLite commentary routes through Bible chapter scroll, advances its edge
+       before accepted publication, or loses source ownership for an appended block.
+     */
+    @MainActor
+    func testSQLiteCommentaryInfiniteScrollAppendsAcceptedBlockAndRoutesVisiblePosition() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/commentary.SQLite3")
+        try executeSQLite(
+            """
+            DELETE FROM commentaries
+            WHERE book_number = 10
+              AND chapter_number_from = 1
+              AND verse_number_from = 1
+              AND chapter_number_to IS NULL
+              AND verse_number_to IS NULL;
+            INSERT INTO commentaries (
+                book_number, chapter_number_from, verse_number_from,
+                chapter_number_to, verse_number_to, text
+            ) VALUES
+              (10, 1, 4, 1, 5, 'Infinite-scroll middle linked block'),
+              (20, 1, 1, 1, 2, 'Infinite-scroll cross-book final block')
+            """,
+            at: commentaryURL
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let pageManager = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 4)
+        let replacementBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "MyBible-commentary")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+
+        let appendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 4181)
+        let responseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: appendBoundary,
+            description: "SQLite commentary append response"
+        ) { $0.hasPrefix("bibleView.response(4181,") }
+        let response = try XCTUnwrap(responseResult)
+        let payload = try bridgeResponseObject(from: response)
+        XCTAssertEqual(payload["key"] as? String, "Exod.1.1")
+        let range = try XCTUnwrap(payload["commentaryRange"] as? [String: Any])
+        XCTAssertEqual(range["startOsisRef"] as? String, "Exod.1.1")
+        XCTAssertEqual(range["endOsisRef"] as? String, "Exod.1.2")
+        let localRange = try XCTUnwrap(payload["ordinalRange"] as? [Int])
+        let localAnchor = try XCTUnwrap(localRange.last)
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: "Exod.1.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+        XCTAssertTrue(controller.hasPrevious)
+
+        let prependBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToBeginning: 4183)
+        let prependResponseResult = try await awaitBridgeScript(
+            from: scripts,
+            after: prependBoundary,
+            description: "SQLite commentary prepend response"
+        ) { $0.hasPrefix("bibleView.response(4183,") }
+        let prependResponse = try XCTUnwrap(prependResponseResult)
+        let prependPayload = try bridgeResponseObject(from: prependResponse)
+        XCTAssertEqual(prependPayload["key"] as? String, "Gen.1.1")
+        let prependRange = try XCTUnwrap(prependPayload["commentaryRange"] as? [String: Any])
+        XCTAssertEqual(prependRange["startOsisRef"] as? String, "Gen.1.1")
+        XCTAssertEqual(prependRange["endOsisRef"] as? String, "Gen.1.2")
+        let prependLocalRange = try XCTUnwrap(prependPayload["ordinalRange"] as? [Int])
+        let prependAnchor = try XCTUnwrap(prependLocalRange.last)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: prependAnchor,
+            key: "Gen.1.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, prependAnchor)
+
+        let firstBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToBeginning: 4184)
+        let firstResponse = try await awaitBridgeScript(
+            from: scripts,
+            after: firstBoundary,
+            description: "SQLite commentary first boundary response"
+        ) { $0.hasPrefix("bibleView.response(4184,") }
+        XCTAssertEqual(firstResponse, "bibleView.response(4184, null);")
+
+        let finalBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 4182)
+        let finalResponse = try await awaitBridgeScript(
+            from: scripts,
+            after: finalBoundary,
+            description: "SQLite commentary final boundary response"
+        ) { $0.hasPrefix("bibleView.response(4182,") }
+        XCTAssertEqual(finalResponse, "bibleView.response(4182, null);")
+    }
+
+    /** A SWORD source Bible relock invalidates an in-flight SQLite commentary mapping. */
+    @MainActor
+    func testSQLiteCommentaryAppendRejectsRelockedSwordSourceBible() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let commentaryURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mybible/commentary.SQLite3")
+        try executeSQLite(
+            """
+            DELETE FROM commentaries
+            WHERE book_number = 10
+              AND chapter_number_from = 1
+              AND verse_number_from = 1
+              AND chapter_number_to IS NULL
+              AND verse_number_to IS NULL;
+            INSERT INTO commentaries (
+                book_number, chapter_number_from, verse_number_from,
+                chapter_number_to, verse_number_to, text
+            ) VALUES (10, 1, 4, 1, 5, 'Relock target block')
+            """,
+            at: commentaryURL
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let captureEntered = expectation(description: "SQLite commentary capture entered")
+        let releaseCapture = DispatchSemaphore(value: 0)
+        let blockNextCapture = SQLiteCommentaryCaptureGate()
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture,
+                      key.family.rawValue == "sqlite-commentary",
+                      blockNextCapture.consumeIfOpen() else { return }
+                captureEntered.fulfill()
+                _ = releaseCapture.wait(timeout: .now() + 3)
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        _ = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+        let replacementBoundary = scripts().count
+        controller.switchCommentaryDocument(to: "MyBible-commentary")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: replacementBoundary
+        )
+
+        blockNextCapture.open()
+        let appendBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 4185)
+        await fulfillment(of: [captureEntered], timeout: 3)
+        var released = false
+        defer {
+            if !released { releaseCapture.signal() }
+        }
+        let configURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/kjv.conf")
+        var config = try String(contentsOf: configURL, encoding: .utf8)
+        XCTAssertFalse(config.contains("\nCipherKey="))
+        config += "\nCipherKey=\n"
+        try config.write(to: configURL, atomically: true, encoding: .utf8)
+        let cacheURL = URL(fileURLWithPath: modulePath, isDirectory: true)
+            .appendingPathComponent("mods.d/modules-conf.cache")
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            try FileManager.default.removeItem(at: cacheURL)
+        }
+        manager.refresh()
+        XCTAssertEqual(manager.moduleAccessState(named: "KJV"), .locked)
+        released = true
+        releaseCapture.signal()
+
+        let response = try await awaitBridgeScript(
+            from: scripts,
+            after: appendBoundary,
+            description: "SQLite commentary response after source-Bible relock"
+        ) { $0.hasPrefix("bibleView.response(4185,") }
+        XCTAssertEqual(response, "bibleView.response(4185, null);")
+
+        try config.replacingOccurrences(of: "\nCipherKey=\n", with: "\n").write(
+            to: configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            try FileManager.default.removeItem(at: cacheURL)
+        }
+        manager.refresh()
+        XCTAssertEqual(manager.moduleAccessState(named: "KJV"), .readable)
+        let retryBoundary = scripts().count
+        controller.bridge(bridge, requestMoreToEnd: 4186)
+        let retryResult = try await awaitBridgeScript(
+            from: scripts,
+            after: retryBoundary,
+            description: "SQLite commentary append after source-Bible authorization returns"
+        ) { $0.hasPrefix("bibleView.response(4186,") }
+        let retry = try XCTUnwrap(retryResult)
+        XCTAssertTrue(retry.contains(#""key":"Gen.1.4""#))
     }
 
     /**
@@ -1649,6 +2115,72 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies a real MyBible commentary reuses its accepted local anchor after visiting its paired
+     SQLite Bible at the same selected verse.
+
+     - Side effects: Installs temporary SQLite fixtures, mutates one PageManager, and records bridge
+       replacement events.
+     - Failure modes: Fixture discovery, SQLite capture, and asynchronous bridge publication can
+       throw or time out. The test does not exercise process relaunch because a raw persisted iOS
+       ordinal currently has no durable commentary-key witness.
+     */
+    @MainActor
+    func testSQLiteCommentaryRoundTripRestoresExactAcceptedLocalAnchor() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try installAllSQLiteFixtures(in: modulePath)
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let pageManager = attachWindow(to: controller)
+        controller.bridgeDidSetClientReady(bridge)
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
+
+        var boundary = scripts().count
+        XCTAssertEqual(
+            controller.switchCommentaryDocument(to: "MyBible-commentary"),
+            .switched
+        )
+        let initial = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try latestDocumentPayload(from: initial)
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.1.2")
+        let range = try XCTUnwrap(document["ordinalRange"] as? [Int])
+        let localAnchor = try XCTUnwrap(range.last)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: localAnchor,
+            key: "Gen.1.2",
+            atChapterTop: false
+        )
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
+
+        boundary = scripts().count
+        XCTAssertEqual(controller.switchBibleDocument(to: "MyBible-bible"), .switched)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        boundary = scripts().count
+        XCTAssertEqual(
+            controller.switchCommentaryDocument(to: "MyBible-commentary"),
+            .switched
+        )
+        let restored = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: boundary
+        )
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: restored, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, localAnchor)
+    }
+
+    /**
      Verifies the dictionary browser abstraction exposes SQLite keys and exact lazy definitions.
 
      - Setup: Discovers the real MyBible dictionary fixture and captures its immutable runtime
@@ -1958,6 +2490,18 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         )
     }
 
+    /** Decodes the object argument from one exact `bibleView.response` test script. */
+    private func bridgeResponseObject(from script: String) throws -> [String: Any] {
+        let comma = try XCTUnwrap(script.firstIndex(of: ","))
+        XCTAssertTrue(script.hasSuffix(");"))
+        let start = script.index(after: comma)
+        let end = script.index(script.endIndex, offsetBy: -2)
+        let json = script[start..<end].trimmingCharacters(in: .whitespaces)
+        return try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+    }
+
     /**
      Copies every supported real SQLite fixture into its Android discovery family directory.
 
@@ -2189,6 +2733,24 @@ final class SQLiteReaderRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
         try sidecar.write(to: package.appendingPathComponent("module.json"))
     }
 
+}
+
+/** Lock-owned one-shot gate for a commentary capture phase observer. */
+private final class SQLiteCommentaryCaptureGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var openState = false
+
+    func open() {
+        lock.withLock { openState = true }
+    }
+
+    func consumeIfOpen() -> Bool {
+        lock.withLock {
+            guard openState else { return false }
+            openState = false
+            return true
+        }
+    }
 }
 
 /** Deterministic commentary reader with two linked blocks separated by one empty verse. */

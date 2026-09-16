@@ -50,6 +50,242 @@ final class GenericSwordDocumentParityTests: XCTestCase {
     }
 
     /**
+     Verifies source annotation metadata is typed like Android before it becomes document identity.
+
+     `Bible:Gen...` is an unknown JSword book name and therefore falls back to the selected key;
+     a valid verse range remains canonical and retains exact start/end coordinates. Raw XML keeps
+     the source spelling in both cases so rendering and diagnostics do not rewrite module bytes.
+     */
+    func testRawFilesAnnotationRangeNormalizationMatchesAndroidFallbackAndRangeSemantics() throws {
+        let invalid = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div annotateRef="Bible:Gen.1.1"><p>Calvin marker.</p></div></verse>"#,
+            rows: [4]
+        )
+        defer { try? FileManager.default.removeItem(at: invalid.root) }
+        let invalidManager = try XCTUnwrap(SwordManager(modulePath: invalid.root.path))
+        let invalidModule = try XCTUnwrap(invalidManager.module(named: "RAWFILES"))
+        let invalidFragment = try invalidModule.rawOSISFragment(forKey: "Gen.1.1")
+
+        XCTAssertNil(invalidFragment.annotateRef)
+        XCTAssertNil(invalidFragment.annotationVerseRange)
+        XCTAssertTrue(invalidFragment.originalXML.contains(#"annotateRef="Bible:Gen.1.1""#))
+        XCTAssertEqual(invalidFragment.key, "Gen.1.1")
+
+        let laterSibling = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div><p>First direct block.</p></div><div annotateRef="Gen.1.2"><p>Later block.</p></div></verse>"#
+        )
+        defer { try? FileManager.default.removeItem(at: laterSibling.root) }
+        let laterSiblingManager = try XCTUnwrap(SwordManager(modulePath: laterSibling.root.path))
+        let laterSiblingModule = try XCTUnwrap(laterSiblingManager.module(named: "RAWFILES"))
+        let laterSiblingFragment = try laterSiblingModule.rawOSISFragment(forKey: "Gen.1.1")
+        XCTAssertNil(laterSiblingFragment.annotateRef)
+        XCTAssertNil(laterSiblingFragment.annotationVerseRange)
+        XCTAssertTrue(laterSiblingFragment.originalXML.contains(#"annotateRef="Gen.1.2""#))
+        XCTAssertEqual(laterSiblingFragment.key, "Gen.1.1")
+
+        let oracle: [(String, String?, String?, String?)] = [
+            ("Bible:Gen.1.22", nil, nil, nil),
+            ("Bible Gen.1.22", nil, nil, nil),
+            ("Dict:Strongs_G1234", nil, nil, nil),
+            ("Gen.1.22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen.1.1!a", "Gen.1.1!a", "Gen.1.1", "Gen.1.1"),
+            ("Gen.1.1!", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen.1.22-Gen.1.24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.1.22-24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen 1:22-24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.1.24-Gen.1.22", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.50.26-Exod.1.2", "Gen.50.26-Exod.1.2", "Gen.50.26", "Exod.1.2"),
+            ("Gen.1.0-Gen.1.31", "Gen.1", "Gen.1.0", "Gen.1.31"),
+            ("Gen.1.1-Gen.1.$", "Gen.1", "Gen.1.1", "Gen.1.31"),
+            ("Gen.1.1-Gen.1.ff", "Gen.1", "Gen.1.1", "Gen.1.31"),
+            ("Gen.1.1ff", nil, nil, nil),
+            ("Gen.1.$", "Gen.1.31", "Gen.1.31", "Gen.1.31"),
+            ("Gen.$", "Gen.50", "Gen.50.0", "Gen.50.26"),
+            ("Gen.$.$", "Gen.50.26", "Gen.50.26", "Gen.50.26"),
+            ("Gen.1.0-Gen.2.25", "Gen.1-Gen.2", "Gen.1.0", "Gen.2.25"),
+            ("Gen.0.0-Gen.50.26", "Gen", "Gen.0.0", "Gen.50.26"),
+            ("Gen.1", "Gen.1", "Gen.1.0", "Gen.1.31"),
+            ("Gen", "Gen", "Gen.0.0", "Gen.50.26"),
+            ("Gen.1.0", "Gen.1.0", "Gen.1.0", "Gen.1.0"),
+            ("Gen.0", "Gen.0", "Gen.0.0", "Gen.0.0"),
+            ("Gen.0.0", "Gen.0", "Gen.0.0", "Gen.0.0"),
+            ("1:2", nil, nil, nil),
+            ("22-24", nil, nil, nil),
+            ("22", nil, nil, nil),
+            ("Gen.1.x", nil, nil, nil),
+            ("Gen.1.1-Gen.1.2-Gen.1.3", nil, nil, nil),
+            ("Bogus.1.1", nil, nil, nil),
+            ("Gen.1.99", nil, nil, nil),
+            ("Gen.99.1", nil, nil, nil),
+            ("Genesis 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen1:1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen 1 1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen,1,1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("genesis 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Genes 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Ex 1:1", "Exod.1.1", "Exod.1.1", "Exod.1.1"),
+            ("1. Pet 1:1", "1Pet.1.1", "1Pet.1.1", "1Pet.1.1"),
+            ("Jud 1:1", "Judg.1.1", "Judg.1.1", "Judg.1.1"),
+            ("Jude 1", "Jude.1.1", "Jude.1.1", "Jude.1.1"),
+            ("Jude 2", "Jude.1.2", "Jude.1.2", "Jude.1.2"),
+            ("Génesis 1:22", nil, nil, nil),
+            ("  GEN 1 : 22  ", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen.1.1,Gen.1.2", nil, nil, nil),
+            ("Gen.1.1 Gen.1.2", nil, nil, nil),
+            ("Tob.1.1-Tob.1.2", nil, nil, nil),
+            ("Dan.3.52-Dan.3.53", nil, nil, nil),
+        ]
+        for (input, osisRef, start, end) in oracle {
+            let resolved = invalidModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, osisRef, input)
+            XCTAssertEqual(resolved?.start.osisRef, start, input)
+            XCTAssertEqual(resolved?.end.osisRef, end, input)
+        }
+
+        for (input, expected) in [
+            ("Gen.1.22-Gen.1.24", "Gen.1.22-Gen.1.24"),
+            ("Gen.1.1!a", "Gen.1.1!a"),
+            ("Gen.1.22-24", "Gen.1.22-Gen.1.24"),
+            ("Gen.1.24-Gen.1.22", "Gen.1.22-Gen.1.24"),
+            ("Gen.50.26-Exod.1.2", "Gen.50.26-Exod.1.2"),
+            ("Gen.1.0-Gen.1.31", "Gen.1"),
+            ("Gen.1.1-Gen.1.$", "Gen.1"),
+            ("Gen.1.1-Gen.1.ff", "Gen.1"),
+            ("Gen.1.$", "Gen.1.31"),
+            ("Gen.$", "Gen.50"),
+            ("Gen.$.$", "Gen.50.26"),
+            ("Gen.1.0-Gen.2.25", "Gen.1-Gen.2"),
+            ("Gen.0.0-Gen.50.26", "Gen"),
+            ("Gen.1", "Gen.1"),
+            ("Gen", "Gen"),
+            ("Gen.1.0", "Gen.1.0"),
+            ("Gen.0", "Gen.0"),
+            ("Gen.0.0", "Gen.0"),
+        ] {
+            let productionFixture = try makeRawFilesFixture(
+                source: "<verse osisID=\"Gen.1.1\"><div annotateRef=\"\(input)\"><p>Range.</p></div></verse>"
+            )
+            defer { try? FileManager.default.removeItem(at: productionFixture.root) }
+            let productionManager = try XCTUnwrap(
+                SwordManager(modulePath: productionFixture.root.path)
+            )
+            let productionModule = try XCTUnwrap(productionManager.module(named: "RAWFILES"))
+            let productionFragment = try productionModule.rawOSISFragment(forKey: "Gen.1.1")
+            XCTAssertEqual(productionFragment.annotateRef, expected, input)
+            if input == "Gen.1" {
+                XCTAssertEqual(productionFragment.annotationVerseRange?.start.osisRef, "Gen.1.0")
+            } else if input == "Gen" {
+                XCTAssertEqual(productionFragment.annotationVerseRange?.start.osisRef, "Gen.0.0")
+            }
+        }
+
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "1. Mose 1:22",
+                locale: Locale(identifier: "de")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Genesis 1:22",
+                locale: Locale(identifier: "de")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Gen.١.٢٢",
+                locale: Locale(identifier: "ar")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "Gen.۱.۲۲",
+            locale: Locale(identifier: "ar")
+        ))
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Gen.۱.۲۲",
+                locale: Locale(identifier: "fa")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Mga Taga-Roma 1:1",
+                locale: Locale(identifier: "fil")
+            )?.osisRef,
+            "Rom.0-Rom.1.1"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "1-Shomuil 1:1",
+            locale: Locale(identifier: "uz")
+        ))
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Nehemias' Bog 1:1",
+                locale: Locale(identifier: "da")
+            )?.osisRef,
+            "Neh.1.1"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "Süleyman'ın Özdeyişleri 1:1",
+            locale: Locale(identifier: "tr")
+        ))
+
+        let ranged = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div annotateRef="Gen.1.1-Gen.1.2"><p>Covering marker.</p></div></verse>"#,
+            rows: [4, 5]
+        )
+        defer { try? FileManager.default.removeItem(at: ranged.root) }
+        let rangedManager = try XCTUnwrap(SwordManager(modulePath: ranged.root.path))
+        let rangedModule = try XCTUnwrap(rangedManager.module(named: "RAWFILES"))
+        let rangedFragment = try rangedModule.rawOSISFragment(forKey: "Gen.1.2")
+
+        XCTAssertEqual(rangedFragment.annotateRef, "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(rangedFragment.annotationVerseRange?.start.osisRef, "Gen.1.1")
+        XCTAssertEqual(rangedFragment.annotationVerseRange?.end.osisRef, "Gen.1.2")
+        XCTAssertTrue(rangedFragment.originalXML.contains(#"annotateRef="Gen.1.1-Gen.1.2""#))
+        XCTAssertEqual(rangedFragment.key, "Gen.1.2")
+
+        let catholic = try makeRawFilesFixture(versification: "Catholic2")
+        defer { try? FileManager.default.removeItem(at: catholic.root) }
+        let catholicManager = try XCTUnwrap(SwordManager(modulePath: catholic.root.path))
+        let catholicModule = try XCTUnwrap(catholicManager.module(named: "RAWFILES"))
+        for (input, kjvOSIS, kjvStart, kjvEnd) in oracle {
+            let expected: (String?, String?, String?)
+            switch input {
+            case "Tob.1.1-Tob.1.2":
+                expected = ("Tob.1.1-Tob.1.2", "Tob.1.1", "Tob.1.2")
+            case "Dan.3.52-Dan.3.53":
+                expected = ("Dan.3.52-Dan.3.53", "Dan.3.52", "Dan.3.53")
+            default:
+                expected = (kjvOSIS, kjvStart, kjvEnd)
+            }
+            let resolved = catholicModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, expected.0, "Catholic2: \(input)")
+            XCTAssertEqual(resolved?.start.osisRef, expected.1, "Catholic2: \(input)")
+            XCTAssertEqual(resolved?.end.osisRef, expected.2, "Catholic2: \(input)")
+        }
+
+
+        let kjva = try makeRawFilesFixture(versification: "KJVA")
+        defer { try? FileManager.default.removeItem(at: kjva.root) }
+        let kjvaManager = try XCTUnwrap(SwordManager(modulePath: kjva.root.path))
+        let kjvaModule = try XCTUnwrap(kjvaManager.module(named: "RAWFILES"))
+        for (input, kjvOSIS, kjvStart, kjvEnd) in oracle {
+            let expected: (String?, String?, String?) = input == "Tob.1.1-Tob.1.2"
+                ? ("Tob.1.1-Tob.1.2", "Tob.1.1", "Tob.1.2")
+                : (kjvOSIS, kjvStart, kjvEnd)
+            let resolved = kjvaModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, expected.0, "KJVA: \(input)")
+            XCTAssertEqual(resolved?.start.osisRef, expected.1, "KJVA: \(input)")
+            XCTAssertEqual(resolved?.end.osisRef, expected.2, "KJVA: \(input)")
+        }
+    }
+
+    /**
      Verifies the native RawLD path preserves exact OSIS, dictionary metadata, and source identity.
 
      - Setup: Writes a real two-entry RawLD module using SWORD's documented `.dat`/`.idx` format.
@@ -755,6 +991,7 @@ final class GenericSwordDocumentParityTests: XCTestCase {
             contentOrdinalRange: processed.contentOrdinalRange,
             keyOrdinalRange: nil,
             annotateRef: processed.annotateRef,
+            annotationVerseRange: nil,
             anchorTexts: processed.anchorTexts,
             comparablePlainText: processed.comparablePlainText,
             hasRenderableContent: processed.hasRenderableContent
@@ -860,7 +1097,11 @@ final class GenericSwordDocumentParityTests: XCTestCase {
     }
 
     /** Builds one real RawFiles verse-to-file index with a single KJV source entry. */
-    private func makeRawFilesFixture() throws -> RawFilesFixture {
+    private func makeRawFilesFixture(
+        source: String = #"<verse osisID="Gen.1.1">Synthetic RawFiles commentary.</verse>"#,
+        rows: [Int] = [4],
+        versification: String = "KJV"
+    ) throws -> RawFilesFixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let modsDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
@@ -872,13 +1113,14 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
 
         let fileName = "0000000"
-        let source = #"<verse osisID="Gen.1.1">Synthetic RawFiles commentary.</verse>"#
         try Data(source.utf8).write(
             to: dataDirectory.appendingPathComponent(fileName, isDirectory: false)
         )
         var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
-        let rowOffset = 4 * 6
-        oldTestamentIndex[rowOffset + 4] = UInt8(fileName.utf8.count)
+        for row in rows {
+            let rowOffset = row * 6
+            oldTestamentIndex[rowOffset + 4] = UInt8(fileName.utf8.count)
+        }
         try Data(fileName.utf8).write(
             to: dataDirectory.appendingPathComponent("ot", isDirectory: false)
         )
@@ -900,7 +1142,7 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         SourceType=OSIS
         Encoding=UTF-8
         Lang=en
-        Versification=KJV
+        Versification=\(versification)
         """.write(
             to: modsDirectory.appendingPathComponent("rawfiles.conf", isDirectory: false),
             atomically: true,

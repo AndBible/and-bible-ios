@@ -52,12 +52,15 @@ export function useInfiniteScroll(
     bibleViewDocuments: AnyDocument[],
     config: Config,
 ) {
-    const enabledCategories: Set<BookCategory> = new Set(["BIBLE", "GENERAL_BOOK"]);
+    const enabledCategories: Set<BookCategory> = new Set(["BIBLE", "GENERAL_BOOK", "COMMENTARY"]);
     let currentPos: number;
     let addMoreAtTopOnTouchUp = false;
     let bottomElem: HTMLElement;
     let touchDown = false;
-    let textToBeInsertedAtTop: Nullable<AnyDocument[]> = null;
+    let textToBeInsertedAtTop: Nullable<{
+        documents: AnyDocument[],
+        generation: number,
+    }> = null;
     let isProcessing = false;
     const reachedStart = ref(false);
     const addChaptersToTop: Promise<Nullable<AnyDocument>>[] = [];
@@ -69,10 +72,20 @@ export function useInfiniteScroll(
 
     let clearDocumentCount = 0;
 
+    /**
+     * Retires every queued or touch-deferred adjacent request for the replaced document generation.
+     *
+     * @returns Nothing; all directional queue, sentinel, and deferred-prepend state is reset in place.
+     * @remarks A native promise may still settle after this call, but `processQueues` and
+     * `insertThisTextAtTop` compare their captured generation before mutating the new document list or
+     * scroll anchor. Touch release/cancellation therefore cannot revive an already-resolved prepend.
+     */
     function documentsCleared() {
         addChaptersToTop.splice(0);
         addChaptersToEnd.splice(0);
         clearDocumentCount++;
+        textToBeInsertedAtTop = null;
+        addMoreAtTopOnTouchUp = false;
         reachedEnd.value = false;
         consecutiveEmptyLoads = 0;
         reachedStart.value = false;
@@ -131,7 +144,7 @@ export function useInfiniteScroll(
                     const validTopChaps = filterNotNull(topChaps);
                     if(validTopChaps.length > 0) {
                         console.log("inf: Displaying received chapters at top")
-                        await insertThisTextAtTop(validTopChaps);
+                        await insertThisTextAtTop(validTopChaps, clearCountStart);
                         contentAdded = true;
                         await nextTick();
                     } else {
@@ -247,8 +260,12 @@ export function useInfiniteScroll(
     function touchendListener() {
         touchDown = false;
         if (textToBeInsertedAtTop) {
-            insertThisTextAtTop(textToBeInsertedAtTop);
+            const pendingInsertion = textToBeInsertedAtTop;
             textToBeInsertedAtTop = null;
+            void insertThisTextAtTop(
+                pendingInsertion.documents,
+                pendingInsertion.generation,
+            );
         }
         if (addMoreAtTopOnTouchUp) {
             addMoreAtTopOnTouchUp = false;
@@ -256,18 +273,30 @@ export function useInfiniteScroll(
         }
     }
 
-    async function insertThisTextAtTop(docs: AnyDocument[]) {
+    /**
+     * Prepends one response while preserving the preexisting viewport and clear-generation owner.
+     *
+     * @param docs - Adjacent documents returned by the native previous-content request.
+     * @param generation - `clearDocumentCount` captured before the request queue was awaited.
+     * @returns A promise that settles after insertion and scroll compensation, or immediately for a
+     * stale generation. While touch is held, it settles after recording one deferred insertion.
+     * @remarks Mutates the reactive document list, `scrollYAtStart`, and window scroll position only
+     * for the current generation. The response array is copied before reversing so bridge-owned values
+     * are not reordered. A clear during the Vue layout tick suppresses stale scroll compensation.
+     */
+    async function insertThisTextAtTop(docs: AnyDocument[], generation: number) {
+        if (generation !== clearDocumentCount) return;
         if (touchDown) {
-            textToBeInsertedAtTop = docs;
+            textToBeInsertedAtTop = {documents: docs, generation};
         } else {
             const priorHeight = bodyHeight();
             const origPosition = scrollPosition();
 
             if (docs) {
-                docs.reverse();
-                bibleViewDocuments.unshift(...docs);
+                bibleViewDocuments.unshift(...[...docs].reverse());
             }
             await nextTick();
+            if (generation !== clearDocumentCount) return;
 
             // do no try to get scrollPosition here because it has not settled
             const adjustedTop = origPosition - priorHeight + bodyHeight();

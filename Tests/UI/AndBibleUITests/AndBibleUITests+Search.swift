@@ -8,6 +8,103 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Reads across real Calvin commentary blocks and restores the visible passage after Bible return.
+
+     The fixture starts at Genesis 1:22, whose short entry is followed by an empty 1:23 and the
+     distinct 1:24 block. Three deliberate slow drags advance into that following block; no action
+     repeats in response to a failed assertion. The user-visible reference must follow to 1:24.
+     A preliminary Next/Previous toolbar visit records the following block's actual top pixels.
+     The restoration marker must appear in the scrolled viewport's upper third and be absent from
+     that fresh-top control, so reopening the right block at its beginning cannot pass.
+     Package contracts separately verify exact local ordinals and persistence ownership.
+
+     - Side effects: Launches an isolated real-module fixture, visits the next and previous blocks
+       once, scrolls three times, switches to Bible once, then returns to commentary once. OCR only observes composited reader pixels.
+     - Failure modes: Fails for missing real content, an unhandled empty verse, a stale reference,
+       or a return that loses the previously visible passage. No hidden state export is an endpoint.
+     */
+    func testCalvinCommentaryScrollCrossesEmptyVerseAndRestoresVisiblePassage() throws {
+        let app = makeApp(
+            fixtureScenario: "calvin-commentary-scroll-restoration",
+            enablesDetailedAccessibilityExports: false
+        )
+        app.launch()
+        waitForVisiblePerformanceModuleSubtitle(
+            "King James Version (1769) with Strongs Numbers and Morphology  and CatchWords", in: app
+        )
+        waitForVisibleReaderText(containing: "Be fruitful", in: app)
+        requireButton("readerCommentaryToolbarButton", in: app).tap()
+        waitForVisiblePerformanceModuleSubtitle("Calvin's Collected Commentaries", in: app)
+        waitForVisibleReaderText(containing: "What is the force of this benediction", in: app)
+
+        let viewport = app.webViews.firstMatch
+        XCTAssertTrue(elementHasUsableFrame(viewport) && app.frame.contains(viewport.frame))
+        /// Reads upper-third OCR lines without altering scroll position or suggesting expected words.
+        func upperReaderLines() throws -> [String] {
+            let pixels = try XCTUnwrap(viewport.screenshot().image.cgImage)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = ["en-US"]
+            try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
+            return (request.results ?? [])
+                .filter { $0.boundingBox.midY > 0.67 }
+                .sorted { $0.boundingBox.midY > $1.boundingBox.midY }
+                .compactMap { $0.topCandidates(1).first?.string }
+                .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+        }
+        // A real toolbar visit establishes what losing the anchor and reopening at block top
+        // would look like on this device. No fixed pixel/font estimate can satisfy this control.
+        let nextBlock = app.buttons["Next chapter"].firstMatch
+        XCTAssertTrue(waitForElementToBecomeHittable(nextBlock, timeout: 10))
+        nextBlock.tap()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
+        waitForVisibleReaderText(containing: "He descends to the sixth day", in: app)
+        let freshBlockTop = try upperReaderLines().joined(separator: " ")
+        let previousBlock = app.buttons["Previous chapter"].firstMatch
+        XCTAssertTrue(waitForElementToBecomeHittable(previousBlock, timeout: 10))
+        previousBlock.tap()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1:22", in: app)
+        waitForVisibleReaderText(containing: "What is the force of this benediction", in: app)
+
+        for _ in 0..<3 {
+            viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).press(
+                forDuration: 0.05,
+                thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)),
+                withVelocity: .slow,
+                thenHoldForDuration: 0.15
+            )
+        }
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
+
+        let marker = try XCTUnwrap(try upperReaderLines().first {
+            $0.count >= 24 && freshBlockTop.range(of: $0, options: .caseInsensitive) == nil
+        }, "The fixed reading gestures must reach a passage distinct from the following block's top.")
+        let before = XCTAttachment(screenshot: viewport.screenshot())
+        before.name = "Calvin following block before leaving: \(marker)"
+        before.lifetime = .keepAlways
+        add(before)
+
+        requireButton("readerBibleToolbarButton", in: app).tap()
+        waitForVisiblePerformanceModuleSubtitle(
+            "King James Version (1769) with Strongs Numbers and Morphology  and CatchWords", in: app
+        )
+        waitForVisibleReaderText(containing: "Let the earth bring forth", in: app)
+        requireButton("readerCommentaryToolbarButton", in: app).tap()
+        waitForVisiblePerformanceModuleSubtitle("Calvin's Collected Commentaries", in: app)
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
+        let restored = waitForUITestCondition("Same commentary passage remains near viewport top", timeout: 15) {
+            guard let lines = try? upperReaderLines() else { return false }
+            return lines.joined(separator: " ").range(of: marker, options: .caseInsensitive) != nil
+        }
+        let after = XCTAttachment(screenshot: viewport.screenshot())
+        after.name = "Calvin passage after returning"
+        after.lifetime = .keepAlways
+        add(after)
+        XCTAssertTrue(restored, "Expected the same visible passage near the top after returning: \(marker)")
+    }
+
+    /**
      Verifies reader administration actions and Settings route Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live
