@@ -241,6 +241,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.bridgeDidSetClientReady(bridge)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.navigateTo(book: "Psalms", chapter: 12, verse: 1)
         let initialScriptCount = scripts().count
 
@@ -270,9 +272,10 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             )
         )
         let targetRangeStart = try XCTUnwrap(
-            JSwordKJVAVersification.chapterIntroOrdinal(
+            JSwordKJVAVersification.verseOrdinal(
                 osisId: targetReference.osisId,
-                chapter: targetReference.chapter
+                chapter: targetReference.chapter,
+                verse: 1
             )
         )
         let targetRangeEnd = try XCTUnwrap(
@@ -332,9 +335,10 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: expectedKJVA)
         )
         let targetRangeStart = try XCTUnwrap(
-            JSwordKJVAVersification.chapterIntroOrdinal(
+            JSwordKJVAVersification.verseOrdinal(
                 osisId: targetReference.osisId,
-                chapter: targetReference.chapter
+                chapter: targetReference.chapter,
+                verse: 1
             )
         )
         let targetVerseCount = try XCTUnwrap(
@@ -356,6 +360,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.bridgeDidSetClientReady(bridge)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.navigateTo(book: "Psalms", chapter: 12, verse: 1)
         let baseline = scripts().count
 
@@ -996,6 +1002,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager,
             documentPreparationCoordinator: coordinator
         )
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.bridgeDidSetClientReady(bridge)
         XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
         let baseline = scripts().count
@@ -1313,7 +1321,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(synchronizedScrollPayload["ordinal"] as? Int, 4)
         let reverseBroadcast = expectation(description: "commentary sync feedback stays passive")
         reverseBroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in reverseBroadcast.fulfill() }
+        windowManager.onSyncVerseChanged = { _, _ in reverseBroadcast.fulfill() }
 
         var persistCount = 0
         let anchorPersisted = expectation(description: "commentary anchor persisted once")
@@ -1961,23 +1969,19 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
 
         let synchronized = expectation(description: "introduction reaches synchronized target")
         synchronized.assertForOverFulfill = true
-        windowManager.onSyncVerseChanged = { [weak windowManager] eventSource, ordinal, key in
+        windowManager.onSyncVerseChanged = { [weak windowManager] eventSource, delivery in
             guard let windowManager else { return }
             XCTAssertEqual(eventSource.id, sourceWindow.id)
-            XCTAssertEqual(ordinal, expectedOrdinal)
-            XCTAssertEqual(key, "Gen.\(expectedChapter).0")
-            let reference = (windowManager.controllers[eventSource.id] as? BibleReaderController)?
-                .synchronizedVerseReference(ordinal: ordinal)
-            XCTAssertEqual(reference?.osisBookId, "Gen")
-            XCTAssertEqual(reference?.chapter, expectedChapter)
-            XCTAssertEqual(reference?.verse, 0)
-            for window in windowManager.synchronizedVerseUpdateTargets(for: eventSource) {
+            // CALVINSYNC declares KJV; typed delivery must retain the commentary source canon.
+            XCTAssertEqual(delivery.position.sourceVersification, "KJV")
+            XCTAssertEqual(delivery.position.osisBookId, "Gen")
+            XCTAssertEqual(delivery.position.chapter, expectedChapter)
+            XCTAssertEqual(delivery.position.verse, 0)
+            XCTAssertEqual(delivery.position.sourceOrdinal, expectedOrdinal)
+            XCTAssertEqual(delivery.position.sourceKey, "Gen.\(expectedChapter).0")
+            for window in delivery.targets {
                 (windowManager.controllers[window.id] as? BibleReaderController)?
-                    .scrollToSynchronizedVerse(
-                        osisBookId: reference?.osisBookId ?? "",
-                        chapter: reference?.chapter ?? -1,
-                        verse: reference?.verse ?? -1
-                    )
+                    .applyWindowSynchronizationPosition(delivery.position)
             }
             synchronized.fulfill()
         }
@@ -2552,21 +2556,27 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             bookmarkService: bookmarkService,
             swordManagerOverride: manager
         )
-        let window = Window()
-        let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
-        pageManager.bibleChapterNo = 1
-        pageManager.bibleVerseNo = 2
-        window.pageManager = pageManager
-        window.isSynchronized = true
-        retainReaderWindowGraph(window)
-        controller.activeWindow = window
         let container = try makeWorkspaceModelContainer()
-        let windowManager = WindowManager(
-            workspaceStore: WorkspaceStore(modelContext: ModelContext(container))
-        )
+        let workspaceStore = WorkspaceStore(modelContext: ModelContext(container))
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        let workspace = workspaceStore.createWorkspace(name: "Commentary Typed Sync")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let pageManager = try XCTUnwrap(window.pageManager)
+        windowManager.setActiveWorkspace(workspace)
+        let target = try XCTUnwrap(windowManager.addWindow(from: window))
+        window.pageManager?.bibleBibleBook = 0
+        window.pageManager?.bibleChapterNo = 1
+        window.pageManager?.bibleVerseNo = 2
+        window.isSynchronized = true
+        window.syncGroup = 0
+        target.isSynchronized = true
+        target.syncGroup = 0
+        retainReaderWindowGraph(window)
+        retainReaderWindowGraph(target)
+        controller.activeWindow = window
         windowManager.activeWindow = window
         controller.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(controller, for: window))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 2)
         controller.bridgeDidSetClientReady(bridge)
         let baseline = scripts().count
@@ -2613,7 +2623,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         }
         let broadcast = expectation(description: "direct commentary source broadcasts once")
         var broadcastCount = 0
-        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+        windowManager.onSyncVerseChanged = { sourceWindow, delivery in
+            let sourceOrdinal = delivery.position.sourceOrdinal
+            let key = delivery.position.sourceKey
             broadcastCount += 1
             XCTAssertEqual(sourceWindow.id, window.id)
             XCTAssertEqual(sourceOrdinal, renderedSourceOrdinal)

@@ -145,12 +145,32 @@ public final class WindowManager {
 
     /// Debounce work item for scroll sync (200ms matching Android WindowSync.kt:71).
     private var syncWorkItem: DispatchWorkItem?
+    /// Exact source slot associated with `syncWorkItem`, used for bounded lifecycle invalidation.
+    private var syncWorkSourceWindowID: UUID?
+    /// Group whose immutable source value is pending; valid immediate alignment supersedes it.
+    private var syncWorkGroup: Int?
+    /// Monotonic admission identity used to release completed work and reject superseded delivery.
+    private var syncWorkGeneration: UInt64 = 0
+    /// Per-window membership identity; away-and-back transitions never regain older authority.
+    private var synchronizationMembershipEpochs: [UUID: UInt64] = [:]
+
+    /** Admission-time witness for one target authorized to consume a delayed position. */
+    private struct SynchronizedScrollTargetWitness {
+        weak var window: Window?
+        let windowID: UUID
+        let membershipEpoch: UInt64
+    }
 
     /**
-     Callback to perform sync — set by the coordinator (BibleReaderView).
-     Parameters: (sourceWindow, ordinal, key)
+     Delivers one admitted typed source position to the reader coordinator.
+
+     - Parameters:
+       - sourceWindow: Exact managed window whose registered controller admitted the position.
+       - delivery: Immutable source-versification coordinate plus exact admitted target peers.
+     - Side Effects: The coordinator may strictly map and apply the position to admitted peers.
+     - Failure Modes: Delivery is suppressed when source ownership changes before the debounce fires.
      */
-    public var onSyncVerseChanged: ((Window, Int, String) -> Void)?
+    public var onSyncVerseChanged: ((Window, WindowSynchronizationDelivery) -> Void)?
 
     /**
      Creates a window manager for a workspace-backed window set.
@@ -158,6 +178,22 @@ public final class WindowManager {
      */
     public init(workspaceStore: WorkspaceStore) {
         self.workspaceStore = workspaceStore
+    }
+
+    /** Advances one window's synchronization membership and revokes work only when it is the source. */
+    private func advanceSynchronizationMembership(for windowID: UUID) {
+        synchronizationMembershipEpochs[windowID, default: 0] &+= 1
+        invalidatePendingSynchronizedScroll(sourceWindowID: windowID)
+    }
+
+    /** Revokes queued source authority and releases the manager-owned work item. */
+    private func invalidatePendingSynchronizedScroll(sourceWindowID: UUID? = nil) {
+        if let sourceWindowID, syncWorkSourceWindowID != sourceWindowID { return }
+        syncWorkItem?.cancel()
+        syncWorkItem = nil
+        syncWorkSourceWindowID = nil
+        syncWorkGroup = nil
+        syncWorkGeneration &+= 1
     }
 
     // MARK: - Controller Registry
@@ -225,6 +261,10 @@ public final class WindowManager {
             return false
         }
 
+        let priorController = controllers[windowID]
+        if priorController.map({ $0 !== controller }) ?? true {
+            advanceSynchronizationMembership(for: windowID)
+        }
         let replaced = controllers.updateValue(controller, forKey: windowID)
         controllerRegistrationOwners[windowID] = WindowControllerRegistrationOwner(
             windowIdentity: ObjectIdentifier(window)
@@ -267,6 +307,7 @@ public final class WindowManager {
               !controllerRegistrationBlockedWindowIDs.contains(windowId) else {
             return
         }
+        advanceSynchronizationMembership(for: windowId)
         let removed = controllers.removeValue(forKey: windowId)
         controllerRegistrationOwners.removeValue(forKey: windowId)
         controllerPendingWindowIds.remove(windowId)
@@ -327,6 +368,8 @@ public final class WindowManager {
      - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func setActiveWorkspace(_ workspace: Workspace) {
+        invalidatePendingSynchronizedScroll()
+        synchronizationMembershipEpochs.removeAll()
         // Capture by object identity so one controller temporarily backing two slots retires once.
         let retiredControllers = controllers.values.reduce(into: [ObjectIdentifier: AnyObject]()) {
             $0[ObjectIdentifier($1)] = $1
@@ -1045,7 +1088,8 @@ public final class WindowManager {
      - Failure Modes: None.
      */
     public func setSynchronized(_ window: Window, value: Bool) {
-        guard window.isSynchronized != value else { return }
+        guard managesWindow(window), window.isSynchronized != value else { return }
+        advanceSynchronizationMembership(for: window.id)
         window.isSynchronized = value
         workspaceStore.persistChanges()
         refreshWindows()
@@ -1070,7 +1114,10 @@ public final class WindowManager {
        matching Android's synchronize-before-`WindowChangedEvent` ordering.
      */
     public func changeSyncGroup(_ window: Window, groupNumber: Int) {
-        guard (0..<6).contains(groupNumber) else { return }
+        guard managesWindow(window), (0..<6).contains(groupNumber) else { return }
+        if !window.isSynchronized || window.syncGroup != groupNumber {
+            advanceSynchronizationMembership(for: window.id)
+        }
         window.isSynchronized = true
         window.syncGroup = groupNumber
         synchronizeImmediatelyFromPeer(joining: window)
@@ -1092,17 +1139,28 @@ public final class WindowManager {
             guard candidate.id != window.id,
                   candidate.isSynchronized,
                   candidate.syncGroup == window.syncGroup,
-                  let source = controllers[candidate.id] as? any WindowSynchronizationSource else {
+                  let source = registeredController(for: candidate)
+                    as? any WindowSynchronizationSource else {
                 return false
             }
             return source.canProvideWindowSynchronizationPosition
         }),
-        let source = controllers[peer.id] as? any WindowSynchronizationSource,
-        let position = source.currentWindowSynchronizationPosition() else {
+        let source = registeredController(for: peer) as? any WindowSynchronizationSource,
+        let position = source.currentWindowSynchronizationPosition(),
+        position.isStructurallyValid else {
             return
         }
 
-        onSyncVerseChanged?(peer, position.ordinal, position.key)
+        let targets = synchronizedVerseUpdateTargets(for: peer)
+        guard !targets.isEmpty else { return }
+
+        // Android resolves the peer's current key at immediate execution. That current full-group
+        // alignment supersedes any older immutable value queued for the same group, while work for
+        // another group remains authoritative for its independently admitted recipients.
+        if syncWorkGroup == peer.syncGroup {
+            invalidatePendingSynchronizedScroll()
+        }
+        onSyncVerseChanged?(peer, WindowSynchronizationDelivery(position: position, targets: targets))
     }
 
     /// Get windows in the same sync group as the given window.
@@ -1113,45 +1171,99 @@ public final class WindowManager {
     /**
      Returns synchronized peer windows that still need a visible-verse update from the source.
 
-     Android's `WindowSync` updates an inactive window's Bible key, then compares the old key before
-     posting a secondary scroll. This mirrors that contract at the persisted window-state level: a
-     target whose concrete Bible book/chapter/verse already equals the source is not asked to scroll
-     again, while incomplete state is treated as stale so the existing sync path can repair it.
+     Cross-versification equality cannot be decided from raw persisted book indices and chapter/verse
+     numbers. Every visible grouped peer is admitted here; its controller strictly maps the typed
+     source coordinate into the target Bible versification and performs target-local idempotence.
 
      - Parameter sourceWindow: Window that reported the latest visible verse.
-     - Returns: Visible synchronized peer windows in the same sync group that differ from the source
-       Bible position or lack a complete comparable position.
+     - Returns: Every visible synchronized peer window in the same group except the source.
      - Side Effects: None.
      - Failure Modes: Returns an empty list when the source itself is not synchronized.
      */
     public func synchronizedVerseUpdateTargets(for sourceWindow: Window) -> [Window] {
         guard sourceWindow.isSynchronized else { return [] }
-        return syncedWindows(for: sourceWindow).filter { target in
-            guard target.id != sourceWindow.id else { return false }
-            guard let sourcePM = sourceWindow.pageManager,
-                  let targetPM = target.pageManager,
-                  let sourceBook = sourcePM.bibleBibleBook,
-                  let sourceChapter = sourcePM.bibleChapterNo,
-                  let sourceVerse = sourcePM.bibleVerseNo,
-                  let targetBook = targetPM.bibleBibleBook,
-                  let targetChapter = targetPM.bibleChapterNo,
-                  let targetVerse = targetPM.bibleVerseNo else {
-                return true
-            }
-            return sourceBook != targetBook
-                || sourceChapter != targetChapter
-                || sourceVerse != targetVerse
-        }
+        return syncedWindows(for: sourceWindow).filter { $0.id != sourceWindow.id }
     }
 
-    /// Notify that a verse changed in a window — triggers debounced sync to other windows.
-    public func notifyVerseChanged(sourceWindow: Window, ordinal: Int, key: String) {
-        guard sourceWindow.isSynchronized else { return }
-        syncWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.onSyncVerseChanged?(sourceWindow, ordinal, key)
+    /**
+     Admits one already-resolved source position for debounced grouped-window synchronization.
+
+     - Parameters:
+       - sourceWindow: Exact currently managed source window.
+       - source: Exact registered provider admitting the position; used only as an identity witness.
+       - position: Immutable coordinate resolved in the displayed page's source versification.
+     - Side Effects: An exact current producer always revokes prior pending work; a valid synchronized
+       position schedules delivery after 200 milliseconds.
+     - Failure Modes: Unmanaged windows and foreign/retired producers cannot revoke current work.
+       Invalid coordinates, changed group membership, disabled synchronization, replaced controllers,
+       released producers, and workspace replacement suppress delivery.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
+     */
+    public func notifyVerseChanged(
+        sourceWindow: Window,
+        source: any WindowSynchronizationSource,
+        position: WindowSynchronizationPosition
+    ) {
+        let sourceObject = source as AnyObject
+        guard managesWindow(sourceWindow),
+              let admittedController = registeredController(for: sourceWindow),
+              admittedController === sourceObject else { return }
+
+        // The exact current producer's latest observation supersedes older admitted work even when
+        // the new observation cannot itself synchronize. A retired producer cannot reach this point.
+        invalidatePendingSynchronizedScroll()
+        guard sourceWindow.isSynchronized, position.isStructurallyValid else { return }
+
+        let admittedSyncGroup = sourceWindow.syncGroup
+        let admittedSourceMembershipEpoch = synchronizationMembershipEpochs[sourceWindow.id, default: 0]
+        let admittedTargets = synchronizedVerseUpdateTargets(for: sourceWindow).map { target in
+            SynchronizedScrollTargetWitness(
+                window: target,
+                windowID: target.id,
+                membershipEpoch: synchronizationMembershipEpochs[target.id, default: 0]
+            )
+        }
+        guard !admittedTargets.isEmpty else { return }
+        let generation = syncWorkGeneration
+        let work = DispatchWorkItem { [weak self, weak sourceObject] in
+            guard let self,
+                  let sourceObject,
+                  self.syncWorkGeneration == generation else { return }
+            defer {
+                if self.syncWorkGeneration == generation {
+                    self.syncWorkItem = nil
+                    self.syncWorkSourceWindowID = nil
+                    self.syncWorkGroup = nil
+                }
+            }
+            guard sourceWindow.isSynchronized,
+                  sourceWindow.syncGroup == admittedSyncGroup,
+                  self.synchronizationMembershipEpochs[sourceWindow.id, default: 0]
+                    == admittedSourceMembershipEpoch,
+                  self.managesWindow(sourceWindow),
+                  let currentController = self.registeredController(for: sourceWindow),
+                  currentController === sourceObject else {
+                return
+            }
+            let targets = admittedTargets.compactMap { witness -> Window? in
+                guard self.synchronizationMembershipEpochs[witness.windowID, default: 0]
+                        == witness.membershipEpoch,
+                      let target = witness.window,
+                      self.managesWindow(target),
+                      self.visibleWindows.contains(where: { $0 === target }),
+                      target.isSynchronized,
+                      target.syncGroup == admittedSyncGroup else { return nil }
+                return target
+            }
+            guard !targets.isEmpty else { return }
+            self.onSyncVerseChanged?(
+                sourceWindow,
+                WindowSynchronizationDelivery(position: position, targets: targets)
+            )
         }
         syncWorkItem = work
+        syncWorkSourceWindowID = sourceWindow.id
+        syncWorkGroup = admittedSyncGroup
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 

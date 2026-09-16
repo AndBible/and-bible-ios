@@ -543,6 +543,8 @@ final class BibleBookIntroductionConsumerRegressionTests: BibleUISwordFixtureTes
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.bridgeDidSetClientReady(bridge)
         _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
         let boundary = scripts().count

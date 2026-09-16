@@ -521,6 +521,8 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.activeWindow = window
+        controller.windowManagerRef = windowManager
+        controller.workspaceStore = workspaceStore
         XCTAssertTrue(windowManager.registerController(controller, for: window))
 
         let pending = Task { @MainActor in

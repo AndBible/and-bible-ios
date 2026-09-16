@@ -4,6 +4,20 @@ import BibleCore
 import SwiftData
 import SwiftUI
 
+/** Immutable history route copied before a SwiftData row leaves the list boundary. */
+public struct HistoryNavigationTarget: Sendable, Equatable {
+    public let document: String
+    public let key: String
+    public let anchorOrdinal: Int?
+
+    /** Copies one durable history selection across dialog dismissal. */
+    public init(document: String, key: String, anchorOrdinal: Int?) {
+        self.document = document
+        self.key = key
+        self.anchorOrdinal = anchorOrdinal
+    }
+}
+
 /**
  Renders Android's window-scoped History rows inside an application-owned dialog.
 
@@ -31,7 +45,7 @@ public struct HistoryView: View {
     @Query(sort: \HistoryItem.createdAt, order: .reverse) private var allHistory: [HistoryItem]
 
     /// Callback that applies one stored key to the captured reader pane.
-    private let onNavigate: ((String) -> Void)?
+    private let onNavigate: ((HistoryNavigationTarget) -> Void)?
 
     /// Optional module-aware OSIS book-name resolver.
     private let bookNameResolver: ((String) -> String?)?
@@ -51,7 +65,7 @@ public struct HistoryView: View {
      */
     public init(
         bookNameResolver: ((String) -> String?)? = nil,
-        onNavigate: ((String) -> Void)? = nil,
+        onNavigate: ((HistoryNavigationTarget) -> Void)? = nil,
         activeWindowID: UUID? = nil
     ) {
         self.bookNameResolver = bookNameResolver
@@ -99,7 +113,11 @@ public struct HistoryView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(items, id: \.id) { item in
                 Button {
-                    onNavigate?(item.key)
+                    onNavigate?(HistoryNavigationTarget(
+                        document: item.document,
+                        key: item.key,
+                        anchorOrdinal: item.anchorOrdinal
+                    ))
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(formatDescription(for: item))

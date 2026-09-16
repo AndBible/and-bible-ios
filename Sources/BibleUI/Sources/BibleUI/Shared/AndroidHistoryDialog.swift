@@ -24,7 +24,7 @@ struct AndroidHistoryDialog: View {
     let onDismiss: () -> Void
 
     /// Applies the selected History entry to the captured pane before closing.
-    let onNavigate: (String) -> Void
+    let onNavigate: (HistoryNavigationTarget) -> Void
 
     /// Builds a bounded dialog whose dimmed backdrop dismisses it without changing History.
     var body: some View {

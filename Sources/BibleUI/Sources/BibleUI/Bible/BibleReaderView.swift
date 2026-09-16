@@ -1440,10 +1440,14 @@ public struct BibleReaderView: View {
                     panePresentationController?.bookName(forOsisId: osisID)
                 },
                 onDismiss: dismissHistoryDialog,
-                onNavigate: { key in
+                onNavigate: { target in
                     let controller = panePresentationController
                     dismissHistoryDialog()
-                    _ = controller?.navigateToRef(key)
+                    _ = controller?.navigateToHistoryTarget(
+                        document: target.document,
+                        key: target.key,
+                        anchorOrdinal: target.anchorOrdinal
+                    )
                 }
             )
             .transition(.opacity)
@@ -4120,7 +4124,7 @@ public struct BibleReaderView: View {
         loadPersistedReaderSettings(from: store)
         configureSpeakService(with: store)
         syncActiveDisplaySettings()
-        installSynchronizedScrollingCallback()
+        BibleReaderWindowSynchronization.install(on: windowManager)
         evaluateStartupDownloadPromptIfNeeded()
     }
 
@@ -4441,39 +4445,6 @@ public struct BibleReaderView: View {
             speakService.bookmarkManager = controller.bookmarkService
         } else {
             speakService.reloadResumeBookmarks()
-        }
-    }
-
-    /**
-     Registers target-versification-safe scrolling across synchronized reader windows.
-
-     The callback resolves the source module ordinal back to one authoritative verse identity, then
-     asks every target controller to resolve that verse in its own module. A source ordinal is never
-     reused directly in a target module because ordinal spaces differ across versifications.
-
-     - Side effects: Replaces `WindowManager.onSyncVerseChanged` and may navigate synchronized target
-       panes after a verified source and target conversion.
-     - Failure modes: Missing controllers or an unresolvable source verse stop the update; individual
-       targets that cannot represent the verse remain unchanged.
-     */
-    private func installSynchronizedScrollingCallback() {
-        windowManager.onSyncVerseChanged = { [weak windowManager] sourceWindow, ordinal, _ in
-            guard let wm = windowManager else { return }
-            let syncTargets = wm.synchronizedVerseUpdateTargets(for: sourceWindow)
-            guard let sourceReference = (wm.controllers[sourceWindow.id] as? BibleReaderController)?
-                .synchronizedVerseReference(ordinal: ordinal) else {
-                return
-            }
-            for target in syncTargets {
-                guard let ctrl = wm.controllers[target.id] as? BibleReaderController else {
-                    continue
-                }
-                ctrl.scrollToSynchronizedVerse(
-                    osisBookId: sourceReference.osisBookId,
-                    chapter: sourceReference.chapter,
-                    verse: sourceReference.verse
-                )
-            }
         }
     }
 

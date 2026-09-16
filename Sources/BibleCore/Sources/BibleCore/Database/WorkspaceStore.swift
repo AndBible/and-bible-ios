@@ -12,7 +12,9 @@ import SwiftData
  * - per-window navigation history
  *
  * Mutations save eagerly so the visible window model and persisted state remain aligned after UI
- * actions such as workspace cloning, reordering, and window creation.
+ * actions such as workspace cloning, reordering, and window creation. The explicitly named
+ * `stageHistoryItem` is the sole staging API; reader navigation pairs it with its PageManager write
+ * before one caller-owned journaled save.
  *
  * - Important: This store inherits the thread/actor confinement of the supplied `ModelContext`.
  */
@@ -380,21 +382,80 @@ public final class WorkspaceStore {
     // MARK: - History
 
     /**
-     * Appends a history item to a window.
-     * - Parameters:
-     *   - window: Owning window.
-     *   - document: Document initials at the time of navigation.
-     *   - key: Durable document key for the history location.
-     *   - anchorOrdinal: Optional scroll anchor for restoring position.
-     * - Side Effects: Inserts a `HistoryItem` row linked to the window and saves `modelContext`.
-     * - Failure: Save errors are swallowed.
+     Stages one reader history checkpoint in this store's model context.
+
+     The exact `Window` must belong to this store's context and still resolve as its current row;
+     foreign, deleted, and same-ID replacement objects are rejected before graph mutation.
+
+     - Parameters:
+       - window: Current store-owned window whose location is being left.
+       - document: Document initials at that location.
+       - key: Durable document key at that location.
+       - anchorOrdinal: Optional scroll anchor for restoring the location.
+     - Returns: `true` when a new row was staged, or `false` when the owner is invalid.
+     - Side Effects: Inserts one new `HistoryItem` row; does not save.
+     - Failure Modes: Owner validation failure leaves the graph unchanged and returns `false`.
      */
-    public func addHistoryItem(to window: Window, document: String, key: String, anchorOrdinal: Int? = nil) {
+    @discardableResult
+    public func stageHistoryItem(
+        to window: Window,
+        document: String,
+        key: String,
+        anchorOrdinal: Int? = nil
+    ) -> Bool {
+        guard ownsHistoryWindow(window) else { return false }
         let item = HistoryItem(document: document, key: key)
         item.anchorOrdinal = anchorOrdinal
-        item.window = window
         modelContext.insert(item)
+        item.window = window
+        return true
+    }
+
+    /**
+     Appends and eagerly persists one reader history checkpoint.
+
+     - Parameters:
+       - window: Current store-owned window whose location is being left.
+       - document: Document initials at that location.
+       - key: Durable document key at that location.
+       - anchorOrdinal: Optional scroll anchor for restoring the location.
+     - Side Effects: For a valid owner, stages a history row and saves pending workspace changes.
+     - Failure Modes: Foreign, deleted, or replaced owners are ignored. Journal and save failures
+       are swallowed under the store's existing eager-save contract.
+     */
+    public func addHistoryItem(
+        to window: Window,
+        document: String,
+        key: String,
+        anchorOrdinal: Int? = nil
+    ) {
+        guard stageHistoryItem(
+            to: window,
+            document: document,
+            key: key,
+            anchorOrdinal: anchorOrdinal
+        ) else { return }
         save()
+    }
+
+    /**
+     Determines whether a window can own a history row in this store.
+
+     - Parameter window: Exact window object proposed as the history owner.
+     - Returns: `true` only when the object is live, belongs to this store's model context, and is
+       the current registered model instance for its durable identifier.
+     - Side Effects: Performs a bounded identity fetch; does not mutate or save the model graph.
+     - Failure Modes: Deleted, foreign-context, detached, and same-ID replacement objects return
+       `false`; fetch errors also fail closed.
+     - Concurrency: Inherits the confinement of this store's `ModelContext`.
+     */
+    public func ownsHistoryWindow(_ window: Window) -> Bool {
+        guard !window.isDeleted, window.modelContext === modelContext else { return false }
+        let windowID = window.id
+        var descriptor = FetchDescriptor<Window>(predicate: #Predicate { $0.id == windowID })
+        descriptor.fetchLimit = 1
+        guard let current = try? modelContext.fetch(descriptor).first else { return false }
+        return current === window
     }
 
     /**
@@ -445,24 +506,35 @@ public final class WorkspaceStore {
 
     /**
      * Saves window or workspace mutations performed by a coordinating service.
-     * - Side Effects: Flushes pending `modelContext` changes to disk.
-     * - Failure: Save errors are swallowed to preserve the store's existing eager-save contract.
+     * - Returns: `true` when the journaled save completed, otherwise `false`.
+     * - Side Effects: Attempts to flush pending `modelContext` changes and the workspace journal.
+     * - Failure: Journal and save errors are reported as `false` without escaping.
      * - Note: Entity creation, deletion, and ordering methods already save internally; this method
      *   covers grouped property mutations that must be committed as one manager-routed action.
      */
-    public func persistChanges() {
+    @discardableResult
+    public func persistChanges() -> Bool {
         save()
     }
 
     /**
-     * Saves pending workspace-related mutations.
-     * - Side Effects: Flushes `modelContext` and its remote-sync mutation journal atomically.
-     * - Failure: Journal or save errors are swallowed.
+     Saves pending workspace-related mutations.
+
+     - Returns: `true` when the journaled save completed, otherwise `false`.
+     - Side Effects: Attempts one isolated workspace graph and remote-sync journal save.
+     - Failure Modes: Journal or SwiftData errors are converted to `false`; pending caller state is
+       left in the context under the journal service's existing failure contract.
      */
-    private func save() {
-        try? RemoteSyncMutationJournalService.savePendingGraphChanges(
-            for: .workspaces,
-            modelContext: modelContext
-        )
+    @discardableResult
+    private func save() -> Bool {
+        do {
+            try RemoteSyncMutationJournalService.savePendingGraphChanges(
+                for: .workspaces,
+                modelContext: modelContext
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 }

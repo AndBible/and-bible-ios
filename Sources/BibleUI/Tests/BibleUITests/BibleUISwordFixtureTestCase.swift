@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import XCTest
 @testable import BibleCore
+@testable import BibleUI
 import SwordKit
 
 /**
@@ -92,6 +93,60 @@ class BibleUISwordFixtureTestCase: XCTestCase {
         retainedModelContext.insert(window)
         retainedModelContext.insert(pageManager)
         window.pageManager = pageManager
+    }
+
+    /**
+     Binds a reader fixture to the exact workspace, window, store, and registry owners of a live pane.
+
+     A controller without a pane receives an isolated in-memory workspace. A controller that already
+     has a pane must supply a workspace-backed window and its matching store; detached windows are
+     rejected so retirement tests cannot accidentally acquire fresh authority. The caller retains the
+     returned manager and optional created container through all asynchronous assertions.
+
+     - Parameter controller: Reader controller whose My Notes actions require live pane authority.
+     - Returns: Exact manager and any container created for an otherwise ownerless controller.
+     - Side effects: May create a workspace and registers `controller` for its exact active window.
+     - Failure modes: Throws for missing or detached ownership and records a fixture failure when exact
+       controller registration is rejected.
+     - Concurrency: Main-actor isolated with reader and SwiftData ownership.
+     */
+    @MainActor
+    func registerMyNotesPaneOwner(
+        _ controller: BibleReaderController
+    ) throws -> (manager: WindowManager, container: ModelContainer?) {
+        if let manager = controller.windowManagerRef {
+            let window = try XCTUnwrap(controller.activeWindow)
+            XCTAssertTrue(manager.registerController(controller, for: window))
+            return (manager, nil)
+        }
+        var retainedContainer: ModelContainer?
+        let store: WorkspaceStore
+        if let existing = controller.workspaceStore {
+            store = existing
+        } else {
+            let container = try makeWorkspaceModelContainer()
+            retainedContainer = container
+            store = WorkspaceStore(modelContext: container.mainContext)
+            controller.workspaceStore = store
+        }
+        let window: BibleCore.Window
+        if let existing = controller.activeWindow {
+            _ = try XCTUnwrap(
+                existing.workspace,
+                "Existing My Notes fixture windows must belong to the controller workspace store"
+            )
+            window = existing
+        } else {
+            let workspace = store.createWorkspace(name: "Managed My Notes fixture")
+            window = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+            controller.activeWindow = window
+        }
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(try XCTUnwrap(window.workspace))
+        manager.activeWindow = window
+        controller.windowManagerRef = manager
+        XCTAssertTrue(manager.registerController(controller, for: window))
+        return (manager, retainedContainer)
     }
 
     /**

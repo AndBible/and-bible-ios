@@ -1062,21 +1062,18 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
-     Protects Android's synchronized-window old-key comparison.
+     Verifies core admits every visible grouped peer regardless of raw persisted coordinates.
 
-     Android updates the inactive window's Bible key before deciding whether to post a secondary
-     scroll, then skips the scroll when the target key was already equal to the source key. The setup
-     creates two synchronized panes in the same group, first with the target one verse behind and then
-     with the target at the source verse. The expected result is that only the stale target is returned
-     for secondary scrolling; a failure means iOS can keep injecting redundant scroll commands that
-     let synced panes alternate focus and walk back to an older visible position.
+     Book indices and chapter/verse numbers belong to each pane's active versification, so BibleCore
+     cannot compare them across panes. The target controller maps the typed source position and owns
+     target-local idempotence.
      */
-    func testWindowManagerSkipsSynchronizedTargetAlreadyAtSourceVerse() throws {
+    func testWindowManagerDoesNotFilterSynchronizedTargetByRawPageManagerCoordinates() throws {
         let container = try makeWorkspaceModelContainer()
         let context = ModelContext(container)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Synchronized Target Freshness")
+        let workspace = workspaceStore.createWorkspace(name: "Synchronized Target Admission")
         let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
@@ -1085,20 +1082,16 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
         sourceWindow.pageManager?.bibleBibleBook = 0
-        sourceWindow.pageManager?.bibleChapterNo = 1
-        sourceWindow.pageManager?.bibleVerseNo = 5
+        sourceWindow.pageManager?.bibleChapterNo = 10
+        sourceWindow.pageManager?.bibleVerseNo = 1
         targetWindow.pageManager?.bibleBibleBook = 0
-        targetWindow.pageManager?.bibleChapterNo = 1
-        targetWindow.pageManager?.bibleVerseNo = 4
+        targetWindow.pageManager?.bibleChapterNo = 10
+        targetWindow.pageManager?.bibleVerseNo = 1
 
         XCTAssertEqual(
             windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).map(\.id),
             [targetWindow.id]
         )
-
-        targetWindow.pageManager?.bibleVerseNo = 5
-
-        XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
     }
 
     /**

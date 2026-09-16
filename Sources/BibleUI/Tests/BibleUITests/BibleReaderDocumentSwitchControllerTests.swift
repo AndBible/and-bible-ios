@@ -438,11 +438,10 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
             bridge: BibleBridge(),
             swordManagerOverride: manager
         )
-        let window = Window()
-        let pageManager = PageManager(id: window.id)
-        window.pageManager = pageManager
-        self.retainReaderWindowGraph(window)
-        controller.activeWindow = window
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        let window = try XCTUnwrap(controller.activeWindow)
+        let pageManager = try XCTUnwrap(window.pageManager)
         var persistCount = 0
         controller.onPersistState = { persistCount += 1 }
         controller.loadMyNotesDocument()
@@ -502,11 +501,10 @@ final class BibleReaderDocumentSwitchControllerTests: BibleUISwordFixtureTestCas
             bridge: BibleBridge(),
             swordManagerOverride: manager
         )
-        let window = Window()
-        let pageManager = PageManager(id: window.id)
-        window.pageManager = pageManager
-        self.retainReaderWindowGraph(window)
-        controller.activeWindow = window
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        let window = try XCTUnwrap(controller.activeWindow)
+        let pageManager = try XCTUnwrap(window.pageManager)
         controller.loadMyNotesDocument()
         XCTAssertTrue(controller.showingMyNotes)
         var myNotesStateAtPersistence: [Bool] = []

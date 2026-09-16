@@ -12,16 +12,20 @@ struct BibleReaderCommentaryNavigationTarget: Equatable, Sendable {
     let osisBookID: String
     let chapter: Int
     let verse: Int
+    /// Versification that owns `sourceOrdinal` and the accepted source reference.
+    let sourceVersification: String
     let sourceOrdinal: Int
 
     init(
         key: String,
         selectedKey: String? = nil,
+        sourceVersification: String,
         sourceReference: SwordVersification.Reference,
         sourceOrdinal: Int
     ) {
         self.key = key
         self.selectedKey = selectedKey ?? key
+        self.sourceVersification = sourceVersification
         self.sourceOrdinal = sourceOrdinal
         osisBookID = sourceReference.osisBookId
         chapter = sourceReference.chapter
@@ -44,6 +48,7 @@ struct BibleReaderCommentaryNavigationTarget: Equatable, Sendable {
     /** Compares the requested block receipt without conflating it with rendered annotation text. */
     func hasSameSelectedEdge(as other: Self) -> Bool {
         SwordJavaStringIdentity.equals(selectedKey, other.selectedKey)
+            && sourceVersification == other.sourceVersification
             && osisBookID == other.osisBookID
             && chapter == other.chapter
             && verse == other.verse
@@ -60,6 +65,7 @@ struct BibleReaderCommentaryNavigationTarget: Equatable, Sendable {
             && lhs.osisBookID == rhs.osisBookID
             && lhs.chapter == rhs.chapter
             && lhs.verse == rhs.verse
+            && lhs.sourceVersification == rhs.sourceVersification
             && lhs.sourceOrdinal == rhs.sourceOrdinal
     }
 }

@@ -30,23 +30,27 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testCommentaryInfiniteScrollSeparatesSelectedEdgeFromRenderedRangeKey() {
         let first = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.1",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
             sourceOrdinal: 4
         )
         let second = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.2",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 2),
             sourceOrdinal: 5
         )
         let wrong = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.1-Gen.1.3",
             selectedKey: "Gen.1.3",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 3),
             sourceOrdinal: 6
         )
         let renderedRange = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.1-Gen.1.2",
             selectedKey: "Gen.1.2",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
             sourceOrdinal: 4
         )
@@ -101,11 +105,13 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
     func testCommentaryInfiniteScrollUsesJavaExactKeysAndRetainsOrdinalCollisions() {
         let composed = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.é",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
             sourceOrdinal: 4
         )
         let decomposed = BibleReaderCommentaryNavigationTarget(
             key: "Gen.1.e\u{301}",
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 1),
             sourceOrdinal: 4
         )
@@ -150,6 +156,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
 
         let sameKeyNewOrdinal = BibleReaderCommentaryNavigationTarget(
             key: composed.key,
+            sourceVersification: "KJV",
             sourceReference: .init(osisBookId: "Gen", chapter: 1, verse: 2),
             sourceOrdinal: 5
         )
@@ -6822,12 +6829,18 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(targetWindow)
         targetController.activeWindow = targetWindow
         targetController.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(sourceController, for: sourceWindow))
+        XCTAssertTrue(windowManager.registerController(targetController, for: targetWindow))
         sourceController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         targetController.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         targetWindow.pageManager?.bibleBibleBook = nil
 
         let sourceBroadcast = expectation(description: "source scroll broadcasts once")
-        windowManager.onSyncVerseChanged = { eventSourceWindow, sourceOrdinal, key in
+        var deliveredTargetIDs: [UUID] = []
+        windowManager.onSyncVerseChanged = { eventSourceWindow, delivery in
+            deliveredTargetIDs = delivery.targets.map(\.id)
+            let sourceOrdinal = delivery.position.sourceOrdinal
+            let key = delivery.position.sourceKey
             XCTAssertEqual(eventSourceWindow.id, sourceWindow.id)
             XCTAssertEqual(sourceOrdinal, ordinal)
             XCTAssertEqual(key, "Gen.1.5")
@@ -6841,16 +6854,15 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(sourceController.currentVerse, 5)
         XCTAssertEqual(sourceWindow.pageManager?.bibleChapterNo, 1)
         XCTAssertEqual(sourceWindow.pageManager?.bibleVerseNo, 5)
-        XCTAssertEqual(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).map(\.id), [targetWindow.id])
+        XCTAssertEqual(deliveredTargetIDs, [targetWindow.id])
 
         targetController.scrollToOrdinal(ordinal)
 
         XCTAssertEqual(targetWindow.pageManager?.bibleBibleBook, 0)
-        XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
 
         let reverseBroadcast = expectation(description: "target acknowledgement must not rebroadcast")
         reverseBroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             reverseBroadcast.fulfill()
         }
 
@@ -6997,7 +7009,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 5)
         let rebroadcast = expectation(description: "duplicate visible verse must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7086,6 +7098,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(controller, for: targetWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         emittedScripts.removeAll()
@@ -7095,7 +7108,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "sync-origin scroll must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7111,10 +7124,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         wait(for: [rebroadcast], timeout: 0.35)
 
         let laterUserBroadcast = expectation(description: "older sync ordinal does not remain pending")
-        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+        windowManager.onSyncVerseChanged = { sourceWindow, delivery in
+            let sourceOrdinal = delivery.position.sourceOrdinal
+            let key = delivery.position.sourceKey
             XCTAssertEqual(sourceWindow.id, targetWindow.id)
             XCTAssertEqual(sourceOrdinal, olderOrdinal)
-            XCTAssertEqual(key, "Gen.1")
+            XCTAssertEqual(key, "Gen.1.4")
+            XCTAssertEqual(delivery.position.chapter, 1)
+            XCTAssertEqual(delivery.position.verse, 4)
             laterUserBroadcast.fulfill()
         }
 
@@ -7165,6 +7182,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(controller, for: targetWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         emittedScripts.removeAll()
@@ -7174,7 +7192,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "intermediate sync-origin scroll must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7293,6 +7311,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(targetWindow)
         controller.activeWindow = targetWindow
         controller.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(controller, for: targetWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
@@ -7301,7 +7320,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "detached sync-origin scroll must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7316,10 +7335,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         wait(for: [rebroadcast], timeout: 0.35)
 
         let userBroadcast = expectation(description: "explicit target interaction restores broadcasting")
-        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+        windowManager.onSyncVerseChanged = { sourceWindow, delivery in
+            let sourceOrdinal = delivery.position.sourceOrdinal
+            let key = delivery.position.sourceKey
             XCTAssertEqual(sourceWindow.id, targetWindow.id)
             XCTAssertEqual(sourceOrdinal, olderOrdinal)
-            XCTAssertEqual(key, "Gen.1")
+            XCTAssertEqual(key, "Gen.1.4")
+            XCTAssertEqual(delivery.position.chapter, 1)
+            XCTAssertEqual(delivery.position.verse, 4)
             userBroadcast.fulfill()
         }
 
@@ -7374,7 +7397,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "passive inactive scroll must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7431,7 +7454,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "sync-origin chapter navigation must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7491,7 +7514,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         }
         let rebroadcast = expectation(description: "ready replay must not rebroadcast")
         rebroadcast.isInverted = true
-        windowManager.onSyncVerseChanged = { _, _, _ in
+        windowManager.onSyncVerseChanged = { _, _ in
             rebroadcast.fulfill()
         }
 
@@ -7557,6 +7580,8 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let scrolledWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
+        firstWindow.isSynchronized = true
+        firstWindow.syncGroup = 0
         scrolledWindow.isSynchronized = true
         scrolledWindow.syncGroup = 0
         self.retainReaderWindowGraph(firstWindow)
@@ -7564,6 +7589,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         self.retainReaderWindowGraph(scrolledWindow)
         controller.activeWindow = scrolledWindow
         controller.windowManagerRef = windowManager
+        XCTAssertTrue(windowManager.registerController(controller, for: scrolledWindow))
         controller.navigateTo(book: "Genesis", chapter: 1, verse: 1)
         controller.bridgeDidSetClientReady(bridge)
         controller.onInteraction = {
@@ -7571,10 +7597,14 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             windowManager.activeWindow = scrolledWindow
         }
         let broadcast = expectation(description: "user-origin scroll rebroadcasts")
-        windowManager.onSyncVerseChanged = { sourceWindow, sourceOrdinal, key in
+        windowManager.onSyncVerseChanged = { sourceWindow, delivery in
+            let sourceOrdinal = delivery.position.sourceOrdinal
+            let key = delivery.position.sourceKey
             XCTAssertEqual(sourceWindow.id, scrolledWindow.id)
             XCTAssertEqual(sourceOrdinal, userOrdinal)
-            XCTAssertEqual(key, "Gen.1")
+            XCTAssertEqual(key, "Gen.1.6")
+            XCTAssertEqual(delivery.position.chapter, 1)
+            XCTAssertEqual(delivery.position.verse, 6)
             broadcast.fulfill()
         }
 
@@ -7725,6 +7755,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
             },
             recordHistory: { bookName, chapter, verse in
                 state.history.append("\(osisId(for: bookName)).\(chapter).\(verse)")
+                return true
             },
             persistState: {
                 state.persistCount += 1
@@ -7767,7 +7798,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(pageManager.bibleBibleBook, 1)
         XCTAssertEqual(pageManager.bibleChapterNo, 2)
         XCTAssertEqual(pageManager.bibleVerseNo, 3)
-        XCTAssertEqual(state.history, ["Exod.2.3"])
+        XCTAssertEqual(state.history, ["Gen.1.1"])
         XCTAssertEqual(state.persistCount, 1)
         XCTAssertEqual(state.loadCount, 1)
         XCTAssertEqual(coordinator.originalNavigationOrdinalRange, [203, 203])
@@ -7794,7 +7825,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
      Protects Android's loaded-range navigation path from unnecessary document replacement.
 
      The fixture accepts a target as already present in the current Vue generation. Navigation must
-     still update durable position and history, then emit one highlighted scroll without invoking
+     still update durable position and prior-location history, then emit one highlighted scroll without invoking
      the host extraction callback or leaving a highlight for a future replacement generation.
      */
     func testReaderNavigationCoordinatorScrollsLoadedTargetWithoutReloadingContent() {
@@ -7812,7 +7843,7 @@ final class ReaderNavigationTests: BibleUISwordFixtureTestCase {
         coordinator.navigateTo(book: "Genesis", chapter: 2, verse: 4, context: context)
 
         XCTAssertEqual(state.position, BibleReaderNavigationPosition(book: "Genesis", chapter: 2, verse: 4))
-        XCTAssertEqual(state.history, ["Gen.2.4"])
+        XCTAssertEqual(state.history, ["Gen.1.1"])
         XCTAssertEqual(state.persistCount, 1)
         XCTAssertEqual(state.loadCount, 0)
         XCTAssertEqual(state.loadedScrolls.count, 1)

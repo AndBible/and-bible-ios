@@ -270,6 +270,7 @@ final class BibleReaderCommentaryAnchorOwnerTests: XCTestCase {
             moduleInitials: "CALVIN",
             target: BibleReaderCommentaryNavigationTarget(
                 key: key,
+                sourceVersification: "KJV",
                 sourceReference: SwordVersification.Reference(
                     osisBookId: "Gen",
                     chapter: Int(key.split(separator: ".")[1]) ?? 1,

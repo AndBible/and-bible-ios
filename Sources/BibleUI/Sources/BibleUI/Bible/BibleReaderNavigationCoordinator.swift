@@ -122,8 +122,8 @@ struct BibleReaderNavigationContext {
     /// Resolves a module-local ordinal into a chapter/verse identity.
     let verseReference: (_ book: String, _ ordinal: Int) -> BibleReaderNavigationVerseReference?
 
-    /// Records an Android-style history checkpoint after explicit navigation.
-    let recordHistory: (_ book: String, _ chapter: Int, _ verse: Int) -> Void
+    /// Admits and stages the Android-style location being left before navigation mutates state.
+    let recordHistory: (_ book: String, _ chapter: Int, _ verse: Int) -> Bool
 
     /// Persists mutated workspace/page state.
     let persistState: () -> Void
@@ -214,15 +214,16 @@ final class BibleReaderNavigationCoordinator {
          accepted only with `verifiedIntroductionOrdinal`.
        - verifiedIntroductionOrdinal: Exact active-source ordinal proving the requested zero verse.
        - context: Controller-owned lookup, persistence, history, and reload callbacks.
-     - Returns: True after the requested location passes validation and mutates reader state; false
-       before mutation when an introduction proof is absent or stale.
+     - Returns: `true` after history admission and the requested location mutate reader state;
+       `false` before mutation when history admission fails or an introduction proof is absent or stale.
      - Side effects: Mutates controller position through `context`, writes PageManager Bible fields,
-       records history, persists workspace state, and either scrolls retained content or reloads when
+       records the prior location, persists workspace state, and either scrolls retained content or reloads when
        the Vue client is ready.
-     - Failure modes: If no PageManager is available, controller state and history still update but
-       no durable page-position write occurs; if the explicit verse has no ordinal, highlighting is
-       skipped while navigation still lands on the requested verse number. An invalid introduction
-       proof returns before reader state, history, or persistence changes.
+     - Failure modes: Rejected history admission or an invalid introduction proof returns before
+       reader state, PageManager, persistence, scroll, or reload mutation. If no PageManager is
+       available after admission, controller state and history still update without a durable page
+       position write. If an explicit verse has no ordinal, highlighting is skipped while navigation
+       still lands on the requested verse number.
      */
     @discardableResult
     func navigateTo(
@@ -243,6 +244,13 @@ final class BibleReaderNavigationCoordinator {
         } else {
             introductionOrdinal = nil
         }
+
+        let previousPosition = context.currentPosition()
+        guard context.recordHistory(
+            previousPosition.book,
+            previousPosition.chapter,
+            previousPosition.verse
+        ) else { return false }
 
         let resolvedVerse = introductionOrdinal == nil ? max(1, verse ?? 1) : 0
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: resolvedVerse)
@@ -269,11 +277,10 @@ final class BibleReaderNavigationCoordinator {
             shouldRestoreScroll = false
         }
 
-        context.recordHistory(book, chapter, resolvedVerse)
         if let pageManager = context.pageManager() {
             write(position: position, to: pageManager, bookList: context.bookList())
-            context.persistState()
         }
+        context.persistState()
 
         guard context.clientReady() else { return true }
         if context.scrollToLoadedPosition(position, verse != nil) {

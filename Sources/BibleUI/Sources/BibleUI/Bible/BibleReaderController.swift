@@ -315,7 +315,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             versification: String,
             osisBookID: String,
             chapter: Int,
-            jumpSourceVerse: Int?
+            jumpSourceVerse: Int?,
+            exactKJVAJump: Int?
         )
         /// One source ordinal received from a My Notes link and mapped on the worker.
         case ordinal(versification: String, ordinal: Int)
@@ -327,6 +328,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     }
     /// My Notes destination currently rendered or awaiting a client-ready replay.
     private var activeMyNotesTarget: MyNotesTarget?
+    /// Last synchronously accepted semantic position; render completion never advances this value.
+    private(set) var activeMyNotesIntent: BibleReaderMyNotesIntent?
+    /// Next action identity; incremented only after exact-owner preflight accepts a mutation.
+    private var nextMyNotesAcceptanceID: UInt64 = 1
+    /// Acceptance identity whose prepared document owns the current visible generation.
+    private var committedMyNotesAcceptanceID: UInt64?
+    /// Suppresses recursive history and intermediate persistence during typed history restoration.
+    private var restoresHistoryTarget = false
     /// Last authoritative mapped span published for the active target.
     private var activeMyNotesReference: MyNotesChapterReference?
     /// Explicit KJVA My Notes destination requested before the Vue client was ready.
@@ -436,7 +445,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private(set) var activeCommentaryModuleName: String?
     private(set) var currentCategory: DocumentCategory = .bible
     /// Current and adjacent source-Bible targets captured with the accepted commentary document.
-    private var commentaryNavigationAvailability = BibleReaderCommentaryNavigationAvailability.empty
+    private(set) var commentaryNavigationAvailability = BibleReaderCommentaryNavigationAvailability.empty
     /// Accepted commentary linked blocks owned by the current WebView document generation.
     private var commentaryInfiniteScrollCoordinator = BibleReaderCommentaryInfiniteScrollCoordinator()
     /// Pane identity captured by the full commentary publication that owns visible callbacks.
@@ -857,8 +866,139 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             versification: activeSourceVersificationName(),
             osisBookID: sourceOSISBookID,
             chapter: currentChapter,
-            jumpSourceVerse: nil
+            jumpSourceVerse: nil,
+            exactKJVAJump: nil
         )
+    }
+
+    /** Converts an accepted semantic intent into the existing worker render request. */
+    private static func myNotesTarget(
+        for intent: BibleReaderMyNotesIntent,
+        renderJumpOrdinal: Int? = nil
+    ) -> MyNotesTarget {
+        let exactJump = renderJumpOrdinal ?? intent.kjvaPosition.ordinal
+        switch intent.render {
+        case .sourceChapter(let source, _):
+            return .chapter(
+                versification: source.versification,
+                osisBookID: source.osisBookId,
+                chapter: source.chapter,
+                jumpSourceVerse: nil,
+                exactKJVAJump: exactJump
+            )
+        case .selectedKJVAChapter:
+            return .chapter(
+                versification: JSwordKJVAVersification.name,
+                osisBookID: intent.kjvaPosition.osisBookID,
+                chapter: intent.kjvaPosition.chapter,
+                jumpSourceVerse: intent.kjvaPosition.verse,
+                exactKJVAJump: exactJump
+            )
+        }
+    }
+
+    /**
+     Commits one valid semantic action before asynchronous document preparation begins.
+
+     Actor ordering makes successive actions observe the last accepted intent even when older
+     renders are still suspended. History captures the prior accepted document exactly once.
+     PageManager uses its established module-list index representation when the shared book exists.
+
+     - Parameters:
+       - intent: Fully validated immutable semantic destination.
+       - recordsHistory: Whether this user action leaves a restorable prior location.
+     - Returns: `true` after exact-owner admission; invalid or replaced owners return `false`.
+     - Side effects: May stage history, update controller/PageManager/category state, persist once,
+       and submit a latest-wins My Notes render.
+     - Failure modes: A missing admitted book preserves runtime navigation but cannot update the
+       legacy PageManager tuple. A later journal save failure is the existing recovery obligation;
+       this method does not misdescribe that failure as pre-mutation rejection.
+     */
+    @discardableResult
+    private func admitMyNotesIntent(
+        _ intent: BibleReaderMyNotesIntent,
+        recordsHistory: Bool,
+        publishesRender: Bool = true,
+        requestOwner: BibleReaderAwaitedSelectionRequest? = nil,
+        renderJumpOrdinal: Int? = nil
+    ) -> Bool {
+        guard intent.acceptanceID == nextMyNotesAcceptanceID,
+              let window = activeWindow,
+              let windowManagerRef,
+              windowManagerRef.managesWindow(window),
+              windowManagerRef.registeredController(for: window) === self,
+              !window.isDeleted,
+              workspaceStore != nil,
+              let pageManager = window.pageManager,
+              !pageManager.isDeleted else { return false }
+
+        let bookName = bookName(forOsisId: intent.sharedPosition.osisBookId)
+            ?? intent.sharedPosition.osisBookId
+        if recordsHistory, let workspaceStore {
+            let history: (document: String, key: String)?
+            if showingMyNotes, let prior = activeMyNotesIntent {
+                history = (
+                    Self.myNotesHistoryDocumentInitials,
+                    BibleReaderMyNotesIntentAdmission.historyKey(for: prior)
+                )
+            } else {
+                history = (
+                    activeModuleName,
+                    "\(osisBookId(for: currentBook)).\(currentChapter).\(currentVerse)"
+                )
+            }
+            if let history,
+               !workspaceStore.stageHistoryItem(
+                    to: window,
+                    document: history.document,
+                    key: history.key
+               ) {
+                return false
+            }
+        }
+
+        nextMyNotesAcceptanceID &+= 1
+        activeMyNotesIntent = intent
+        let renderTarget = Self.myNotesTarget(
+            for: intent,
+            renderJumpOrdinal: renderJumpOrdinal
+        )
+        activeMyNotesTarget = renderTarget
+        if publishesRender {
+            activeMyNotesReference = nil
+            committedMyNotesAcceptanceID = nil
+        } else {
+            // A retained-page sync still supersedes any suspended replacement/reload. Advance the
+            // content generation before blessing the existing committed page for the new intent.
+            _ = beginReplacingContentIntent()
+            committedMyNotesAcceptanceID = intent.acceptanceID
+        }
+        currentBook = bookName
+        currentChapter = intent.sharedPosition.chapter
+        currentVerse = intent.sharedVerse
+        if let bookIndex = moduleBookList.firstIndex(where: {
+             $0.osisId == intent.sharedPosition.osisBookId
+           }) {
+            pageManager.currentCategoryName = Self.myNotesPageManagerCategoryName
+            pageManager.bibleVersification = intent.sharedPosition.versification
+            pageManager.bibleBibleBook = bookIndex
+            pageManager.bibleChapterNo = intent.sharedPosition.chapter
+            pageManager.bibleVerseNo = intent.sharedVerse
+        }
+        showingMyNotes = true
+        showingStudyPad = false
+        activeStudyPadLabelId = nil
+        activeStudyPadLabelName = nil
+        editingInWebView = false
+        clearNativeSelectionState()
+        _ = persistNavigationState()
+        if publishesRender {
+            loadMyNotesDocument(
+                target: renderTarget,
+                requestOwner: requestOwner
+            )
+        }
+        return true
     }
 
     /** Resolves one exact source request into Android's authoritative mapped My Notes span. */
@@ -870,12 +1010,18 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         let exactKJVAJump: Int?
 
         switch target {
-        case .chapter(let versification, let osisBookID, let chapter, let requestedVerse):
+        case .chapter(
+            let versification,
+            let osisBookID,
+            let chapter,
+            let requestedVerse,
+            let requestedKJVAJump
+        ):
             sourceVersification = versification
             sourceOSISBookID = osisBookID
             sourceChapter = chapter
             jumpSourceVerse = requestedVerse
-            exactKJVAJump = nil
+            exactKJVAJump = requestedKJVAJump
         case .ordinal(let versification, let ordinal):
             guard let normalized = JSwordVersificationRegistry.normalizedName(versification) else {
                 return nil
@@ -907,11 +1053,18 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             sourceChapter: sourceChapter
         ) else { return nil }
         let mappedJump = exactKJVAJump ?? jumpSourceVerse.flatMap { sourceVerse in
-            Self.myNotesKJVAOrdinal(
+            if reference.source.versification == JSwordKJVAVersification.name,
+               sourceVerse == 0 {
+                return JSwordKJVAVersification.chapterIntroOrdinal(
+                    osisId: reference.source.osisBookId,
+                    chapter: reference.effectiveSourceChapter
+                )
+            }
+            return Self.myNotesKJVAOrdinal(
                 sourceVersification: reference.source.versification,
                 osisBookID: reference.source.osisBookId,
                 chapter: reference.effectiveSourceChapter,
-                verse: max(sourceVerse, 1)
+                verse: sourceVerse
             )
         }
         return PreparedMyNotesTarget(reference: reference, jumpToOrdinal: mappedJump)
@@ -977,9 +1130,16 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /** Returns exact request text for cancellation/coalescing without serializing document data. */
     private static func myNotesTargetIdentity(_ target: MyNotesTarget) -> String {
         switch target {
-        case .chapter(let versification, let osisBookID, let chapter, let jumpSourceVerse):
+        case .chapter(
+            let versification,
+            let osisBookID,
+            let chapter,
+            let jumpSourceVerse,
+            let exactKJVAJump
+        ):
             let jump = jumpSourceVerse.map(String.init) ?? ""
-            return "chapter|\(versification)|\(osisBookID)|\(chapter)|\(jump)"
+            let exactJump = exactKJVAJump.map(String.init) ?? ""
+            return "chapter|\(versification)|\(osisBookID)|\(chapter)|\(jump)|\(exactJump)"
         case .ordinal(let versification, let ordinal):
             return "ordinal|\(versification)|\(ordinal)"
         }
@@ -1102,7 +1262,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func activeSourceVersificationName() -> String {
+    func activeSourceVersificationName() -> String {
         guard let activeModule else { return JSwordKJVAVersification.name }
     let raw =
       activeModule.configEntry("Versification")?
@@ -2131,21 +2291,22 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 }
             },
             recordHistory: { [weak self] book, chapter, verse in
-                guard let self,
-                      let store = self.workspaceStore,
-          let window = self.activeWindow
-        else {
-                    return
-                }
+                guard let self else { return false }
+                guard !self.restoresHistoryTarget else { return true }
+                guard let store = self.workspaceStore else { return true }
+                guard let window = self.activeWindow,
+                      let manager = self.windowManagerRef,
+                      manager.managesWindow(window),
+                      manager.registeredController(for: window) === self else { return false }
                 let osisId = self.osisBookId(for: book)
-                store.addHistoryItem(
+                return store.stageHistoryItem(
                     to: window,
                     document: self.activeModuleName,
                     key: "\(osisId).\(chapter).\(verse)"
                 )
             },
             persistState: { [weak self] in
-                self?.onPersistState?()
+                self?.persistNavigationState()
             },
             scrollToLoadedPosition: { [weak self] position, highlight in
                 self?.scrollToLoadedBiblePosition(position, highlight: highlight) ?? false
@@ -2154,6 +2315,25 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 self?.loadCurrentContent()
             }
         )
+    }
+
+    /**
+     Persists one reader-navigation generation before publishing its explicit outward save callback.
+
+     - Returns: `true` when the workspace journal completed or no workspace store is attached;
+       otherwise `false`.
+     - Side Effects: Attempts the staged workspace/history/PageManager save, then invokes
+       `onPersistState` only after that operation succeeds.
+     - Failure Modes: A rejected journal returns `false` and suppresses the outward callback so its
+       app-owned plain save cannot commit the graph through this callback after journal rejection.
+     */
+    @discardableResult
+    func persistNavigationState() -> Bool {
+        if let workspaceStore, !workspaceStore.persistChanges() {
+            return false
+        }
+        onPersistState?()
+        return true
     }
 
     /**
@@ -2227,12 +2407,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 self?.moduleBookList.count ?? 0
             },
             persistState: { [weak self] in
+                guard self?.restoresHistoryTarget == false else { return }
                 self?.onPersistState?()
             },
             loadCurrentContent: { [weak self] in
                 // Android's document/category switches select the new page and leave the MYNOTE
                 // category (CurrentPageManager.setCurrentDocument*), so switch-driven reloads
                 // must exit My Notes; only navigation-driven reloads keep it current.
+                guard self?.restoresHistoryTarget == false else { return }
                 self?.showingMyNotes = false
                 self?.loadCurrentContent()
             }
@@ -4390,15 +4572,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             // instead of exiting to the Bible text. Bookmark-list navigation and the return
             // affordance exit explicitly before loading. An explicit verse keeps its row jump
             // like Android's key-anchored reload; chapter stepping lands at the chapter top.
-            let sourceOSISBookID = osisBookId(for: currentBook)
-            let target: MyNotesTarget? = sourceOSISBookID.isEmpty ? nil : .chapter(
-                versification: activeSourceVersificationName(),
-                osisBookID: sourceOSISBookID,
-                chapter: currentChapter,
-                jumpSourceVerse: currentVerse > 1 ? currentVerse : nil
-            )
-            if let target {
-                loadMyNotesDocument(target: target)
+            if let activeMyNotesIntent {
+                loadMyNotesDocument(target: Self.myNotesTarget(for: activeMyNotesIntent))
                 return
             }
         }
@@ -5928,6 +6103,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                                         ?? "\(target.osisBookId).\(target.chapter).\(target.verse)",
                                     selectedKey: selectedKey
                                         ?? "\(target.osisBookId).\(target.chapter).\(target.verse)",
+                                    sourceVersification: sourceVersification,
                                     sourceReference: candidate,
                                     sourceOrdinal: sourceOrdinal
                                 )
@@ -5972,6 +6148,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                             current: BibleReaderCommentaryNavigationTarget(
                                 key: renderedKey,
                                 selectedKey: selected.osisRef,
+                                sourceVersification: sourceVersification,
                                 sourceReference: SwordVersification.Reference(
                                     osisBookId: selectedCurrent.osisBookID,
                                     chapter: selectedCurrent.chapter,
@@ -6323,6 +6500,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                   return BibleReaderCommentaryNavigationTarget(
                     key: renderedKey
                       ?? "\(target.osisId).\(target.chapter).\(target.verse)",
+                    sourceVersification: sourceVersification,
                     sourceReference: candidate,
                     sourceOrdinal: sourceOrdinal
                   )
@@ -9407,7 +9585,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         // Notes page; the window's persisted Bible position supplies the chapter. An
         // unresolvable target falls back to the Bible document instead of a blank pane.
         if pm.currentCategoryName == Self.myNotesPageManagerCategoryName {
-            if let target = currentMyNotesTarget(jumpToOrdinal: nil) {
+            let intent = BibleReaderMyNotesIntentAdmission.sourceChapter(
+                acceptanceID: nextMyNotesAcceptanceID,
+                sourceVersification: activeSourceVersificationName(),
+                osisBookID: osisBookId(for: currentBook),
+                chapter: currentChapter,
+                sourceVerse: currentVerse,
+                destinationVersification: activeSourceVersificationName()
+            )
+            if let intent {
+                activeMyNotesIntent = intent
+                nextMyNotesAcceptanceID &+= 1
+                let target = Self.myNotesTarget(for: intent)
+                activeMyNotesTarget = target
                 if preparesPersistedMyNotesContent {
                     loadMyNotesDocument(target: target)
                 } else {
@@ -9490,6 +9680,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         } else {
             verifiedIntroductionOrdinal = nil
         }
+        if showingMyNotes {
+            let osisBookID = osisBookId(for: book)
+            guard !osisBookID.isEmpty,
+                  let intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: nextMyNotesAcceptanceID,
+                    sourceVersification: activeSourceVersificationName(),
+                    osisBookID: osisBookID,
+                    chapter: chapter,
+                    verse: verse ?? 1,
+                    destinationVersification: activeSourceVersificationName()
+                  ) else { return false }
+            return admitMyNotesIntent(intent, recordsHistory: true)
+        }
         return navigationCoordinator.navigateTo(
             book: book,
             chapter: chapter,
@@ -9569,6 +9772,10 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Navigate to the next chapter, wrapping to the next book if needed.
     public func navigateNext() {
+        if showingMyNotes {
+            _ = navigateMyNotesIntent(forward: true)
+            return
+        }
         if currentCategory == .commentary, navigateCommentaryBlock(forward: true) {
             return
         }
@@ -9584,6 +9791,10 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Navigate to the previous chapter, wrapping to the previous book if needed.
     public func navigatePrevious() {
+        if showingMyNotes {
+            _ = navigateMyNotesIntent(forward: false)
+            return
+        }
         if currentCategory == .commentary, navigateCommentaryBlock(forward: false) {
             return
         }
@@ -9595,6 +9806,33 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             return
         }
         navigationCoordinator.navigatePrevious(context: makeNavigationContext())
+    }
+
+    /** Admits one chapter action synchronously from the last accepted semantic position. */
+    @discardableResult
+    private func navigateMyNotesIntent(forward: Bool) -> Bool {
+        guard let prior = activeMyNotesIntent else { return false }
+        let admitted = Set(moduleBookList.map(\.osisId))
+        let destination = forward
+            ? MyNotesChapterTraversal.next(
+                after: prior.sharedPosition,
+                eligibleBookOSISIDs: admitted
+              )
+            : MyNotesChapterTraversal.previous(
+                before: prior.sharedPosition,
+                eligibleBookOSISIDs: admitted
+              )
+        guard let destination else { return false }
+        guard destination != prior.sharedPosition else { return true }
+        guard let intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: nextMyNotesAcceptanceID,
+            sourceVersification: destination.versification,
+            osisBookID: destination.osisBookId,
+            chapter: destination.chapter,
+            verse: 1,
+            destinationVersification: activeSourceVersificationName()
+        ) else { return false }
+        return admitMyNotesIntent(intent, recordsHistory: true)
     }
 
     /// Scroll down by one viewport page (Android parity: PAGE swipe mode).
@@ -9611,6 +9849,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Whether there's a next chapter available.
     public var hasNext: Bool {
+        if showingMyNotes { return myNotesIntentDestination(forward: true) != nil }
         if currentCategory == .commentary,
            activeCommentaryModule != nil || activeSQLiteCommentaryModule != nil {
             return commentaryNavigationAvailability.next != nil
@@ -9623,6 +9862,12 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Whether there's a previous chapter available.
     public var hasPrevious: Bool {
+        if showingMyNotes {
+            guard let activeMyNotesIntent,
+                  let destination = myNotesIntentDestination(forward: false)
+            else { return false }
+            return destination != activeMyNotesIntent.sharedPosition
+        }
         if currentCategory == .commentary,
            activeCommentaryModule != nil || activeSQLiteCommentaryModule != nil {
             return commentaryNavigationAvailability.previous != nil
@@ -9631,6 +9876,21 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             return reader.previousKey(before: currentGeneralBookKey) != nil
         }
         return navigationCoordinator.hasPrevious(context: makeNavigationContext())
+    }
+
+    /** Resolves chapter-control availability from accepted intent without touching render state. */
+    private func myNotesIntentDestination(forward: Bool) -> MyNotesSourceChapter? {
+        guard let activeMyNotesIntent else { return nil }
+        let admitted = Set(moduleBookList.map(\.osisId))
+        return forward
+            ? MyNotesChapterTraversal.next(
+                after: activeMyNotesIntent.sharedPosition,
+                eligibleBookOSISIDs: admitted
+              )
+            : MyNotesChapterTraversal.previous(
+                before: activeMyNotesIntent.sharedPosition,
+                eligibleBookOSISIDs: admitted
+              )
     }
 
     // MARK: - BibleBridgeDelegate — State
@@ -9946,6 +10206,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     if consumeVisibleCommentaryPosition(ordinal: ordinal, key: key) {
       return
     }
+    if consumeVisibleMyNotesPosition(ordinal: ordinal) { return }
 
         let previousBook = currentBook
         let previousChapter = currentChapter
@@ -9970,9 +10231,84 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             && computeIsActiveWindow()
 
         // Notify WindowManager for synchronized scrolling
-        if shouldBroadcastSynchronizedScroll, let window = activeWindow {
-            windowManagerRef?.notifyVerseChanged(sourceWindow: window, ordinal: ordinal, key: key)
+        if shouldBroadcastSynchronizedScroll,
+           let window = activeWindow,
+           let position = currentWindowSynchronizationPosition() {
+            windowManagerRef?.notifyVerseChanged(sourceWindow: window, source: self, position: position)
         }
+    }
+
+    /** Applies a rendered KJVA row to the shared cursor while preserving its render-span mode. */
+    private func consumeVisibleMyNotesPosition(ordinal: Int) -> Bool {
+        guard showingMyNotes else { return false }
+        guard let reference = activeMyNotesReference,
+              (reference.kjvaOrdinalStart...reference.kjvaOrdinalEnd).contains(ordinal),
+              let prior = activeMyNotesIntent,
+              committedMyNotesAcceptanceID == prior.acceptanceID,
+              let kjva = JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: ordinal),
+              let kjvaPosition = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: prior.acceptanceID,
+                sourceVersification: JSwordKJVAVersification.name,
+                osisBookID: kjva.osisId,
+                chapter: kjva.chapter,
+                verse: kjva.verse,
+                destinationVersification: activeSourceVersificationName()
+              )
+        else {
+            _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+            return true
+        }
+        guard let window = activeWindow,
+              let windowManagerRef,
+              windowManagerRef.managesWindow(window),
+              windowManagerRef.registeredController(for: window) === self,
+              !window.isDeleted,
+              let pageManager = window.pageManager,
+              !pageManager.isDeleted else {
+            _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+            return true
+        }
+        let shared = kjvaPosition.sharedPosition
+        let sharedVerse = kjvaPosition.sharedVerse
+        let book = bookName(forOsisId: shared.osisBookId) ?? shared.osisBookId
+        let bookIndex = moduleBookList.firstIndex(where: { $0.osisId == shared.osisBookId })
+        let changed = currentBook != book
+            || currentChapter != shared.chapter
+            || currentVerse != sharedVerse
+        let refreshedIntent = prior.refreshingAnchor(
+            sharedPosition: MyNotesSourceChapter(
+                versification: shared.versification,
+                osisBookId: shared.osisBookId,
+                chapter: shared.chapter
+            ),
+            sharedVerse: sharedVerse,
+            kjvaPosition: kjvaPosition.kjvaPosition
+        )
+        activeMyNotesIntent = refreshedIntent
+        activeMyNotesTarget = Self.myNotesTarget(for: refreshedIntent)
+        currentBook = book
+        currentChapter = shared.chapter
+        currentVerse = sharedVerse
+        if let bookIndex {
+            pageManager.bibleVersification = shared.versification
+            pageManager.bibleBibleBook = bookIndex
+            pageManager.bibleChapterNo = shared.chapter
+            pageManager.bibleVerseNo = sharedVerse
+        }
+        if changed { persistVisibleVerseState(immediate: false) }
+        let acknowledged = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+        if changed, !acknowledged, computeIsActiveWindow(), let window = activeWindow {
+            let position = WindowSynchronizationPosition(
+                sourceVersification: JSwordKJVAVersification.name,
+                osisBookId: kjva.osisId,
+                chapter: kjva.chapter,
+                verse: kjva.verse,
+                sourceOrdinal: ordinal,
+                sourceKey: "\(kjva.osisId).\(kjva.chapter).\(kjva.verse)"
+            )
+            windowManagerRef.notifyVerseChanged(sourceWindow: window, source: self, position: position)
+        }
+        return true
     }
 
     /**
@@ -10057,11 +10393,15 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
               visibleVerseChanged,
               computeIsActiveWindow(),
               let window = activeWindow else { return true }
-        windowManagerRef?.notifyVerseChanged(
-            sourceWindow: window,
-            ordinal: target.sourceOrdinal,
-            key: target.sourceKey
+        let position = WindowSynchronizationPosition(
+            sourceVersification: target.sourceVersification,
+            osisBookId: target.osisBookID,
+            chapter: target.chapter,
+            verse: target.verse,
+            sourceOrdinal: target.sourceOrdinal,
+            sourceKey: target.sourceKey
         )
+        windowManagerRef?.notifyVerseChanged(sourceWindow: window, source: self, position: position)
         return true
     }
 
@@ -10192,6 +10532,61 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         }
 
         navigateTo(book: book, chapter: chapter, verse: verse)
+    }
+
+    /** Applies one immutable typed sync coordinate captured before WindowManager debounce. */
+    func applyWindowSynchronizationPosition(_ position: WindowSynchronizationPosition) {
+        if showingMyNotes {
+            guard let intent = BibleReaderMyNotesIntentAdmission.sourceChapter(
+                acceptanceID: nextMyNotesAcceptanceID,
+                sourceVersification: position.sourceVersification,
+                osisBookID: position.osisBookId,
+                chapter: position.chapter,
+                sourceVerse: position.verse,
+                destinationVersification: activeSourceVersificationName()
+            ) else {
+                return
+            }
+            if let current = activeMyNotesIntent,
+               committedMyNotesAcceptanceID == current.acceptanceID,
+               current.kjvaPosition == intent.kjvaPosition {
+                return
+            }
+            let kjvaOrdinal = intent.kjvaPosition.ordinal
+            let retainsRenderedPage = activeMyNotesReference.map {
+                ($0.kjvaOrdinalStart...$0.kjvaOrdinalEnd).contains(kjvaOrdinal)
+            } ?? false
+            guard admitMyNotesIntent(
+                intent,
+                recordsHistory: false,
+                publishesRender: !retainsRenderedPage
+            ) else { return }
+            synchronizedScrollCoordinator.armSynchronizedFeedback(ordinal: kjvaOrdinal)
+            if retainsRenderedPage {
+                guard clientReady else {
+                    synchronizedScrollCoordinator.deferUntilClientReady(ordinal: kjvaOrdinal)
+                    return
+                }
+                bridge.emit(
+                    event: "scroll_to_verse",
+                    data: "{\"ordinal\":\(kjvaOrdinal),\"now\":false}"
+                )
+            }
+            return
+        }
+
+        guard let mapped = VersificationMapper.convertStrictly(
+            osisBookId: position.osisBookId,
+            chapter: position.chapter,
+            verse: position.verse,
+            from: position.sourceVersification,
+            to: activeSourceVersificationName()
+        )?.reference else { return }
+        scrollToSynchronizedVerse(
+            osisBookId: mapped.osisBookId,
+            chapter: mapped.chapter,
+            verse: mapped.verse
+        )
     }
 
     /**
@@ -12543,10 +12938,33 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
        rather than opening an unrelated active chapter or sending an ordinal from the wrong domain.
      */
     public func loadMyNotesDocument(v11nName: String, sourceOrdinal: Int) {
-        guard let target = myNotesTarget(v11nName: v11nName, sourceOrdinal: sourceOrdinal) else {
-            return
+        guard let normalized = JSwordVersificationRegistry.normalizedName(v11nName) else { return }
+        let source: SwordVersification.Reference?
+        if normalized == JSwordKJVAVersification.name,
+           let reference = JSwordKJVAVersification.referenceIncludingIntroductions(
+             ordinal: sourceOrdinal
+           ) {
+            source = .init(
+                osisBookId: reference.osisId,
+                chapter: reference.chapter,
+                verse: reference.verse
+            )
+        } else {
+            source = SwordVersification.reference(
+                forIndex: sourceOrdinal,
+                versification: normalized
+            )
         }
-        loadMyNotesDocument(target: target)
+        guard let source,
+              let intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: nextMyNotesAcceptanceID,
+                sourceVersification: normalized,
+                osisBookID: source.osisBookId,
+                chapter: source.chapter,
+                verse: source.verse,
+                destinationVersification: activeSourceVersificationName()
+              ) else { return }
+        _ = admitMyNotesIntent(intent, recordsHistory: true)
     }
 
   /**
@@ -12572,50 +12990,219 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
   }
 
     /**
-     Loads the KJVA My Notes chapter containing the requested row or active-pane verse.
+     Waits for an explicit KJVA My Notes request to settle publication.
 
-     - Parameter jumpToOrdinal: Optional KJVA My Notes row ordinal to scroll to after loading.
-     - Side effects: Resolves an immutable KJVA target, marks My Notes as visible, clears competing
-       StudyPad/editing state, emits the target chapter when the client is ready, or stores that
-       complete target for client-ready replay.
-     - Failure modes: If the requested row or active verse cannot resolve to a KJVA My Notes page,
-       logs the failure and leaves the current reader document unchanged.
+     - Parameter jumpToOrdinal: Exact KJVA My Notes row selected by the caller.
+     - Returns: The accepted, cancelled, or failed publication disposition for this request.
+     - Side Effects: Admits the typed My Notes intent and may stage history, persist navigation,
+       replace reader content, or wait for the request's preparation result.
+     - Failure Modes: An invalid ordinal or rejected pane owner returns `.failed(.settle)`; a newer
+       request or retired destination can return cancellation through the preparation owner.
+     - Concurrency: Main-actor isolated; suspension does not retain authority over a replaced pane.
      */
-    /** Waits for an explicit KJVA My Notes request's accepted or rejected publication. */
     @MainActor
     func loadMyNotesDocumentAwaitingSelection(
         jumpToOrdinal: Int
     ) async -> BibleReaderPreparationPublicationDisposition {
-        guard let target = myNotesTarget(kjvaOrdinal: jumpToOrdinal) else {
+        guard let selected = JSwordKJVAVersification.referenceIncludingIntroductions(
+            ordinal: jumpToOrdinal
+        ), let intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+            acceptanceID: nextMyNotesAcceptanceID,
+            sourceVersification: JSwordKJVAVersification.name,
+            osisBookID: selected.osisId,
+            chapter: selected.chapter,
+            verse: selected.verse,
+            destinationVersification: activeSourceVersificationName()
+        ) else {
             return .failed(.settle)
         }
         return await awaitPreparationSelectionSettlement { requestOwner in
-            loadMyNotesDocument(target: target, requestOwner: requestOwner)
+            guard admitMyNotesIntent(
+                intent,
+                recordsHistory: true,
+                requestOwner: requestOwner
+            ) else {
+                requestOwner.complete(.failed(.settle))
+                return
+            }
         }
-    }
-
-    public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
-        guard let target = currentMyNotesTarget(jumpToOrdinal: jumpToOrdinal) else {
-            logger.error("Failed to resolve the KJVA My Notes target")
-            return
-        }
-        loadMyNotesDocument(target: target)
     }
 
     /**
-     Loads one explicit KJVA-owned My Notes chapter.
+     Loads the KJVA My Notes chapter containing the requested row or active-pane verse.
 
-     - Parameter target: KJVA book, chapter, and optional row ordinal resolved at the route boundary.
-     - Side effects: Invalidates older content intents, retains the complete target for client-ready
-       replay, emits a target-owned My Notes document, and updates visible annotation state.
-     - Failure modes: An unresolved target chapter fails in the annotation loader without falling
-       back to the active pane's chapter.
+     - Parameter jumpToOrdinal: Optional KJVA My Notes row ordinal to select after loading.
+     - Side Effects: Admits an immutable My Notes intent, attempts navigation persistence, then emits its chapter when
+       the client is ready or retains the complete target for client-ready replay.
+     - Failure Modes: Invalid rows, unmappable active positions, and rejected pane ownership leave
+       the current reader document unchanged.
      */
+    public func loadMyNotesDocument(jumpToOrdinal: Int? = nil) {
+        let intent: BibleReaderMyNotesIntent?
+        if let jumpToOrdinal,
+           let selected = JSwordKJVAVersification.referenceIncludingIntroductions(
+             ordinal: jumpToOrdinal
+           ) {
+            intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: nextMyNotesAcceptanceID,
+                sourceVersification: JSwordKJVAVersification.name,
+                osisBookID: selected.osisId,
+                chapter: selected.chapter,
+                verse: selected.verse,
+                destinationVersification: activeSourceVersificationName()
+            )
+        } else {
+            intent = BibleReaderMyNotesIntentAdmission.sourceChapter(
+                acceptanceID: nextMyNotesAcceptanceID,
+                sourceVersification: activeSourceVersificationName(),
+                osisBookID: osisBookId(for: currentBook),
+                chapter: currentChapter,
+                sourceVerse: currentVerse,
+                destinationVersification: activeSourceVersificationName()
+            )
+        }
+        guard let intent else {
+            logger.error("Failed to resolve the KJVA My Notes target")
+            return
+        }
+        _ = admitMyNotesIntent(intent, recordsHistory: true)
+    }
+
     /**
      Android's persisted page-manager category value for the My Notes fake document; the Android
      backup boundary upper-cases it to the `MYNOTE` enum name.
      */
     static let myNotesPageManagerCategoryName = "mynote"
+    /// Android fake-document initials stored by `HistoryManager` for My Notes.
+    static let myNotesHistoryDocumentInitials = "MyNote"
+
+    /**
+     Restores one typed reader-history target through its persisted document owner.
+
+     - Parameters:
+       - document: Installed Bible initials or Android's `MyNote` fake-document initials.
+       - key: Document-owned OSIS key persisted by the history row.
+       - anchorOrdinal: Optional document ordinal used when it belongs to the restored chapter.
+     - Returns: `true` after exact-owner admission and navigation; `false` before target navigation
+       when the document, key, pane owner, or history owner cannot be resolved.
+     - Side Effects: Stages the page being left once, may switch Bible modules, updates controller
+       and PageManager state, persists navigation, and requests content replacement or scrolling.
+     - Failure Modes: Invalid targets and stale owners fail closed. Journal failure after admitted
+       mutation remains governed by `persistNavigationState` and is not reported as rollback.
+     - Concurrency: Main-actor isolated; owner validation and staging contain no suspension point.
+     */
+    @MainActor
+    @discardableResult
+    public func navigateToHistoryTarget(
+        document: String,
+        key: String,
+        anchorOrdinal: Int?
+    ) -> Bool {
+        if SwordJavaStringIdentity.equals(document, Self.myNotesHistoryDocumentInitials) {
+            let parts = key.split(separator: ".")
+            guard parts.count >= 3,
+                  let chapter = Int(parts[1]),
+                  let verse = Int(parts[2]),
+                  let intent = BibleReaderMyNotesIntentAdmission.selectedVerse(
+                acceptanceID: nextMyNotesAcceptanceID,
+                    sourceVersification: JSwordKJVAVersification.name,
+                    osisBookID: String(parts[0]),
+                    chapter: chapter,
+                    verse: verse,
+                    destinationVersification: activeSourceVersificationName()
+                  ) else { return false }
+            let acceptedAnchor = anchorOrdinal.flatMap {
+                JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: $0)
+            }.flatMap { reference in
+                reference.osisId == intent.kjvaPosition.osisBookID
+                    && reference.chapter == intent.kjvaPosition.chapter
+                    ? anchorOrdinal
+                    : nil
+            }
+            return admitMyNotesIntent(
+                intent,
+                recordsHistory: true,
+                renderJumpOrdinal: acceptedAnchor
+            )
+        }
+        let parts = key.split(separator: ".")
+        let verse = parts.count >= 3 ? Int(parts[2]) : nil
+        guard parts.count >= 2,
+              let chapter = Int(parts[1]),
+              chapter >= 0,
+              verse.map({ $0 >= 0 }) ?? true else { return false }
+        let requestedVerse = verse ?? 1
+        let osisBookID = String(parts[0])
+        let swordTarget = swordManager?.module(named: document)
+        let sqliteTarget = sqliteRuntimeCoordinator.preferredModule(named: document, category: .bible)
+        let targetIsValid: Bool
+        if let swordTarget, swordTarget.info.category == .bible {
+            targetIsValid = swordTarget.verseOrdinal(
+                osisBookId: osisBookID,
+                chapter: chapter,
+                verse: requestedVerse
+            ) != nil
+        } else if let sqliteTarget {
+            targetIsValid = (try? sqliteTarget.verseContent(
+                osisId: osisBookID,
+                chapter: chapter,
+                verse: max(requestedVerse, 1)
+            )) != nil
+        } else {
+            targetIsValid = false
+        }
+        guard targetIsValid else { return false }
+        guard let prior = currentHistorySnapshotForRestore(),
+              let window = activeWindow,
+              let store = workspaceStore,
+              store.ownsHistoryWindow(window) else { return false }
+        restoresHistoryTarget = true
+        defer { restoresHistoryTarget = false }
+        if !SwordJavaStringIdentity.equals(activeModuleName, document) {
+            guard switchBibleDocument(to: document) == .switched else { return false }
+        }
+        guard store.stageHistoryItem(
+            to: window,
+            document: prior.document,
+            key: prior.key
+        ) else { return false }
+        showingMyNotes = false
+        guard let book = bookName(forOsisId: osisBookID) else { return false }
+        if let anchorOrdinal,
+           let anchor = swordTarget?.verseReference(osisBookId: osisBookID, ordinal: anchorOrdinal)
+            ?? (sqliteTarget == nil ? nil : JSwordKJVAVersification
+                .referenceIncludingIntroductions(ordinal: anchorOrdinal).map {
+                    VerseKeyReference(
+                        osisBookId: $0.osisId,
+                        chapter: $0.chapter,
+                        verse: $0.verse,
+                        ordinal: anchorOrdinal
+                    )
+                }),
+           anchor.chapter == chapter {
+            pendingLinkNavigationOrdinalRange = [anchorOrdinal, anchorOrdinal]
+        }
+        return navigateTo(book: book, chapter: chapter, verse: verse)
+    }
+
+    /** Snapshots the exact page being left before a typed history selection changes document owner. */
+    private func currentHistorySnapshotForRestore() -> (document: String, key: String)? {
+        guard let window = activeWindow,
+              let windowManagerRef,
+              windowManagerRef.managesWindow(window),
+              windowManagerRef.registeredController(for: window) === self,
+              workspaceStore != nil else { return nil }
+        if showingMyNotes, let intent = activeMyNotesIntent {
+            return (
+                Self.myNotesHistoryDocumentInitials,
+                BibleReaderMyNotesIntentAdmission.historyKey(for: intent)
+            )
+        }
+        return (
+            activeModuleName,
+            "\(osisBookId(for: currentBook)).\(currentChapter).\(currentVerse)"
+        )
+    }
 
     /**
      Persists Android's MYNOTE page-manager category for this window.
@@ -12643,11 +13230,28 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         onPersistState?()
     }
 
+    /**
+     Prepares and publishes one previously admitted My Notes render target.
+
+     - Parameters:
+       - target: Captured source span and exact KJVA jump owned by the accepted intent.
+       - retriesOneStaleResult: Whether one stale preparation may be resubmitted against current data.
+       - requestOwner: Optional awaited-selection owner completed by publication or rejection.
+     - Side Effects: Replaces the content intent, stages client-ready replay, prepares off-main, and
+       publishes only through the still-current pane, source, intent, and generation owners.
+     - Failure Modes: Stale or retired owners cancel publication; unresolved content reports failure
+       without falling back to the pane's mutable Bible cursor.
+     */
     private func loadMyNotesDocument(
         target: MyNotesTarget,
         retriesOneStaleResult: Bool = true,
         requestOwner: BibleReaderAwaitedSelectionRequest? = nil
     ) {
+        guard activeMyNotesTarget == target,
+              let renderAcceptanceID = activeMyNotesIntent?.acceptanceID else {
+            requestOwner?.complete(.cancelled)
+            return
+        }
         let generation = beginReplacingContentIntent(requestOwner: requestOwner)
         let destination = preparationPublicationOwner.captureDestination()
         guard clientReady else {
@@ -12696,6 +13300,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 && self.activeWindow?.workspace?.id == workspaceID
                 && self.swordManager === manager
                 && self.activeModule === activeSwordModule
+                && self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID
+                && self.activeMyNotesTarget == target
         }
         documentPreparationCoordinator.submitWithOwnerCaptureReportingOutcome(
             scope: .replacement,
@@ -12798,6 +13404,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 stalePolicy: .requestFreshCurrent,
                 isCurrent: { [weak self] result in
                     guard let self,
+                          self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID,
+                          self.activeMyNotesTarget == target,
                           self.sourceDependenciesAreCurrent(result.prepared.sourceDependencies)
                     else { return false }
                     let currentOwner = self.myNotesOwnerSnapshot(
@@ -12810,12 +13418,12 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 },
                 selectedIntent: .init(
                     commit: { [weak self] result in
-                        guard let self else { return }
+                        guard let self,
+                              self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID,
+                              self.activeMyNotesTarget == target else { return }
                         self.specialDocumentCoordinator.evictPreparedReplay()
                         self.activeCompositeRebuildRequest = nil
-                        self.persistMyNotesPageCategory(visible: true)
                         self.activeMyNotesTarget = target
-                        self.activeMyNotesReference = result.prepared.reference
                         self.showingMyNotes = true
                         self.showingStudyPad = false
                         self.activeStudyPadLabelId = nil
@@ -12825,6 +13433,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     },
                     isCurrentAfterCommit: { [weak self] result in
                         guard let self,
+                              self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID,
+                              self.activeMyNotesTarget == target,
                               self.sourceDependenciesAreCurrent(
                                 result.prepared.sourceDependencies
                               ) else { return false }
@@ -12841,15 +13451,21 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     self?.annotationDocumentLoader().prepareMyNotesDispatch(result)
                 },
                 isSourceCurrentAroundBridge: { [weak self] result in
-                    self?.sourceDependenciesAreCurrent(
-                        result.prepared.sourceDependencies
-                    ) == true
+                    guard let self,
+                          self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID,
+                          self.activeMyNotesTarget == target else { return false }
+                    return self.sourceDependenciesAreCurrent(result.prepared.sourceDependencies)
                 },
                 queueBridge: { [weak self] result in
                     self?.annotationDocumentLoader().dispatchMyNotesDocument(result) == true
                 },
                 commitAcceptedRender: { [weak self] result in
-                    self?.annotationDocumentLoader().commitMyNotesRender(result)
+                    guard let self,
+                          self.activeMyNotesIntent?.acceptanceID == renderAcceptanceID,
+                          self.activeMyNotesTarget == target else { return }
+                    self.annotationDocumentLoader().commitMyNotesRender(result)
+                    self.activeMyNotesReference = result.prepared.reference
+                    self.committedMyNotesAcceptanceID = renderAcceptanceID
                 }
             )
             switch disposition {
@@ -12882,7 +13498,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         pendingClientReadyMyNotesRequest = requestOwner
         activeMyNotesTarget = target
         activeMyNotesReference = nil
-        persistMyNotesPageCategory(visible: true)
+        committedMyNotesAcceptanceID = nil
         showingMyNotes = true
         showingStudyPad = false
         activeStudyPadLabelId = nil
@@ -13675,13 +14291,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     case .downloads(let searchText):
             bridgeEventRouter.requestOpenDownloads(searchText: searchText)
     case .myNotes(let v11n, let ordinal):
-      guard
-        let target = myNotesTarget(
-                v11nName: v11n,
-                sourceOrdinal: ordinal
-        )
-      else { return }
-            loadMyNotesDocument(target: target)
+            loadMyNotesDocument(v11nName: v11n, sourceOrdinal: ordinal)
     case .studyPad(let labelId, let bookmarkId):
             loadStudyPadDocument(labelId: labelId, bookmarkId: bookmarkId)
     case .osisReferences(let values, let v11n, let documentInitials, let forceDocument):
