@@ -47,6 +47,7 @@
   "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testSwapActivityBibleNextCyclesReadableModulesAfterInitialKJVPublication": "locked-readable-next",
   "AndBibleUITests/AndBibleUITests/testSwapActivityFromCommentaryUnlocksExactRetainedBibleSuggestion": "locked-suggested-commentary",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsUsernamePersistsBeforeServerURLIsConfigured": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "sync-nextcloud-adopt-existing",

@@ -225,6 +225,14 @@ Current work and acceptance:
   and a parent-link query that omitted scrolling. Unresolved iOS17 interaction and XCTest logging
   quarantine failures remain recorded. Correct those boundaries before retiring the corresponding
   source guards; lower test duration alone cannot establish product performance.
+- Sync Settings credential journeys now verify URL-first and username-first setup through real
+  editors and route reopening. Invalid URL input produces the visible error and preserves the
+  accepted address. Native tests cover partial configuration and independent field edits, including
+  preservation of a password whose secret-store read is unavailable. These contracts and the
+  prepared-runtime manual-sync journey pass on iOS17.5/26.5. Three superseded source-string tests
+  for URL validation/private helpers are removed; route chrome, the DEBUG CloudKit seam, and
+  button reachability guards remain pending their own review. In-memory settings tests do not
+  establish disk recovery or all-writer runtime retirement.
 - Real WebKit/Vue tests complement native payload tests. Visible reader text uses screenshot
   recognition where WebKit's editable element does not expose its child text to accessibility.
   That observer currently covers English, single-pane fixtures; it does not establish screen-reader

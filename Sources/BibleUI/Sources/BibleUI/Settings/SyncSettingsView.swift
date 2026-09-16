@@ -65,9 +65,6 @@ public struct SyncSettingsView: View {
     /// User-entered or persisted NextCloud/WebDAV server root URL.
     @State private var serverURL = ""
 
-    /// Last server URL accepted by Android-style edit validation and eligible for persistence.
-    @State private var lastCommittedServerURL = ""
-
     /// User-entered or persisted NextCloud/WebDAV username.
     @State private var username = ""
 
@@ -273,7 +270,7 @@ public struct SyncSettingsView: View {
             loadPersistedSettingsIfNeeded()
         }
         .onDisappear {
-            persistRemoteSettings()
+            persistBackendSelection()
         }
         .onChange(of: selectedBackend) { _, newValue in
             remoteSettingsStore.selectedBackend = newValue
@@ -538,7 +535,7 @@ public struct SyncSettingsView: View {
 
     /** Closes the app-owned activity after committing valid remote settings. */
     private func close() {
-        persistRemoteSettings()
+        persistBackendSelection()
         if let onBack {
             onBack()
         } else {
@@ -663,8 +660,9 @@ public struct SyncSettingsView: View {
        dialog does after its change listener runs.
      - Side effects: Persists accepted credentials, clears stale connection state, or publishes the
        localized invalid-URL state and app-owned error dialog without changing the saved server URL.
-     - Failure modes: Invalid server URLs are rejected before mutation; local Keychain persistence
-       failures retain the existing best-effort behavior in `persistRemoteSettings()`.
+     - Failure modes: Invalid server URLs are rejected before mutation; Keychain edit failures
+       surface an error and retain the prior displayed password. Unrelated edits never rewrite
+       a password whose Keychain read may have been unavailable.
      */
     private func commitCredential(_ candidate: String, for field: NextCloudCredentialField) {
         switch field {
@@ -676,17 +674,25 @@ public struct SyncSettingsView: View {
                 remoteSyncErrorMessage = invalidURLMessage
                 return
             }
+            remoteSettingsStore.setWebDAVServerURL(trimmedCandidate)
             serverURL = trimmedCandidate
-            lastCommittedServerURL = serverURL
         case .username:
+            remoteSettingsStore.setWebDAVUsername(candidate)
             username = candidate
         case .password:
+            do {
+                try remoteSettingsStore.setWebDAVPassword(candidate)
+            } catch {
+                remoteConnectionStatus = .failure(error.localizedDescription)
+                remoteSyncErrorMessage = error.localizedDescription
+                return
+            }
             password = candidate
         case .folderPath:
+            remoteSettingsStore.setWebDAVFolderPath(candidate)
             folderPath = candidate
         }
         remoteConnectionStatus = nil
-        persistRemoteSettings()
     }
 
     /// Plain localized status text used by the app-owned iCloud value row.
@@ -1082,14 +1088,10 @@ public struct SyncSettingsView: View {
 
         selectedBackend = remoteSettingsStore.selectedBackend
 
-        if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
-            serverURL = configuration.serverURL
-            lastCommittedServerURL = configuration.serverURL
-            username = configuration.username
-            folderPath = configuration.folderPath ?? ""
-        } else {
-            lastCommittedServerURL = serverURL
-        }
+        let configuration = remoteSettingsStore.loadWebDAVConfigurationForEditing()
+        serverURL = configuration.serverURL
+        username = configuration.username
+        folderPath = configuration.folderPath ?? ""
         password = remoteSettingsStore.webDAVPassword() ?? ""
         remoteCategoryEnabled = Dictionary(
             uniqueKeysWithValues: RemoteSyncCategory.activeSyncCases.map { category in
@@ -1100,32 +1102,14 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Persists the currently edited remote-sync state.
+     Saves backend selection without resaving independently committed credential preferences.
 
-     Side effects:
-     - writes the selected backend to `sync_adapter`
-     - writes WebDAV server, username, folder path, and password through `RemoteSyncSettingsStore`
-       into SwiftData and Keychain
-
-     Failure modes:
-     - persistence errors from Keychain writes are swallowed because this view should not crash on
-       local settings save failures; the user still receives connection-test feedback separately
+     - Side effects: Writes the selected backend key through `RemoteSyncSettingsStore`.
+     - Failure modes: Retains the settings store's best-effort save policy. Route dismissal and
+       connection attempts never rewrite credentials or clear an unavailable Keychain secret.
      */
-    private func persistRemoteSettings() {
-        let store = remoteSettingsStore
-        store.selectedBackend = selectedBackend
-        guard isAndroidValidNextCloudServerURL(serverURL) else {
-            return
-        }
-        try? store.saveWebDAVConfiguration(
-            WebDAVSyncConfiguration(
-                serverURL: serverURL,
-                username: username,
-                folderPath: normalizedFolderPath
-            ),
-            password: password
-        )
-        lastCommittedServerURL = serverURL
+    private func persistBackendSelection() {
+        remoteSettingsStore.selectedBackend = selectedBackend
     }
 
     /**
@@ -1204,7 +1188,7 @@ public struct SyncSettingsView: View {
      */
     @MainActor
     private func beginAdmittedRemoteSynchronization(for category: RemoteSyncCategory) async {
-        persistRemoteSettings()
+        persistBackendSelection()
         lastRemoteConfirmationAction = nil
 
         do {
@@ -1565,7 +1549,7 @@ public struct SyncSettingsView: View {
     private func testRemoteConnection() async {
         isTestingConnection = true
         remoteConnectionStatus = nil
-        persistRemoteSettings()
+        persistBackendSelection()
         defer { isTestingConnection = false }
 
         do {

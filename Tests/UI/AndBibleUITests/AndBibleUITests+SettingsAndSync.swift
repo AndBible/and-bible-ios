@@ -402,13 +402,48 @@ extension AndBibleUITests {
     }
 
     /**
+     Saves a username independently before a server URL exists, as Android preferences permit.
+
+     The fixture starts with empty credentials. Entering one username and recreating Settings
+     must retain that value without requiring a connectable account or performing network I/O.
+     One editor submission is followed by a read-only value check after route reconstruction.
+     */
+    func testSyncSettingsUsernamePersistsBeforeServerURLIsConfigured() {
+        let app = makeApp()
+        app.launch()
+        _ = openSyncSettingsFromReaderAction(in: app)
+        tapElementReliably(requireElement("syncNextCloudUsernameRow", in: app, timeout: 10), timeout: 5)
+        let usernameField = app.textFields["syncNextCloudUsernameField"]
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 10))
+        replaceKnownText(in: usernameField, existingCharacterCount: 0, with: "partial-account", app: app)
+        tapAppOwnedDialogAction(
+            "syncNextCloudUsernameAction::confirm",
+            dialogIdentifier: "syncNextCloudUsername",
+            expectedTitle: "OK",
+            in: app
+        )
+        dismissSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
+        tapElementReliably(requireElement("syncNextCloudUsernameRow", in: app, timeout: 10), timeout: 5)
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 10))
+        XCTAssertEqual(usernameField.value as? String, "partial-account")
+        tapAppOwnedDialogAction(
+            "syncNextCloudUsernameAction::cancel",
+            dialogIdentifier: "syncNextCloudUsername",
+            expectedTitle: "Cancel",
+            in: app
+        )
+        dismissSyncSettings(in: app)
+    }
+
+    /**
      Verifies NextCloud invalid URL validation, category disabling, and backend switching.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
-     *   - opens Android's server `EditTextPreference`, enters one invalid URL, and presses its
-     *     app-owned OK action
+     *   - saves a valid server URL through Android's `EditTextPreference`, rejects an invalid
+     *     replacement with the visible error dialog, and verifies the accepted value after reopen
      *   - disables the bookmarks category through the production toggle and observes the immediate
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
@@ -417,8 +452,8 @@ extension AndBibleUITests {
      *     reopens again so the iCloud section is rehydrated from persisted settings
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
-     *   - fails if the NextCloud server field is missing or if the exported connection-test state
-     *     never reaches `failureInvalidURL`
+     *   - fails if the server editor does not accept a valid URL, show the invalid-URL message,
+     *     dismiss before the error dialog, or preserve the accepted URL after rejection and reopen
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
@@ -442,8 +477,10 @@ extension AndBibleUITests {
             requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
             timeout: 5
         )
-        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
-        replaceText(in: serverField, with: "not-a-url")
+        let serverField = app.textFields["syncNextCloudServerURLField"]
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        let acceptedServerURL = "https://example.invalid/nextcloud"
+        replaceKnownText(in: serverField, existingCharacterCount: 0, with: acceptedServerURL, app: app)
         tapAppOwnedDialogAction(
             "syncNextCloudServerURLAction::confirm",
             dialogIdentifier: "syncNextCloudServerURL",
@@ -451,7 +488,31 @@ extension AndBibleUITests {
             in: app,
             timeout: 10
         )
-        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
+            timeout: 5
+        )
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        XCTAssertEqual(serverField.value as? String, acceptedServerURL)
+        replaceKnownText(
+            in: serverField,
+            existingCharacterCount: acceptedServerURL.count,
+            with: "not-a-url",
+            app: app
+        )
+        tapAppOwnedDialogAction(
+            "syncNextCloudServerURLAction::confirm",
+            dialogIdentifier: "syncNextCloudServerURL",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
+        let invalidURLMessage = app.alerts.staticTexts[
+            "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)"
+        ]
+        XCTAssertTrue(invalidURLMessage.waitForExistence(timeout: 10))
+        XCTAssertTrue(isElementVisible(invalidURLMessage, within: app))
+        XCTAssertFalse(serverField.exists, "Android closes the editor before presenting the error.")
         tapAppOwnedDialogAction(
             "syncErrorDialogAction::okay",
             dialogIdentifier: "syncErrorDialog",
@@ -474,6 +535,23 @@ extension AndBibleUITests {
             reopenedSyncState.value as? String,
             backend: "NEXT_CLOUD",
             enabled: "none"
+        )
+        tapElementReliably(
+            requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
+            timeout: 5
+        )
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            serverField.value as? String,
+            acceptedServerURL,
+            "Rejecting a malformed edit must preserve the accepted URL after Settings is recreated."
+        )
+        tapAppOwnedDialogAction(
+            "syncNextCloudServerURLAction::cancel",
+            dialogIdentifier: "syncNextCloudServerURL",
+            expectedTitle: "Cancel",
+            in: app,
+            timeout: 10
         )
 
         tapSyncBackend("ICLOUD", in: app)

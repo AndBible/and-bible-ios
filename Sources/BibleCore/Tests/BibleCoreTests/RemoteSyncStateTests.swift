@@ -18,6 +18,29 @@ private enum TestStartupContainerError: LocalizedError {
 }
 
 /**
+ Models a temporarily unreadable secret backend whose stored password still exists.
+
+ Reads return nil, as the production Keychain facade does on a read failure. Writes and deletes
+ reach the backing store so tests can detect accidental password loss after unrelated edits.
+ */
+private final class UnreadableSyncSecretStore: SecretStoring {
+    let backing = InMemorySecretStore()
+
+    /// Simulates unavailable reads without deleting the backing secret.
+    func secret(forKey key: String) -> String? { nil }
+
+    /// Forwards an explicit write, retaining its exact bytes and backend errors.
+    func setSecret(_ value: String, forKey key: String) throws {
+        try backing.setSecret(value, forKey: key)
+    }
+
+    /// Forwards an explicit removal so a mistaken clear remains observable.
+    func removeSecret(forKey key: String) throws {
+        try backing.removeSecret(forKey: key)
+    }
+}
+
+/**
  Deterministically suspends a mode-change handler until a test releases it.
 
  The entry continuation lets concurrency tests observe the admitted operation without polling or
@@ -527,6 +550,66 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(store.selectedBackend, .iCloud)
         XCTAssertNil(store.loadWebDAVConfiguration())
         XCTAssertNil(store.webDAVPassword())
+    }
+
+    /**
+     Keeps independently edited preferences visible while connection credentials are incomplete.
+
+     Each case models an Android credential preference entered before the others. The settings
+     facade is recreated to avoid reading a view draft. These in-memory checks prove store reads
+     and transport admission, not physical-store recovery; the app journeys cover editor reopen.
+     */
+    func testRemoteSyncSettingsEditorRestoresPartialCredentialsWithoutEnablingTransport() throws {
+        let configurations = [
+            WebDAVSyncConfiguration(serverURL: "", username: "", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "https://example.invalid", username: "", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "", username: "alice", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "", username: "", folderPath: "Study"),
+            WebDAVSyncConfiguration(serverURL: "", username: "alice", folderPath: "Study")
+        ]
+        for configuration in configurations {
+            let settings = try makeInMemorySettingsStore()
+            let secrets = InMemorySecretStore()
+            try RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+                .saveWebDAVConfiguration(configuration, password: " secret ")
+            let reopened = RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+            XCTAssertEqual(reopened.loadWebDAVConfigurationForEditing(), configuration)
+            XCTAssertEqual(reopened.webDAVPassword(), " secret ")
+            XCTAssertNil(reopened.loadWebDAVConfiguration())
+            XCTAssertNil(try reopened.makeWebDAVClient())
+        }
+    }
+
+    /**
+     Editing ordinary preferences or changing backend must not delete an unreadable password.
+
+     Android stores credential preferences independently. This exercises a read-unavailable
+     secret facade and inspects its independent backing store after edits, including clears.
+     */
+    func testRemoteSyncCredentialEditsPreserveOtherFieldsAndUnreadablePassword() throws {
+        let settings = try makeInMemorySettingsStore()
+        let secrets = UnreadableSyncSecretStore()
+        let store = RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+        try store.setWebDAVPassword(" secret ")
+        XCTAssertNil(store.webDAVPassword())
+
+        store.setWebDAVUsername(" alice ")
+        store.setWebDAVFolderPath(" Study ")
+        store.setWebDAVServerURL(" https://example.invalid ")
+        store.selectedBackend = .iCloud
+        store.setWebDAVUsername("")
+        XCTAssertEqual(
+            store.loadWebDAVConfigurationForEditing(),
+            WebDAVSyncConfiguration(serverURL: "https://example.invalid", username: "", folderPath: "Study")
+        )
+        store.setWebDAVFolderPath(nil)
+        XCTAssertEqual(store.loadWebDAVConfigurationForEditing().serverURL, "https://example.invalid")
+        XCTAssertNil(store.loadWebDAVConfigurationForEditing().folderPath)
+        XCTAssertEqual(secrets.backing.secret(forKey: "gdrive_password"), " secret ")
+
+        try store.setWebDAVPassword("")
+        XCTAssertNil(secrets.backing.secret(forKey: "gdrive_password"))
+        XCTAssertEqual(store.loadWebDAVConfigurationForEditing().serverURL, "https://example.invalid")
     }
 
     /**
