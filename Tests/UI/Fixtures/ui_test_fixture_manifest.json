@@ -1,6 +1,7 @@
 {
   "AndBibleUITests/AndBibleUITests/testCalvinCommentaryScrollCrossesEmptyVerseAndRestoresVisiblePassage": "calvin-commentary-scroll-restoration",
   "AndBibleUITests/AndBibleUITests/testPerformanceCalvinCommentaryScrollAndReturnToScripture": "calvin-commentary-performance",
+  "AndBibleUITests/AndBibleUITests/testPerformanceSustainedCalvinCommentaryReadingAndScriptureReturn": "calvin-commentary-performance",
   "AndBibleUITests/AndBibleUITests/testAllTextOptionsWorkspaceRouteAndFontEditor": "display-colors-custom",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderToSeededReference": "bookmark-filter",
   "AndBibleUITests/AndBibleUITests/testBookmarkSelectionNavigatesReaderWithoutDetailedAccessibilityExports": "bookmark-filter",

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Vision
 
 /**
  Release-only measurements of production reader launch, return, and destination navigation.
@@ -102,6 +103,263 @@ extension AndBibleUITests {
         } catch {
             XCTFail("Could not encode commentary route timing evidence: \(error)")
         }
+    }
+
+    /**
+     Records six bounded Calvin reading cycles in one application process for sustained-lag diagnosis.
+
+     Each cycle begins on the visible seeded KJV body, activates Commentary once, performs three
+     slow forward and three slow backward drags in Calvin's long Genesis 1:1 entry, and activates
+     Bible once. Tap readiness is checked before each route clock; the timed route starts immediately
+     before its single tap and ends after the visible module source marker is ready. A screenshot/OCR
+     check then verifies the actual composited body outside that route clock and publishes its cost.
+     The scroll duration includes XCTest gesture delivery;
+     it is not a physical FPS, hitch, WebContent CPU, or cross-commentary-block measurement.
+
+     This test deliberately has no performance budget and does not assert that later samples must
+     be slower. It retains every cycle's monotonic and Unix timestamps before reporting endpoint
+     failures, allowing an external RSS sampler to correlate early, middle, and late behavior.
+
+     - Side effects: Launches one fixture-backed app process, performs at most twelve module taps
+       and 36 vertical drags, runs bounded English OCR polling at body correctness boundaries,
+       retains only each observer's final WebView screenshot, and adds one JSON timing attachment.
+       It never relaunches or resets the app between cycles.
+     - Failure modes: Retains the first failed cycle for a missing source, body, restored position,
+       gesture surface, or OCR result, then stops before driving another cycle from invalid state.
+       Fixture preparation and process launch failures remain outside the cycle clocks.
+     */
+    func testPerformanceSustainedCalvinCommentaryReadingAndScriptureReturn() {
+        let kjvSubtitle = "King James Version (1769) with Strongs Numbers and Morphology  and CatchWords"
+        let calvinSubtitle = "Calvin's Collected Commentaries"
+        let cycleCount = 6
+        let app = makeApp(
+            fixtureScenario: "calvin-commentary-performance",
+            enablesDetailedAccessibilityExports: false
+        )
+        app.launch()
+        waitForVisiblePerformanceScripture(in: app)
+        waitForVisiblePerformanceModuleSubtitle(kjvSubtitle, in: app)
+
+        let sessionMonotonicStart = ProcessInfo.processInfo.systemUptime
+        let sessionUnixStart = Date().timeIntervalSince1970
+        var cycleRecords: [[String: Any]] = []
+        var failedCycles: [Int] = []
+
+        for cycle in 1...cycleCount {
+            var phases: [[String: Any]] = []
+            var observers: [[String: Any]] = []
+            var cycleSucceeded = true
+
+            let commentaryButton = app.otherElements["readerDocumentHeader"]
+                .buttons["readerCommentaryToolbarButton"]
+                .firstMatch
+            let commentaryControlReady = waitForElementToBecomeHittable(commentaryButton, timeout: 10)
+            let commentaryStartMonotonic = ProcessInfo.processInfo.systemUptime
+            let commentaryStartUnix = Date().timeIntervalSince1970
+            if commentaryControlReady {
+                commentaryButton.tap()
+            }
+            let commentaryEndpointReady = commentaryControlReady && waitForVisiblePerformanceSource(
+                subtitle: calvinSubtitle,
+                in: app,
+                timeout: 30
+            )
+            let commentaryEndMonotonic = ProcessInfo.processInfo.systemUptime
+            let commentaryEndUnix = Date().timeIntervalSince1970
+            phases.append(sustainedPhaseRecord(
+                name: "commentary_tap_to_visible_source_marker",
+                startMonotonic: commentaryStartMonotonic,
+                endMonotonic: commentaryEndMonotonic,
+                startUnix: commentaryStartUnix,
+                endUnix: commentaryEndUnix,
+                succeeded: commentaryEndpointReady
+            ))
+            cycleSucceeded = cycleSucceeded && commentaryEndpointReady
+            if !commentaryEndpointReady {
+                cycleRecords.append([
+                    "cycle": cycle,
+                    "sample_band": cycle == 1 ? "early" : (cycle == 3 ? "middle" : (cycle == 6 ? "late" : "intermediate")),
+                    "succeeded": false,
+                    "phases": phases,
+                    "observers": observers,
+                ])
+                failedCycles.append(cycle)
+                break
+            }
+            let commentaryReadyObservation = sustainedReaderObservation(
+                expectedText: "BY JOHN CALVIN",
+                attachmentName: "Sustained Calvin cycle \(cycle) body ready before scrolling",
+                timeout: 20,
+                routeTapStartMonotonic: commentaryStartMonotonic,
+                in: app
+            )
+            observers.append(commentaryReadyObservation)
+            cycleSucceeded = commentaryReadyObservation["succeeded"] as? Bool == true
+            if !cycleSucceeded {
+                cycleRecords.append([
+                    "cycle": cycle,
+                    "sample_band": cycle == 1 ? "early" : (cycle == 3 ? "middle" : (cycle == 6 ? "late" : "intermediate")),
+                    "succeeded": false,
+                    "phases": phases,
+                    "observers": observers,
+                ])
+                failedCycles.append(cycle)
+                break
+            }
+
+            let webView = app.webViews.firstMatch
+            let scrollStartMonotonic = ProcessInfo.processInfo.systemUptime
+            let scrollStartUnix = Date().timeIntervalSince1970
+            var forwardGestureCount = 0
+            var backwardGestureCount = 0
+            let scrollSurfaceReady = webView.exists
+                && elementFrameIsUsable(webView.frame)
+                && app.frame.contains(webView.frame)
+            if scrollSurfaceReady {
+                for direction in ["forward", "forward", "forward", "backward", "backward", "backward"] {
+                    let start = direction == "forward"
+                        ? webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+                        : webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+                    let end = direction == "forward"
+                        ? webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18))
+                        : webView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.82))
+                    start.press(
+                        forDuration: 0.05,
+                        thenDragTo: end,
+                        withVelocity: .slow,
+                        thenHoldForDuration: 0.15
+                    )
+                    if direction == "forward" {
+                        forwardGestureCount += 1
+                    } else {
+                        backwardGestureCount += 1
+                    }
+                }
+            }
+            let returnedToCalvinStart = scrollSurfaceReady && waitForVisiblePerformanceSource(
+                subtitle: calvinSubtitle,
+                in: app,
+                timeout: 20
+            )
+            let scrollEndMonotonic = ProcessInfo.processInfo.systemUptime
+            let scrollEndUnix = Date().timeIntervalSince1970
+            phases.append(sustainedPhaseRecord(
+                name: "bounded_forward_backward_scroll",
+                startMonotonic: scrollStartMonotonic,
+                endMonotonic: scrollEndMonotonic,
+                startUnix: scrollStartUnix,
+                endUnix: scrollEndUnix,
+                succeeded: returnedToCalvinStart,
+                details: [
+                    "forward_gesture_count": forwardGestureCount,
+                    "backward_gesture_count": backwardGestureCount,
+                    "includes_xctest_gesture_delivery": true,
+                ]
+            ))
+            cycleSucceeded = cycleSucceeded && returnedToCalvinStart
+            let commentaryObservation = sustainedReaderObservation(
+                expectedText: "BY JOHN CALVIN",
+                attachmentName: "Sustained Calvin cycle \(cycle) after bounded scroll",
+                timeout: 20,
+                in: app
+            )
+            observers.append(commentaryObservation)
+            cycleSucceeded = cycleSucceeded && (commentaryObservation["succeeded"] as? Bool == true)
+            if !cycleSucceeded {
+                cycleRecords.append([
+                    "cycle": cycle,
+                    "sample_band": cycle == 1 ? "early" : (cycle == 3 ? "middle" : (cycle == 6 ? "late" : "intermediate")),
+                    "succeeded": false,
+                    "phases": phases,
+                    "observers": observers,
+                ])
+                failedCycles.append(cycle)
+                break
+            }
+
+            let bibleButton = app.otherElements["readerDocumentHeader"]
+                .buttons["readerBibleToolbarButton"]
+                .firstMatch
+            let bibleControlReady = waitForElementToBecomeHittable(bibleButton, timeout: 10)
+            let bibleStartMonotonic = ProcessInfo.processInfo.systemUptime
+            let bibleStartUnix = Date().timeIntervalSince1970
+            if bibleControlReady {
+                bibleButton.tap()
+            }
+            let bibleEndpointReady = bibleControlReady && waitForVisiblePerformanceSource(
+                subtitle: kjvSubtitle,
+                in: app,
+                timeout: 30
+            )
+            let bibleEndMonotonic = ProcessInfo.processInfo.systemUptime
+            let bibleEndUnix = Date().timeIntervalSince1970
+            phases.append(sustainedPhaseRecord(
+                name: "bible_tap_to_visible_source_marker",
+                startMonotonic: bibleStartMonotonic,
+                endMonotonic: bibleEndMonotonic,
+                startUnix: bibleStartUnix,
+                endUnix: bibleEndUnix,
+                succeeded: bibleEndpointReady
+            ))
+            cycleSucceeded = cycleSucceeded && bibleEndpointReady
+            // Recognize the passage even when verse 1's opening words are just above the viewport.
+            // Exact scroll restoration is a separate contract from returning to readable Scripture.
+            let bibleObservation = sustainedReaderObservation(
+                expectedText: "Spirit of God moved upon the face of the waters",
+                attachmentName: "Sustained Calvin cycle \(cycle) returned scripture",
+                timeout: 20,
+                routeTapStartMonotonic: bibleStartMonotonic,
+                in: app
+            )
+            observers.append(bibleObservation)
+            cycleSucceeded = cycleSucceeded && (bibleObservation["succeeded"] as? Bool == true)
+
+            cycleRecords.append([
+                "cycle": cycle,
+                "sample_band": cycle == 1 ? "early" : (cycle == 3 ? "middle" : (cycle == 6 ? "late" : "intermediate")),
+                "succeeded": cycleSucceeded,
+                "phases": phases,
+                "observers": observers,
+            ])
+            if !cycleSucceeded {
+                failedCycles.append(cycle)
+                break
+            }
+        }
+
+        let payload: [String: Any] = [
+            "schema_version": 1,
+            "workload": "CalvinCommentaries1.1 Gen.1.1 bounded repeated reading",
+            "planned_cycle_count": cycleCount,
+            "executed_cycle_count": cycleRecords.count,
+            "session_monotonic_start_seconds": sessionMonotonicStart,
+            "session_monotonic_end_seconds": ProcessInfo.processInfo.systemUptime,
+            "session_unix_start_seconds": sessionUnixStart,
+            "session_unix_end_seconds": Date().timeIntervalSince1970,
+            "cycles": cycleRecords,
+            "failed_cycles": failedCycles,
+            "interpretation": [
+                "route_durations_include_xctest_action_and_accessibility_endpoint_observer_cost",
+                "scroll_durations_include_xctest_gesture_delivery_cost",
+                "ocr_and_screenshot_observer_costs_are_recorded_outside_phase_durations",
+                "app_memory_metrics_would_exclude_the_WebContent_process",
+                "no_physical_fps_or_cross_commentary_block_smoothness_claim",
+                "no_performance_budget_or_monotonic_degradation_assertion",
+            ],
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = "Sustained Calvin commentary cycle timings"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        } catch {
+            XCTFail("Could not encode sustained commentary timing evidence: \(error)")
+        }
+        XCTAssertTrue(
+            failedCycles.isEmpty,
+            "Sustained commentary visible endpoint failures in cycles: \(failedCycles)"
+        )
     }
 
     /**
@@ -324,4 +582,143 @@ extension AndBibleUITests {
             "Expected visible reader module subtitle '\(subtitle)'."
         )
     }
+
+    /**
+     Passively awaits an actual visible reader source marker.
+
+     - Parameters:
+       - subtitle: Exact reader-header module subtitle required for source identity.
+       - app: The running foreground application.
+       - timeout: Maximum accessibility polling time in seconds.
+     - Returns: `true` when the source is visible with usable on-screen geometry.
+     - Side effects: Samples XCTest accessibility state; it does not mutate application state.
+     - Failure modes: Returns `false` on timeout or unusable geometry. The separately timed OCR
+       observer verifies composited body pixels because WebKit can split body text across AX nodes.
+     */
+    private func waitForVisiblePerformanceSource(
+        subtitle: String,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        waitForUITestCondition("Visible performance source", timeout: timeout) {
+            let header = app.otherElements["readerDocumentHeader"].firstMatch
+            let source = header.staticTexts.matching(
+                NSPredicate(format: "label == %@", subtitle)
+            ).firstMatch
+            guard header.exists, self.elementFrameIsUsable(header.frame),
+                  source.exists, self.elementFrameIsUsable(source.frame) else { return false }
+            return header.frame.intersects(source.frame) && app.frame.intersects(source.frame)
+        }
+    }
+
+    /**
+     Passively polls composited reader pixels and retains only the final screenshot.
+
+     - Parameters:
+       - expectedText: Known logical-position text expected in the composited reader pixels.
+       - attachmentName: Stable diagnostic name for the retained screenshot.
+       - timeout: Maximum screenshot/OCR polling time in seconds.
+       - routeTapStartMonotonic: Optional route-tap timestamp used to report the explicitly
+         observer-inclusive tap-to-body evidence beside, but not inside, the source-marker phase.
+       - app: The running foreground application.
+     - Returns: A JSON-compatible record with observer timestamps, duration, and OCR result.
+     - Side effects: Repeatedly captures the visible WebView and performs English Vision OCR in the
+       test runner until success or timeout; retains only the final screenshot as an attachment.
+     - Failure modes: Returns `succeeded: false` for missing pixels, OCR errors, or absent text;
+       the sustained test defers its XCTest failure until all cycle records are attached.
+     */
+    private func sustainedReaderObservation(
+        expectedText: String,
+        attachmentName: String,
+        timeout: TimeInterval,
+        routeTapStartMonotonic: TimeInterval? = nil,
+        in app: XCUIApplication
+    ) -> [String: Any] {
+        let startMonotonic = ProcessInfo.processInfo.systemUptime
+        let startUnix = Date().timeIntervalSince1970
+        let webView = app.webViews.firstMatch
+        var succeeded = false
+        var recognizedText = ""
+        var lastScreenshot: XCUIScreenshot?
+        succeeded = waitForUITestCondition("Visible reader OCR body: \(expectedText)", timeout: timeout) {
+            guard webView.exists, self.elementFrameIsUsable(webView.frame),
+                  app.frame.intersects(webView.frame) else { return false }
+            let screenshot = webView.screenshot()
+            lastScreenshot = screenshot
+            guard let pixels = screenshot.image.cgImage else { return false }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = ["en-US"]
+            do {
+                try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
+                let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+                recognizedText = lines.joined(separator: " ")
+                return self.visibleReaderOCRLines(lines, contain: expectedText)
+            } catch {
+                recognizedText = "OCR error: \(error.localizedDescription)"
+                return false
+            }
+        }
+        if let screenshot = lastScreenshot {
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = attachmentName
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        let endMonotonic = ProcessInfo.processInfo.systemUptime
+        let endUnix = Date().timeIntervalSince1970
+        var record: [String: Any] = [
+            "name": attachmentName,
+            "expected_text": expectedText,
+            "recognized_text": recognizedText,
+            "succeeded": succeeded,
+            "monotonic_start_seconds": startMonotonic,
+            "monotonic_end_seconds": endMonotonic,
+            "duration_seconds": endMonotonic - startMonotonic,
+            "unix_start_seconds": startUnix,
+            "unix_end_seconds": endUnix,
+        ]
+        if let routeTapStartMonotonic {
+            record["tap_to_visible_body_observer_inclusive_seconds"] = endMonotonic - routeTapStartMonotonic
+        }
+        return record
+    }
+
+    /**
+     Builds one JSON-compatible phase record from monotonic and wall-clock observations.
+
+     - Parameters:
+       - name: Stable phase identity.
+       - startMonotonic: `systemUptime` sampled immediately before the phase action.
+       - endMonotonic: `systemUptime` sampled after the visible endpoint or timeout.
+       - startUnix: Unix timestamp sampled beside `startMonotonic` for external correlation.
+       - endUnix: Unix timestamp sampled beside `endMonotonic` for external correlation.
+       - succeeded: Whether the phase reached its declared visible endpoint.
+       - details: Optional JSON-compatible phase metadata.
+     - Returns: A record containing raw timestamps and monotonic duration.
+     - Side effects: None.
+     - Failure modes: Does not validate clock ordering; the caller records observed values exactly.
+     */
+    private func sustainedPhaseRecord(
+        name: String,
+        startMonotonic: TimeInterval,
+        endMonotonic: TimeInterval,
+        startUnix: TimeInterval,
+        endUnix: TimeInterval,
+        succeeded: Bool,
+        details: [String: Any] = [:]
+    ) -> [String: Any] {
+        [
+            "name": name,
+            "succeeded": succeeded,
+            "monotonic_start_seconds": startMonotonic,
+            "monotonic_end_seconds": endMonotonic,
+            "duration_seconds": endMonotonic - startMonotonic,
+            "unix_start_seconds": startUnix,
+            "unix_end_seconds": endUnix,
+            "details": details,
+        ]
+    }
+
 }

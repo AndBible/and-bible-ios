@@ -132,6 +132,36 @@ The test requests the public scrolling-and-deceleration metric together with clo
 
 These are simulator observations without an acceptance budget. App CPU and memory do not cover the separate WebContent process, and scrolling metrics do not identify a main-thread stack. Use an Instruments Time Profiler or Animation Hitches trace of the same exact method when attribution is needed, and report traced timing separately because tracing changes the workload.
 
+## Observe repeated commentary use
+
+`AndBibleSustainedCommentaryPerformance` selects the opt-in
+`testPerformanceSustainedCalvinCommentaryReadingAndScriptureReturn` method. Build it
+in Release and run it through the same fixture wrapper above, replacing the scheme
+and selected method. It uses the same reviewed Calvin fixture and is excluded from
+the ordinary `AndBible` correctness scheme.
+
+The workload keeps one app process for six cycles. Each cycle opens real Calvin
+Genesis 1:1, verifies its visible body, performs three slow forward and three
+backward drags, verifies the starting commentary passage, and returns to readable
+KJV Scripture. The Scripture endpoint recognizes Genesis 1:2 even when the first
+words of verse 1 are above the viewport; exact scroll restoration is a separate
+contract. The first failed cycle stops the session and retains its observations.
+
+Export attachments with the command above. `Sustained Calvin commentary cycle
+timings` contains planned/executed cycle counts, actual gesture counts, monotonic
+phase durations, Unix timestamps, and separately recorded screenshot/OCR costs.
+Tap-to-source-marker timing does not establish body readiness. The
+`tap_to_visible_body_observer_inclusive_seconds` field includes the pixel observer
+and XCTest overhead. Failed endpoints are failed workflows, not slow successful
+samples. The workload has no performance threshold.
+
+This short, repeated visit to one long commentary entry does not cover accumulating
+adjacent blocks, long reading sessions, physical frame smoothness or memory
+retention. The JSON attachment contains no memory measurements. If external process
+sampling is used, retain its ownership evidence and distinguish native app memory
+from WebContent. Resident memory includes allocator reserves and shared pages; a
+rise alone does not establish a leak.
+
 ## What the measurements establish
 
 Clock time includes XCTest action and accessibility observation overhead. “Process launch” terminates the app but does not purge OS filesystem caches. CPU and memory metrics cover the app process; they do not cover WebContent. A five-sample nearest-rank p95 is simply the observed maximum and cannot establish tail latency. Compare distributions across independent matched runs, not a single best iteration.

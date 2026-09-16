@@ -68,6 +68,7 @@
                <Test Identifier="AndBibleUITests/testPerformanceOpenBookmarks"/>
                <Test Identifier="AndBibleUITests/testPerformanceOpenSettings"/>
                <Test Identifier="AndBibleUITests/testPerformanceCalvinCommentaryScrollAndReturnToScripture"/>
+               <Test Identifier="AndBibleUITests/testPerformanceSustainedCalvinCommentaryReadingAndScriptureReturn"/>
             </SkippedTests>
          </TestableReference>
       </Testables>
