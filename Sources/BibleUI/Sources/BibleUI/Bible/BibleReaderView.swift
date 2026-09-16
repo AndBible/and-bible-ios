@@ -6225,7 +6225,7 @@ public struct BibleReaderView: View {
        locked by a prior double-tap action.
      */
     private func handleAutoFullscreenScroll(from window: BibleCore.Window, deltaY: Double) {
-        guard windowManager.activeWindow?.id == window.id else { return }
+        guard windowManager.activeWindow === window else { return }
         let action = ReaderAutoFullscreenPolicy.action(
             deltaY: deltaY,
             isEnabled: autoFullscreenPref,

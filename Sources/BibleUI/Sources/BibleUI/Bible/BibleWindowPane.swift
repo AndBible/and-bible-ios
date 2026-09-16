@@ -894,10 +894,15 @@ struct BibleWindowPane: View {
         // Focus-on-interaction: bridge messages and native web-view gestures from this pane set it
         // active. The native callback covers plain taps that do not emit JavaScript messages,
         // matching Android's onTouchEvent -> activeWindow = window behavior.
-        let focusHandler: () -> Void = { [weak windowManager] in
-            guard let wm = windowManager else { return }
-            if wm.activeWindow?.id != window.id {
-                wm.activateWindow(window)
+        let paneWindowID = window.id
+        let focusHandler: () -> Void = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let wm = windowManager else { return }
+            BibleReaderPaneInteractionOwnership.focus(
+                controller: ctrl,
+                paneWindow: window,
+                paneWindowID: paneWindowID,
+                windowManager: wm
+            ) {
                 // Notify all controllers to update their active state in Vue.js
                 for (_, controllerObj) in wm.controllers {
                     if let controller = controllerObj as? BibleReaderController {
@@ -907,20 +912,36 @@ struct BibleWindowPane: View {
             }
         }
         ctrl.onInteraction = focusHandler
-        ctrl.bridge.onAnyMessage = { [weak ctrl] in
-            ctrl?.handleUserInteraction()
+        ctrl.bridge.onAnyMessage = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let windowManager,
+                  ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl else { return }
+            ctrl.handleUserInteraction()
         }
-        ctrl.bridge.onNativeUserInteraction = { [weak ctrl] in
-            ctrl?.handleUserInteraction()
+        ctrl.bridge.onNativeUserInteraction = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let windowManager,
+                  ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl else { return }
+            ctrl.handleUserInteraction()
+            guard ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl,
+                  windowManager.activeWindow === window else { return }
             NotificationCenter.default.post(name: .andBiblePaneButtonsRevealed, object: nil)
         }
         ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl, weak windowManager] deltaY in
-            guard let ctrl else { return }
-            guard ctrl.shouldTreatNativeScrollDeltaAsUserInteraction() else { return }
-            if windowManager?.activeWindow?.id != window.id {
-                ctrl.handleUserInteraction()
+            guard let ctrl, let windowManager else { return }
+            BibleReaderPaneInteractionOwnership.forwardNativeScrollDelta(
+                deltaY,
+                controller: ctrl,
+                paneWindow: window,
+                paneWindowID: paneWindowID,
+                windowManager: windowManager
+            ) { deltaY in
+                onUserScrollDeltaY?(deltaY)
             }
-            onUserScrollDeltaY?(deltaY)
         }
         ctrl.bridge.onNativeHorizontalSwipe = { direction in
             onUserHorizontalSwipe?(direction)

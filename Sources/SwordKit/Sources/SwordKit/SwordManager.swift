@@ -134,6 +134,9 @@ public final class SwordManager: @unchecked Sendable {
     private let contentAuthorizationGenerationLock = NSLock()
     private var contentAuthorizationGenerationStorage: UInt64 = 0
 
+    /// Stable root generation that surrounded construction of the immutable libsword manager.
+    private let nativeRegistryModuleStoreGeneration: UInt64?
+
     /// The filesystem path where SWORD modules are installed.
     public let modulePath: String
 
@@ -146,13 +149,57 @@ public final class SwordManager: @unchecked Sendable {
      Initialize a SwordManager with the given module path.
      - Parameter modulePath: Path to the SWORD modules directory.
        Pass nil to use the default system path.
+     - Side effects: Constructs an immutable libsword manager and samples the canonical root
+       generation immediately before and after native construction without acquiring a root lease.
+     - Failure modes: Returns nil when native construction fails. Construction that overlaps a
+       publication succeeds with unavailable registry provenance and is rejected by reader-facing
+       current-registry APIs until they create a leased replacement.
+     - Important: Mutation preparation already holding the exclusive root lease may use this
+       initializer. Reader inventory owners should use `currentRegistryManager(modulePath:)` or
+       `performCurrentRegistryRead(replacingIfNeeded:_:)`.
      */
     public init?(modulePath: String? = nil) {
         let path = modulePath ?? SwordManager.defaultModulePath()
         self.modulePath = path
-
+        let coordinator = ModuleStoreMutationCoordinator.shared(
+            forModuleRoot: URL(fileURLWithPath: path)
+        )
+        let generationBeforeConstruction = coordinator.currentMutationGeneration
         guard let h = SwordRuntime.sync({ SWMgr_new(path) }) else { return nil }
         self.handle = h
+        let generationAfterConstruction = coordinator.currentMutationGeneration
+        if generationBeforeConstruction == generationAfterConstruction,
+           generationAfterConstruction.isMultiple(of: 2) {
+            nativeRegistryModuleStoreGeneration = generationAfterConstruction
+        } else {
+            nativeRegistryModuleStoreGeneration = nil
+        }
+    }
+
+    /**
+     Constructs a reader-facing manager while publication cannot change its native registry.
+
+     The general initializer remains available to mutation preparation, including callers already
+     holding the canonical exclusive lease. Reader inventory owners use this factory so `SWMgr_new`
+     and its construction-generation witness share one stable read boundary.
+
+     - Parameter modulePath: Module root, or nil for the default application root.
+     - Returns: A current manager, or nil when libsword construction fails.
+     - Side effects: Waits behind an active or queued module-store writer, then constructs one
+       libsword manager under the canonical shared-read lease.
+     - Failure modes: Returns nil when the default directory or native manager cannot be created.
+     - Important: Do not call this factory while holding the exclusive module-store lease; mutation
+       preparation must continue using the general initializer. Do not call it from inside a
+       `SwordRuntime` operation because the root-before-runtime lock order must remain fixed.
+     */
+    public static func currentRegistryManager(modulePath: String? = nil) -> SwordManager? {
+        let path = modulePath ?? defaultModulePath()
+        let coordinator = ModuleStoreMutationCoordinator.shared(
+            forModuleRoot: URL(fileURLWithPath: path)
+        )
+        return coordinator.withSharedRead {
+            SwordManager(modulePath: path)
+        }
     }
 
     deinit {
@@ -384,11 +431,19 @@ public final class SwordManager: @unchecked Sendable {
         }
     }
 
-    /** Returns whether neither manager authorization nor the live module tree changed. */
+    /**
+     Returns whether the snapshot token and live root still authorize this native manager.
+
+     A snapshot captured from an immutable manager after a later root publication remains stale:
+     observing the newer generation cannot add new native handles to the old `SWMgr`.
+     */
     public func isContentAuthorizationCurrent(
         _ snapshot: SwordContentAuthorizationSnapshot
     ) -> Bool {
-        contentAuthorizationGeneration == snapshot.generation
+        let generation = contentAuthorizationGeneration
+        return generation == snapshot.generation
+            && generation.moduleStoreGeneration == nativeRegistryModuleStoreGeneration
+            && generation.moduleStoreGeneration.isMultiple(of: 2)
     }
 
     /**
@@ -1746,6 +1801,77 @@ public final class SwordManager: @unchecked Sendable {
         public init(_ option: GlobalOption, enabled: Bool) {
             self.option = option
             self.enabled = enabled
+        }
+    }
+
+    /**
+     Runs one reader registry operation with an immutable manager from the current root generation.
+
+     If `candidate` predates a completed publication or overlapped one during construction, the
+     method creates exactly one replacement inside the acquired shared-read lease. Construction,
+     installed-registry resolution, and the caller's copied result therefore describe one stable
+     root generation without treating a newer generation as authorization for an old `SWMgr`.
+
+     - Parameters:
+       - candidate: Preferred manager, commonly shared by another reader pane.
+       - operation: Bounded operation receiving the admitted manager and its exact current token.
+     - Returns: The operation result, or nil when a required replacement manager cannot be created.
+     - Throws: Rethrows errors from `operation` after admission.
+     - Side effects: Waits behind an active or queued writer; may construct a replacement manager;
+       holds the root shared-read lease until `operation` returns.
+     - Important: The closure must copy or synchronously apply all source-dependent state. Retained
+       handles must still be revalidated against the returned manager/generation before later use.
+       Do not call while holding the same root's exclusive lease or from inside `SwordRuntime`.
+     */
+    public static func performCurrentRegistryRead<T>(
+        replacingIfNeeded candidate: SwordManager,
+        _ operation: (SwordManager, SwordContentAuthorizationGeneration) throws -> T
+    ) rethrows -> T? {
+        let coordinator = candidate.moduleStoreMutationCoordinator
+        return try coordinator.withSharedRead {
+            let currentGeneration = coordinator.currentMutationGeneration
+            let manager: SwordManager
+            if candidate.nativeRegistryModuleStoreGeneration == currentGeneration,
+               currentGeneration.isMultiple(of: 2) {
+                manager = candidate
+            } else {
+                guard let replacement = SwordManager(modulePath: candidate.modulePath) else {
+                    return nil
+                }
+                manager = replacement
+            }
+            let generation = manager.contentAuthorizationGeneration
+            guard manager.nativeRegistryModuleStoreGeneration == generation.moduleStoreGeneration,
+                  generation.moduleStoreGeneration == currentGeneration,
+                  generation.moduleStoreGeneration.isMultiple(of: 2) else {
+                return nil
+            }
+            return try operation(manager, generation)
+        }
+    }
+
+    /**
+     Runs a bounded registry read only while this exact manager remains current.
+
+     - Parameter operation: Registry operation receiving the stable current authorization token.
+     - Returns: The copied operation result, or nil after any root publication or overlapping
+       construction made this manager obsolete.
+     - Throws: Rethrows errors from `operation` after admission.
+     - Side effects: Briefly holds the canonical root shared-read lease.
+     - Important: Unlike `performCurrentRegistryRead(replacingIfNeeded:_:)`, this method never
+       constructs a replacement. It is intended for controller state already bound to `self`; do
+       not call while holding the same root's exclusive lease or from inside `SwordRuntime`.
+     */
+    public func performCurrentModuleRegistryRead<T>(
+        _ operation: (SwordContentAuthorizationGeneration) throws -> T
+    ) rethrows -> T? {
+        try moduleStoreMutationCoordinator.withSharedRead {
+            let generation = contentAuthorizationGeneration
+            guard nativeRegistryModuleStoreGeneration == generation.moduleStoreGeneration,
+                  generation.moduleStoreGeneration.isMultiple(of: 2) else {
+                return nil
+            }
+            return try operation(generation)
         }
     }
 

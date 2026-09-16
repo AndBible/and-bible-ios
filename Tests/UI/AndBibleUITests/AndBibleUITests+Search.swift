@@ -810,6 +810,58 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies a real WebView drag transfers focus to its mounted inactive pane.
+
+     The second pane starts active. This test locates pane zero's WebView using its production
+     window-menu overlay, then sends one vertical drag inside the reading surface without tapping
+     either pane's controls. Production tab values and the reader's rendered-content observation
+     must identify pane zero afterward. Package tests cover synchronized suppression and retired
+     controller rejection; this journey checks that SwiftUI installs the native callbacks.
+
+     - Side effects: Launches an isolated fixture app, adds one window, and drags its first reader.
+     - Failure modes: Fails if the mounted reading surface cannot be identified uniquely or the
+       single drag leaves the second pane active. Observation never repeats the interaction.
+     */
+    func testNativeReaderDragActivatesInactivePane() throws {
+        let app = makeApp()
+        app.launch()
+        addWindowTab(expectingOrder: 1, in: app, timeout: 15)
+        waitForElementValue("windowTabButton::0", toContain: "state=inactive", in: app)
+        waitForElementValue("windowTabButton::1", toContain: "state=active", in: app)
+
+        let paneControl = requireObservedSettingsElement(
+            app.buttons["windowPaneMenuButton::0"].firstMatch,
+            identifier: "windowPaneMenuButton::0",
+            timeout: 10
+        )
+        var paneWebView: XCUIElement?
+        let foundPane = waitForUITestCondition("Inactive pane has one mounted WebView", timeout: 10) {
+            guard self.elementHasUsableFrame(paneControl) else { return false }
+            let anchor = CGPoint(x: paneControl.frame.midX, y: paneControl.frame.midY)
+            let candidates = app.webViews.allElementsBoundByIndex.filter {
+                self.elementHasUsableFrame($0) && $0.frame.contains(anchor)
+            }
+            // WebKit exposes nested accessibility nodes for the same visible viewport.
+            // Require one distinct rectangle so those wrappers cannot look like extra panes.
+            guard let candidate = candidates.first else { return false }
+            let frame = candidate.frame
+            guard candidates.allSatisfy({ $0.frame == frame }) else { return false }
+            paneWebView = candidate
+            return true
+        }
+        XCTAssertTrue(foundPane, "Expected one distinct WebView viewport beneath pane zero's window control.")
+        let viewport = try XCTUnwrap(paneWebView)
+        viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).press(
+            forDuration: 0.05,
+            thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        )
+
+        waitForElementValue("windowTabButton::0", toContain: "state=active", in: app)
+        waitForElementValue("windowTabButton::1", toContain: "state=inactive", in: app)
+        waitForReaderRenderedContentState(containing: "windowOrder=0", in: app, timeout: 10)
+    }
+
+    /**
      * Verifies one pane-window control owns Android's tap, hold, and vertical-swipe actions.
      *
      * The second pane starts active, so tapping pane zero also proves an inactive pane becomes the

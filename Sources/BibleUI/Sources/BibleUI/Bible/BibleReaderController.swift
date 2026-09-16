@@ -1349,6 +1349,10 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private lazy var speechCoordinator = BibleReaderSpeechCoordinator()
     /// SWORD setup collaborator that owns manager option mapping and module-state projection.
     private let swordCoordinator = BibleReaderSwordCoordinator()
+    /// Exact backend/generation owner for the last non-empty active Bible book inventory.
+    private var bookListOwner = BibleReaderBookListOwner()
+    /// Manager/root generation that authorized the controller's current installed-source handles.
+    private var bookListRegistryWitness: BibleReaderBookListRegistryWitness?
     /// Reader config/window-state collaborator that owns bridge payload projection and compare visibility state.
     private var configurationCoordinator = BibleReaderConfigurationCoordinator()
     /// Reader-local native selection state and pure action-payload decisions.
@@ -8056,13 +8060,12 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private func refreshInstalledSourceInventory() -> Bool {
         let refreshedManager: SwordManager?
         if let modulePath = swordManager?.modulePath {
-            refreshedManager = SwordManager(modulePath: modulePath)
+            refreshedManager = SwordManager.currentRegistryManager(modulePath: modulePath)
         } else {
-            refreshedManager = SwordManager()
+            refreshedManager = SwordManager.currentRegistryManager()
         }
         guard let newManager = refreshedManager else { return false }
-        configureSwordManager(newManager)
-        return true
+        return configureSwordManager(newManager)
     }
 
     /**
@@ -8087,7 +8090,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
     /// Initialize SWORD and find the first available Bible module.
     private func initializeSword() {
-        guard let mgr = SwordManager() else {
+        guard let mgr = SwordManager.currentRegistryManager() else {
             logger.warning("Failed to create SwordManager — using placeholder text")
             return
         }
@@ -8097,51 +8100,88 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
   /**
    Rebuilds the pane runtime from genuine SWORD modules and Android-compatible SQLite modules.
 
-   - Parameter mgr: Configured manager whose module root owns both backend inventories.
+   - Parameters:
+     - candidate: Preferred manager whose module root owns both backend inventories. An obsolete
+       shared manager is atomically replaced under the same root read lease.
+     - requestedSelection: Category identities to resolve, or current controller identities.
+   - Returns: `true` after applying a current registry; `false` without changing controller state
+     when libsword cannot construct the required current manager.
    - Side effects: Applies SWORD options, replaces installed inventories and backend handles,
      opens a fresh serialized SQLite catalog, resolves prior category selections, and refreshes
      the active Bible book list.
    - Failure modes: Unreadable SQLite payloads are omitted by discovery; absent supported Bibles
-     retain the explicit no-backend state used by placeholder rendering.
+     retain the explicit no-backend state used by placeholder rendering. Replacement construction
+     failure retains all prior installed, active, book-list, persistence, and render state.
    - Important: SQLite discovery and precedence decisions remain in the runtime coordinator; this
      method only applies its immutable results to controller state.
    */
-    private func configureSwordManager(_ mgr: SwordManager) {
-        routedSourceAuthorizationOwner.installedSourceGeneration &+= 1
-        swordManager = mgr
+    @discardableResult
+    private func configureSwordManager(
+        _ candidate: SwordManager,
+        requestedSelection: BibleReaderSwordSelection? = nil
+    ) -> Bool {
+        let selection = requestedSelection ?? currentSwordSelection()
+        let configuration = SwordManager.performCurrentRegistryRead(
+            replacingIfNeeded: candidate
+        ) { manager, initialGeneration in
+            let configurationInstalledSourceGeneration =
+                routedSourceAuthorizationOwner.installedSourceGeneration &+ 1
+            let state = swordCoordinator.configure(
+                manager: manager,
+                selection: selection,
+                displaySettings: displaySettings
+            )
+            let sqliteInventories = sqliteRuntimeCoordinator.reload(
+                manager: manager,
+                primaryBibles: state.installedBibleModules,
+                primaryCommentaries: state.installedCommentaryModules,
+                primaryDictionaries: state.installedDictionaryModules
+            )
+            let sqliteSelections = sqliteRuntimeCoordinator.resolveSelections(
+                selection,
+                hasActiveSwordBible: state.activeModule != nil,
+                hasActiveSwordCommentary: state.activeCommentaryModule != nil
+            )
+            let finalGeneration = manager.contentAuthorizationGeneration
+            let registryWitness: BibleReaderBookListRegistryWitness?
+            if initialGeneration == finalGeneration {
+                registryWitness = BibleReaderBookListRegistryWitness(
+                    managerOwner: manager,
+                    managerGeneration: initialGeneration.managerGeneration,
+                    moduleStoreGeneration: initialGeneration.moduleStoreGeneration,
+                    installedSourceGeneration: configurationInstalledSourceGeneration
+                )
+            } else {
+                registryWitness = nil
+            }
 
-    let requestedSelection = currentSwordSelection()
-        let state = swordCoordinator.configure(
-            manager: mgr,
-      selection: requestedSelection,
-            displaySettings: displaySettings
-        )
+            routedSourceAuthorizationOwner.installedSourceGeneration =
+                configurationInstalledSourceGeneration
+            swordManager = manager
+            applySwordState(state, registryWitness: registryWitness)
+            installedBibleModules = sqliteInventories.bibles
+            installedCommentaryModules = sqliteInventories.commentaries
+            installedDictionaryModules = sqliteInventories.dictionaries
+            applySQLiteRuntimeSelections(sqliteSelections)
+            refreshBookList(under: manager)
+            return (manager: manager, state: state)
+        }
+        guard let configuration else {
+            logger.warning(
+                "Could not construct a current SWORD registry; retaining prior reader state"
+            )
+            return false
+        }
+
+        let state = configuration.state
         logger.info("SWORD found \(state.installedModules.count) installed modules")
         for mod in state.installedModules {
             let hasStrongs = mod.features.contains(.strongsNumbers)
-      logger.info(
-        "  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)"
-      )
+            logger.info(
+                "  Module: \(mod.name) (\(mod.description)) [\(mod.category.rawValue)] strongs=\(hasStrongs)"
+            )
         }
-
-        applySwordState(state)
-    let sqliteInventories = sqliteRuntimeCoordinator.reload(
-      manager: mgr,
-      primaryBibles: installedBibleModules,
-      primaryCommentaries: installedCommentaryModules,
-      primaryDictionaries: installedDictionaryModules
-    )
-    installedBibleModules = sqliteInventories.bibles
-    installedCommentaryModules = sqliteInventories.commentaries
-    installedDictionaryModules = sqliteInventories.dictionaries
-    let sqliteSelections = sqliteRuntimeCoordinator.resolveSelections(
-      requestedSelection,
-      hasActiveSwordBible: activeModule != nil,
-      hasActiveSwordCommentary: activeCommentaryModule != nil
-    )
-    applySQLiteRuntimeSelections(sqliteSelections)
-    refreshBookList()
-    if activeModule == nil && activeSQLiteBibleModule == nil {
+        if activeModule == nil && activeSQLiteBibleModule == nil {
             logger.warning("No Bible modules installed — using placeholder text")
         } else {
             logger.info("Using Bible module: \(self.activeModuleName)")
@@ -8149,8 +8189,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
         logBookListRefresh(module: activeModule, books: moduleBookList)
         if clientReady {
-            emitAdmittedAddonReload(using: mgr, bridge: bridge)
+            emitAdmittedAddonReload(using: configuration.manager, bridge: bridge)
         }
+        return true
     }
 
     /**
@@ -8255,13 +8296,21 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /**
      Applies a SWORD setup projection to controller-owned observable state.
 
-     - Parameter state: Installed-module catalog and active module handles generated from the
-       current `SwordManager`.
+     - Parameters:
+       - state: Installed-module catalog and active module handles generated from the current
+         `SwordManager`.
+       - registryWitness: Exact manager/root/controller generation that authorized `state` while a
+         shared root read excluded publication, or nil when a stable generation was not captured.
      - Side effects: Mutates installed-module arrays, active module references, selected initials,
-       and `moduleBookList` on the controller.
-     - Failure modes: None; absent modules are represented by nil handles in `state`.
+       and `moduleBookList` on the controller. A non-empty Bible list is retained for immediate
+       reuse only when the manager generation remained unchanged through configuration.
+     - Failure modes: Absent modules are represented by nil handles in `state`; an ownership or
+       generation change declines reuse so the normal refresh performs a fresh authoritative load.
      */
-    private func applySwordState(_ state: BibleReaderSwordState) {
+    private func applySwordState(
+        _ state: BibleReaderSwordState,
+        registryWitness: BibleReaderBookListRegistryWitness?
+    ) {
         installedBibleModules = state.installedBibleModules
         installedCommentaryModules = state.installedCommentaryModules
         installedDictionaryModules = state.installedDictionaryModules
@@ -8278,6 +8327,22 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         activeMapModule = state.activeMapModule
         activeMapModuleName = state.activeMapModuleName
         moduleBookList = state.moduleBookList
+        bookListRegistryWitness = registryWitness
+        let configuredSource = swordManager.flatMap { manager in
+            state.activeModule.flatMap { module in
+                let generation = manager.contentAuthorizationGeneration
+                return registryWitness?.sourceIdentityIfCurrent(
+                    managerOwner: manager,
+                    moduleOwner: module,
+                    backend: .sword,
+                    managerGeneration: generation.managerGeneration,
+                    moduleStoreGeneration: generation.moduleStoreGeneration,
+                    installedSourceGeneration:
+                        routedSourceAuthorizationOwner.installedSourceGeneration
+                )
+            }
+        }
+        bookListOwner.record(state.moduleBookList, for: configuredSource)
     }
 
     /**
@@ -8289,30 +8354,25 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
    - Side Effects: Reuses `other`'s `SwordManager`, resolves this controller's own SWORD handles,
      opens an independent SQLite catalog/connection set, reapplies SWORD options, and reopens an
      active EPUB only when the fresh combined registry still admits that exact package.
-     - Failure Modes: Returns `false` without mutation when the source controller has no
-       `SwordManager`. A newly installed native/SQLite owner suppresses stale copied EPUB state.
+     - Failure Modes: Returns `false` without mutation when the source controller has no manager or
+       a required current replacement manager cannot be constructed. A newly installed
+       native/SQLite owner suppresses stale copied EPUB state.
      - Important: This avoids constructing multiple C++ `SWMgr` instances during pane creation.
      */
     @discardableResult
     public func copyModuleState(from other: BibleReaderController) -> Bool {
         guard let mgr = other.swordManager else { return false }
-    activeModuleName = other.activeModuleName
-    activeCommentaryModuleName = other.activeCommentaryModuleName
-    activeDictionaryModuleName = other.activeDictionaryModuleName
-    activeGeneralBookModuleName = other.activeGeneralBookModuleName
-    activeMapModuleName = other.activeMapModuleName
-    activeModule = nil
-    activeSQLiteBibleModule = nil
-    activeCommentaryModule = nil
-    activeSQLiteCommentaryModule = nil
-    activeDictionaryModule = nil
-    activeSQLiteDictionaryModule = nil
-    activeGeneralBookModule = nil
-    activeMapModule = nil
+        let copiedSelection = BibleReaderSwordSelection(
+            activeModuleName: other.activeModuleName,
+            activeCommentaryModuleName: other.activeCommentaryModuleName,
+            activeDictionaryModuleName: other.activeDictionaryModuleName,
+            activeGeneralBookModuleName: other.activeGeneralBookModuleName,
+            activeMapModuleName: other.activeMapModuleName
+        )
 
-    // Configuration reuses the SWORD manager but creates a new SQLite library so concurrent
-    // pane rendering never shares one unchecked SQLite connection.
-    configureSwordManager(mgr)
+        // Configuration reuses a current SWORD manager, or atomically replaces an obsolete shared
+        // manager, while creating an independent SQLite library for this pane.
+        guard configureSwordManager(mgr, requestedSelection: copiedSelection) else { return false }
 
         if let epubIdentifier = other.activeEpubIdentifier,
            let epubReader = EpubReader(identifier: epubIdentifier),
@@ -18155,34 +18215,150 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /// Backward-compatible static accessor — returns just the book names from the default list.
     static let allBooks: [String] = defaultBooks.map(\.name)
 
-  /**
-   Refreshes the active Bible book list from the authoritative backend.
+    /**
+     Resolves the exact active Bible backend against the witnessed installed inventory.
 
-   - Side effects: Replaces `moduleBookList` with real serialized SQLite key metadata or SWORD
-     versification books and writes diagnostics for empty/error results.
-   - Failure modes: Reader failures clear the active list; no static canon is substituted while a
-     backend remains active. With no backend, the list is cleared for the explicit fallback path.
-   */
-    private func refreshBookList() {
-    if let module = activeSQLiteBibleModule {
-      do {
-        moduleBookList = try module.bookList()
-        if moduleBookList.isEmpty {
-          logger.error("SQLite module \(module.info.name, privacy: .public) returned no books")
+     - Parameter manager: Current controller manager while its canonical root read lease is held.
+     - Returns: Exact manager/module/backend identity from the configuration witness only when that
+       witness and the current native or SQLite registry still authorize the active handle.
+     - Side effects: May populate the manager's already-cached native registry projection; it never
+       traverses Bible keys or changes reader state.
+     - Failure modes: Manager replacement, post-configuration root mutation, unlock/refresh,
+       installed-registry replacement, locked/replaced native handles, stale SQLite catalog handles,
+       and backend ambiguity return nil before module content is read.
+     - Important: Call only inside `SwordManager.performCurrentModuleRegistryRead` so obsolete
+       managers are rejected before handle resolution and publication cannot begin during the read.
+     */
+    private func activeBookListSourceIdentity(
+        manager: SwordManager
+    ) -> BibleReaderBookListSourceIdentity? {
+        guard swordManager === manager,
+              let registryWitness = bookListRegistryWitness else { return nil }
+        let initialGeneration = manager.contentAuthorizationGeneration
+        let initialInstalledSourceGeneration =
+            routedSourceAuthorizationOwner.installedSourceGeneration
+        let moduleOwner: AnyObject
+        let backend: BibleReaderBookListSourceIdentity.Backend
+
+        if let sqliteModule = activeSQLiteBibleModule {
+            guard sqliteRuntimeCoordinator.preferredModule(
+                named: sqliteModule.info.name,
+                category: .bible
+            ) === sqliteModule else { return nil }
+            moduleOwner = sqliteModule
+            backend = .sqlite
+        } else if let module = activeModule {
+            guard manager.readableModule(named: module.info.name) === module else { return nil }
+            moduleOwner = module
+            backend = .sword
+        } else {
+            return nil
         }
-      } catch {
-        moduleBookList = []
-        logger.error(
-          "SQLite module \(module.info.name, privacy: .public) book list failed: \(error.localizedDescription, privacy: .public)"
+        let finalGeneration = manager.contentAuthorizationGeneration
+        let finalInstalledSourceGeneration =
+            routedSourceAuthorizationOwner.installedSourceGeneration
+        guard initialGeneration == finalGeneration,
+              initialInstalledSourceGeneration == finalInstalledSourceGeneration else {
+            return nil
+        }
+        return registryWitness.sourceIdentityIfCurrent(
+            managerOwner: manager,
+            moduleOwner: moduleOwner,
+            backend: backend,
+            managerGeneration: initialGeneration.managerGeneration,
+            moduleStoreGeneration: initialGeneration.moduleStoreGeneration,
+            installedSourceGeneration: initialInstalledSourceGeneration
         )
-      }
-      return
     }
-        guard let mod = activeModule else {
+
+    /**
+     Refreshes the active Bible book list from its exact authoritative backend generation.
+
+     Android retains `DocumentBibleBooks` for the same installed `Book` and evicts on Books
+     add/remove. iOS reuses the controller's non-empty value only while the manager object, backend
+     object, backend family, manager authorization generation, canonical root generation, and
+     controller installed-source generation all still match. Every module replacement, manager or
+     registry rebuild, unlock/refresh, native/SQLite change, empty result, or failed read performs a
+     fresh backend load on the next call.
+
+     - Side effects: Acquires a bounded shared module-root read, may traverse native SWORD keys or
+       query serialized SQLite key metadata, then replaces `moduleBookList` and the controller-owned
+       cache. SWORD empty/error results are logged.
+     - Failure modes: Missing configuration witnesses, in-progress/completed root mutation, reader
+       failures, or ownership changes clear the active list and cache without reading an obsolete
+       handle. No static canon is substituted while a backend remains active.
+     */
+    private func refreshBookList() {
+        guard let manager = swordManager else {
+            bookListOwner.invalidate()
             moduleBookList = []
             return
         }
-        moduleBookList = swordCoordinator.bookList(for: mod)
+        let refreshed = manager.performCurrentModuleRegistryRead { _ in
+            refreshBookList(under: manager)
+            return true
+        } ?? false
+        if !refreshed {
+            bookListOwner.invalidate()
+            moduleBookList = []
+        }
+    }
+
+    /**
+     Performs the exact-owner lookup and optional backend load under one shared root read.
+
+     - Parameter manager: Current controller manager whose root lease is already held.
+     - Side effects: May load native/SQLite book metadata, replace `moduleBookList`, update the
+       retained owner, and write empty/error diagnostics.
+     - Failure modes: An obsolete registry witness, active-handle mismatch, empty list, or backend
+       error clears reusable ownership; SQLite errors are logged and do not escape.
+     */
+    private func refreshBookList(under manager: SwordManager) {
+        guard let source = activeBookListSourceIdentity(manager: manager) else {
+            bookListOwner.invalidate()
+            moduleBookList = []
+            return
+        }
+
+        if let module = activeSQLiteBibleModule {
+            do {
+                let books = try bookListOwner.resolve(for: source) {
+                    try module.bookList()
+                }
+                guard activeBookListSourceIdentity(manager: manager) == source else {
+                    bookListOwner.invalidate()
+                    moduleBookList = []
+                    return
+                }
+                moduleBookList = books
+                if books.isEmpty {
+                    logger.error("SQLite module \(module.info.name, privacy: .public) returned no books")
+                }
+            } catch {
+                bookListOwner.invalidate()
+                moduleBookList = []
+                logger.error(
+                    "SQLite module \(module.info.name, privacy: .public) book list failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            return
+        }
+        guard let mod = activeModule else {
+            bookListOwner.invalidate()
+            moduleBookList = []
+            return
+        }
+        let coordinator = swordCoordinator
+        let books = bookListOwner.resolve(for: source) {
+            coordinator.bookList(for: mod)
+        }
+        guard activeBookListSourceIdentity(manager: manager) == source else {
+            bookListOwner.invalidate()
+            moduleBookList = []
+            logBookListRefresh(module: mod, books: [])
+            return
+        }
+        moduleBookList = books
         logBookListRefresh(module: mod, books: moduleBookList)
     }
 

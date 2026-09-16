@@ -674,9 +674,15 @@ final class SwordManagerTests: XCTestCase {
         XCTAssertFalse(manager.isContentAuthorizationCurrent(snapshot))
 
         let afterStoreMutation = manager.contentAuthorizationSnapshot(for: ["AUTHORIZED"])
-        XCTAssertTrue(manager.isContentAuthorizationCurrent(afterStoreMutation))
-        manager.refresh()
         XCTAssertFalse(manager.isContentAuthorizationCurrent(afterStoreMutation))
+
+        let currentManager = try XCTUnwrap(
+            SwordManager.currentRegistryManager(modulePath: fixture.root.path)
+        )
+        let currentSnapshot = currentManager.contentAuthorizationSnapshot(for: ["AUTHORIZED"])
+        XCTAssertTrue(currentManager.isContentAuthorizationCurrent(currentSnapshot))
+        currentManager.refresh()
+        XCTAssertFalse(currentManager.isContentAuthorizationCurrent(currentSnapshot))
     }
 
     /**
