@@ -8,6 +8,52 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Exercises the swipe route from issue #421 through real native gestures and visible Scripture.
+
+     The ordinary KJV fixture uses the shipping CHAPTER swipe preference. A single left swipe
+     must render Genesis 2, and a single right swipe must return to Genesis 1. The test neither
+     retries a failed gesture nor substitutes a controller call for the user interaction.
+     Passing establishes this fixture/runtime only; the report does not identify its module,
+     app version or saved workspace, and names a physical iPhone on iOS 18.1.
+     */
+    func testChapterSwipeNavigatesForwardAndBackWithoutCrash() {
+        let app = makeApp(fixtureScenario: "baseline", enablesDetailedAccessibilityExports: false)
+        app.launch()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
+
+        app.webViews.firstMatch.swipeLeft()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
+        waitForVisibleReaderText(containing: "Thus the heavens", in: app)
+        XCTAssertEqual(app.state, .runningForeground)
+
+        app.webViews.firstMatch.swipeRight()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /**
+     Exercises issue #421's chooser route with one book and chapter selection on an ordinary library.
+
+     Requires actual destination Scripture and a live foreground app after dismissing the chooser.
+     It supplies a reproducible baseline, not proof that the reporter's unknown installation is fixed.
+     */
+    func testChapterChooserNavigatesToSelectedChapterWithoutCrash() {
+        let app = makeApp(fixtureScenario: "baseline", enablesDetailedAccessibilityExports: false)
+        app.launch()
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
+        requireButton("bookChooserButton", in: app).tap()
+        XCTAssertTrue(requireElement("passageChooserScreen", in: app, timeout: 20).exists)
+        app.buttons["passageBookCell.Gen"].firstMatch.tap()
+        app.buttons["passageChapterCell.2"].firstMatch.tap()
+
+        waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
+        waitForVisibleReaderText(containing: "Thus the heavens", in: app)
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /**
      Reads across real Calvin commentary blocks and restores the visible passage after Bible return.
 
      The fixture starts at Genesis 1:22, whose short entry is followed by an empty 1:23 and the
