@@ -657,6 +657,66 @@ extension AndBibleUITests {
     }
 
     /**
+     Tests whether Vision's ordered line observations contain the expected visible reader text.
+
+     Vision preserves CSS line-end hyphenation as a trailing ASCII hyphen on one observation and
+     the remainder of the word on the next. This matcher keeps observation boundaries as newlines
+     and permits that exact `-\n` sequence between adjacent letters in the expected phrase.
+     Ordinary expected whitespace can span a line boundary; authored hyphens remain required.
+
+     - Parameters:
+       - lines: Ordered best-candidate strings returned by the Vision text observations.
+       - expectedText: The semantic visible phrase required by the journey.
+     - Returns: `true` when the case-insensitive observed text contains the phrase, allowing only
+       the evidenced line-boundary forms described above.
+     - Side effects: none.
+     - Failure modes: Returns `false` for empty expectations and when no projection contains the
+       phrase. OCR cannot distinguish an authored hyphen from automatic hyphenation at the exact
+       end of a line, so `-\n` is accepted as a discretionary break only where the expected phrase
+       has adjacent letters.
+     */
+    func visibleReaderOCRLines(_ lines: [String], contain expectedText: String) -> Bool {
+        let expected = expectedText
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !expected.isEmpty else { return false }
+
+        let observed = lines
+            .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        guard !observed.isEmpty else { return false }
+
+        let expectedCharacters = Array(expected)
+        var pattern = ""
+        for index in expectedCharacters.indices {
+            let character = expectedCharacters[index]
+            if character.isWhitespace {
+                pattern += #"\s+"#
+            } else {
+                pattern += NSRegularExpression.escapedPattern(for: String(character))
+                let nextIndex = expectedCharacters.index(after: index)
+                if nextIndex < expectedCharacters.endIndex {
+                    let next = expectedCharacters[nextIndex]
+                    if character == "-" && !next.isWhitespace {
+                        pattern += #"(?:\n)?"#
+                    } else if character.isLetter && next.isLetter {
+                        pattern += #"(?:-\n)?"#
+                    }
+                }
+            }
+        }
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive]
+        ) else { return false }
+        return expression.firstMatch(
+            in: observed,
+            range: NSRange(observed.startIndex..., in: observed)
+        ) != nil
+    }
+
+    /**
      Awaits text drawn in the on-screen WebView without changing the interaction.
 
      Vision reads the actual composited WebView screenshot. WebKit can split scripture across
@@ -696,13 +756,14 @@ extension AndBibleUITests {
             request.recognitionLanguages = ["en-US"]
             do {
                 try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
-                observedText = (request.results ?? [])
+                let observedLines = (request.results ?? [])
                     .compactMap { $0.topCandidates(1).first?.string }
+                observedText = observedLines
                     .joined(separator: " ")
                     .split(whereSeparator: { $0.isWhitespace })
                     .joined(separator: " ")
                 recognitionError = nil
-                return observedText.range(of: expectedText, options: .caseInsensitive) != nil
+                return self.visibleReaderOCRLines(observedLines, contain: expectedText)
             } catch {
                 recognitionError = error.localizedDescription
                 return false

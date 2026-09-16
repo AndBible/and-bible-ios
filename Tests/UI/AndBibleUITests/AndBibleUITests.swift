@@ -79,4 +79,46 @@ final class AndBibleUITests: XCTestCase {
         XCTAssertFalse(elementFrameIsUsable(overflowedMidpointFrame))
     }
 
+    /**
+     Verifies visible-reader OCR matching joins only line-boundary word hyphenation.
+
+     The Source146 iOS 26 observation split `descends` as `de-` and `scends`. The same matcher must
+     continue to preserve authored within-line and line-boundary hyphens, ordinary line spacing,
+     and a standalone dash at the end of a line.
+
+     - Side effects: none; this test does not launch the application.
+     - Failure modes: Fails if the matcher loses the reported rendered phrase, erases authored
+       within-line hyphens, or treats a spaced dash as word hyphenation.
+     */
+    func testVisibleReaderOCRMatcherHandlesOnlyLineBoundaryWordHyphenation() {
+        XCTAssertTrue(visibleReaderOCRLines(
+            ["24. Let the earth bring forth He de-", "scends to the sixth day,"],
+            contain: "He descends to the sixth day"
+        ))
+        XCTAssertTrue(visibleReaderOCRLines(
+            ["A first-century witness remains"],
+            contain: "first-century witness"
+        ))
+        XCTAssertFalse(visibleReaderOCRLines(
+            ["A first-century witness remains"],
+            contain: "firstcentury witness"
+        ))
+        XCTAssertFalse(visibleReaderOCRLines(
+            ["He de- scends within one observation"],
+            contain: "He descends"
+        ))
+        XCTAssertTrue(visibleReaderOCRLines(
+            ["The well-", "being of the reader"],
+            contain: "well-being of the reader"
+        ))
+        XCTAssertTrue(visibleReaderOCRLines(
+            ["the sixth day,", "on which the animals"],
+            contain: "day, on which"
+        ))
+        XCTAssertFalse(visibleReaderOCRLines(
+            ["The reader is ready -", "next passage"],
+            contain: "ready next"
+        ))
+    }
+
 }
