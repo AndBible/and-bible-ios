@@ -631,9 +631,14 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      * versification ordinal used by modal links, and every display string plus `osisRef` derives
      * from the bookmark's own versification (`bookmark.verseRange`). A failure here means the iOS
      * My Notes document can drift back to active-module ordinals or emit an `osisRef` that
-     * mismatches the emitted `v11n`, breaking link/scroll parity with Android.
+     * mismatches the emitted `v11n`, breaking link/scroll parity with Android. The bookmark belongs
+     * to a retained in-memory bookmark context so iOS 17 can resolve its relationship-backed fields
+     * independently of which other tests ran before it.
      */
     func testMyNotesBookmarkPayloadUsesKJVAOrdinalRangeAndSourceOriginalOrdinals() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let john316 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -660,6 +665,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             v11n: "NRSV",
             bookInitials: "NRSV"
         )
+        modelContext.insert(bookmark)
         bookmark.book = "John"
         let factory = BibleReaderAnnotationPayloadFactory(
             currentBook: "Genesis",
