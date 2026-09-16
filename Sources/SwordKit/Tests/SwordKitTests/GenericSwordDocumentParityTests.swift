@@ -424,6 +424,55 @@ final class GenericSwordDocumentParityTests: XCTestCase {
     }
 
     /**
+     Verifies fixed XML-declaration and sentence-boundary expressions remain deterministic when
+     processor calls overlap.
+
+     - Setup: Concurrently processes the same BOM-prefixed, mixed-case XML declaration and
+       two-sentence text node through independent fragment trees.
+     - Expected result: Every call removes the declaration and returns the same exact sentence text
+       and ordinal ordering.
+     - Failure meaning: Sharing immutable compiled expressions changed Android-compatible anchor
+       bytes, introduced cross-call match state, or made concurrent processor output nondeterministic.
+     - Side effects: Creates only task-local XML trees; no files or shared model state are changed.
+     */
+    func testProcessorSharedFixedExpressionsRemainDeterministicAcrossConcurrentCalls() async throws {
+        let sourceXML = "\u{FEFF}  <?XML version=\"1.0\"?><p>First sentence. Second sentence.</p>"
+        let expected = ["declaration-absent", "First sentence. ", "Second sentence."]
+
+        let snapshots = try await withThrowingTaskGroup(
+            of: [String].self,
+            returning: [[String]].self
+        ) { group in
+            for _ in 0..<16 {
+                group.addTask {
+                    let processed = try SwordOSISFragmentProcessor.process(
+                        sourceXML: sourceXML,
+                        category: .generalBook
+                    )
+                    let declarationState = processed.originalXML.localizedCaseInsensitiveContains("<?xml")
+                        ? "declaration-present"
+                        : "declaration-absent"
+                    let anchors = processed.anchorTexts.keys.sorted().compactMap {
+                        processed.anchorTexts[$0]
+                    }
+                    return [declarationState] + anchors
+                }
+            }
+
+            var results: [[String]] = []
+            for try await snapshot in group {
+                results.append(snapshot)
+            }
+            return results
+        }
+
+        XCTAssertEqual(snapshots.count, 16)
+        for snapshot in snapshots {
+            XCTAssertEqual(snapshot, expected)
+        }
+    }
+
+    /**
      Verifies commentary processing unwraps a direct verse while retaining its semantic children.
 
      A regression here would make equal linked commentary entries compare differently from Android
