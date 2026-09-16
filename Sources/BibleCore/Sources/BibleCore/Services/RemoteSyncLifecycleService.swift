@@ -200,8 +200,20 @@ public final class RemoteSyncLifecycleService {
     private let nowProvider: () -> Int64
     private let sleep: @Sendable (UInt64) async -> Void
 
+    /// Admission state for lifecycle and interactive sync work owned by this runtime.
+    private enum AdmissionState: Equatable {
+        /// New work may be admitted when no category operation is already running.
+        case active
+        /// Replacement preparation has closed admission, but a failed replacement may reopen it.
+        case paused
+        /// Container ownership ended permanently and this instance must never run or publish again.
+        case retired
+    }
+
     private var periodicTask: Task<Void, Never>?
     private var isSynchronizing = false
+    private var admissionState = AdmissionState.active
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Invoked after one category completed a successful ready-state synchronization pass.
     public var onCategorySynchronized: ((RemoteSyncCategorySynchronizationReport) -> Void)?
@@ -272,10 +284,18 @@ public final class RemoteSyncLifecycleService {
      - Failure modes:
        - invalid or incomplete remote configuration causes the immediate pass to short-circuit
          without failing the app scene transition
+       - paused or retired runtimes return before reading container-backed configuration, including
+         when admission closes while the immediate pass is suspended
      */
     @discardableResult
     public func sceneDidBecomeActive() async -> Bool {
+        guard admissionState == .active else {
+            return false
+        }
         let didSynchronize = await synchronizeIfNeeded(force: true)
+        guard admissionState == .active else {
+            return false
+        }
         if isLifecycleSyncConfigured() {
             startPeriodicSync()
         } else {
@@ -313,6 +333,107 @@ public final class RemoteSyncLifecycleService {
     }
 
     /**
+     Temporarily closes admission and waits for the currently admitted category operation to finish.
+
+     Runtime replacement calls this before constructing a container that may target the same stores.
+     The method cancels periodic polling, but deliberately does not cancel remote synchronization:
+     transports and persistence work may be noncooperative, so container safety requires waiting for
+     the real operation boundary. The already admitted pass remains authoritative and publishes its
+     normal callbacks and timestamp before this method returns. Cancellation of the caller does not
+     reopen admission or shorten the drain. The runtime-replacement owner must serialize pause,
+     construction, resume, and retirement decisions; multiple waiters may observe the same drain but
+     do not receive independent ownership tokens.
+
+     - Side Effects: Stops periodic polling, rejects new lifecycle and interactive sync work, and
+       suspends until the admitted category operation returns.
+     - Failure modes: This method does not throw. A cancelled waiting task still waits for the actual
+       operation to drain; call ``resumeAfterPause()`` only when replacement construction has failed.
+     */
+    public func pauseAndWait() async {
+        guard admissionState != .retired else {
+            await waitForAdmittedOperation()
+            return
+        }
+        admissionState = .paused
+        stopPeriodicSync()
+        await waitForAdmittedOperation()
+    }
+
+    /**
+     Reopens a temporarily paused runtime after replacement construction fails.
+
+     This does not restart periodic polling; normal scene lifecycle handling decides whether polling
+     should resume. A permanently retired instance remains closed.
+
+     - Side Effects: Changes paused admission state back to active.
+     - Failure modes: Calling this on an active or retired instance is a no-op.
+     */
+    public func resumeAfterPause() {
+        guard admissionState == .paused else {
+            return
+        }
+        admissionState = .active
+    }
+
+    /**
+     Permanently retires this runtime and waits for its currently admitted category operation.
+
+     Retirement suppresses lifecycle category callbacks, timestamp publication, and later categories
+     once an admitted async operation returns. An admitted manual closure is instead drained through
+     its complete UI-facing completion because the service cannot censor effects inside that closure;
+     the replacement owner should normally pause and drain before construction, then retire the idle
+     old runtime after accepting its replacement. Retirement never claims to cancel noncooperative
+     remote or persistence I/O. The instance cannot be resumed after this call. Multiple retirement
+     callers share the drain.
+
+     - Side Effects: Stops periodic polling, permanently rejects new work, and suspends until the
+       admitted category operation returns without publishing its stale result.
+     - Failure modes: This method does not throw. Caller cancellation does not end the drain early.
+     */
+    public func retire() async {
+        admissionState = .retired
+        stopPeriodicSync()
+        await waitForAdmittedOperation()
+    }
+
+    /**
+     Admits one complete settings-driven remote-sync operation through this runtime's lifecycle gate.
+
+     The closure must include the full manual operation, including synchronizer construction, settings
+     reads and writes, awaited remote/persistence work, and its UI-facing completion or error update.
+     When lifecycle work is already admitted, this method waits for that real operation boundary and
+     then rechecks admission. Pause or retirement therefore rejects queued manual work without running
+     its closure. Once admitted, pause and retirement wait for the closure itself to return; they do
+     not cancel it or claim to stop noncooperative I/O.
+
+     This is specifically the shared remote-sync admission boundary. It is not a general persistence
+     context lease and does not make unrelated writers safe for container replacement.
+
+     - Parameter operation: Main-actor operation containing the complete manual remote-sync workflow.
+     - Returns: `true` when the closure was admitted and completed, or `false` when pause or retirement
+       closed admission before it acquired ownership.
+     - Side Effects: May suspend behind lifecycle work, then runs the supplied closure exactly once.
+     - Failure modes: The nonthrowing closure owns its UI error presentation. Caller cancellation is
+       cooperative only inside the closure and does not bypass pause or retirement draining.
+     */
+    @discardableResult
+    public func performManualSynchronization(
+        _ operation: @MainActor () async -> Void
+    ) async -> Bool {
+        while admissionState == .active, isSynchronizing {
+            await waitForAdmittedOperation()
+        }
+        guard admissionState == .active, !isSynchronizing else {
+            return false
+        }
+
+        isSynchronizing = true
+        defer { finishAdmittedOperation() }
+        await operation()
+        return true
+    }
+
+    /**
      Runs one lifecycle-driven synchronization sweep when configuration and throttling allow it.
 
      - Parameter force: Whether the pass should bypass Android's `globalLastSynchronized` interval gate.
@@ -327,7 +448,7 @@ public final class RemoteSyncLifecycleService {
      */
     @discardableResult
     public func synchronizeIfNeeded(force: Bool) async -> Bool {
-        guard !isSynchronizing else {
+        guard admissionState == .active, !isSynchronizing else {
             return false
         }
 
@@ -354,18 +475,22 @@ public final class RemoteSyncLifecycleService {
         }
 
         isSynchronizing = true
-        defer { isSynchronizing = false }
+        defer { finishAdmittedOperation() }
 
         let now = nowProvider()
         var synchronizedAnyCategory = false
 
-        for category in enabledCategories {
+        categoryLoop: for category in enabledCategories {
             do {
                 let outcome = try await synchronizer.synchronize(
                     category,
                     modelContext: modelContext,
                     settingsStore: settingsStore
                 )
+
+                guard admissionState != .retired else {
+                    break categoryLoop
+                }
 
                 switch outcome {
                 case .synchronized(let report):
@@ -378,14 +503,24 @@ public final class RemoteSyncLifecycleService {
                         modelContext: modelContext,
                         settingsStore: settingsStore
                     )
+                    guard admissionState != .retired else {
+                        break categoryLoop
+                    }
                     synchronizedAnyCategory = true
                     onCategorySynchronized?(report)
                 case .requiresRemoteAdoption:
                     onInteractionRequired?(category, outcome)
                 }
             } catch {
+                guard admissionState != .retired else {
+                    break categoryLoop
+                }
                 onCategoryError?(category, error)
             }
+        }
+
+        guard admissionState != .retired else {
+            return false
         }
 
         if synchronizedAnyCategory {
@@ -464,7 +599,7 @@ public final class RemoteSyncLifecycleService {
      - Failure modes: Multiple start attempts are ignored while one task is already active.
      */
     private func startPeriodicSync() {
-        guard periodicTask == nil else {
+        guard admissionState == .active, periodicTask == nil else {
             return
         }
 
@@ -517,7 +652,7 @@ public final class RemoteSyncLifecycleService {
             SettingsStore
         ) async throws -> RemoteSyncCategorySynchronizationReport
     ) async -> Bool {
-        guard !isSynchronizing else {
+        guard admissionState == .active, !isSynchronizing else {
             return false
         }
 
@@ -533,16 +668,53 @@ public final class RemoteSyncLifecycleService {
         }
 
         isSynchronizing = true
-        defer { isSynchronizing = false }
+        defer { finishAdmittedOperation() }
 
         do {
             let report = try await operation(synchronizer, modelContext, settingsStore)
+            guard admissionState != .retired else {
+                return false
+            }
             remoteSettingsStore.globalLastSynchronized = nowProvider()
             onCategorySynchronized?(report)
             return true
         } catch {
-            onCategoryError?(category, error)
+            if admissionState != .retired {
+                onCategoryError?(category, error)
+            }
             return false
+        }
+    }
+
+    /**
+     Suspends until the admitted synchronization sweep or interactive operation reaches its defer.
+
+     - Side Effects: Stores a continuation when work is active; the synchronization defer resumes all
+       stored waiters after the last admitted operation has returned.
+     - Failure modes: Caller cancellation is intentionally ignored because it cannot prove underlying
+       remote I/O stopped. The waiter resumes only at the actual operation boundary.
+     */
+    private func waitForAdmittedOperation() async {
+        guard isSynchronizing else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            drainWaiters.append(continuation)
+        }
+    }
+
+    /**
+     Marks the admitted operation complete and resumes every pause or retirement waiter.
+
+     - Side Effects: Clears synchronization ownership and resumes retained continuations exactly once.
+     - Failure modes: This synchronous cleanup cannot fail and performs no I/O.
+     */
+    private func finishAdmittedOperation() {
+        isSynchronizing = false
+        let waiters = drainWaiters
+        drainWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 

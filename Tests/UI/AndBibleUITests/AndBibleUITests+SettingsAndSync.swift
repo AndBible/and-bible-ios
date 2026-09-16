@@ -306,6 +306,102 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies manual NextCloud sync uses the prepared runtime owner after an in-route iCloud mode
+     change.
+     *
+     * - Side effects:
+     *   - launches the deterministic adopt-existing fixture with the local iCloud runtime substitute
+     *   - changes iCloud mode while keeping the app-owned Sync Settings route visible
+     *   - returns to NextCloud and completes the My Documents reset-cloud confirmation workflow
+     *   - dismisses and reopens Sync Settings to verify category enablement was persisted by the
+     *     prepared runtime rather than rejected by the retired owner
+     * - Failure modes:
+     *   - fails if the iCloud mode change dismisses the existing app-owned route
+     *   - fails if manual synchronization remains bound to the retired lifecycle service
+     *   - fails if the reset-cloud result is not durable after direct route dismissal and reopen
+     */
+    func testSyncSettingsPreparedRuntimeOwnsManualSyncWithoutRecreatingRoute() {
+        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
+        app.launchEnvironment["UITEST_LOCAL_ICLOUD_RUNTIME_CONTAINER"] = "1"
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+
+        tapSyncBackend("ICLOUD", in: app)
+        waitForSyncState(
+            ["backend": "ICLOUD", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+        let iCloudToggle = requireElement("syncICloudEnabledToggle", in: app, timeout: 10)
+        let initialState = resolvedElementSemanticText("syncSettingsState", in: app) ?? ""
+        XCTAssertEqual(
+            syncStateToken(named: "icloudEnabled", in: initialState), "false",
+            "The baseline must start with iCloud disabled so this test actually prepares a new runtime."
+        )
+        tapElementReliably(iCloudToggle, timeout: 10)
+
+        waitForICloudSyncRuntimeApplyToSettle(in: app, timeout: 30)
+        waitForSyncState(
+            ["backend": "ICLOUD", "icloudEnabled": "true", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].exists,
+            "Preparing the replacement runtime must keep the existing Sync Settings route visible."
+        )
+
+        tapSyncBackend("NEXT_CLOUD", in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+        toggleSyncCategory(
+            "syncCategoryToggle::mydocuments",
+            in: app,
+            expectedTokens: [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "adoptOrCreate:mydocuments",
+            ],
+            timeout: 15
+        )
+        chooseSyncBootstrapPromptOption(
+            "Copy from this device to Cloud",
+            actionIdentifier: "syncBootstrapDialogAction::create",
+            expecting: ["pendingConfirmation": "resetCloud:mydocuments"],
+            in: app,
+            timeout: 10
+        )
+        tapAppOwnedDialogAction(
+            "syncConfirmationDialogAction::confirm",
+            dialogIdentifier: "syncConfirmationDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
+        waitForSyncState(
+            [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "none",
+                "pendingConfirmation": "none",
+                "lastConfirmation": "resetCloud:mydocuments",
+            ],
+            in: app,
+            timeout: 20
+        )
+
+        dismissSyncSettingsThroughExactRoles(in: app)
+        openSyncSettingsThroughExactRoles(in: app)
+        waitForSyncState(
+            ["backend": "NEXT_CLOUD", "enabled": "mydocuments"],
+            in: app,
+            timeout: 20
+        )
+        dismissSyncSettingsThroughExactRoles(in: app)
+    }
+
+    /**
      Verifies NextCloud invalid URL validation, category disabling, and backend switching.
      *
      * - Side effects:
@@ -474,16 +570,14 @@ extension AndBibleUITests {
 
      - Parameter app: Running application whose app-owned Sync Settings route is visible.
      - Side effects: Activates the exact Android Up button once.
-     - Failure modes: Records a failure if the exact screen, Up button, or reader drawer button does
-       not cross the expected visibility boundary.
+     - Failure modes: Records a failure if the exact Up button does not become actionable and then
+       disappear, or the reader drawer button does not become actionable after dismissal.
      */
     private func dismissSyncSettingsThroughExactRoles(in app: XCUIApplication) {
-        let screen = app.otherElements["syncSettingsScreen"].firstMatch
-        XCTAssertTrue(screen.waitForExistence(timeout: 10))
         let backButton = app.buttons["syncSettingsTopAppBarBackButton"].firstMatch
         XCTAssertTrue(waitForElementToBecomeHittable(backButton, timeout: 10))
         backButton.tap()
-        waitForElementToDisappear(screen, timeout: 10)
+        waitForElementToDisappear(backButton, timeout: 10)
         XCTAssertTrue(
             waitForElementToBecomeHittable(
                 app.buttons["readerNavigationDrawerButton"].firstMatch,
@@ -497,33 +591,13 @@ extension AndBibleUITests {
      Reopens Sync Settings from the restored reader through exact production roles.
 
      - Parameter app: Running application whose reader action surface is ready.
-     - Side effects: Opens the navigation drawer once, performs at most four reveal swipes on its
-       exact scroll surface, and activates Device synchronization once.
+     - Side effects: Uses the shared reader-action resolver to open the drawer, perform at most
+       four reveal swipes, and activate Device synchronization once. The action is never retried.
      - Failure modes: Records a failure if the exact drawer, Sync action, screen, or backend row does
        not become actionable.
      */
     private func openSyncSettingsThroughExactRoles(in app: XCUIApplication) {
-        let drawerButton = app.buttons["readerNavigationDrawerButton"].firstMatch
-        XCTAssertTrue(waitForElementToBecomeHittable(drawerButton, timeout: 20))
-        drawerButton.tap()
-
-        let drawer = app.scrollViews["readerNavigationDrawer"].firstMatch
-        guard drawer.waitForExistence(timeout: 10) else {
-            XCTFail("The exact reader navigation drawer ScrollView must appear after one open action.")
-            return
-        }
-        let syncAction = app.buttons["readerOpenSyncSettingsAction"].firstMatch
-        var syncIsHittable = waitForElementToBecomeHittable(syncAction, timeout: 1)
-        for _ in 0..<4 {
-            if syncIsHittable { break }
-            drawer.swipeUp()
-            syncIsHittable = waitForElementToBecomeHittable(syncAction, timeout: 1)
-        }
-        guard syncIsHittable else {
-            XCTFail("Device synchronization must become hittable after bounded drawer scrolling.")
-            return
-        }
-        syncAction.tap()
+        tapReaderAction("readerOpenSyncSettingsAction", in: app, timeout: 20)
 
         XCTAssertTrue(app.otherElements["syncSettingsScreen"].firstMatch.waitForExistence(timeout: 20))
         XCTAssertTrue(

@@ -815,103 +815,41 @@ extension AndBibleUITests {
     }
 
     /**
-     Switches Sync Settings to one backend through the production picker.
-     *
-     * - Parameters:
-     *   - backendRawValue: Target backend raw value that should become active.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the switch control to resolve and become
-     *     hittable.
-     * - Side effects:
-     *   - opens the backend picker and selects the requested production option
-     * - Failure modes:
-     *   - fails if no backend-switch control for the requested backend becomes available
+     Selects one backend through the app-owned synchronization dialog with one tap per control.
+
+     The production dialog exposes button identifiers by backend raw value. Android's English
+     `adapters_next_cloud` label is "Next Cloud"; using the unrelated spelling "NextCloud" with
+     fallback queries across twelve element roles hid this contract and prolonged failures.
+
+     - Parameters:
+       - backendRawValue: Backend raw value identifying the actual dialog choice.
+       - app: Running app with Sync Settings visible.
+       - timeout: Maximum wait for each required control to exist.
+     - Side effects: Opens the backend dialog and taps its identified button once.
+     - Failure modes: Fails for missing controls or an incorrect source-backed visible label; it
+       never retries the action or substitutes a different control role.
      */
     func tapSyncBackend(
         _ backendRawValue: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 15
     ) {
-        let picker = requireElement("syncBackendPicker", in: app, timeout: timeout)
-        tapElementReliably(picker, timeout: timeout)
+        let picker = app.buttons["syncBackendPicker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: timeout))
+        picker.tap()
 
         let backendLabel: String = switch backendRawValue {
-        case "ICLOUD":
-            "iCloud Sync"
-        case "NEXT_CLOUD":
-            "NextCloud"
-        default:
-            backendRawValue
+        case "ICLOUD": "iCloud Sync"
+        case "NEXT_CLOUD": "Next Cloud"
+        default: backendRawValue
         }
-
-        let option = resolveSyncBackendOption(named: backendLabel, in: app, timeout: timeout)
+        let option = app.buttons["syncBackendDialogChoice::\(backendRawValue)"]
         XCTAssertTrue(
             option.waitForExistence(timeout: timeout),
-            "Expected sync backend option '\(backendLabel)' to exist."
+            "Expected the app-owned choice for backend '\(backendRawValue)'."
         )
-        tapElementReliably(option, timeout: timeout)
-    }
-
-    /**
-     Resolves the first live picker option for one Sync backend label across the system control
-     presentations SwiftUI may choose on CI.
-     *
-     * - Parameters:
-     *   - backendLabel: User-visible backend option label.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the first option candidate to appear.
-     * - Returns: The first live picker-option candidate, preferring visible controls.
-     * - Side effects:
-     *   - probes multiple XCUI query families because SwiftUI `Picker` presentations may surface
-     *     options as buttons, cells, static texts, or generic elements depending on platform state
-     * - Failure modes:
-     *   - returns an unresolved fallback query when no picker option becomes available before the
-     *     timeout expires; the caller records the assertion failure
-     */
-    func resolveSyncBackendOption(
-        named backendLabel: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> XCUIElement {
-        let candidates: [XCUIElement] = [
-            app.sheets.buttons[backendLabel].firstMatch,
-            app.sheets.staticTexts[backendLabel].firstMatch,
-            app.alerts.buttons[backendLabel].firstMatch,
-            app.alerts.staticTexts[backendLabel].firstMatch,
-            app.collectionViews.buttons[backendLabel].firstMatch,
-            app.collectionViews.staticTexts[backendLabel].firstMatch,
-            app.tables.buttons[backendLabel].firstMatch,
-            app.tables.staticTexts[backendLabel].firstMatch,
-            app.buttons[backendLabel].firstMatch,
-            app.cells[backendLabel].firstMatch,
-            app.staticTexts[backendLabel].firstMatch,
-            app.otherElements[backendLabel].firstMatch,
-        ]
-
-        func resolvedBackendOption() -> XCUIElement? {
-            if let visible = candidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                return visible
-            }
-            return candidates.first(where: { $0.exists })
-        }
-
-        if let option = resolvedBackendOption() {
-            return option
-        }
-
-        var resolvedOption: XCUIElement?
-        _ = waitForUITestCondition(
-            "Wait for Sync backend option \(backendLabel)",
-            timeout: max(0, timeout)
-        ) {
-            if let option = resolvedBackendOption() {
-                resolvedOption = option
-                return true
-            }
-            return false
-        }
-
-        return resolvedOption ?? resolvedBackendOption() ?? candidates[0]
+        XCTAssertEqual(option.label, backendLabel)
+        option.tap()
     }
 
     /**

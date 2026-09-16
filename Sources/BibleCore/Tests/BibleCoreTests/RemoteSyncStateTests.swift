@@ -18,6 +18,44 @@ private enum TestStartupContainerError: LocalizedError {
 }
 
 /**
+ Deterministically suspends a mode-change handler until a test releases it.
+
+ The entry continuation lets concurrency tests observe the admitted operation without polling or
+ sleeping. All state is main-actor isolated to match `SyncService.ModeChangeHandler`.
+ */
+@MainActor
+private final class SuspendedModeChangeHandler {
+    private var didEnter = false
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /** Suspends the caller after notifying every waiter that the handler was entered. */
+    func suspendUntilReleased() async {
+        didEnter = true
+        let waiters = entryWaiters
+        entryWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    /** Waits until the handler has entered its controlled suspension point. */
+    func waitUntilEntered() async {
+        guard !didEnter else { return }
+        await withCheckedContinuation { continuation in
+            entryWaiters.append(continuation)
+        }
+    }
+
+    /** Releases the currently suspended handler. */
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+/**
  BibleCore remote-sync state and bootstrap tests migrated out of the app-host bundle.
 
  This suite protects sync settings persistence, iCloud startup recovery, WebDAV configuration,
@@ -211,7 +249,7 @@ final class RemoteSyncStateTests: XCTestCase {
      applier result becomes the active mode immediately and keeps the toggle usable.
      */
     @MainActor
-    func testSyncServiceAppliesRuntimeModeChangeWithoutPendingRestart() throws {
+    func testSyncServiceAppliesRuntimeModeChangeWithoutPendingRestart() async throws {
         let defaultsName = "org.andbible.tests.sync-toggle-live.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
         defer {
@@ -231,11 +269,130 @@ final class RemoteSyncStateTests: XCTestCase {
             return SyncModeChangeResult(effectiveEnabled: requestedMode)
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertEqual(requestedModes, [true])
         XCTAssertTrue(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies one suspended runtime replacement excludes duplicate toggles and releases admission
+     after successful settlement.
+
+     The controlled handler models the app shell draining the old persistence runtime. A second
+     toggle during that interval must not request another replacement even if public sync status
+     changes independently. After the first operation settles, a fresh toggle must be admitted.
+     */
+    @MainActor
+    func testSyncServiceSerializesSuspendedSuccessfulModeChanges() async throws {
+        let defaultsName = "org.andbible.tests.sync-toggle-serialized-success.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
+        service.setInitialState(enabled: false)
+        let suspension = SuspendedModeChangeHandler()
+        var requestedModes: [Bool] = []
+        service.setModeChangeHandler { requestedMode in
+            requestedModes.append(requestedMode)
+            await suspension.suspendUntilReleased()
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+
+        let firstToggle = Task { await service.toggleSync() }
+        await suspension.waitUntilEntered()
+
+        XCTAssertTrue(service.isModeChangeInFlight)
+        XCTAssertEqual(service.state, .syncing)
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+
+        service.recordRemoteChange(at: Date(timeIntervalSince1970: 1_806_000_000))
+        XCTAssertEqual(service.state, .idle)
+        await service.toggleSync()
+        XCTAssertEqual(requestedModes, [true])
+
+        suspension.release()
+        await firstToggle.value
+
+        XCTAssertFalse(service.isModeChangeInFlight)
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+
+        service.setModeChangeHandler { requestedMode in
+            requestedModes.append(requestedMode)
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+        await service.toggleSync()
+
+        XCTAssertEqual(requestedModes, [true, false])
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertEqual(service.state, .disabled)
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies a suspended failed replacement rolls back preference and runtime state, releases its
+     admission guard, and permits a later independent toggle.
+     */
+    @MainActor
+    func testSyncServiceSettlesSuspendedFailureBeforeAdmittingFreshToggle() async throws {
+        enum RuntimeModeChangeError: LocalizedError {
+            case rejected
+
+            var errorDescription: String? { "CloudKit runtime rebuild failed" }
+        }
+
+        let defaultsName = "org.andbible.tests.sync-toggle-serialized-failure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
+        service.setInitialState(enabled: false)
+        let suspension = SuspendedModeChangeHandler()
+        var requestCount = 0
+        service.setModeChangeHandler { _ in
+            requestCount += 1
+            await suspension.suspendUntilReleased()
+            throw RuntimeModeChangeError.rejected
+        }
+
+        let failedToggle = Task { await service.toggleSync() }
+        await suspension.waitUntilEntered()
+        await service.toggleSync()
+        XCTAssertEqual(requestCount, 1)
+
+        suspension.release()
+        await failedToggle.value
+
+        XCTAssertFalse(service.isModeChangeInFlight)
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .error("CloudKit runtime rebuild failed"))
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+
+        service.setModeChangeHandler { requestedMode in
+            requestCount += 1
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+        await service.toggleSync()
+
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertTrue(service.isEnabled)
         XCTAssertEqual(service.state, .idle)
         XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
     }
@@ -249,7 +406,7 @@ final class RemoteSyncStateTests: XCTestCase {
      requiring a restart or claiming the requested CloudKit mode is active.
      */
     @MainActor
-    func testSyncServiceRevertsPreferenceWhenRuntimeModeChangeFails() throws {
+    func testSyncServiceRevertsPreferenceWhenRuntimeModeChangeFails() async throws {
         enum RuntimeModeChangeError: LocalizedError {
             case rejected
 
@@ -274,7 +431,7 @@ final class RemoteSyncStateTests: XCTestCase {
             throw RuntimeModeChangeError.rejected
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertFalse(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
@@ -291,7 +448,7 @@ final class RemoteSyncStateTests: XCTestCase {
      container.
      */
     @MainActor
-    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() throws {
+    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() async throws {
         enum RuntimeModeChangeError: LocalizedError {
             case rejected
 
@@ -321,7 +478,7 @@ final class RemoteSyncStateTests: XCTestCase {
             throw RuntimeModeChangeError.rejected
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertTrue(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
@@ -339,7 +496,7 @@ final class RemoteSyncStateTests: XCTestCase {
      silent no-op when no runtime stack can be rebuilt.
      */
     @MainActor
-    func testSyncServiceFallsBackToPendingRestartWithoutRuntimeModeHandler() throws {
+    func testSyncServiceFallsBackToPendingRestartWithoutRuntimeModeHandler() async throws {
         let defaultsName = "org.andbible.tests.sync-toggle-fallback.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
         defer {
@@ -354,7 +511,7 @@ final class RemoteSyncStateTests: XCTestCase {
         )
         service.setInitialState(enabled: false)
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertTrue(service.isEnabled)
         XCTAssertTrue(service.requiresRestart)

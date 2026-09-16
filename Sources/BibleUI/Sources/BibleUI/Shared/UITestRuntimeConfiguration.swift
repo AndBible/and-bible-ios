@@ -1,7 +1,8 @@
 import Foundation
+import BibleCore
 
 /// Shared runtime flags consumed by deterministic UI-test instrumentation.
-enum UITestRuntimeConfiguration {
+public enum UITestRuntimeConfiguration {
     private static let detailedAccessibilityExportsEnvironmentKey = "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let detailedAccessibilityExportsArgument = "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let myNotesAppendTextEnvironmentKey = "UITEST_MY_NOTES_APPEND_TEXT"
@@ -14,6 +15,32 @@ enum UITestRuntimeConfiguration {
     /// Test-only remote sync bootstrap paths that can replace live backend transport in UI tests.
     enum RemoteSyncBootstrapScenario: String {
         case adoptExisting = "adopt-existing"
+    }
+
+    /**
+     Creates the deterministic remote transport override requested by UI automation.
+
+     The returned service shares the process-session adapter between settings-driven and lifecycle-
+     driven synchronization while retaining the caller's real `RemoteSyncSettingsStore`, device
+     identity, model contexts, and lifecycle admission. Normal launches return `nil` so callers use
+     their production synchronization factory.
+
+     - Parameter remoteSettingsStore: Real local settings owner for the active persistence runtime.
+     - Returns: A deterministic synchronization service only for the adopt-existing scenario.
+     - Side effects: May persist the stable source-device identifier on first construction.
+     - Failure modes: This factory cannot fail.
+     */
+    @MainActor
+    public static func makeRemoteSynchronizationServiceOverride(
+        using remoteSettingsStore: RemoteSyncSettingsStore
+    ) -> RemoteSyncSynchronizationService? {
+        guard remoteSyncBootstrapScenario == .adoptExisting else { return nil }
+        return RemoteSyncSynchronizationService(
+            adapter: UITestRemoteSyncAdapter.appSession,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
+            deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
+            nowProvider: { 1_735_689_900_000 }
+        )
     }
 
     /// Upper bound for test-only row-token exports embedded into accessibility state strings.

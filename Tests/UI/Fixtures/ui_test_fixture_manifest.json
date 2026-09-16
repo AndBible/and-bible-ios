@@ -49,6 +49,7 @@
   "AndBibleUITests/AndBibleUITests/testSwapActivityFromCommentaryUnlocksExactRetainedBibleSuggestion": "locked-suggested-commentary",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsCategoryDisableAndBackendSwitchPersistAcrossDirectReopen": "sync-nextcloud-bookmarks-enabled",
   "AndBibleUITests/AndBibleUITests/testSyncSettingsICloudToggleDoesNotRequireRestart": "sync-nextcloud-bookmarks-enabled",
-  "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "baseline",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsMyDocumentsAdoptCreateChoiceSynchronizesFromVisibleWorkflow": "sync-nextcloud-adopt-existing",
+  "AndBibleUITests/AndBibleUITests/testSyncSettingsPreparedRuntimeOwnsManualSyncWithoutRecreatingRoute": "sync-nextcloud-adopt-existing",
   "AndBibleUITests/AndBibleUITests/testTextEntrySemanticValueCandidatesUnwrapOptionalPlaceholderForms": "none"
 }

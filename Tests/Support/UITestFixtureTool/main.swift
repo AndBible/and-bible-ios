@@ -63,6 +63,7 @@ private enum FixtureScenario: String, CaseIterable {
     case localQuickDocuments = "local-quick-documents"
     case longBibleQuickSelector = "long-bible-quick-selector"
     case syncNextCloud = "sync-nextcloud"
+    case syncNextCloudAdoptExisting = "sync-nextcloud-adopt-existing"
     case syncNextCloudBookmarksEnabled = "sync-nextcloud-bookmarks-enabled"
     case displayColorsCustom = "display-colors-custom"
     case readerNightMode = "reader-night-mode"
@@ -550,6 +551,8 @@ private final class FixtureContext {
             try seedLongBibleQuickSelector()
         case .syncNextCloud:
             seedSyncNextCloud(enabledCategories: [])
+        case .syncNextCloudAdoptExisting:
+            try seedSyncNextCloudAdoptExisting()
         case .syncNextCloudBookmarksEnabled:
             seedSyncNextCloud(enabledCategories: [.bookmarks])
         case .displayColorsCustom:
@@ -2383,15 +2386,37 @@ private final class FixtureContext {
     }
 
     /**
-     Seeds remote-sync settings for the NextCloud backend.
+     Seeds the persisted NextCloud backend choice and category toggles.
      *
      * - Parameter enabledCategories: Categories that should start enabled.
+     * - Side effects: Writes the backend and every current category toggle to the fixture's local
+     *   SwiftData settings store.
+     * - Failure modes: Underlying fixture settings writes retain `SettingsStore` soft-failure behavior.
      */
     private func seedSyncNextCloud(enabledCategories: [RemoteSyncCategory]) {
         remoteSyncSettingsStore.selectedBackend = .nextCloud
         for category in RemoteSyncCategory.allCases {
             remoteSyncSettingsStore.setSyncEnabled(enabledCategories.contains(category), for: category)
         }
+    }
+
+    /**
+     Seeds the adopt-existing UI workflow with real persisted NextCloud fields and disabled toggles.
+     *
+     * - Side effects: Writes non-secret WebDAV configuration and every current category toggle to
+     *   the fixture's local SwiftData settings store.
+     * - Throws: Rethrows fixture secret-store cleanup failures while saving the configuration.
+     */
+    private func seedSyncNextCloudAdoptExisting() throws {
+        seedSyncNextCloud(enabledCategories: [])
+        try remoteSyncSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://example.invalid/remote.php/dav/files/ui-test",
+                username: "ui-test",
+                folderPath: nil
+            ),
+            password: nil
+        )
     }
 
     /**

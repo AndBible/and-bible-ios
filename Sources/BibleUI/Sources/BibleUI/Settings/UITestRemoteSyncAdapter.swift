@@ -4,10 +4,10 @@ import BibleCore
 /**
  Deterministic remote-sync adapter used only for UI automation launch scenarios.
 
- The adapter gives Sync Settings a same-named remote folder without requiring live WebDAV or
- Google Drive credentials. Normal app launches never instantiate this type; `SyncSettingsView`
- only uses it when the UI-test runtime configuration explicitly requests the adopt-existing
- bootstrap branch.
+ The adapter gives lifecycle-driven and settings-driven synchronization a shared same-named remote
+ folder without requiring live WebDAV or Google Drive credentials. Normal app launches never
+ instantiate this type; `UITestRuntimeConfiguration` supplies it to both callers only when UI-test
+ automation explicitly requests the adopt-existing bootstrap branch.
  */
 actor UITestRemoteSyncAdapter: RemoteSyncAdapting, RemoteSyncConditionalFileUploading {
     /**
