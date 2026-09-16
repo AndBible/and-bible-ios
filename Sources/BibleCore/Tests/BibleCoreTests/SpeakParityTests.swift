@@ -436,7 +436,7 @@ final class SpeakParityTests: XCTestCase {
      fixture also proves unavailable modules and unknown canons fail before provider construction.
      */
     func testBibleSourceResolverUsesRequestedModuleAndAuthoritativeVersification() throws {
-        let manager = try XCTUnwrap(SwordManager(modulePath: repositorySwordFixturePath()))
+        let manager = try XCTUnwrap(SwordManager(modulePath: temporarySwordFixturePath()))
         let sourceStart = try XCTUnwrap(
             SwordVersification.referenceIndex(
                 for: .init(osisBookId: "Ps", chapter: 10, verse: 2),
@@ -531,7 +531,7 @@ final class SpeakParityTests: XCTestCase {
 
     /** Verifies Bible checkpoint reconstruction preserves exact target-module position and bounds. */
     func testBibleCheckpointReconstructionUsesPersistedModuleAndVersification() throws {
-        let manager = try XCTUnwrap(SwordManager(modulePath: repositorySwordFixturePath()))
+        let manager = try XCTUnwrap(SwordManager(modulePath: temporarySwordFixturePath()))
         let start = try XCTUnwrap(
             SwordVersification.referenceIndex(
                 for: .init(osisBookId: "Gen", chapter: 1, verse: 1),
@@ -2000,15 +2000,31 @@ final class SpeakParityTests: XCTestCase {
         }
     }
 
-    /** Locates the checked-in KJV SWORD fixture without depending on process working directory. */
-    private func repositorySwordFixturePath() throws -> String {
+    /**
+     Copies the checked-in SWORD fixture into a unique directory owned by this test.
+
+     Native module discovery writes a configuration cache, so the repository fixture must never be
+     opened as a live module root. XCTest removes this copy after the test's local manager and module
+     owners leave scope. Throws on missing fixture, copy failure, or teardown cleanup failure.
+     */
+    private func temporarySwordFixturePath() throws -> String {
         var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while candidate.path != "/" {
             let packageURL = candidate.appendingPathComponent("Package.swift", isDirectory: false)
             if FileManager.default.fileExists(atPath: packageURL.path) {
-                return candidate
-                    .appendingPathComponent("Sources/BibleUI/Tests/BibleUITests/Fixtures/sword", isDirectory: true)
-                    .path
+                let source = candidate.appendingPathComponent(
+                    "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword", isDirectory: true
+                )
+                let copy = FileManager.default.temporaryDirectory.appendingPathComponent(
+                    "SpeakParityTests-\(UUID().uuidString)", isDirectory: true
+                )
+                addTeardownBlock {
+                    if FileManager.default.fileExists(atPath: copy.path) {
+                        try FileManager.default.removeItem(at: copy)
+                    }
+                }
+                try FileManager.default.copyItem(at: source, to: copy)
+                return copy.path
             }
             candidate.deleteLastPathComponent()
         }
