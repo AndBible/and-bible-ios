@@ -10,6 +10,10 @@ import XCTest
  `experiments/reader/MyNotesRangeOracle.java`, not from the Swift implementation under test. The
  versification resources, converter, and `VerseRange` naming source are byte-for-byte unchanged
  from iOS's pinned JSword ancestor `0da7412d`.
+
+ These fixtures exercise expansion of an already selected source chapter, as retained by Android
+ pseudo-document selection or synchronized target updates. They do not model explicit My Notes
+ link admission, which maps the selected verse to KJVA before expanding that KJVA chapter.
  */
 final class MyNotesChapterReferenceTests: XCTestCase {
     /**

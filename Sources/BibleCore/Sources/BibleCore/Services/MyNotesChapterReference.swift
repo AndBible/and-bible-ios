@@ -42,11 +42,16 @@ public struct MyNotesSourceChapter: Sendable, Equatable {
 /**
  Carries Android's authoritative KJVA span and heading for one source My Notes chapter.
 
- Android expands the selected source chapter with introductions disabled, clamps both endpoint
- chapters and verses to at least one, converts each endpoint through JSword, and then constructs a
- KJVA `VerseRange`. This immutable value preserves the exact request identity while exposing only
- strict mapped or identity KJVA results. Public-converter coordinate fallbacks never become
- authoritative ordinals.
+ This is the chapter-expansion boundary, not the admission policy for every My Notes route.
+ Pseudo-document selection and synchronized target updates through `currentBible.doSetKey` can
+ retain an active-source chapter here.
+ Explicit links, passage choices, and next/previous first map their selected verse to KJVA; callers
+ must pass that resulting KJVA chapter rather than expand the original source chapter.
+
+ Expansion disables introductions, clamps both endpoint chapters and verses to at least one,
+ converts each endpoint through JSword, and constructs a KJVA `VerseRange`. This immutable value
+ preserves the exact request identity while exposing only strict mapped or identity KJVA results.
+ Public-converter coordinate fallbacks never become authoritative ordinals.
  */
 public struct MyNotesChapterReference: Sendable, Equatable {
     /// Exact validated source request, retaining chapter `0` when selected.

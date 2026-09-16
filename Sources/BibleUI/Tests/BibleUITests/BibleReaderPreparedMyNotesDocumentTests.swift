@@ -9,7 +9,13 @@ import XCTest
 
 @MainActor
 final class BibleReaderPreparedMyNotesDocumentTests: XCTestCase {
-    /** A divergent source chapter emits its complete authoritative mapped KJVA span and heading. */
+    /**
+     A prepared source chapter emits its complete mapped KJVA span and heading.
+
+     This serialization fixture represents a retained-source pseudo-document or synchronized target request.
+     Explicit links map their selected verse before chapter expansion and need separate routing
+     coverage; this test does not establish which ingress supplied the prepared reference.
+     */
     func testEncodedDocumentUsesMappedCrossChapterReference() throws {
         let reference = try XCTUnwrap(
             MyNotesChapterReference(

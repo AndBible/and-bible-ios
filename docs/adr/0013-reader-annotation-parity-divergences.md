@@ -103,6 +103,21 @@ time.
   Chapter stepping also does not wrap at the canon boundary the way
   Android's `BibleTraverser` does.
 
+> **My Notes projection-order correction (2026-09-16).** The divergent-canon
+> follow-up above describes source-chapter expansion too broadly. Android's
+> explicit My Notes links, next/previous actions, and passage selections call
+> `CurrentMyNotePage.setKey`, which converts the selected verse to the fake
+> document's KJVA versification before expanding its chapter. Selecting My Notes
+> without a new key, or synchronizing through `currentBible.doSetKey`, can retain
+> the active-source chapter until page construction and then map its endpoints
+> to KJVA. For example, an explicit Vulgate Psalm 9:22 link renders KJVA Psalm 10;
+> retaining the Vulgate Psalm 9 chapter produces KJVA Psalms 9–10. Follow-up work
+> must preserve the distinction. This corrects the factual premise of a
+> follow-up; the accepted intentional divergences and historical prose remain
+> unchanged. Sources: Android `CurrentPageManager.setCurrentDocumentAndKey`,
+> `CurrentCommentaryPage.doSetKey`, `CurrentMyNotePage.currentPageContent`, and
+> `WindowSync.updateInactiveBibleKey`.
+
 ## Consequences
 
 Future parity reports touching these areas should be checked against this
