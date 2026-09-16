@@ -162,6 +162,37 @@ sampling is used, retain its ownership evidence and distinguish native app memor
 from WebContent. Resident memory includes allocator reserves and shared pages; a
 rise alone does not establish a leak.
 
+## Investigate memory growth
+
+Record both resident size and physical footprint for the same process identity.
+On the simulator host, `proc_pid_rusage` exposes these separately as
+`ri_resident_size` and `ri_phys_footprint`. Check the SDK's structure layout and
+return status, preserve process birth identity, and align samples with the cycle
+timestamps. Separate launch warmup from repeated use. One-second sampling describes
+trends and can miss short peaks. A rising RSS with stable footprint does not show
+an equivalent increase in memory charged to the app.
+
+Use a separate diagnostic replay for `vmmap -summary <pid>`,
+`heap -s --noContent <pid>`, or
+`leaks --noContent --outputGraph=<path> <pid>`. These tools can pause or perturb the
+target, so do not pool their timings with the baseline. Retain capture start/end
+times, exit status and errors; an incomplete or timed-out capture is not a valid
+checkpoint. Verify that the tool inspected the intended app and simulator runtime.
+Offline analysis of a saved memory graph avoids further disturbance of the app.
+
+Compare live allocated bytes, object counts and retaining owners at equivalent
+workflow checkpoints. Distinguish unreachable leaks from reachable caches,
+temporary allocation churn, and clean/shared residency. A stable total heap or a
+zero-leak scan does not prove every ownership path is correct. Conversely, a
+large process-lifetime cache can be an optimization target without being a leak;
+identify its owner and behavioral contract before changing its representation.
+Memory-graph reachability can include conservative pointer matches; confirm large
+retaining paths against source ownership and allocation evidence. Also check native
+library discovery paths: simulator access to a developer installation can load
+resources that are absent from the app package and unavailable on a phone.
+Keep app and WebContent conclusions separate, including when WebContent ownership
+can only be qualified to the dedicated simulator.
+
 ## What the measurements establish
 
 Clock time includes XCTest action and accessibility observation overhead. “Process launch” terminates the app but does not purge OS filesystem caches. CPU and memory metrics cover the app process; they do not cover WebContent. A five-sample nearest-rank p95 is simply the observed maximum and cannot establish tail latency. Compare distributions across independent matched runs, not a single best iteration.
