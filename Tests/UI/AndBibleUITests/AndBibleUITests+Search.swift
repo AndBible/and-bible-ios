@@ -7,6 +7,105 @@ import UIKit
 
 extension AndBibleUITests {
     /**
+     Exercises issue #421's chapter-swipe route through one gesture in each direction.
+
+     The ordinary KJV fixture starts on Genesis 1 with the shipping chapter-swipe preference. The
+     test observes actual WebView Scripture after each gesture and requires the app to remain live;
+     it does not retry either gesture or replace the interaction with a controller call.
+
+     - Side effects:
+       - launches the baseline KJV fixture
+       - swipes the production reader WebView left once and right once
+     - Failure modes:
+       - fails if the reader does not visibly render Genesis 2 and then Genesis 1
+       - fails if either navigation terminates or backgrounds the app
+     */
+    func testChapterSwipeNavigatesForwardAndBackWithoutCrash() {
+        let app = makeApp()
+        app.launch()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(
+            webView.waitForExistence(timeout: 20),
+            "Expected the production reader WebView before exercising chapter swipes."
+        )
+        let genesisOneText = webView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "In the beginning")
+        ).firstMatch
+        XCTAssertTrue(
+            genesisOneText.waitForExistence(timeout: 20) && isElementVisible(genesisOneText, within: webView),
+            "Expected visible Genesis 1 Scripture before swiping."
+        )
+
+        webView.swipeLeft()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
+        let genesisTwoText = webView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Thus the heavens")
+        ).firstMatch
+        XCTAssertTrue(
+            genesisTwoText.waitForExistence(timeout: 20) && isElementVisible(genesisTwoText, within: webView),
+            "Expected visible Genesis 2 Scripture after one left swipe."
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+
+        webView.swipeRight()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+        XCTAssertTrue(
+            genesisOneText.waitForExistence(timeout: 20) && isElementVisible(genesisOneText, within: webView),
+            "Expected visible Genesis 1 Scripture after one right swipe."
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /**
+     Exercises issue #421's chooser route through the production book and chapter controls.
+
+     The ordinary KJV fixture opens the chooser, selects Genesis and chapter 2 exactly once, and
+     then requires destination Scripture in the reader WebView while the app remains foregrounded.
+
+     - Side effects:
+       - launches the baseline KJV fixture
+       - opens the passage chooser and selects Genesis 2 through accessibility-identified buttons
+     - Failure modes:
+       - fails if the chooser route does not dismiss into visible Genesis 2 Scripture
+       - fails if selection terminates or backgrounds the app
+     */
+    func testChapterChooserNavigatesToSelectedChapterWithoutCrash() {
+        let app = makeApp()
+        app.launch()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(
+            webView.waitForExistence(timeout: 20),
+            "Expected the production reader WebView before opening the passage chooser."
+        )
+        let genesisOneText = webView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "In the beginning")
+        ).firstMatch
+        XCTAssertTrue(
+            genesisOneText.waitForExistence(timeout: 20) && isElementVisible(genesisOneText, within: webView),
+            "Expected visible Genesis 1 Scripture before opening the passage chooser."
+        )
+
+        requireButton("bookChooserButton", in: app).tap()
+        XCTAssertTrue(requireElement("passageChooserScreen", in: app, timeout: 20).exists)
+        app.buttons["passageBookCell.Gen"].firstMatch.tap()
+        app.buttons["passageChapterCell.2"].firstMatch.tap()
+
+        waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
+        let genesisTwoText = webView.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Thus the heavens")
+        ).firstMatch
+        XCTAssertTrue(
+            genesisTwoText.waitForExistence(timeout: 20) && isElementVisible(genesisTwoText, within: webView),
+            "Expected visible Genesis 2 Scripture after chooser selection."
+        )
+        XCTAssertEqual(app.state, .runningForeground)
+    }
+
+    /**
      Verifies reader administration actions and Settings route Android shortcut rows.
      *
      * Package tests own the full Application Preferences row catalog. This UI smoke keeps the live

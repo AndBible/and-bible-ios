@@ -588,13 +588,14 @@ struct AndBibleApp: App {
      - Side effects:
        - creates a default workspace when no workspace exists
        - seeds Android-compatible default/system labels
+       - loads the presentation graph through the same main context injected into the reader
      - Failure modes: Label seeding currently swallows persistence failures through its service.
      */
     private static func prepareContainerForUse(
         _ container: ModelContainer,
         windowManager: WindowManager
     ) {
-        let context = ModelContext(container)
+        let context = container.mainContext
         let workspaceStore = WorkspaceStore(modelContext: context)
         Self.restoreActiveWorkspace(
             windowManager: windowManager,
@@ -668,8 +669,9 @@ struct AndBibleApp: App {
             }
             self._modelContainer = State(initialValue: container)
 
-            // Initialize services that need ModelContext
-            let context = ModelContext(container)
+            // The visible windows and reader history must belong to the context injected by
+            // SwiftUI; relating models registered in different contexts can crash SwiftData.
+            let context = container.mainContext
             try Self.migratePersistedOrdinalTrust(in: context)
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
@@ -947,7 +949,8 @@ struct AndBibleApp: App {
         let effectiveICloudEnabled = usesLocalUITestContainer
             ? requestedEnabled
             : startupResult.effectiveICloudEnabled
-        let context = ModelContext(container)
+        // A replacement runtime must share its presentation owner with the replacement reader.
+        let context = container.mainContext
         try Self.migratePersistedOrdinalTrust(in: context)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowMgr = WindowManager(workspaceStore: workspaceStore)
@@ -1461,9 +1464,9 @@ struct AndBibleApp: App {
      *
      * - Parameters:
        - windowManager: Live window manager driving the visible workspace UI.
-       - modelContainer: Model container used to create fallback store/context instances.
-       - workspaceStore: Optional prebuilt workspace store for the current context.
-       - settingsStore: Optional prebuilt settings store for the current context.
+       - modelContainer: Model container whose main context owns the visible workspace graph.
+       - workspaceStore: Optional prebuilt workspace store using that main context.
+       - settingsStore: Optional prebuilt settings store using that main context.
      * - Side effects:
        - may switch the active workspace shown in the UI
        - may create a default workspace when no persisted workspace exists
@@ -1477,7 +1480,9 @@ struct AndBibleApp: App {
         workspaceStore: WorkspaceStore? = nil,
         settingsStore: SettingsStore? = nil
     ) {
-        let context = ModelContext(modelContainer)
+        // Sync and restore can replace model instances. Resolve the visible graph through the
+        // reader's main context instead of publishing objects from a temporary context.
+        let context = modelContainer.mainContext
         let resolvedWorkspaceStore = workspaceStore ?? WorkspaceStore(modelContext: context)
         let resolvedSettingsStore = settingsStore ?? SettingsStore(modelContext: context)
 

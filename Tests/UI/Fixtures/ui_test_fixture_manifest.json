@@ -1,4 +1,6 @@
 {
+  "AndBibleUITests/AndBibleUITests/testChapterSwipeNavigatesForwardAndBackWithoutCrash": "baseline",
+  "AndBibleUITests/AndBibleUITests/testChapterChooserNavigatesToSelectedChapterWithoutCrash": "baseline",
   "AndBibleUITests/AndBibleUITests/testSingleAppCalculatorGateAndSecuritySettings": "baseline",
   "AndBibleUITests/AndBibleUITests/testReaderDrawerOpensInSpanishAtLargeDynamicType": "baseline",
   "AndBibleUITests/AndBibleUITests/testFeedbackBugReportCollectsEvidenceAndPresentsConsentWithoutTerminating": "baseline",
