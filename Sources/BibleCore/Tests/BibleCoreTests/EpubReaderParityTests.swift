@@ -29,7 +29,7 @@ final class EpubReaderParityTests: XCTestCase {
     }
 
     /**
-     Proves the built BibleCore bundle contains the pinned JSword locale catalogs used by Android.
+     Proves BibleCore resolves references through the pinned JSword catalogs bundled by SwordKit.
 
      The German name `Johannes` is absent from the English fallback, so resolving it with an
      English UI locale and German document language can succeed only when

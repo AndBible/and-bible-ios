@@ -54,6 +54,7 @@ let package = Package(
             resources: [
                 .copy("Resources/compatibility"),
                 .copy("Resources/versification"),
+                .copy("Resources/jsword-bible-names"),
                 .copy("Resources/tagsoup"),
             ]
         ),
@@ -86,7 +87,6 @@ let package = Package(
             path: "Sources/BibleCore/Sources/BibleCore",
             resources: [
                 .copy("Resources/readingplan"),
-                .copy("Resources/jsword-bible-names"),
                 .copy("Resources/speak"),
                 .copy("Resources/search"),
             ]
