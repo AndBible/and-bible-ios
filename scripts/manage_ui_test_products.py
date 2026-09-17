@@ -37,6 +37,7 @@ SWORD_MODULE_PAYLOAD_FAMILIES = frozenset(
 CALVIN_SCENARIOS = frozenset(
     {"calvin-commentary-performance", "calvin-commentary-scroll-restoration"}
 )
+SWORD_DERIVED_CACHE_RELATIVE_PATH = Path("mods.d/modules-conf.cache")
 ALLOWED_ARCHIVE_ROOTS = frozenset({".derivedData", ".build", ".ui-test", MANIFEST_NAME})
 RUNNER_LOCAL_TEST_ENVIRONMENT_KEYS = frozenset(
     {
@@ -519,13 +520,21 @@ def validate_baseline_fixture_excludes_calvin(sword_fixture: Path) -> None:
         )
 
 
+def copy_baseline_sword_fixture(baseline_fixture: Path, destination: Path) -> None:
+    """Copy the KJV baseline without carrying libsword's generated module cache."""
+    shutil.copytree(baseline_fixture, destination, symlinks=True)
+    derived_cache = destination / SWORD_DERIVED_CACHE_RELATIVE_PATH
+    if derived_cache.exists() or derived_cache.is_symlink():
+        derived_cache.unlink()
+
+
 def compose_sword_fixture(
     baseline_fixture: Path,
     calvin_fixture: Path,
     destination: Path,
 ) -> None:
     """Compose the packaged UI fixture without changing the shared KJV test baseline."""
-    shutil.copytree(baseline_fixture, destination, symlinks=True)
+    copy_baseline_sword_fixture(baseline_fixture, destination)
     provenance = calvin_fixture / "calvincommentaries.provenance.json"
     shutil.copy2(provenance, destination / provenance.name, follow_symlinks=False)
     for relative in sorted(CALVIN_FIXTURE_ENTRIES):
@@ -598,10 +607,9 @@ def package_products(
             stage_root / SWORD_FIXTURE_RELATIVE_PATH,
         )
     else:
-        shutil.copytree(
+        copy_baseline_sword_fixture(
             sword_fixture,
             stage_root / SWORD_FIXTURE_RELATIVE_PATH,
-            symlinks=True,
         )
 
     staged_xctestrun = stage_root / PRODUCTS_RELATIVE_PATH / xctestrun_path.name

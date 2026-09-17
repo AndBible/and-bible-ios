@@ -6,6 +6,7 @@ import io
 import json
 import os
 import plistlib
+import shutil
 import stat
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from pathlib import Path
 from manage_ui_test_products import (
     FIXTURE_MANIFEST_RELATIVE_PATH,
     ProductArchiveError,
+    SWORD_DERIVED_CACHE_RELATIVE_PATH,
     RUNNER_LOCAL_UI_TEST_ENVIRONMENT_KEYS,
     ToolchainProvenance,
     _write_github_output,
@@ -64,7 +66,13 @@ class ManageUITestProductsTests(unittest.TestCase):
             "ui-test-encrypted-rawtext/ot.vss",
         }
         self.assertEqual(
-            {path.relative_to(baseline).as_posix() for path in baseline.rglob("*") if path.is_file()},
+            {
+                relative
+                for path in baseline.rglob("*")
+                if path.is_file()
+                and (relative := path.relative_to(baseline).as_posix())
+                != SWORD_DERIVED_CACHE_RELATIVE_PATH.as_posix()
+            },
             expected,
         )
         validate_baseline_fixture_excludes_calvin(baseline)
@@ -97,6 +105,61 @@ class ManageUITestProductsTests(unittest.TestCase):
              for path in calvin.rglob("*") if path.is_file()},
             calvin_before,
         )
+
+    def test_ui_product_composition_excludes_libsword_derived_module_cache(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        source_baseline = repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+        calvin = repository_root / "Tests/UI/Fixtures/calvin-sword"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            baseline = root / "baseline"
+            destination = root / "composite"
+            shutil.copytree(source_baseline, baseline)
+            derived_cache = baseline / SWORD_DERIVED_CACHE_RELATIVE_PATH
+            derived_cache.write_text("libsword generated cache", encoding="utf-8")
+
+            compose_sword_fixture(baseline, calvin, destination)
+
+            self.assertTrue(derived_cache.is_file())
+            self.assertFalse((destination / SWORD_DERIVED_CACHE_RELATIVE_PATH).exists())
+            validate_calvin_fixture(destination)
+
+    def test_baseline_only_product_excludes_derived_cache_without_mutating_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+            derived_cache = sword_fixture / SWORD_DERIVED_CACHE_RELATIVE_PATH
+            derived_cache.write_text("libsword generated cache", encoding="utf-8")
+            archive = root / "ui-test-products.tar.gz"
+
+            package_products(
+                products_path=products,
+                fixture_tool=fixture,
+                fixture_manifest=fixture_manifest,
+                sword_fixture=sword_fixture,
+                output_path=archive,
+                commit_sha="abc123",
+                configuration="Debug",
+                code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+            destination = root / "restored"
+            destination.mkdir()
+            verify_products(
+                archive_path=archive,
+                destination=destination,
+                expected_commit_sha="abc123",
+                expected_configuration="Debug",
+                expected_code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+
+            self.assertTrue(derived_cache.is_file())
+            self.assertFalse(
+                (destination / ".ui-test/fixtures/sword" / SWORD_DERIVED_CACHE_RELATIVE_PATH).exists()
+            )
 
     def test_calvin_ui_product_round_trip_restores_composed_fixture(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
