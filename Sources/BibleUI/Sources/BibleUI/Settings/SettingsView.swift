@@ -642,6 +642,7 @@ public struct SettingsView: View {
             }
             .padding(.vertical, 8)
         }
+        .accessibilityIdentifier("settingsScrollView")
     }
 
     /**

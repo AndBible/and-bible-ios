@@ -478,7 +478,9 @@ extension AndBibleUITests {
             return screenScopedStateCandidates(identifier, within: "syncSettingsScreen", in: app)
                 + screenRootCandidates("syncSettingsScreen", in: app)
         case "settingsForm":
-            return screenRootCandidates("settingsForm", in: app)
+            // `SettingsView` exports state through a one-point Rectangle marker, which XCTest
+            // exposes as Other. The real scrolling surface has the separate settingsScrollView ID.
+            return [app.otherElements[identifier].firstMatch]
         default:
             return semanticStateCandidates(for: identifier, in: app)
         }
@@ -976,8 +978,10 @@ extension AndBibleUITests {
                 app.scrollViews[identifier].firstMatch,
                 app.otherElements[identifier].firstMatch,
             ]
+        case "settingsForm":
+            // This is the noninteractive AndroidActivityAccessibilityMarker, not a screen root.
+            return [app.otherElements[identifier].firstMatch]
         case
-            "settingsForm",
             "bookmarkListScreen",
             "labelAssignmentScreen",
             "labelManagerScreen",

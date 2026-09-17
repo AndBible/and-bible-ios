@@ -384,25 +384,6 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertIn("waitForUITestCondition", body, helper_name)
             self.assertNotIn("RunLoop.current.run", body, helper_name)
 
-    def test_settings_navigation_reveal_uses_existing_row_frame(self) -> None:
-        """Keep Settings navigation identity-safe while revealing offscreen rows."""
-        list_source = (
-            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestListSupport.swift"
-        ).read_text(encoding="utf-8")
-        body = swift_function_body(list_source, "requireSettingsNavigationControl")
-
-        self.assertIn("firstExistingControl()", body)
-        self.assertIn("settingsScrollDirection(toward:", body)
-        self.assertIn("scrollSettingsForm(toward:", body)
-        self.assertIn("XCTNSPredicateExpectation", body)
-        self.assertIn("XCTWaiter", body)
-        self.assertNotIn("waitForElementToBecomeHittable($0, timeout: 0.5)", body)
-        self.assertNotIn("settingsForm.swipeUp()", body)
-        self.assertNotIn("settingsForm.swipeDown()", body)
-        self.assertNotIn("settings-control-diagnostics", body)
-        self.assertIn("candidates.append(contentsOf:", body)
-        self.assertNotIn("textFields[visibleTitle]", body)
-
     def test_workspace_prompt_button_candidates_prefer_prompt_scope_and_titles(self) -> None:
         """Keep workspace prompt button lookup off expensive app-wide identifier queries first."""
         element_source = (
@@ -800,9 +781,6 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
 
     def test_settings_and_reading_plan_state_waits_use_shared_semantic_waiter(self) -> None:
         """Keep Settings and Reading Plan exported state waits off manual polling loops."""
-        element_source = (
-            REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestElementSupport.swift"
-        ).read_text(encoding="utf-8")
         interaction_source = (
             REPO_ROOT / "Tests/UI/AndBibleUITests/AndBibleUITestInteractionSupport.swift"
         ).read_text(encoding="utf-8")
@@ -823,10 +801,6 @@ class SemanticWaitGuardrailsTests(unittest.TestCase):
             self.assertIn("waitForResolvedSemanticState", body)
             self.assertNotIn("RunLoop.current.run", body)
         self.assertNotIn("missingCountsAsSuccess: true", reading_plan_state_body)
-
-        candidates_body = swift_function_body(element_source, "semanticStateValueCandidates")
-        self.assertIn('case "settingsForm":', candidates_body)
-        self.assertIn('screenRootCandidates("settingsForm", in: app)', candidates_body)
 
     def test_value_state_waits_use_shared_semantic_waiter(self) -> None:
         """Keep pure accessibility-value waits on XCTest predicates, not run-loop polling."""

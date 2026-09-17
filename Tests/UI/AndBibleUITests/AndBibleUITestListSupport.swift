@@ -833,12 +833,8 @@ extension AndBibleUITests {
      */
     func dismissSettings(in app: XCUIApplication) {
         let settingsForm = requireElement("settingsForm", in: app, timeout: 10)
-        let backButton = app.navigationBars.buttons.element(boundBy: 0)
-        if backButton.exists {
-            tapElementReliably(backButton, timeout: 10)
-        } else {
-            settingsForm.swipeRight()
-        }
+        let backButton = requireElement("settingsTopAppBarBackButton", in: app, timeout: 10)
+        tapElementReliably(backButton, timeout: 10)
         waitForElementToDisappear(settingsForm, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
@@ -1017,7 +1013,7 @@ extension AndBibleUITests {
     }
 
     /**
-     Resolves one settings navigation control from the production Settings form.
+     Resolves one settings navigation control through the production Settings viewport.
      *
      * - Parameters:
      *   - identifier: Production settings-row identifier requested by the test.
@@ -1027,23 +1023,16 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: The production settings row element.
      * - Side effects:
-     *   - scans the current Settings viewport, then uses the production Settings search field as an
-     *     early reveal path for title-backed rows
-     *   - scrolls through the form while re-querying the live XCUI hierarchy when search cannot
-     *     reveal the row
-     *   - retries the production Settings search field as a final reveal path when CI scrolling cannot
-     *     reliably bring an offscreen row into the accessibility hierarchy
+     *   - uses production Settings search first for rows with a mapped visible title
+     *   - scrolls only the identified production `ScrollView` for identifier-only rows, never the
+     *     semantic state marker
      * - Failure modes:
      *   - records an XCTest failure if the production row never appears
      *
-     * Exact production identifiers stay ahead of localized-title fallbacks. Navigation-button
-     * queries precede unrelated element types, while identifiers ending in `Toggle` retain switch
-     * priority; this avoids exhausting a hosted-runner timeout on known-wrong type queries. Title-
-     * matched text fields are intentionally excluded: while Settings search is focused, its value
-     * can equal a row title and XCTest would otherwise return the search editor instead of the
-     * navigation row. Broad `otherElements.containing(staticText:)` fallbacks are also avoided
-     * because the Android-style flat settings conversion makes them resolve to the full scroll
-     * surface.
+     * Row resolution stays inside the real viewport and always requires the production identifier.
+     * A semantic type query is attempted first (`Switch` for toggles and `Button` for action rows),
+     * followed by one exact-identifier descendant query for SwiftUI accessibility flattening. No
+     * localized title, app-wide role, or containing-text query can resolve a different control.
      */
     func requireSettingsNavigationControl(
         _ identifier: String,
@@ -1052,70 +1041,33 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let settingsForm = requireElement("settingsForm", in: app, timeout: timeout, file: file, line: line)
+        _ = requireElement("settingsForm", in: app, timeout: timeout, file: file, line: line)
+        let settingsScrollView = app.scrollViews["settingsScrollView"].firstMatch
+        let didResolveScrollView = waitForUITestCondition(
+            "Wait for Settings scroll viewport",
+            timeout: min(timeout, 10)
+        ) {
+            settingsScrollView.exists && self.elementHasUsableFrame(settingsScrollView)
+        }
+        guard didResolveScrollView else {
+            XCTFail(
+                "Expected the production Settings scroll viewport to exist before revealing '\(identifier)'.",
+                file: file,
+                line: line
+            )
+            return settingsScrollView
+        }
         let visibleTitle = settingsNavigationTitle(for: identifier)
-        let deadline = Date().addingTimeInterval(timeout)
+        let scrollDeadline = Date().addingTimeInterval(min(max(timeout / 2, 3), 10))
         func candidateElements() -> [XCUIElement] {
-            let prefersToggle = identifier.hasSuffix("Toggle")
-            var candidates = prefersToggle ? [
-                settingsForm.switches[identifier].firstMatch,
-                app.switches[identifier].firstMatch,
-                settingsForm.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-            ] : [
-                settingsForm.buttons[identifier].firstMatch,
-                app.buttons[identifier].firstMatch,
-                settingsForm.links[identifier].firstMatch,
-                app.links[identifier].firstMatch,
-                settingsForm.cells[identifier].firstMatch,
-                app.cells[identifier].firstMatch,
-                settingsForm.otherElements[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-                settingsForm.switches[identifier].firstMatch,
-                app.switches[identifier].firstMatch,
-                settingsForm.textFields[identifier].firstMatch,
-                app.textFields[identifier].firstMatch,
-            ]
-
-            if prefersToggle {
-                candidates.append(contentsOf: [
-                    settingsForm.links[identifier].firstMatch,
-                    app.links[identifier].firstMatch,
-                    settingsForm.cells[identifier].firstMatch,
-                    app.cells[identifier].firstMatch,
-                    settingsForm.otherElements[identifier].firstMatch,
-                    app.otherElements[identifier].firstMatch,
-                    settingsForm.textFields[identifier].firstMatch,
-                    app.textFields[identifier].firstMatch,
-                ])
-            }
-
-            if let visibleTitle {
-                let titleCandidates = prefersToggle ? [
-                    settingsForm.switches[visibleTitle].firstMatch,
-                    app.switches[visibleTitle].firstMatch,
-                    settingsForm.buttons[visibleTitle].firstMatch,
-                    app.buttons[visibleTitle].firstMatch,
-                ] : [
-                    settingsForm.buttons[visibleTitle].firstMatch,
-                    app.buttons[visibleTitle].firstMatch,
-                    settingsForm.links[visibleTitle].firstMatch,
-                    app.links[visibleTitle].firstMatch,
-                    settingsForm.cells[visibleTitle].firstMatch,
-                    app.cells[visibleTitle].firstMatch,
-                    settingsForm.otherElements[visibleTitle].firstMatch,
-                    app.otherElements[visibleTitle].firstMatch,
-                    settingsForm.switches[visibleTitle].firstMatch,
-                    app.switches[visibleTitle].firstMatch,
-                ]
-                candidates.append(contentsOf: titleCandidates)
-                candidates.append(contentsOf: [
-                    settingsForm.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                    app.cells.containing(.staticText, identifier: visibleTitle).firstMatch,
-                ])
-            }
-
-            return candidates
+            let exactDescendant = settingsScrollView
+                .descendants(matching: .any)
+                .matching(identifier: identifier)
+                .firstMatch
+            let typedControl = identifier.hasSuffix("Toggle")
+                ? settingsScrollView.switches[identifier].firstMatch
+                : settingsScrollView.buttons[identifier].firstMatch
+            return [typedControl, exactDescendant]
         }
 
         enum SettingsScrollDirection {
@@ -1133,7 +1085,7 @@ extension AndBibleUITests {
             if let control = candidates.first(where: { isElementHittable($0) }) {
                 return control
             }
-            if let control = candidates.first(where: { $0.exists && isElementVisible($0, within: settingsForm) }) {
+            if let control = candidates.first(where: { $0.exists && isElementVisible($0, within: settingsScrollView) }) {
                 return control
             }
             return nil
@@ -1144,12 +1096,12 @@ extension AndBibleUITests {
         }
 
         func settingsScrollDirection(toward control: XCUIElement) -> SettingsScrollDirection? {
-            guard elementHasUsableFrame(control), elementHasUsableFrame(settingsForm) else {
+            guard elementHasUsableFrame(control), elementHasUsableFrame(settingsScrollView) else {
                 return nil
             }
 
-            let verticalInset = min(24, max(0, settingsForm.frame.height * 0.08))
-            let visibleFrame = settingsForm.frame.insetBy(dx: 0, dy: verticalInset)
+            let verticalInset = min(24, max(0, settingsScrollView.frame.height * 0.08))
+            let visibleFrame = settingsScrollView.frame.insetBy(dx: 0, dy: verticalInset)
             if control.frame.minY >= visibleFrame.maxY {
                 return .lowerRows
             }
@@ -1160,7 +1112,7 @@ extension AndBibleUITests {
         }
 
         func scrollSettingsForm(toward direction: SettingsScrollDirection) {
-            guard elementHasUsableFrame(settingsForm) else {
+            guard elementHasUsableFrame(settingsScrollView) else {
                 return
             }
 
@@ -1174,9 +1126,9 @@ extension AndBibleUITests {
                 startOffset = CGVector(dx: 0.5, dy: 0.82)
                 endOffset = CGVector(dx: 0.5, dy: 0.28)
             }
-            settingsForm.coordinate(withNormalizedOffset: startOffset).press(
+            settingsScrollView.coordinate(withNormalizedOffset: startOffset).press(
                 forDuration: 0.01,
-                thenDragTo: settingsForm.coordinate(withNormalizedOffset: endOffset)
+                thenDragTo: settingsScrollView.coordinate(withNormalizedOffset: endOffset)
             )
         }
 
@@ -1202,21 +1154,24 @@ extension AndBibleUITests {
         if let control = resolvedVisibleControl() {
             return control
         }
-        if let control = resolveSettingsNavigationControlViaSearch(
-            title: visibleTitle,
-            settingsForm: settingsForm,
-            app: app,
-            timeout: min(max(timeout / 4, 3), 5),
-            resolveControl: resolvedVisibleControl
-        ) {
-            return control
+        if let visibleTitle {
+            if let control = resolveSettingsNavigationControlViaSearch(
+                title: visibleTitle,
+                app: app,
+                timeout: min(max(timeout / 2, 5), 10),
+                file: file,
+                line: line,
+                resolveControl: resolvedVisibleControl
+            ) {
+                return control
+            }
+            return unresolvedElement(identifier, in: app)
         }
-
         repeat {
             if let control = resolvedVisibleControl() {
                 return control
             }
-            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+            guard settingsScrollView.exists, !settingsScrollView.frame.isEmpty else {
                 break
             }
 
@@ -1227,41 +1182,9 @@ extension AndBibleUITests {
             if let control = waitForControlAfterScroll(previousFrame: previousFrame) {
                 return control
             }
-        } while Date() < deadline
-
-        let recoveryDeadline = Date().addingTimeInterval(min(3, max(1, timeout / 4)))
-        repeat {
-            if let control = resolvedVisibleControl() {
-                return control
-            }
-            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
-                break
-            }
-
-            let existingControl = firstExistingControl()
-            let direction = existingControl.flatMap { settingsScrollDirection(toward: $0) } ?? .higherRows
-            let previousFrame = existingControl?.frame
-            scrollSettingsForm(toward: direction)
-            if let control = waitForControlAfterScroll(previousFrame: previousFrame) {
-                return control
-            }
-        } while Date() < recoveryDeadline
-
-        if let control = resolveSettingsNavigationControlViaSearch(
-            title: visibleTitle,
-            settingsForm: settingsForm,
-            app: app,
-            timeout: min(max(timeout / 2, 5), 10),
-            resolveControl: resolvedVisibleControl
-        ) {
-            return control
-        }
+        } while Date() < scrollDeadline
 
         let control = unresolvedElement(identifier, in: app)
-        if control.exists {
-            return control
-        }
-
         XCTAssertTrue(
             false,
             "Expected settings navigation control '\(identifier)' to exist within \(timeout) seconds.",
@@ -1274,67 +1197,68 @@ extension AndBibleUITests {
     /**
      Reveals one Settings navigation row through the production app-owned Settings search field.
 
-     This is a fallback for hosted simulator runs where repeated form swipes do not expose a lower
-     Settings row before the XCTest timeout. It activates Android's real search action when needed,
-     then narrows the app-owned activity; callers still tap the same production preference row.
+     The exact search-field identifier is the expansion boundary. After entering a nonempty query,
+     the helper requires semantic `search=active` state and the exact filtered-row identifier.
      *
      * - Parameters:
      *   - title: Visible English title used as the search query.
-     *   - settingsForm: The live Settings form element.
      *   - app: Running application under test.
      *   - timeout: Maximum number of seconds to spend revealing and applying Settings search.
+     *   - file: Source file used for XCTest failure attribution.
+     *   - line: Source line used for XCTest failure attribution.
      *   - resolveControl: Existing row resolver scoped to the live Settings hierarchy.
      * - Returns: The resolved native row element, or `nil` when Settings search cannot reveal it.
      * - Side effects:
      *   - expands the app-owned Android Settings search row when it is collapsed
      *   - types the visible row title into that production search field
-     * - Failure modes: This helper does not fail directly; the caller reports a single row-missing
-     *   assertion if both direct scanning and search reveal fail.
+     * - Failure modes: Records one focused failure at search activation, field presentation, or
+     *   filtered-row resolution, then returns `nil`.
      */
     func resolveSettingsNavigationControlViaSearch(
-        title: String?,
-        settingsForm: XCUIElement,
+        title: String,
         app: XCUIApplication,
         timeout: TimeInterval,
+        file: StaticString,
+        line: UInt,
         resolveControl: () -> XCUIElement?
     ) -> XCUIElement? {
-        guard let title, !title.isEmpty else {
-            return nil
-        }
-
-        let searchDeadline = Date().addingTimeInterval(timeout)
-        var searchField: XCUIElement?
-        if settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).allSatisfy({ !$0.exists }) {
-            let searchButtonCandidates = [
-                settingsForm.buttons["settingsSearchButton"].firstMatch,
-                settingsForm.otherElements["settingsSearchButton"].firstMatch,
-                app.buttons["settingsSearchButton"].firstMatch,
-                app.otherElements["settingsSearchButton"].firstMatch,
-            ]
-            if let searchButton = searchButtonCandidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                tapElementReliably(searchButton, timeout: min(3, timeout))
-            }
-        }
-        repeat {
-            if let field = settingsSearchFieldCandidates(in: app, settingsForm: settingsForm).first(
-                where: { $0.exists && !$0.frame.isEmpty }
-            ) {
-                searchField = field
-                break
-            }
-
-            guard settingsForm.exists, !settingsForm.frame.isEmpty else {
+        let searchFieldCandidates = settingsSearchFieldCandidates(in: app)
+        var searchField = searchFieldCandidates.first(
+            where: { $0.exists && self.elementHasUsableFrame($0) }
+        )
+        if searchField == nil {
+            let searchButton = app.buttons["settingsSearchButton"].firstMatch
+            guard searchButton.exists && elementHasUsableFrame(searchButton) else {
+                XCTFail("Expected the identified Settings search action before revealing '\(title)'.", file: file, line: line)
                 return nil
             }
-            settingsForm.swipeDown()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < searchDeadline
+            tapElementReliably(searchButton, timeout: min(3, timeout), file: file, line: line)
+        }
 
-        guard let searchField else {
+        let didResolveSearchField = waitForUITestCondition(
+            "Wait for identified Settings search field",
+            timeout: min(timeout, 5)
+        ) {
+            searchField = searchFieldCandidates.first(where: { $0.exists && self.elementHasUsableFrame($0) })
+            return searchField != nil
+        }
+        guard didResolveSearchField, let searchField else {
+            XCTFail("Expected settingsSearchField after tapping the Settings search action.", file: file, line: line)
             return nil
         }
 
         replaceText(in: searchField, with: title, placeholderHints: ["Find", "Search"])
+
+        let didActivateSearch = waitForUITestCondition(
+            "Wait for Settings query activation",
+            timeout: min(timeout, 5)
+        ) {
+            self.semanticStateExportValue("settingsForm", in: app)?.contains("search=active") == true
+        }
+        guard didActivateSearch else {
+            XCTFail("Expected Settings to report search=active after entering '\(title)'.", file: file, line: line)
+            return nil
+        }
 
         let resultDeadline = Date().addingTimeInterval(min(max(timeout / 2, 3), 5))
         repeat {
@@ -1344,44 +1268,30 @@ extension AndBibleUITests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         } while Date() < resultDeadline
 
+        XCTFail(
+            "Expected Settings search for '\(title)' to reveal its identified production row.",
+            file: file,
+            line: line
+        )
         return nil
     }
 
     /**
      Returns Settings search-field candidates exposed by the app-owned Android search row.
 
-     Stable production identifiers come first. Type-only fallbacks remain for accessibility
-     flattening, and localized prompt fallbacks preserve coverage across translated builds without
-     mistaking unrelated preference editors for the Settings search control.
+     The stable production identifier is queried through the two element roles SwiftUI may expose
+     for the same custom text input. No title or role-only fallback can select another editor.
 
      * - Parameters:
      *   - app: Running application under test.
-     *   - settingsForm: The live Settings form element.
-     * - Returns: Search and text-field candidates ordered from form-scoped to broader app queries.
+     * - Returns: Exact-identifier field candidates ordered by the custom input's expected roles.
      * - Side effects: none.
      * - Failure modes: This helper cannot fail.
      */
-    func settingsSearchFieldCandidates(in app: XCUIApplication, settingsForm: XCUIElement) -> [XCUIElement] {
+    func settingsSearchFieldCandidates(in app: XCUIApplication) -> [XCUIElement] {
         [
-            settingsForm.textFields["settingsSearchField"].firstMatch,
-            settingsForm.searchFields["settingsSearchField"].firstMatch,
             app.textFields["settingsSearchField"].firstMatch,
             app.searchFields["settingsSearchField"].firstMatch,
-            settingsForm.searchFields.firstMatch,
-            app.navigationBars.searchFields.firstMatch,
-            app.searchFields.firstMatch,
-            settingsForm.searchFields["Find"].firstMatch,
-            settingsForm.textFields["Find"].firstMatch,
-            app.navigationBars.searchFields["Find"].firstMatch,
-            app.navigationBars.textFields["Find"].firstMatch,
-            app.searchFields["Find"].firstMatch,
-            app.textFields["Find"].firstMatch,
-            settingsForm.searchFields["Search"].firstMatch,
-            settingsForm.textFields["Search"].firstMatch,
-            app.navigationBars.searchFields["Search"].firstMatch,
-            app.navigationBars.textFields["Search"].firstMatch,
-            app.searchFields["Search"].firstMatch,
-            app.textFields["Search"].firstMatch,
         ]
     }
 
@@ -1506,20 +1416,4 @@ extension AndBibleUITests {
         )
         return destination
     }
-
-    /**
-     Produces narrow typed fallback queries for identifiers that do not have an explicit override.
-     *
-     * This helper intentionally avoids `descendants(matching: .any)` because the broad descendant
-     * scan was the recurring source of snapshot timeouts in CI. The suffix/prefix heuristics keep
-     * the fallback path typed enough to remain stable while still covering new identifiers that
-     * follow the test harness naming conventions.
-     *
-     * - Parameters:
-     *   - identifier: Accessibility identifier to resolve heuristically.
-     *   - app: Running application under test.
-     * - Returns: Ordered typed XCUI queries derived from the identifier naming convention.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
 }

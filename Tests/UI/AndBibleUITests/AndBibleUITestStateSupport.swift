@@ -21,8 +21,9 @@ extension AndBibleUITests {
             element.tap()
             return
         }
-        if let settingsForm = resolvedElement("settingsForm", in: app),
-           isElementVisible(element, within: settingsForm)
+        let settingsScrollView = app.scrollViews["settingsScrollView"].firstMatch
+        if settingsScrollView.exists,
+           isElementVisible(element, within: settingsScrollView)
         {
             element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             return
