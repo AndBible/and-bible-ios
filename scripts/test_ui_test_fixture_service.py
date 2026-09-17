@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import plistlib
 import signal
 import socket
 import subprocess
@@ -122,6 +123,31 @@ class FixtureServiceTestCase(unittest.TestCase):
             request_timeout_seconds=2,
         )
 
+    def _make_application(
+        self,
+        path: pathlib.Path,
+        *,
+        executable: bytes = b"verified executable",
+        debug_dylib: bytes = b"verified debug dylib",
+        reader_javascript: bytes = b"verified reader javascript",
+        bundle_identifier: str = BUNDLE_ID,
+    ) -> pathlib.Path:
+        path.mkdir(parents=True)
+        (path / "Info.plist").write_bytes(
+            plistlib.dumps(
+                {
+                    "CFBundleIdentifier": bundle_identifier,
+                    "CFBundleExecutable": "AndBible",
+                }
+            )
+        )
+        (path / "AndBible").write_bytes(executable)
+        (path / "AndBible.debug.dylib").write_bytes(debug_dylib)
+        reader = path / "BibleView.bundle" / "BibleView.js"
+        reader.parent.mkdir()
+        reader.write_bytes(reader_javascript)
+        return path
+
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
@@ -229,7 +255,232 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertEqual(kill_mock.call_args_list[0], mock.call(5151, signal.SIGTERM))
         self.assertIn(mock.call(5151, signal.SIGKILL), kill_mock.call_args_list)
 
-    def test_install_timeout_writes_exact_bounded_diagnostic_without_retry(self) -> None:
+    def test_install_timeout_accepts_only_matching_installed_app_with_data_container(self) -> None:
+        source = self._make_application(self.root / "Products" / "AndBible.app")
+        installed = self._make_application(self.root / "Simulator" / "AndBible.app")
+        commands: list[list[str]] = []
+
+        def completed_but_blocked(command, timeout, _cancellation) -> CommandResult:
+            command = list(command)
+            commands.append(command)
+            if "install" in command:
+                raise FixtureHostCommandTimeout(
+                    command=command,
+                    timeout_seconds=timeout,
+                    pid=4242,
+                    elapsed_seconds=60,
+                    returncode=-signal.SIGTERM,
+                    termination_signals_attempted=("SIGTERM",),
+                    direct_child_reaped=True,
+                    process_group_gone=True,
+                    cleanup_error=None,
+                    stdout="",
+                    stderr="",
+                )
+            if "get_app_container" in command:
+                container = installed if command[-1] == "app" else self.container
+                return CommandResult(0, f"{container}\n", "")
+            return CommandResult(0, "", "")
+
+        install_simulator_application(
+            simulator_id=SIMULATOR_ID,
+            application_path=source,
+            bundle_identifier=BUNDLE_ID,
+            diagnostic_path=self.root / "diagnostic.json",
+            command_runner=completed_but_blocked,
+        )
+
+        self.assertEqual(sum("install" in command for command in commands), 1)
+        self.assertEqual(commands[-2][-1], "app")
+        self.assertEqual(commands[-1][-1], "data")
+        disposition = json.loads(
+            (self.root / "diagnostic.json").read_text(encoding="utf-8")
+        )["recoveryDisposition"]
+        self.assertEqual(disposition["outcome"], "accepted-exact-installed-state")
+        self.assertFalse(disposition["retryAttempted"])
+
+    def test_install_timeout_accepts_installer_normalized_modes_when_content_matches(self) -> None:
+        source = self._make_application(self.root / "Products" / "AndBible.app")
+        installed = self._make_application(self.root / "Simulator" / "AndBible.app")
+        (source / "AndBible.debug.dylib").chmod(0o755)
+        (installed / "AndBible.debug.dylib").chmod(0o644)
+
+        def normalized_install(command, timeout, _cancellation) -> CommandResult:
+            command = list(command)
+            if "install" in command:
+                raise FixtureHostCommandTimeout(
+                    command=command,
+                    timeout_seconds=timeout,
+                    pid=4242,
+                    elapsed_seconds=60,
+                    returncode=-signal.SIGTERM,
+                    termination_signals_attempted=("SIGTERM",),
+                    direct_child_reaped=True,
+                    process_group_gone=True,
+                    cleanup_error=None,
+                    stdout="",
+                    stderr="",
+                )
+            if "get_app_container" in command:
+                container = installed if command[-1] == "app" else self.container
+                return CommandResult(0, f"{container}\n", "")
+            return CommandResult(0, "", "")
+
+        install_simulator_application(
+            simulator_id=SIMULATOR_ID,
+            application_path=source,
+            bundle_identifier=BUNDLE_ID,
+            diagnostic_path=self.root / "diagnostic.json",
+            command_runner=normalized_install,
+        )
+
+    def test_install_timeout_retries_once_when_registration_is_absent_then_verifies(self) -> None:
+        source = self._make_application(self.root / "Products" / "AndBible.app")
+        installed = self._make_application(self.root / "Simulator" / "AndBible.app")
+        install_attempts = 0
+
+        def incomplete_then_recovered(command, timeout, _cancellation) -> CommandResult:
+            nonlocal install_attempts
+            command = list(command)
+            if "install" in command:
+                install_attempts += 1
+                if install_attempts == 1:
+                    raise FixtureHostCommandTimeout(
+                        command=command,
+                        timeout_seconds=timeout,
+                        pid=4242,
+                        elapsed_seconds=60,
+                        returncode=-signal.SIGTERM,
+                        termination_signals_attempted=("SIGTERM",),
+                        direct_child_reaped=True,
+                        process_group_gone=True,
+                        cleanup_error=None,
+                        stdout="",
+                        stderr="",
+                    )
+                return CommandResult(0, "", "")
+            if "get_app_container" in command:
+                if install_attempts == 1:
+                    return CommandResult(1, "", "not installed")
+                container = installed if command[-1] == "app" else self.container
+                return CommandResult(0, f"{container}\n", "")
+            return CommandResult(0, "", "")
+
+        install_simulator_application(
+            simulator_id=SIMULATOR_ID,
+            application_path=source,
+            bundle_identifier=BUNDLE_ID,
+            diagnostic_path=self.root / "diagnostic.json",
+            command_runner=incomplete_then_recovered,
+        )
+
+        self.assertEqual(install_attempts, 2)
+        disposition = json.loads(
+            (self.root / "diagnostic.json").read_text(encoding="utf-8")
+        )["recoveryDisposition"]
+        self.assertEqual(disposition["outcome"], "accepted-bounded-reinstall")
+        self.assertTrue(disposition["retryAttempted"])
+
+    def test_install_timeout_rejects_stale_registered_app_after_single_recovery(self) -> None:
+        source = self._make_application(
+            self.root / "Products" / "AndBible.app",
+            executable=b"current executable",
+        )
+        stale = self._make_application(
+            self.root / "Simulator" / "AndBible.app",
+            executable=b"stale executable",
+        )
+        install_attempts = 0
+
+        def stale_after_retry(command, timeout, _cancellation) -> CommandResult:
+            nonlocal install_attempts
+            command = list(command)
+            if "install" in command:
+                install_attempts += 1
+                if install_attempts == 1:
+                    raise FixtureHostCommandTimeout(
+                        command=command,
+                        timeout_seconds=timeout,
+                        pid=4242,
+                        elapsed_seconds=60,
+                        returncode=-signal.SIGTERM,
+                        termination_signals_attempted=("SIGTERM",),
+                        direct_child_reaped=True,
+                        process_group_gone=True,
+                        cleanup_error=None,
+                        stdout="",
+                        stderr="",
+                    )
+                return CommandResult(0, "", "")
+            if "get_app_container" in command:
+                return CommandResult(0, f"{stale}\n", "")
+            return CommandResult(0, "", "")
+
+        with self.assertRaisesRegex(
+            FixtureServiceError,
+            "did not produce the intended usable application",
+        ):
+            install_simulator_application(
+                simulator_id=SIMULATOR_ID,
+                application_path=source,
+                bundle_identifier=BUNDLE_ID,
+                diagnostic_path=self.root / "diagnostic.json",
+                command_runner=stale_after_retry,
+            )
+
+        self.assertEqual(install_attempts, 2)
+
+    def test_install_timeout_rejects_stale_dylib_or_reader_resource(self) -> None:
+        source = self._make_application(self.root / "Products" / "AndBible.app")
+        for name, changed_contents in (
+            ("AndBible.debug.dylib", b"stale debug dylib"),
+            ("BibleView.bundle/BibleView.js", b"stale reader javascript"),
+        ):
+            with self.subTest(name=name):
+                installed = self.root / name.replace("/", "-") / "AndBible.app"
+                self._make_application(installed)
+                (installed / name).write_bytes(changed_contents)
+                install_attempts = 0
+
+                def stale_bundle(command, timeout, _cancellation) -> CommandResult:
+                    nonlocal install_attempts
+                    command = list(command)
+                    if "install" in command:
+                        install_attempts += 1
+                        if install_attempts == 1:
+                            raise FixtureHostCommandTimeout(
+                                command=command,
+                                timeout_seconds=timeout,
+                                pid=4242,
+                                elapsed_seconds=60,
+                                returncode=-signal.SIGTERM,
+                                termination_signals_attempted=("SIGTERM",),
+                                direct_child_reaped=True,
+                                process_group_gone=True,
+                                cleanup_error=None,
+                                stdout="",
+                                stderr="",
+                            )
+                        return CommandResult(0, "", "")
+                    if "get_app_container" in command:
+                        container = installed if command[-1] == "app" else self.container
+                        return CommandResult(0, f"{container}\n", "")
+                    return CommandResult(0, "", "")
+
+                with self.assertRaisesRegex(
+                    FixtureServiceError,
+                    "did not produce the intended usable application",
+                ):
+                    install_simulator_application(
+                        simulator_id=SIMULATOR_ID,
+                        application_path=source,
+                        bundle_identifier=BUNDLE_ID,
+                        diagnostic_path=self.root / f"{name.replace('/', '-')}.json",
+                        command_runner=stale_bundle,
+                    )
+                self.assertEqual(install_attempts, 2)
+
+    def test_install_timeout_retains_diagnostic_and_does_not_retry_unreaped_process(self) -> None:
         application_path = self.root / "Products" / "AndBible.app"
         diagnostic_path = self.root / "artifacts" / "ui.fixture-host-diagnostic.json"
         commands: list[list[str]] = []
@@ -257,7 +508,7 @@ class FixtureServiceTestCase(unittest.TestCase):
 
         with self.assertRaisesRegex(
             FixtureServiceError,
-            "verified UI target installation timed out after 60.0s",
+            "without proving the host installer process was fully reaped",
         ):
             install_simulator_application(
                 simulator_id=SIMULATOR_ID,
@@ -283,6 +534,10 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertTrue(payload["stdout"]["truncated"])
         self.assertEqual(payload["stdout"]["originalByteCount"], 40_006)
         self.assertEqual(payload["stderr"]["text"], "CoreSimulator stalled\n")
+        self.assertEqual(
+            payload["recoveryDisposition"]["outcome"],
+            "fatal-installer-process-not-reaped",
+        )
         self.assertEqual(
             payload["postTimeoutProbes"][1]["error"]["text"],
             "listapps unavailable",
@@ -324,7 +579,7 @@ class FixtureServiceTestCase(unittest.TestCase):
                 command_runner=timed_out,
             )
 
-        self.assertIn("installation timed out after 60.0s", str(captured.exception))
+        self.assertIn("single recovery install timed out after 60.0s", str(captured.exception))
         self.assertIn("diagnostic capture failed", str(captured.exception))
         self.assertIsInstance(captured.exception.__cause__, FixtureHostCommandTimeout)
 

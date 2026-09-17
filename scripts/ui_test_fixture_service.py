@@ -13,6 +13,7 @@ import base64
 import io
 import json
 import os
+import plistlib
 import select
 import signal
 import socket
@@ -27,6 +28,8 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
+
+from manage_ui_test_products import ProductArchiveError, content_inventory_tree
 
 
 class FixtureServiceError(RuntimeError):
@@ -559,9 +562,16 @@ def install_simulator_application(
     until ``XCUIApplication.launch()``, which is too late for fixture seeding.
     """
     cancellation = threading.Event()
+    install_command = (
+        "xcrun",
+        "simctl",
+        "install",
+        simulator_id,
+        str(application_path),
+    )
     try:
         result = command_runner(
-            ("xcrun", "simctl", "install", simulator_id, str(application_path)),
+            install_command,
             timeout_seconds,
             cancellation,
         )
@@ -587,17 +597,174 @@ def install_simulator_application(
                     "; diagnostic capture failed without replacing the install timeout: "
                     f"{bounded_error['text']}"
                 )
-        raise FixtureServiceError(
-            "verified UI target installation timed out "
-            f"after {error.timeout_seconds:.1f}s on simulator {simulator_id}"
-            f"{diagnostic_suffix}"
-        ) from error
+        if not error.direct_child_reaped or error.process_group_gone is not True:
+            _record_install_recovery_disposition(
+                diagnostic_path,
+                outcome="fatal-installer-process-not-reaped",
+                retry_attempted=False,
+                verification="not-run",
+            )
+            raise FixtureServiceError(
+                "verified UI target installation timed out without proving the host "
+                f"installer process was fully reaped on simulator {simulator_id}"
+                f"{diagnostic_suffix}"
+            ) from error
+        if bundle_identifier is not None and _installed_application_is_usable(
+            simulator_id=simulator_id,
+            bundle_identifier=bundle_identifier,
+            source_application_path=application_path,
+            command_runner=command_runner,
+        ):
+            _record_install_recovery_disposition(
+                diagnostic_path,
+                outcome="accepted-exact-installed-state",
+                retry_attempted=False,
+                verification="full-content-and-data-container-match",
+            )
+            return
+
+        try:
+            result = command_runner(
+                install_command,
+                timeout_seconds,
+                cancellation,
+            )
+        except FixtureHostCommandTimeout as retry_error:
+            _record_install_recovery_disposition(
+                diagnostic_path,
+                outcome="fatal-recovery-install-timeout",
+                retry_attempted=True,
+                verification="initial-installed-state-not-usable",
+            )
+            raise FixtureServiceError(
+                "verified UI target installation timed out, was not proven usable, and its "
+                f"single recovery install timed out after {retry_error.timeout_seconds:.1f}s "
+                f"on simulator {simulator_id}{diagnostic_suffix}"
+            ) from retry_error
+        if result.returncode != 0:
+            _record_install_recovery_disposition(
+                diagnostic_path,
+                outcome="fatal-recovery-install-nonzero-exit",
+                retry_attempted=True,
+                verification="initial-installed-state-not-usable",
+            )
+            diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+            raise FixtureServiceError(
+                "verified UI target installation timed out, was not proven usable, and its "
+                f"single recovery install failed on simulator {simulator_id}: "
+                f"exit {result.returncode}: {diagnostic}{diagnostic_suffix}"
+            ) from error
+        if bundle_identifier is None or not _installed_application_is_usable(
+            simulator_id=simulator_id,
+            bundle_identifier=bundle_identifier,
+            source_application_path=application_path,
+            command_runner=command_runner,
+        ):
+            _record_install_recovery_disposition(
+                diagnostic_path,
+                outcome="fatal-recovery-install-unusable",
+                retry_attempted=True,
+                verification="full-content-or-data-container-mismatch",
+            )
+            raise FixtureServiceError(
+                "verified UI target installation timed out and its single recovery "
+                "install did not produce the intended usable application on simulator "
+                f"{simulator_id}{diagnostic_suffix}"
+            ) from error
+        _record_install_recovery_disposition(
+            diagnostic_path,
+            outcome="accepted-bounded-reinstall",
+            retry_attempted=True,
+            verification="full-content-and-data-container-match",
+        )
+        return
     if result.returncode != 0:
         diagnostic = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
         raise FixtureServiceError(
             "cannot install the verified UI target application "
             f"on simulator {simulator_id}: exit {result.returncode}: {diagnostic}"
         )
+
+
+def _installed_application_is_usable(
+    *,
+    simulator_id: str,
+    bundle_identifier: str,
+    source_application_path: Path,
+    command_runner: CommandRunner,
+) -> bool:
+    """Verify exact installed bundle content and the existing data container.
+
+    CoreSimulator can complete an installation while leaving ``simctl install``
+    blocked. Query the registered app bundle after the timed process has been
+    terminated and reaped, match every immutable bundle entry to the
+    wrapper-validated source product, and require the data container needed by
+    fixture mutation. CoreSimulator preserves bundle content while assigning
+    container paths externally, so no in-bundle entry is excluded.
+    """
+    try:
+        installed_result = command_runner(
+            (
+                "xcrun",
+                "simctl",
+                "get_app_container",
+                simulator_id,
+                bundle_identifier,
+                "app",
+            ),
+            15,
+            threading.Event(),
+        )
+    except (FixtureHostCommandTimeout, FixtureServiceError):
+        return False
+    if installed_result.returncode != 0:
+        return False
+    installed_path = Path(installed_result.stdout.strip())
+    if not installed_path.is_absolute() or not installed_path.is_dir():
+        return False
+    try:
+        with (source_application_path / "Info.plist").open("rb") as source_file:
+            source_info = plistlib.load(source_file)
+        with (installed_path / "Info.plist").open("rb") as installed_file:
+            installed_info = plistlib.load(installed_file)
+        source_executable_name = source_info.get("CFBundleExecutable")
+        installed_executable_name = installed_info.get("CFBundleExecutable")
+        if (
+            source_info.get("CFBundleIdentifier") != bundle_identifier
+            or installed_info.get("CFBundleIdentifier") != bundle_identifier
+            or not isinstance(source_executable_name, str)
+            or source_executable_name != installed_executable_name
+        ):
+            return False
+        if content_inventory_tree(source_application_path) != content_inventory_tree(
+            installed_path
+        ):
+            return False
+    except (OSError, plistlib.InvalidFileException, AttributeError, ProductArchiveError):
+        return False
+
+    try:
+        data_result = command_runner(
+            (
+                "xcrun",
+                "simctl",
+                "get_app_container",
+                simulator_id,
+                bundle_identifier,
+                "data",
+            ),
+            15,
+            threading.Event(),
+        )
+    except (FixtureHostCommandTimeout, FixtureServiceError):
+        return False
+    if data_result.returncode != 0:
+        return False
+    container_text = data_result.stdout.strip()
+    if not container_text:
+        return False
+    container = Path(container_text)
+    return container.is_absolute() and container.is_dir()
 
 
 def _read_bounded_temporary_output(
@@ -610,6 +777,41 @@ def _read_bounded_temporary_output(
     file.seek(max(0, original_byte_count - limit))
     retained = file.read(limit).decode("utf-8", errors="replace")
     return retained, original_byte_count > limit, original_byte_count
+
+
+def _record_install_recovery_disposition(
+    path: Path | None,
+    *,
+    outcome: str,
+    retry_attempted: bool,
+    verification: str,
+) -> None:
+    """Best-effort append the bounded recovery outcome to the timeout record."""
+    if path is None or not path.is_file():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return
+        payload["recoveryDisposition"] = {
+            "outcome": outcome,
+            "retryAttempted": retry_attempted,
+            "verification": verification,
+        }
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary_path, path)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+    except (OSError, json.JSONDecodeError):
+        return
 
 
 def _capture_timeout_output(

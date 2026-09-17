@@ -365,7 +365,7 @@ def product_architectures(
     return architectures
 
 
-def _inventory_paths(root: Path, paths: Sequence[Path]) -> list[dict[str, object]]:
+def inventory_paths(root: Path, paths: Sequence[Path]) -> list[dict[str, object]]:
     """Describe the supplied paths relative to one artifact root."""
     entries: list[dict[str, object]] = []
     for path in sorted(paths, key=lambda candidate: candidate.as_posix()):
@@ -393,6 +393,19 @@ def _inventory_paths(root: Path, paths: Sequence[Path]) -> list[dict[str, object
     return entries
 
 
+def inventory_tree(root: Path) -> list[dict[str, object]]:
+    """Describe every descendant of one directory with portable content identity."""
+    return inventory_paths(root, list(root.rglob("*")))
+
+
+def content_inventory_tree(root: Path) -> list[dict[str, object]]:
+    """Describe tree content while ignoring installer-normalized POSIX modes."""
+    return [
+        {key: value for key, value in entry.items() if key != "mode"}
+        for entry in inventory_tree(root)
+    ]
+
+
 def inventory_payload(root: Path) -> list[dict[str, object]]:
     """Describe only the portable product roots, excluding unrelated destination files."""
     paths: list[Path] = []
@@ -401,7 +414,7 @@ def inventory_payload(root: Path) -> list[dict[str, object]]:
         if product_root.exists() or product_root.is_symlink():
             paths.append(product_root)
             paths.extend(product_root.rglob("*"))
-    return _inventory_paths(root, paths)
+    return inventory_paths(root, paths)
 
 
 def validate_required_products(
