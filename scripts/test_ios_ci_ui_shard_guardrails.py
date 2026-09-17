@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import unittest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,36 +74,50 @@ def workflow_step_run_blocks(workflow_text: str, step_name: str) -> list[str]:
     return run_blocks
 
 
-def upload_artifact_steps(workflow_text: str) -> list[tuple[int, str]]:
-    """Returns every upload-artifact workflow step with its source line number."""
-    upload_step_pattern = re.compile(r"^(\s*)(-\s*)?uses:\s+actions/upload-artifact@v\d+\s*$")
-    steps: list[tuple[int, str]] = []
-    lines = workflow_text.splitlines()
+def upload_artifact_steps(workflow_text: str) -> list[tuple[str, str, dict]]:
+    """Return parsed upload-artifact inputs with their owning job and diagnostic step name."""
+    workflow = yaml.safe_load(workflow_text)
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, dict):
+        raise AssertionError("Expected the workflow to define a jobs mapping.")
 
-    for index, line in enumerate(lines):
-        upload_match = upload_step_pattern.match(line)
-        if upload_match is None:
+    uploads: list[tuple[str, str, dict]] = []
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
             continue
+        steps = job.get("steps", [])
+        if not isinstance(steps, list):
+            raise AssertionError(f"Expected workflow job {job_name!r} to define a steps list.")
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or uses.split("@", 1)[0] != "actions/upload-artifact":
+                continue
+            inputs = step.get("with")
+            if not isinstance(inputs, dict):
+                raise AssertionError(
+                    f"Expected upload step in job {job_name!r} to define with inputs."
+                )
+            step_name = str(step.get("name", uses))
+            uploads.append((str(job_name), step_name, inputs))
+    return uploads
 
-        uses_indent = len(upload_match.group(1))
-        step_indent = uses_indent if upload_match.group(2) is not None else uses_indent - 2
-        step_boundary = re.compile(rf"^ {{{step_indent}}}-\s+")
-        step_lines = [line]
-        for step_line in lines[index + 1 :]:
-            if step_boundary.match(step_line):
-                break
-            step_lines.append(step_line)
-        steps.append((index + 1, "\n".join(step_lines)))
 
-    return steps
+def upload_artifact_paths(inputs: dict) -> list[str]:
+    """Return individual artifact paths using GitHub Actions multiline-input semantics."""
+    path_value = inputs.get("path")
+    if not isinstance(path_value, str):
+        raise AssertionError("Expected upload-artifact inputs to declare a string path.")
+    paths = [line.strip() for line in path_value.splitlines() if line.strip()]
+    if not paths:
+        raise AssertionError("Expected upload-artifact path to contain at least one entry.")
+    return paths
 
 
-def upload_step_scalar(step_text: str, key: str) -> str:
-    """Returns one scalar `with:` value from an upload-artifact step."""
-    match = re.search(rf"^\s+{re.escape(key)}:\s+(.+?)\s*$", step_text, re.MULTILINE)
-    if match is None:
-        raise AssertionError(f"Expected upload-artifact step to declare {key!r}.\n{step_text}")
-    return match.group(1)
+def expected_upload_retention_days(paths: list[str]) -> int:
+    """Retain uploads containing result bundles for diagnosis; keep other artifacts short-lived."""
+    return 14 if any(".xcresult" in path for path in paths) else 1
 
 
 def step_offsets(workflow_text: str, step_name: str) -> list[int]:
@@ -131,14 +146,14 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
 
         upload_steps = upload_artifact_steps(workflow_text)
-        for line_number, step_text in upload_steps:
-            path = upload_step_scalar(step_text, "path")
-            retention_days = int(upload_step_scalar(step_text, "retention-days"))
-            expected_retention_days = 14 if ".xcresult" in path else 1
+        for job_name, step_name, inputs in upload_steps:
+            paths = upload_artifact_paths(inputs)
+            retention_days = int(inputs["retention-days"])
+            expected_retention_days = expected_upload_retention_days(paths)
             self.assertEqual(
                 expected_retention_days,
                 retention_days,
-                f"Unexpected upload-artifact retention near line {line_number} for path {path!r}.",
+                f"Unexpected retention for upload {step_name!r} in job {job_name!r}: {paths!r}.",
             )
 
         self.assertGreater(len(upload_steps), 0, "Expected the workflow to contain upload-artifact steps.")
@@ -190,17 +205,20 @@ class IOSCIUIShardGuardrailsTests(unittest.TestCase):
         self.assertIn("needs.ios-bibleview-package-tests.result", verify_gate)
         self.assertIn("needs.ios-bibleui-package-tests.result", verify_gate)
 
-    def test_upload_artifact_retention_guardrail_handles_name_less_steps(self) -> None:
-        """Ensure the retention guardrail classifies valid `- uses:` upload steps."""
+    def test_upload_artifact_retention_guardrail_handles_multiline_and_name_less_steps(self) -> None:
+        """Classify parsed path entries without depending on optional names or YAML scalar style."""
         workflow_text = """
 name: demo
 jobs:
   demo:
     steps:
-      - uses: actions/upload-artifact@v6
+      - name: Upload result diagnostics
+        uses: actions/upload-artifact@0123456789abcdef0123456789abcdef01234567
         with:
           name: result
-          path: .artifacts/*.xcresult
+          path: |
+            .artifacts/*.xcresult
+            .artifacts/reader-gestures.log
           retention-days: 14
       - uses: actions/upload-artifact@v6
         with:
@@ -214,10 +232,21 @@ jobs:
         upload_steps = upload_artifact_steps(workflow_text)
 
         self.assertEqual(2, len(upload_steps))
-        self.assertEqual(".artifacts/*.xcresult", upload_step_scalar(upload_steps[0][1], "path"))
-        self.assertEqual("14", upload_step_scalar(upload_steps[0][1], "retention-days"))
-        self.assertEqual("build-products.tar.gz", upload_step_scalar(upload_steps[1][1], "path"))
-        self.assertEqual("1", upload_step_scalar(upload_steps[1][1], "retention-days"))
+        self.assertEqual(("demo", "Upload result diagnostics"), upload_steps[0][:2])
+        self.assertEqual(("demo", "actions/upload-artifact@v6"), upload_steps[1][:2])
+        self.assertEqual(
+            [".artifacts/*.xcresult", ".artifacts/reader-gestures.log"],
+            upload_artifact_paths(upload_steps[0][2]),
+        )
+        self.assertEqual(
+            14,
+            expected_upload_retention_days(upload_artifact_paths(upload_steps[0][2])),
+        )
+        self.assertEqual(["build-products.tar.gz"], upload_artifact_paths(upload_steps[1][2]))
+        self.assertEqual(
+            1,
+            expected_upload_retention_days(upload_artifact_paths(upload_steps[1][2])),
+        )
 
     def test_workflow_step_run_blocks_reports_every_duplicate_step_name(self) -> None:
         """Locks duplicate step-name checks to every occurrence, not the first.
