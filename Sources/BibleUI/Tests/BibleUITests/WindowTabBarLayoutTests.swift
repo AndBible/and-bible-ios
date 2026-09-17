@@ -336,23 +336,52 @@ final class WindowTabBarLayoutTests: XCTestCase {
      A failure means auto-pin can render or group pane-menu entries using stale raw pin values even
      though manager layout behavior uses the effective state.
      */
+    @MainActor
     func testBibleWindowPaneMenuUsesEffectivePinState() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPane.swift"
-        )
-        let snapshotFactorySource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleWindowPaneMenuSnapshotFactory.swift"
+        let container = try makeWorkspaceModelContainer()
+        let store = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = store.createWorkspace(name: "Effective pin snapshot")
+        workspace.workspaceSettings?.autoPin = true
+        let window = try XCTUnwrap(store.windows(workspaceId: workspace.id).first)
+        window.isPinMode = false
+        let manager = WindowManager(workspaceStore: store)
+        manager.setActiveWorkspace(workspace)
+        let otherWindow = try XCTUnwrap(manager.addWindow(from: window))
+        otherWindow.isPinMode = true
+
+        let snapshot = BibleWindowPaneMenuSnapshotFactory.snapshot(
+            for: window,
+            windowManager: manager,
+            displaySettings: TextDisplaySettings(),
+            isAIConfigured: false,
+            referenceStore: BibleWindowMenuReferenceStore(),
+            recentTextSettings: []
         )
 
-        XCTAssertTrue(source.contains("BibleWindowPaneMenuSnapshotFactory.snapshot("))
-        XCTAssertTrue(snapshotFactorySource.contains("isPinned: windowManager.isEffectivelyPinned(window)"))
-        XCTAssertTrue(snapshotFactorySource.contains("isPinned: windowManager.isEffectivelyPinned(candidate)"))
-        XCTAssertTrue(source.contains("windowManager.activateWindow(window)"))
-        XCTAssertTrue(source.contains("wm.activateWindow(window)"))
-        XCTAssertFalse(snapshotFactorySource.contains("isPinned: window.isPinMode"))
-        XCTAssertFalse(snapshotFactorySource.contains("isPinned: candidate.isPinMode"))
-        XCTAssertFalse(source.contains("windowManager.activeWindow = window"))
-        XCTAssertFalse(source.contains("wm.activeWindow = window"))
+        XCTAssertTrue(manager.isEffectivelyPinned(window))
+        XCTAssertTrue(snapshot.isPinned)
+        XCTAssertFalse(window.isPinMode)
+
+        let autoPinnedOther = try XCTUnwrap(
+            snapshot.allWindowsInPersistedOrder.first { $0.id == otherWindow.id }
+        )
+        XCTAssertTrue(autoPinnedOther.isPinned)
+
+        workspace.workspaceSettings?.autoPin = false
+        let restoredSnapshot = BibleWindowPaneMenuSnapshotFactory.snapshot(
+            for: window,
+            windowManager: manager,
+            displaySettings: TextDisplaySettings(),
+            isAIConfigured: false,
+            referenceStore: BibleWindowMenuReferenceStore(),
+            recentTextSettings: []
+        )
+        XCTAssertFalse(restoredSnapshot.isPinned)
+        let restoredOther = try XCTUnwrap(
+            restoredSnapshot.allWindowsInPersistedOrder.first { $0.id == otherWindow.id }
+        )
+        XCTAssertTrue(restoredOther.isPinned)
+        withExtendedLifetime(container) {}
     }
 
     /**

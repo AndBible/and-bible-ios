@@ -494,6 +494,12 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         guard let end = verseReference(ordinal: endOrdinal) else {
             throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(endOrdinal)
         }
+        guard start.chapter > 0, start.verse > 0 else {
+            throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(startOrdinal)
+        }
+        guard end.chapter > 0, end.verse > 0 else {
+            throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(endOrdinal)
+        }
 
         let verses: [BibleReaderInstalledScriptureVerse]
         switch self {
@@ -519,7 +525,7 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         case .sqlite(let module):
             let references = (startOrdinal...endOrdinal).compactMap {
                 verseReference(ordinal: $0)
-            }
+            }.filter { $0.chapter > 0 && $0.verse > 0 }
             var captured: [BibleReaderInstalledScriptureVerse] = []
             captured.reserveCapacity(references.count)
 
@@ -606,7 +612,11 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
             guard let reference = verseReference(ordinal: ordinal, ownsBook: ownsBook) else {
                 continue
             }
-            return reference == candidate
+            if reference == candidate { return true }
+            // Introductions remain valid explicit targets, while interior introductions do not
+            // interrupt adjacency between the addressable verses on either side of a boundary.
+            if reference.verse == 0 { continue }
+            return false
         }
         return false
     }

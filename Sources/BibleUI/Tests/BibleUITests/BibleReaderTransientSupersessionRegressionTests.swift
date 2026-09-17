@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 @testable import BibleCore
 @testable import BibleUI
@@ -8,6 +9,7 @@ import XCTest
 /** Regression coverage for cancellation and replay ownership of pre-ready transient documents. */
 @MainActor
 final class BibleReaderTransientSupersessionRegressionTests: BibleUISwordFixtureTestCase {
+    private var retainedPaneOwners: [(WindowManager, ModelContainer?)] = []
     /** A superseded pre-ready Multi cannot replay after its cancelled waiter has settled. */
     func testPreReadyMultiSupersededByMyNotesCannotReplayAfterClientReady() async throws {
         let manager = try XCTUnwrap(
@@ -19,7 +21,7 @@ final class BibleReaderTransientSupersessionRegressionTests: BibleUISwordFixture
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let boundary = scripts().count
 
         let superseded = Task { @MainActor in
@@ -70,9 +72,8 @@ final class BibleReaderTransientSupersessionRegressionTests: BibleUISwordFixture
         Array(scripts.dropFirst(boundary)).filter { $0.contains("emit('add_documents'") }
     }
 
-    private func attachWindow(to controller: BibleReaderController) {
-        let window = Window()
-        retainReaderWindowGraph(window, attaching: PageManager(id: window.id))
-        controller.activeWindow = window
+    private func attachWindow(to controller: BibleReaderController) throws {
+        let owner = try registerMyNotesPaneOwner(controller)
+        retainedPaneOwners.append((owner.manager, owner.container))
     }
 }

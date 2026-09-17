@@ -164,6 +164,7 @@ final class SearchReferenceNavigationTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
         let baseline = scripts().count
 
         XCTAssertTrue(controller.navigateToRef("Genesis 1:1, Exodus 2:1"))

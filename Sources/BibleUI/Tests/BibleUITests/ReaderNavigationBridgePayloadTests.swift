@@ -112,6 +112,7 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.bridgeDidSetClientReady(bridge)
         let secondCorinthians = try XCTUnwrap(
             controller.bookList.first(where: { $0.osisId == "2Cor" })?.name
         )

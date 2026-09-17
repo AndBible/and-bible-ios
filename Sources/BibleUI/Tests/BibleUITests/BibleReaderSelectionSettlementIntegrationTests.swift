@@ -9,12 +9,13 @@ import XCTest
 /** End-to-end final-disposition contracts exposed by prepared reader selection routes. */
 @MainActor
 final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureTestCase {
+    private var retainedPaneOwners: [(WindowManager, ModelContainer?)] = []
     /** An invalid request terminates once without changing the selected document. */
     func testMyDocumentMissingRequestReturnsFailureWithoutSelection() async throws {
         let container = try makeMyDocumentModelContainer()
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         controller.myDocumentStore = MyDocumentStore(modelContext: container.mainContext)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
 
         let disposition = await controller.loadMyDocumentPageAwaitingSelection(
             bookInitials: "missing",
@@ -33,7 +34,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         let bridge = BibleBridge()
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         controller.myDocumentStore = MyDocumentStore(modelContext: fixture.context)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         controller.bridgeDidSetClientReady(bridge)
 
         let disposition = await controller.loadMyDocumentPageAwaitingSelection(
@@ -69,7 +70,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
             documentPreparationCoordinator: coordinator
         )
         controller.myDocumentStore = MyDocumentStore(modelContext: fixture.context)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         controller.bridgeDidSetClientReady(bridge)
         action.install {
             fixture.page.title = "After"
@@ -109,7 +110,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         let (bridge, _) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         controller.myDocumentStore = MyDocumentStore(modelContext: context)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         XCTAssertTrue(controller.switchMyDocumentToolbarDocument(
             expectedID: document.id,
             initials: document.initials
@@ -182,7 +183,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let boundary = scripts().count
 
         let pending = Task { @MainActor in
@@ -221,7 +222,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let boundary = scripts().count
 
         let first = Task { @MainActor in
@@ -258,7 +259,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
             bookmarkService: service,
             initializesSword: false
         )
-        attachWindow(to: first)
+        try attachWindow(to: first)
         let pending = Task { @MainActor in
             await first.loadStudyPadDocumentAwaitingSelection(labelId: label.id)
         }
@@ -268,7 +269,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
 
         let (otherBridge, _) = makeRecordingBridge()
         let other = BibleReaderController(bridge: otherBridge, initializesSword: false)
-        attachWindow(to: other)
+        try attachWindow(to: other)
         other.bridgeDidSetClientReady(otherBridge)
         XCTAssertTrue(firstScripts().isEmpty)
 
@@ -297,7 +298,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
             bookmarkService: service,
             initializesSword: false
         )
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
 
         let disposition = await Task { @MainActor in
             withUnsafeCurrentTask { $0?.cancel() }
@@ -317,7 +318,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let pending = Task { @MainActor in
             await controller.loadRestoredAndroidMultiDocumentAwaitingSelection(
                 pageKey: "KJV:Gen.1.1"
@@ -364,7 +365,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
             swordManagerOverride: manager,
             documentPreparationCoordinator: preparation
         )
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let pending = Task { @MainActor in
             await controller.loadCompareDocumentAwaitingSelection(.ordinals(
                 bookInitials: "KJV",
@@ -400,7 +401,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let pending = Task { @MainActor in
             await controller.loadMyNotesDocumentAwaitingSelection(jumpToOrdinal: ordinal)
         }
@@ -432,7 +433,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let accepted = Task { @MainActor in
             await controller.loadMyNotesDocumentAwaitingSelection(jumpToOrdinal: ordinal)
         }
@@ -460,7 +461,7 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        attachWindow(to: controller)
+        try attachWindow(to: controller)
         let pending = Task { @MainActor in
             await controller.loadRestoredAndroidMultiDocumentAwaitingSelection(
                 pageKey: "KJV:Gen.1.1"
@@ -570,10 +571,9 @@ final class BibleReaderSelectionSettlementIntegrationTests: BibleUISwordFixtureT
         withExtendedLifetime(container) {}
     }
 
-    private func attachWindow(to controller: BibleReaderController) {
-        let window = Window()
-        retainReaderWindowGraph(window, attaching: PageManager(id: window.id))
-        controller.activeWindow = window
+    private func attachWindow(to controller: BibleReaderController) throws {
+        let owner = try registerMyNotesPaneOwner(controller)
+        retainedPaneOwners.append((owner.manager, owner.container))
     }
 }
 

@@ -174,6 +174,7 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             bridge: bridge,
             swordManagerOverride: manager
         )
+        controller.bridgeDidSetClientReady(bridge)
         XCTAssertEqual(controller.activeModuleName, "KJV")
 
         controller.bridge(bridge, compareVerses: "VulgTest", startOrdinal: start, endOrdinal: end)
