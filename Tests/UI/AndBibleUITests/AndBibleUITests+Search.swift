@@ -148,8 +148,8 @@ extension AndBibleUITests {
             try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
             return (request.results ?? [])
                 // Vision can invent a different first character when a line is clipped by the
-                // viewport's top edge. Use only lines whose complete recognition box sits inside
-                // the upper third so the marker describes pixels that can be compared exactly.
+                // viewport's top edge. Keep a 3% top inset so edge-clipped recognition is never
+                // selected as the marker, while retaining the upper-third position requirement.
                 .filter { $0.boundingBox.minY >= 0.67 && $0.boundingBox.maxY <= 0.97 }
                 .sorted { $0.boundingBox.midY > $1.boundingBox.midY }
                 .compactMap { $0.topCandidates(1).first?.string }
@@ -163,6 +163,10 @@ extension AndBibleUITests {
         waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
         waitForVisibleReaderText(containing: "He descends to the sixth day", in: app)
         let freshBlockTop = try upperReaderLines().joined(separator: " ")
+        let freshTop = XCTAttachment(screenshot: viewport.screenshot())
+        freshTop.name = "Calvin following block fresh-top negative control"
+        freshTop.lifetime = .keepAlways
+        add(freshTop)
         let previousBlock = app.buttons["Previous chapter"].firstMatch
         XCTAssertTrue(waitForElementToBecomeHittable(previousBlock, timeout: 10))
         previousBlock.tap()
