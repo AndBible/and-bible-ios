@@ -21,6 +21,7 @@ from manage_ui_test_products import (
     SWORD_DERIVED_CACHE_RELATIVE_PATH,
     RUNNER_LOCAL_UI_TEST_ENVIRONMENT_KEYS,
     ToolchainProvenance,
+    _resolve_xctestrun_product_path,
     _write_github_output,
     current_toolchain_provenance,
     compose_sword_fixture,
@@ -430,6 +431,46 @@ class ManageUITestProductsTests(unittest.TestCase):
                 {"PRODUCT_CONTRACT": "retained"},
             )
             self.assertEqual(restored_ui_target["TestingEnvironmentVariables"], {})
+
+    def test_round_trip_supports_host_paths_with_double_underscores(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "runner__workspace"
+            root.mkdir()
+            archive = self.package(root)
+            destination = root / "restored__products"
+            destination.mkdir()
+
+            verify_products(
+                archive_path=archive,
+                destination=destination,
+                expected_commit_sha="abc123",
+                expected_configuration="Debug",
+                expected_code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+
+    def test_xctestrun_path_placeholders_are_validated_before_single_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            products = Path(temporary_directory) / "products__TESTHOST__" / "Build/Products"
+            expected = products / "Debug-iphonesimulator/AndBible.app"
+            self.assertEqual(
+                _resolve_xctestrun_product_path(
+                    "__TESTROOT__/Debug-iphonesimulator/AndBible.app",
+                    products_path=products,
+                ),
+                expected,
+            )
+            with self.assertRaisesRegex(ProductArchiveError, "Unsupported placeholder"):
+                _resolve_xctestrun_product_path(
+                    "__UNKNOWN__/AndBible.app",
+                    products_path=products,
+                )
+            with self.assertRaisesRegex(ProductArchiveError, "escapes Build/Products"):
+                _resolve_xctestrun_product_path(
+                    "__TESTROOT__/../AndBible.app",
+                    products_path=products,
+                )
 
     def test_package_strips_runner_local_environment_without_mutating_producer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -38,6 +39,7 @@ CALVIN_SCENARIOS = frozenset(
     {"calvin-commentary-performance", "calvin-commentary-scroll-restoration"}
 )
 SWORD_DERIVED_CACHE_RELATIVE_PATH = Path("mods.d/modules-conf.cache")
+XCTESTRUN_PATH_PLACEHOLDER_PATTERN = re.compile(r"__[A-Za-z][A-Za-z0-9_]*__")
 ALLOWED_ARCHIVE_ROOTS = frozenset({".derivedData", ".build", ".ui-test", MANIFEST_NAME})
 RUNNER_LOCAL_TEST_ENVIRONMENT_KEYS = frozenset(
     {
@@ -216,16 +218,21 @@ def _resolve_xctestrun_product_path(
     """Resolve Xcode test-root/test-host placeholders and enforce product-root containment."""
     if not isinstance(value, str) or not value:
         raise ProductArchiveError(f"Expected generated xctestrun product path, found {value!r}.")
-    resolved = value.replace("__TESTROOT__", str(products_path))
-    if "__TESTHOST__" in resolved:
-        if test_host_path is None:
-            raise ProductArchiveError(f"Cannot resolve __TESTHOST__ without its host: {value}")
-        resolved = resolved.replace("__TESTHOST__", str(test_host_path))
-    if "__" in resolved:
+
+    def replace_placeholder(match: re.Match[str]) -> str:
+        placeholder = match.group(0)
+        if placeholder == "__TESTROOT__":
+            return str(products_path)
+        if placeholder == "__TESTHOST__":
+            if test_host_path is None:
+                raise ProductArchiveError(f"Cannot resolve __TESTHOST__ without its host: {value}")
+            return str(test_host_path)
         raise ProductArchiveError(f"Unsupported placeholder in xctestrun product path: {value}")
+
+    resolved = XCTESTRUN_PATH_PLACEHOLDER_PATTERN.sub(replace_placeholder, value)
     path = Path(resolved)
     try:
-        path.relative_to(products_path)
+        path.resolve(strict=False).relative_to(products_path.resolve(strict=False))
     except ValueError as error:
         raise ProductArchiveError(f"xctestrun product path escapes Build/Products: {value}") from error
     return path
