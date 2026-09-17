@@ -1146,21 +1146,33 @@ extension AndBibleUITests {
      *   - fails if the margins dialog, its seek bar, or its OK action cannot be reached
      *   - fails if reader text never renders, disappears after the commit, or keeps its width
      */
-    func testMarginMaxWidthEditorNarrowsRenderedReaderText() {
+    func testMarginMaxWidthEditorNarrowsRenderedReaderText() throws {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
         let webView = app.webViews.firstMatch
         XCTAssertTrue(webView.waitForExistence(timeout: 20))
-        var initialWidth: CGFloat = 0
+        var initialGeometry: [String: CGRect]?
         XCTAssertTrue(
             waitForUITestCondition("initial reader text renders", timeout: 20) {
-                initialWidth = self.widestTextLineWidth(in: webView)
-                return initialWidth > 100
+                initialGeometry = self.renderedTextGeometry(in: webView)
+                guard let initialGeometry else { return false }
+                let bounds = initialGeometry.values.reduce(CGRect.null) { bounds, frame in
+                    bounds.union(frame)
+                }
+                return self.elementFrameIsUsable(bounds) && bounds.width > 100
             },
             "Expected measurable rendered reader text before editing margins."
         )
+        guard let initialGeometry else { return }
+        let initialTextBounds = initialGeometry.values.reduce(CGRect.null) { bounds, frame in
+            bounds.union(frame)
+        }
+        guard elementFrameIsUsable(initialTextBounds) else {
+            XCTFail("Expected usable bounds around the fixture passage before editing margins.")
+            return
+        }
         attachReaderScreenshot(named: "reader-before-margin-edit", of: app)
 
         let textDisplayScreen = openAllTextOptions(in: app)
@@ -1178,7 +1190,7 @@ extension AndBibleUITests {
         )
         dragSeekBar(maxWidthSlider, fromNormalizedX: 0.34, toNormalizedX: 0.1)
         XCTAssertLessThan(
-            seekBarNumericValue(maxWidthSlider),
+            try seekBarNumericValue(maxWidthSlider),
             120,
             "Expected the seek bar drag to reduce the drafted maximum width below its 170 default."
         )
@@ -1193,21 +1205,24 @@ extension AndBibleUITests {
         )
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
 
-        var narrowedWidth: CGFloat = 0
+        var widthScale: CGFloat?
         let didNarrow = waitForUITestCondition("reader text narrows", timeout: 20) {
-            narrowedWidth = self.widestTextLineWidth(in: webView)
-            return narrowedWidth > 0 && narrowedWidth < initialWidth * 0.8
+            guard let currentGeometry = self.renderedTextGeometry(in: webView) else {
+                return false
+            }
+            let currentTextBounds = currentGeometry.values.reduce(CGRect.null) { bounds, frame in
+                bounds.union(frame)
+            }
+            guard self.elementFrameIsUsable(currentTextBounds) else { return false }
+            widthScale = currentTextBounds.width / initialTextBounds.width
+            return widthScale.map { $0 < 0.8 } ?? false
         }
         attachReaderScreenshot(named: "reader-after-margin-edit", of: app)
         XCTAssertTrue(
             didNarrow,
-            "Expected a much smaller maximum text width to narrow rendered reader text; "
-                + "initial=\(initialWidth) final=\(narrowedWidth)"
-        )
-        XCTAssertGreaterThan(
-            narrowedWidth,
-            0,
-            "Expected the reader to keep rendering text after the margin commit."
+            "Expected the same bounded fixture passage to become narrower after reducing maximum "
+                + "width; paired bounds-width scale="
+                + "\(String(describing: widthScale))"
         )
     }
 
@@ -1242,21 +1257,22 @@ extension AndBibleUITests {
      *   - fails if the font-size dialog, its seek bar, or its OK action cannot be reached
      *   - fails if rendered reader text keeps its previous line height after the commit
      */
-    func testFontSizeEditorGrowsRenderedReaderText() {
+    func testFontSizeEditorGrowsRenderedReaderText() throws {
         let app = makeApp()
         app.launch()
 
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 30))
         let webView = app.webViews.firstMatch
         XCTAssertTrue(webView.waitForExistence(timeout: 20))
-        var initialHeight: CGFloat = 0
+        var initialGeometry: [String: CGRect]?
         XCTAssertTrue(
             waitForUITestCondition("initial reader text renders", timeout: 20) {
-                initialHeight = self.tallestTextLineHeight(in: webView)
-                return initialHeight > 10
+                initialGeometry = self.renderedTextGeometry(in: webView)
+                return initialGeometry != nil
             },
             "Expected measurable rendered reader text before editing font size."
         )
+        guard let initialGeometry else { return }
 
         let textDisplayScreen = openAllTextOptions(in: app)
         XCTAssertTrue(textDisplayScreen.exists)
@@ -1271,7 +1287,7 @@ extension AndBibleUITests {
         )
         dragSeekBar(fontSizeSlider, fromNormalizedX: 0.3, toNormalizedX: 0.9)
         XCTAssertGreaterThan(
-            seekBarNumericValue(fontSizeSlider),
+            try seekBarNumericValue(fontSizeSlider),
             35,
             "Expected the seek bar drag to raise the drafted font size well above its default."
         )
@@ -1285,15 +1301,22 @@ extension AndBibleUITests {
         )
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
 
-        var grownHeight: CGFloat = 0
+        var heightScale: CGFloat?
         let didGrow = waitForUITestCondition("reader text grows", timeout: 20) {
-            grownHeight = self.tallestTextLineHeight(in: webView)
-            return grownHeight > initialHeight * 1.5
+            guard let currentGeometry = self.renderedTextGeometry(in: webView) else {
+                return false
+            }
+            heightScale = self.medianPairedGeometryScale(
+                from: initialGeometry,
+                to: currentGeometry,
+                dimension: \CGRect.height
+            )
+            return heightScale.map { $0 > 1.5 } ?? false
         }
         XCTAssertTrue(
             didGrow,
-            "Expected a much larger font size to grow rendered reader text lines; "
-                + "initial=\(initialHeight) final=\(grownHeight)"
+            "Expected the same rendered text to become broadly taller after increasing font "
+                + "size; median paired height scale=\(String(describing: heightScale))"
         )
     }
 
@@ -1318,80 +1341,104 @@ extension AndBibleUITests {
     }
 
     /**
-     Reads the Android seek bar's numeric accessibility value.
-     *
-     * - Parameter element: Seek bar element exposing its bound value as accessibility value.
-     * - Returns: Parsed numeric value, or `greatestFiniteMagnitude` when unavailable so callers'
-     *   less-than assertions fail loudly.
-     * - Side effects: none.
-     * - Failure modes: Missing or non-numeric accessibility values return the sentinel maximum.
+     Reads the Android seek bar's numeric accessibility value without inventing a success value.
+
+     - Parameter element: Seek bar exposing its drafted value through accessibility.
+     - Returns: The current numeric value for the caller's range assertion.
+     - Throws: An XCTest failure when the value is missing or cannot be parsed.
+     - Side effects: Reads the live control; does not change its value.
      */
-    private func seekBarNumericValue(_ element: XCUIElement) -> Double {
-        Double((element.value as? String) ?? "") ?? .greatestFiniteMagnitude
+    private func seekBarNumericValue(_ element: XCUIElement) throws -> Double {
+        try XCTUnwrap(
+            Double((element.value as? String) ?? ""),
+            "Expected the seek bar to expose a numeric accessibility value."
+        )
     }
 
     /**
-     Captures one complete accessibility sample of rendered reader text frames.
+     Captures a bounded accessibility sample of identifiable Genesis fixture text.
      *
      * WebKit can omit its remote descendants from a root snapshot even while those descendants
-     remain queryable. Resolving the descendant query directly preserves that remote boundary, and
-     requiring the fixture's first 40 text runs prevents a temporarily truncated tree from becoming
-     evidence that reader geometry changed.
+     remain queryable. Direct exact-label queries preserve that remote boundary without traversing
+     the whole document. The anchors are the complete first eight-run Genesis 1:1 sequence in the
+     deterministic KJV fixture and were observed at the start of every retained successful sample.
+     For repeated words and punctuation, the first exact match identifies the first verse because
+     the fixture chapter and document order do not change while display settings change geometry.
      *
      * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: The first 40 static-text frames, or `nil` when WebKit cannot provide the complete
-     *   deterministic sample.
-     * - Side effects: Resolves the WebKit static-text query and captures 40 read-only snapshots.
-     * - Failure modes: Returns `nil` when fewer than 40 descendants are exposed or any snapshot
-     *   fails, changes type, or exposes unusable geometry. Every collected frame is discarded so
-     *   polling callers cannot accept a partial sample.
+     * - Returns: Frames keyed by fixture text, or `nil` when WebKit cannot provide every anchor.
+     * - Side effects: Resolves eight WebKit static-text queries and captures read-only snapshots.
+     * - Failure modes: Returns `nil` when an anchor is missing, replaced, changes type, or exposes
+     *   unusable geometry. Every collected frame is discarded so polling callers cannot accept a
+     *   partial sample.
      */
-    private func sampledStaticTextFrames(in webView: XCUIElement) -> [CGRect]? {
-        let requiredSampleCount = 40
-        let textElements = Array(
-            webView.staticTexts.allElementsBoundByAccessibilityElement.prefix(requiredSampleCount)
-        )
-        guard textElements.count == requiredSampleCount else { return nil }
-
-        var frames: [CGRect] = []
-        frames.reserveCapacity(textElements.count)
-        for textElement in textElements {
-            guard let snapshot = try? textElement.snapshot(),
+    private func renderedTextGeometry(in webView: XCUIElement) -> [String: CGRect]? {
+        let fixtureTextAnchors = [
+            "1",
+            "In the beginning",
+            "God",
+            "created",
+            "the heaven",
+            "and",
+            "the earth",
+            ".",
+        ]
+        var framesByIdentity: [String: CGRect] = [:]
+        framesByIdentity.reserveCapacity(fixtureTextAnchors.count)
+        for anchor in fixtureTextAnchors {
+            let matches = webView.staticTexts.matching(
+                NSPredicate(format: "label == %@", anchor)
+            )
+            guard let snapshot = try? matches.firstMatch.snapshot(),
                   snapshot.elementType == .staticText,
+                  snapshot.label == anchor,
                   elementFrameIsUsable(snapshot.frame) else {
                 return nil
             }
-            frames.append(snapshot.frame)
+            framesByIdentity[anchor] = snapshot.frame
         }
-        return frames
+        return framesByIdentity
     }
 
     /**
-     Measures the tallest rendered text line inside an existing reader web view.
+     Computes the median proportional geometry change across the same rendered text elements.
      *
-     * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Height of the tallest static text run, or zero when no complete sample is exposed.
-     * - Side effects: Captures one complete read-only WebKit accessibility sample.
-     * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
-     *   partial measurements are never published as evidence that layout changed.
+     * Matching the complete identity set makes disappeared or replaced text invalidate the sample.
+     * Taking the median of paired ratios requires a broad geometry change and prevents one unusually
+     * wide or tall element from satisfying a rendered-layout assertion.
+     *
+     * - Parameters:
+     *   - initial: Baseline frames keyed by rendered-text identity.
+     *   - current: Post-edit frames keyed by rendered-text identity.
+     *   - dimension: Frame dimension to compare, such as width or height.
+     * - Returns: Median `current / initial` ratio, or `nil` when the samples cannot be paired.
+     * - Side effects: none; the calculation is synchronous and deterministic for fixed inputs.
+     * - Failure modes: Returns `nil` if either sample is empty, identities differ, or a selected
+     *   dimension is non-finite or non-positive.
      */
-    private func tallestTextLineHeight(in webView: XCUIElement) -> CGFloat {
-        guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
-        return frames.map(\.height).max() ?? 0
-    }
+    private func medianPairedGeometryScale(
+        from initial: [String: CGRect],
+        to current: [String: CGRect],
+        dimension: KeyPath<CGRect, CGFloat>
+    ) -> CGFloat? {
+        guard !initial.isEmpty, Set(initial.keys) == Set(current.keys) else { return nil }
+        let scales = initial.compactMap { identity, initialFrame -> CGFloat? in
+            guard let currentFrame = current[identity] else { return nil }
+            let initialValue = initialFrame[keyPath: dimension]
+            let currentValue = currentFrame[keyPath: dimension]
+            guard initialValue.isFinite, currentValue.isFinite,
+                  initialValue > 0, currentValue > 0 else {
+                return nil
+            }
+            return currentValue / initialValue
+        }.sorted()
+        guard scales.count == initial.count else { return nil }
 
-    /**
-     Measures the widest rendered text line inside an existing reader web view.
-     *
-     * - Parameter webView: Reader web view element already confirmed to exist.
-     * - Returns: Width of the widest static text run, or zero when no complete sample is exposed.
-     * - Side effects: Captures one complete read-only WebKit accessibility sample.
-     * - Failure modes: Snapshot failure returns zero so the enclosing polling assertion retries;
-     *   partial measurements are never published as evidence that layout changed.
-     */
-    private func widestTextLineWidth(in webView: XCUIElement) -> CGFloat {
-        guard let frames = sampledStaticTextFrames(in: webView) else { return 0 }
-        return frames.map(\.width).max() ?? 0
+        let midpoint = scales.count / 2
+        if scales.count.isMultiple(of: 2) {
+            return (scales[midpoint - 1] + scales[midpoint]) / 2
+        }
+        return scales[midpoint]
     }
 
 }
