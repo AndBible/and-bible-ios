@@ -405,7 +405,32 @@ extension AndBibleUITests {
             "Expected AI Settings back navigation to return to the reader shell."
         )
 
-        openSettings(in: app)
+        let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
+        let drawerButton = readerHeader.buttons["readerNavigationDrawerButton"].firstMatch
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(drawerButton, timeout: 20),
+            "Expected the reader header's navigation drawer button after leaving AI Settings."
+        )
+        drawerButton.tap()
+
+        let drawer = app.scrollViews["readerNavigationDrawer"].firstMatch
+        XCTAssertTrue(
+            drawer.waitForExistence(timeout: 20) && elementHasUsableFrame(drawer),
+            "Expected the identified reader drawer after one header-button activation."
+        )
+        let settingsButton = drawer.buttons["readerOpenSettingsAction"].firstMatch
+        for _ in 0..<4 where !isElementHittable(settingsButton) {
+            drawer.swipeUp()
+        }
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(settingsButton, timeout: 10),
+            "Expected the Settings action inside the identified reader drawer."
+        )
+        settingsButton.tap()
+        XCTAssertTrue(
+            waitForSettingsReady(in: app, timeout: 20),
+            "Expected Settings after one scoped reader-drawer action."
+        )
         XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
 
         tapSettingsElement("settingsAISettingsLink", in: app, timeout: 20)
