@@ -311,6 +311,45 @@ extension AndBibleUITests {
             )
             action.tap()
         }
+        func tapSettingsAction(_ actionIdentifier: String) {
+            let settingsScrollView = app.scrollViews["settingsScrollView"].firstMatch
+            XCTAssertTrue(
+                waitForUITestCondition("Settings scroll viewport becomes visible", timeout: 10) {
+                    settingsScrollView.exists && self.elementHasUsableFrame(settingsScrollView)
+                },
+                "Expected the identified Settings scroll viewport."
+            )
+            let action = settingsScrollView.buttons[actionIdentifier].firstMatch
+            if waitForElementToBecomeHittable(action, timeout: 2) {
+                action.tap()
+                return
+            }
+            if action.exists && isElementVisible(action, within: settingsScrollView) {
+                action.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                return
+            }
+            for _ in 0..<4 {
+                if elementHasUsableFrame(action), action.frame.maxY <= settingsScrollView.frame.minY {
+                    settingsScrollView.swipeDown()
+                } else {
+                    settingsScrollView.swipeUp()
+                }
+                let revealed = waitForUITestCondition("Reveal \(actionIdentifier)", timeout: 1) {
+                    self.isElementHittable(action)
+                        || (action.exists && self.isElementVisible(action, within: settingsScrollView))
+                }
+                if revealed {
+                    break
+                }
+            }
+            if isElementHittable(action) {
+                action.tap()
+            } else if action.exists && isElementVisible(action, within: settingsScrollView) {
+                action.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            } else {
+                XCTFail("Expected '\(actionIdentifier)' inside the identified Settings viewport.")
+            }
+        }
 
         tapReaderDrawerAction("readerOpenAISettingsAction")
         XCTAssertTrue(workflowButton("aiSettingsTopAppBarBackButton", timeout: 20).exists)
@@ -443,12 +482,12 @@ extension AndBibleUITests {
             "Expected the identified Settings form inside the visible app viewport."
         )
 
-        tapElementReliably(workflowButton("settingsAISettingsLink", timeout: 20), timeout: 10)
+        tapSettingsAction("settingsAISettingsLink")
         let nestedAISettingsBackButton = workflowButton("aiSettingsTopAppBarBackButton", timeout: 20)
         tapElementReliably(nestedAISettingsBackButton, timeout: 10)
         XCTAssertTrue(workflowScreen("settingsForm", timeout: 10).exists)
 
-        tapElementReliably(workflowButton("settingsGlobalTextOptionsLink", timeout: 20), timeout: 10)
+        tapSettingsAction("settingsGlobalTextOptionsLink")
         XCTAssertTrue(workflowScreen("textDisplaySettingsScreen", timeout: 20).exists)
         XCTAssertTrue(
             waitForUITestCondition("Global text scope", timeout: 10) {
