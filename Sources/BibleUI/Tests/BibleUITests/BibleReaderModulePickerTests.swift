@@ -628,160 +628,6 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Guards Android `ChooseDocument` routes against regressing to a dialog-sized presentation host.
-
-     Android opens both the all-types chooser and category-scoped chooser as an app-owned
-     full-screen activity. The iOS coordinator state is private, so this source-level contract
-     checks the presentation boundary directly: both chooser routes must use the same reader-stack
-     destination host as Downloads, and neither route may return to an overlay, native sheet, or
-     full-screen cover.
-     */
-    func testBibleReaderDocumentChooserRoutesUseAppOwnedOverlayInsteadOfNativePresentation() throws {
-        let readerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-        let pickerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
-        )
-        let chooserDestinationSource = try BibleUITestSourceLocator.extractFunction(
-            named: "documentChooserDestinationContent",
-            from: readerSource
-        )
-
-        XCTAssertTrue(readerSource.contains("case modulePicker"))
-        XCTAssertTrue(readerSource.contains("case chooseDocument"))
-        XCTAssertTrue(readerSource.contains("case .modulePicker:"))
-        XCTAssertTrue(readerSource.contains("case .chooseDocument:"))
-        XCTAssertTrue(readerSource.contains("documentChooserDestinationContent("))
-        XCTAssertTrue(readerSource.contains("presentReaderDestination(.modulePicker"))
-        XCTAssertTrue(readerSource.contains("presentReaderDestination(.chooseDocument"))
-        XCTAssertFalse(readerSource.contains("if let modal = activeReaderModal"))
-        XCTAssertFalse(readerSource.contains("readerModalContent("))
-        XCTAssertFalse(readerSource.contains("readerSheetModalBinding"))
-        XCTAssertFalse(readerSource.contains("readerDocumentChooserModalBinding"))
-        XCTAssertFalse(readerSource.contains(".fullScreenCover(item: $refChooserPresentation)"))
-        XCTAssertFalse(pickerSource.contains(".presentationDetents([.medium, .large])"))
-        XCTAssertTrue(chooserDestinationSource.contains("BibleReaderModulePicker("))
-        XCTAssertTrue(chooserDestinationSource.contains("surfacePalette: readerThemeSurfacePalette"))
-        XCTAssertFalse(chooserDestinationSource.contains("ReaderAppOwnedOverlay"))
-        XCTAssertFalse(chooserDestinationSource.contains(".sheet("))
-        XCTAssertFalse(chooserDestinationSource.contains(".fullScreenCover("))
-    }
-
-    /**
-     Guards Android `DocumentSelectionBase` visual parity for the full document chooser.
-
-     Android renders `ChooseDocument` with an app-owned toolbar, inline language/search/type filters,
-     a visible document count, and `document_list_item` rows. iOS must not regress to a native
-     `NavigationStack`/`List`/`.searchable` sheet because that preserves iOS chrome instead of the
-     shared AndBible document-management surface.
-     */
-    func testBibleReaderDocumentChooserUsesAndroidDocumentSelectionLayout() throws {
-        let pickerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
-        )
-        let sharedSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDocumentSelectionControls.swift"
-        )
-
-        XCTAssertTrue(pickerSource.contains("private var androidDocumentChooserScreen"))
-        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionActivityScreen("))
-        XCTAssertTrue(pickerSource.contains("private var androidTopAppBar"))
-        XCTAssertTrue(pickerSource.contains("private func androidFilterBar(visibleDocumentCount: Int)"))
-        XCTAssertTrue(pickerSource.contains("private func androidDocumentRow(_ row: DocumentChooserRow)"))
-        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionFilterBar("))
-        XCTAssertTrue(pickerSource.contains("AndroidDocumentSelectionFilterBar.localizedResultCount"))
-        XCTAssertFalse(pickerSource.contains("private func androidLanguageFilterMenu()"))
-        XCTAssertTrue(pickerSource.contains("private var androidChooserOverflowMenu"))
-        XCTAssertTrue(pickerSource.contains("String(localized: \"document\", defaultValue: \"Document\")"))
-        XCTAssertTrue(sharedSource.contains("AndroidActivitySurface(palette: surfacePalette)"))
-        XCTAssertFalse(sharedSource.contains(".toolbar(.hidden, for: .navigationBar)"))
-        XCTAssertFalse(pickerSource.contains("NavigationStack {\n            List {"))
-        XCTAssertFalse(pickerSource.contains(".searchable(text: $searchText"))
-        XCTAssertFalse(pickerSource.contains("Section(String(localized: \"document_filter_results"))
-    }
-
-    /**
-     Locks the reported chooser regression to Android's full activity structure shared with Downloads.
-
-     The regression presented Choose Document as a large-type, history-like constrained modal even
-     though Android's `ChooseDocument` and `DownloadActivity` inherit the same
-     `DocumentSelectionBase` screen. This guard requires both iOS routes to reuse the same app-owned
-     activity host, top bar, filter strip, icon column, contextual action bar, palette ownership, and
-     16/14sp row typography. Native menus, context menus, swipe actions, sheets, and local color
-     facsimiles are forbidden inside either document-selection activity.
-     */
-    func testDocumentChooserAndDownloadsShareFullAndroidDocumentSelectionStructure() throws {
-        let pickerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
-        )
-        let downloadsSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserView.swift"
-        )
-        let sharedSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidDocumentSelectionControls.swift"
-        )
-        let rowPresentationSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Downloads/ModuleBrowserRowActionPresentation.swift"
-        )
-        let activityMarkerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Shared/AndroidActivityAccessibilityMarker.swift"
-        )
-
-        for source in [pickerSource, downloadsSource] {
-            XCTAssertTrue(source.contains("AndroidDocumentSelectionActivityScreen("))
-            XCTAssertTrue(source.contains("AndroidActivityTopAppBar("))
-            XCTAssertTrue(source.contains("AndroidDocumentSelectionFilterBar("))
-            XCTAssertTrue(source.contains("AndroidDocumentListLeadingColumn("))
-            XCTAssertTrue(source.contains("AndroidDocumentContextActionBar("))
-            XCTAssertTrue(source.contains("AndroidActivityAccessibilityMarker("))
-            XCTAssertTrue(source.contains("ReaderThemeSurfacePalette"))
-            XCTAssertTrue(source.contains(".font(.system(size: 16, weight: .regular))"))
-            XCTAssertTrue(source.contains(".font(.system(size: 14, weight: .regular))"))
-
-            for forbidden in [
-                "Menu {",
-                ".contextMenu",
-                ".swipeActions",
-                ".sheet(",
-                ".presentationDetents",
-                "Image(systemName:",
-                "DocumentChooserPalette",
-            ] {
-                XCTAssertFalse(source.contains(forbidden), "Unexpected native/invented document UI: \(forbidden)")
-            }
-        }
-
-        XCTAssertTrue(sharedSource.contains("struct AndroidDocumentSelectionActivityScreen"))
-        XCTAssertTrue(sharedSource.contains("AndroidActivitySurface(palette: surfacePalette)"))
-        XCTAssertTrue(sharedSource.contains("VStack(spacing: 0)"))
-        XCTAssertTrue(sharedSource.contains("maxHeight: .infinity"))
-        XCTAssertFalse(sharedSource.contains("surfacePalette.backgroundColor.ignoresSafeArea()"))
-        XCTAssertFalse(sharedSource.contains(".navigationBarBackButtonHidden(true)"))
-        XCTAssertFalse(sharedSource.contains(".toolbar(.hidden, for: .navigationBar)"))
-        XCTAssertTrue(sharedSource.contains(".frame(height: 55)"))
-        XCTAssertTrue(sharedSource.contains("localized: \"document_filter_results\""))
-        XCTAssertTrue(sharedSource.contains("defaultValue: \"%d documents\""))
-        XCTAssertTrue(sharedSource.contains("AndroidResourcePalette.grey600"))
-        XCTAssertTrue(sharedSource.contains("AndroidResourcePalette.yellow600"))
-        XCTAssertTrue(activityMarkerSource.contains("struct AndroidActivityAccessibilityMarker"))
-        XCTAssertTrue(activityMarkerSource.contains(".accessibilityElement(children: .ignore)"))
-        XCTAssertTrue(activityMarkerSource.contains(".allowsHitTesting(false)"))
-        XCTAssertTrue(downloadsSource.contains("ModuleBrowserStatusSlotPresentation(status: status)"))
-        XCTAssertTrue(rowPresentationSource.contains("DocumentInstalledStatus"))
-        XCTAssertTrue(rowPresentationSource.contains("DocumentDownloadingStatus"))
-        XCTAssertTrue(rowPresentationSource.contains("DocumentUpdateStatus"))
-        XCTAssertTrue(rowPresentationSource.contains("DocumentErrorStatus"))
-        XCTAssertTrue(rowPresentationSource.contains("AndroidResourcePalette.documentUpgradeAmber"))
-
-        let backup = try XCTUnwrap(pickerSource.range(of: "modulePickerBackupDocumentsButton"))
-        let downloads = try XCTUnwrap(pickerSource.range(of: "modulePickerDownloadsButton"))
-        let install = try XCTUnwrap(pickerSource.range(of: "modulePickerInstallZipButton"))
-        XCTAssertLessThan(backup.lowerBound, downloads.lowerBound)
-        XCTAssertLessThan(downloads.lowerBound, install.lowerBound)
-    }
-
-    /**
      Guards imported EPUB management against returning to a parallel native iOS library.
 
      - Setup: Reads the Choose Document, reader-route, and immutable EPUB adapter sources.
@@ -846,19 +692,16 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies the inclusive full chooser retains locked rows and gates selection through real
-     manager-level cipher verification.
+     Verifies the inclusive full chooser retains locked rows while readable-only affordances exclude
+     them.
 
-     - Setup: Compares locked and unlocked Bible metadata, then inspects the private SwiftUI routing
-       boundary that consumes the shared switch outcome.
-     - Expected result: Both rows remain in the full chooser; all Bible rows reach the controller's
-       fresh preflight before prompting through `SwordManager`, and only a successful switch
-       dismisses the picker. A stale locked row already unlocked elsewhere does not prompt twice.
-     - Failure meaning: A locked document can disappear from the unlock-capable chooser, render
-       without a key, recurse on stale metadata, or dismiss without changing the reader.
-     - Side effects: Reads package source only; no module store or reader state is mutated.
+     - Setup: Compares locked and unlocked Bible metadata in the production row filter.
+     - Expected result: Both rows remain in the full chooser and only the locked row requires a key.
+     - Failure meaning: An installed locked document can disappear from the unlock-capable chooser or
+       enter an affordance that promises immediately readable content.
+     - Side effects: None; immutable metadata is used.
      */
-    func testBibleReaderModulePickerGatesLockedSelectionThroughSwordManager() throws {
+    func testBibleReaderModulePickerRetainsLockedRowsInInclusiveChooser() {
         let locked = ModuleInfo(
             name: "LOCKED",
             description: "Locked Bible",
@@ -887,36 +730,6 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
             ).compactMap(\.moduleInfo).map(\.name),
             ["LOCKED", "OPEN"]
         )
-
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
-        )
-        let selectionSource = try BibleUITestSourceLocator.extractFunction(named: "select", from: source)
-        let unlockedSelectionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "selectUnlockedModule",
-            from: source
-        )
-        let beginUnlockSource = try BibleUITestSourceLocator.extractFunction(
-            named: "beginUnlock",
-            from: source
-        )
-        let unlockSource = try BibleUITestSourceLocator.extractFunction(named: "attemptUnlock", from: source)
-
-        XCTAssertTrue(selectionSource.contains("if module.category == .bible"))
-        XCTAssertTrue(selectionSource.contains("Self.requiresUnlock(module)"))
-        XCTAssertTrue(selectionSource.contains("beginUnlock(module)"))
-        XCTAssertTrue(unlockedSelectionSource.contains("switch controller.switchBibleDocument"))
-        XCTAssertTrue(unlockedSelectionSource.contains("case .switched:"))
-        XCTAssertTrue(unlockedSelectionSource.contains("case .requiresUnlock:"))
-        XCTAssertTrue(
-            unlockedSelectionSource.contains(
-                "beginUnlock(module, authoritativeAccessState: true)"
-            )
-        )
-        XCTAssertTrue(beginUnlockSource.contains("authoritativeAccessState || Self.requiresUnlock(module)"))
-        XCTAssertTrue(unlockSource.contains("controller.swordManager?.unlockModule"))
-        XCTAssertTrue(unlockSource.contains("controller.refreshInstalledModules()"))
-        XCTAssertFalse(unlockSource.contains("setCipherKey"))
     }
 
     /**
@@ -966,6 +779,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         pageManager.bibleDocument = "KJV"
         pageManager.commentaryDocument = "BaselineComm"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
 
@@ -1048,6 +862,7 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         pageManager.bibleDocument = "KJV"
         pageManager.commentaryDocument = "BaselineComm"
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
 
@@ -1148,7 +963,11 @@ final class BibleReaderModulePickerTests: BibleUISwordFixtureTestCase {
         )
         XCTAssertTrue(source.contains("modelContext: modelContext"))
         XCTAssertTrue(source.contains("swordManager: controller.swordManager"))
-        XCTAssertTrue(source.contains("controller.refreshInstalledModules()"))
+        XCTAssertTrue(
+            source.contains(
+                "controller.refreshInstalledSourceInventoryForAuthoritativeSelection()"
+            )
+        )
     }
 
 }

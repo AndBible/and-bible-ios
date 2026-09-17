@@ -1542,3 +1542,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ nem található %2$@ dokumentumban.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Előző verzióból származó jegyzetek";

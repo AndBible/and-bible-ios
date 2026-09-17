@@ -53,7 +53,7 @@ struct BibleReaderProgressBridgeCoordinator {
     }
 
     /// Maps one rendered reader ordinal to Android's KJVA memorization-progress ordinal.
-    struct MemorizationOrdinalProjection {
+    struct MemorizationOrdinalProjection: Equatable, Sendable {
         /// Ordinal used by the current Vue document.
         let renderedOrdinal: Int
         /// Android JSword KJVA ordinal persisted in memorization progress rows.

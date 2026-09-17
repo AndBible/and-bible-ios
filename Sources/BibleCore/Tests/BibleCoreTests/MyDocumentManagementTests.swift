@@ -354,12 +354,11 @@ final class MyDocumentManagementTests: XCTestCase {
         let document = MyDocument(name: "Imported", initials: "ImportedPages")
         let composedPage = MyDocumentPage(id: UUID(), title: "Composed", pageKey: composed)
         let decomposedPage = MyDocumentPage(id: UUID(), title: "Decomposed", pageKey: decomposed)
-        composedPage.document = document
-        decomposedPage.document = document
-        document.pages = [composedPage, decomposedPage]
         context.insert(document)
         context.insert(composedPage)
         context.insert(decomposedPage)
+        composedPage.document = document
+        decomposedPage.document = document
         try context.save()
 
         let store = MyDocumentLibraryStore(modelContext: ModelContext(container))
@@ -480,13 +479,14 @@ final class MyDocumentManagementTests: XCTestCase {
      Verifies My Documents persistence cannot commit unrelated pending scene-context changes.
 
      The manager receives a scene context because that is the natural SwiftUI integration point,
-     but its transaction must run in an isolated context. Otherwise its single `save()` would also
-     publish every unsaved model in the scene and its rollback path could discard those edits.
+     but its transaction must run in an isolated context. Otherwise its single `save()` could also
+     publish every unsaved model in the scene.
      */
     @MainActor
     func testLibrarySaveDoesNotCommitUnrelatedCallerContextChanges() throws {
         let container = try makeContainer()
         let sceneContext = ModelContext(container)
+        sceneContext.autosaveEnabled = false
         sceneContext.insert(MyDocument(name: "Unrelated pending", initials: "MyDoc_Pending"))
 
         let store = MyDocumentLibraryStore(modelContext: sceneContext)
@@ -494,10 +494,15 @@ final class MyDocumentManagementTests: XCTestCase {
         _ = try session.createDocument(name: "Managed")
         try saveFixture(store, session: &session)
 
-        sceneContext.rollback()
         let verificationContext = ModelContext(container)
         let persistedDocuments = try verificationContext.fetch(FetchDescriptor<MyDocument>())
         XCTAssertEqual(persistedDocuments.map(\.name), ["Managed"])
+        XCTAssertTrue(sceneContext.hasChanges)
+        XCTAssertEqual(
+            try sceneContext.fetch(FetchDescriptor<MyDocument>())
+                .filter { $0.name == "Unrelated pending" }.count,
+            1
+        )
     }
 
     /** Verifies a rebuilt reader store observes an isolated management save immediately. */
@@ -508,13 +513,11 @@ final class MyDocumentManagementTests: XCTestCase {
         let document = MyDocument(name: "Study", initials: "MyDoc_Study")
         let page = MyDocumentPage(title: "Page", pageKey: "page")
         let content = MyDocumentPageContent(pageId: page.id, content: "Original")
-        page.document = document
-        page.pageContent = content
-        document.pages = [page]
-        content.page = page
         mainContext.insert(document)
         mainContext.insert(page)
         mainContext.insert(content)
+        page.document = document
+        page.pageContent = content
         try mainContext.save()
 
         let store = MyDocumentLibraryStore(modelContext: mainContext)
@@ -565,16 +568,13 @@ final class MyDocumentManagementTests: XCTestCase {
             sourceBookInitials: "KJV",
             sourceBookKey: "Gen.1.1"
         )
-        page.document = document
-        page.pageContent = content
-        page.aiPageCacheEntries = [cache]
-        document.pages = [page]
-        content.page = page
-        cache.page = page
         context.insert(document)
         context.insert(page)
         context.insert(content)
         context.insert(cache)
+        page.document = document
+        page.pageContent = content
+        cache.page = page
         try context.save()
 
         let store = MyDocumentLibraryStore(modelContext: context)
@@ -615,10 +615,9 @@ final class MyDocumentManagementTests: XCTestCase {
         let setupContext = ModelContext(container)
         let document = MyDocument(name: "Study", initials: "MyDoc_Study")
         let originalPage = MyDocumentPage(title: "Original", pageKey: "original")
-        originalPage.document = document
-        document.pages = [originalPage]
         setupContext.insert(document)
         setupContext.insert(originalPage)
+        originalPage.document = document
         try setupContext.save()
 
         let managementContext = ModelContext(container)
@@ -642,17 +641,14 @@ final class MyDocumentManagementTests: XCTestCase {
             sourcePromptId: promptID,
             sourceModelName: "model"
         )
-        generatedPage.document = concurrentDocument
-        generatedPage.pageContent = generatedContent
-        generatedPage.aiPageCacheEntries = [generatedCache]
-        generatedContent.page = generatedPage
-        generatedCache.page = generatedPage
-        concurrentDocument.pages = (concurrentDocument.pages ?? []) + [generatedPage]
         let syncedDocument = MyDocument(name: "Synced", initials: "MyDoc_Synced", orderNumber: 2)
         concurrentContext.insert(generatedPage)
         concurrentContext.insert(generatedContent)
         concurrentContext.insert(generatedCache)
         concurrentContext.insert(syncedDocument)
+        generatedPage.document = concurrentDocument
+        generatedPage.pageContent = generatedContent
+        generatedCache.page = generatedPage
         try concurrentContext.save()
 
         try session.renameDocument(id: document.id, name: "Renamed Study")
@@ -670,6 +666,178 @@ final class MyDocumentManagementTests: XCTestCase {
         XCTAssertFalse(session.isDirty)
     }
 
+    /**
+     Verifies library Save durably stages Android's complete child-first page deletion graph.
+
+     - Setup: Persists two ordinary documents with one content and AI-cache row per page, then
+       accepts that complete graph as the remote-sync baseline. A management session removes one
+       page directly and removes the other page through its parent document.
+     - Expected result: A fresh persistent container retains the first document while neither
+       deleted page, content row, cache row, nor deleted document survives. The journal contains
+       one Android page-id DELETE for every child and page plus the deleted document identity.
+     - Failure meaning: The management path has relied on SwiftData's unsupported iOS 17 cascade,
+       deleted one child graph twice, or diverged from Android's table and entity-key contract.
+     - Side effects: Creates a disk-backed store in the test runner's temporary sandbox. The
+       directory remains until process cleanup because SwiftData exposes no store-close operation.
+     */
+    @MainActor
+    func testLibrarySaveDurablyDeletesPageChildrenAndJournalsAndroidIdentities() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "MyDocumentManagementDeletion-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storeURL = directory.appendingPathComponent("MyDocuments.store")
+        let retainedDocumentID = try XCTUnwrap(
+            UUID(uuidString: "11111111-2222-3333-4444-555555555555")
+        )
+        let directlyDeletedPageID = try XCTUnwrap(
+            UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        )
+        let deletedDocumentID = try XCTUnwrap(
+            UUID(uuidString: "66666666-7777-8888-9999-aaaaaaaaaaaa")
+        )
+        let descendantPageID = try XCTUnwrap(
+            UUID(uuidString: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+        )
+        let promptID = try XCTUnwrap(
+            UUID(uuidString: "12345678-90ab-cdef-1234-567890abcdef")
+        )
+
+        do {
+            let container = try makePersistentJournaledContainer(at: storeURL)
+            let context = ModelContext(container)
+            let retainedDocument = MyDocument(
+                id: retainedDocumentID,
+                name: "Retained",
+                initials: "MyDoc_Retained"
+            )
+            let directlyDeletedPage = MyDocumentPage(
+                id: directlyDeletedPageID,
+                title: "Remove page",
+                pageKey: "remove-page"
+            )
+            let directContent = MyDocumentPageContent(
+                pageId: directlyDeletedPageID,
+                content: "Direct content"
+            )
+            let directCache = AiPageCacheEntry(
+                pageId: directlyDeletedPageID,
+                sourcePromptId: promptID,
+                sourceModelName: "model"
+            )
+            let deletedDocument = MyDocument(
+                id: deletedDocumentID,
+                name: "Delete document",
+                initials: "MyDoc_Delete"
+            )
+            let descendantPage = MyDocumentPage(
+                id: descendantPageID,
+                title: "Remove with document",
+                pageKey: "remove-document-page"
+            )
+            let descendantContent = MyDocumentPageContent(
+                pageId: descendantPageID,
+                content: "Descendant content"
+            )
+            let descendantCache = AiPageCacheEntry(
+                pageId: descendantPageID,
+                sourcePromptId: promptID,
+                sourceModelName: "model"
+            )
+
+            // Insert disconnected models first. Assigning one relationship owner after insertion
+            // lets SwiftData establish each inverse without the iOS 17 pre-insertion graph trap.
+            context.insert(retainedDocument)
+            context.insert(directlyDeletedPage)
+            context.insert(directContent)
+            context.insert(directCache)
+            context.insert(deletedDocument)
+            context.insert(descendantPage)
+            context.insert(descendantContent)
+            context.insert(descendantCache)
+            directlyDeletedPage.document = retainedDocument
+            directlyDeletedPage.pageContent = directContent
+            directCache.page = directlyDeletedPage
+            descendantPage.document = deletedDocument
+            descendantPage.pageContent = descendantContent
+            descendantCache.page = descendantPage
+            try context.save()
+
+            try RemoteSyncMyDocumentSnapshotService().refreshBaselineFingerprintsThrowing(
+                modelContext: context,
+                settingsStore: SettingsStore(modelContext: context)
+            )
+        }
+
+        do {
+            let container = try makePersistentJournaledContainer(at: storeURL)
+            let context = ModelContext(container)
+            let store = MyDocumentLibraryStore(modelContext: context)
+            var session = try store.loadSession()
+            try session.deletePage(
+                documentID: retainedDocumentID,
+                pageID: directlyDeletedPageID
+            )
+            try session.deleteDocument(id: deletedDocumentID)
+            try saveFixture(store, session: &session)
+            XCTAssertFalse(session.isDirty)
+        }
+
+        let verificationContainer = try makePersistentJournaledContainer(at: storeURL)
+        let verificationContext = ModelContext(verificationContainer)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<MyDocument>()).map(\.id),
+            [retainedDocumentID]
+        )
+        XCTAssertTrue(try verificationContext.fetch(FetchDescriptor<MyDocumentPage>()).isEmpty)
+        XCTAssertTrue(
+            try verificationContext.fetch(FetchDescriptor<MyDocumentPageContent>()).isEmpty
+        )
+        XCTAssertTrue(try verificationContext.fetch(FetchDescriptor<AiPageCacheEntry>()).isEmpty)
+
+        let deleteEntries = try RemoteSyncLogEntryStore(
+            settingsStore: SettingsStore(modelContext: verificationContext)
+        ).entriesStrict(for: .myDocuments).filter { $0.type == .delete }
+        let directlyDeletedPageBlob = Data([
+            0xaa, 0xaa, 0xaa, 0xaa, 0xbb, 0xbb, 0xcc, 0xcc,
+            0xdd, 0xdd, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee,
+        ])
+        let descendantPageBlob = Data([
+            0xbb, 0xbb, 0xbb, 0xbb, 0xcc, 0xcc, 0xdd, 0xdd,
+            0xee, 0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ])
+        let deletedDocumentBlob = Data([
+            0x66, 0x66, 0x66, 0x66, 0x77, 0x77, 0x88, 0x88,
+            0x99, 0x99, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,
+        ])
+        let expectedDeleteIdentities: [(
+            tableName: String,
+            entityID1: RemoteSyncSQLiteValue,
+            entityID2: RemoteSyncSQLiteValue
+        )] = [
+            ("MyDocumentPage", .blob(directlyDeletedPageBlob), .text("")),
+            ("MyDocumentPageContent", .blob(directlyDeletedPageBlob), .text("")),
+            ("AiPageCacheEntry", .blob(directlyDeletedPageBlob), .text("")),
+            ("MyDocumentPage", .blob(descendantPageBlob), .text("")),
+            ("MyDocumentPageContent", .blob(descendantPageBlob), .text("")),
+            ("AiPageCacheEntry", .blob(descendantPageBlob), .text("")),
+            ("MyDocument", .blob(deletedDocumentBlob), .text("")),
+        ]
+        XCTAssertEqual(deleteEntries.count, expectedDeleteIdentities.count)
+        for expected in expectedDeleteIdentities {
+            XCTAssertEqual(
+                deleteEntries.filter {
+                    $0.tableName == expected.tableName
+                        && $0.entityID1 == expected.entityID1
+                        && $0.entityID2 == expected.entityID2
+                }.count,
+                1,
+                "Missing or duplicated exact DELETE identity for \(expected.tableName)"
+            )
+        }
+    }
+
     private func makeContainer() throws -> ModelContainer {
         let schema = Schema([
             MyDocument.self,
@@ -681,5 +849,23 @@ final class MyDocumentManagementTests: XCTestCase {
             for: schema,
             configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
         )
+    }
+
+    /** Opens the complete journaled My Documents schema at one caller-owned durable store URL. */
+    private func makePersistentJournaledContainer(at storeURL: URL) throws -> ModelContainer {
+        let schema = Schema([
+            MyDocument.self,
+            MyDocumentPage.self,
+            MyDocumentPageContent.self,
+            AiPageCacheEntry.self,
+            Setting.self,
+        ])
+        let configuration = ModelConfiguration(
+            "MyDocumentManagementDeletion",
+            schema: schema,
+            url: storeURL,
+            cloudKitDatabase: .none
+        )
+        return try ModelContainer(for: schema, configurations: [configuration])
     }
 }

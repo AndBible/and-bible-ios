@@ -31,13 +31,13 @@ enum BibleReaderBookmarkNavigationFailure: Error, Equatable, LocalizedError, Sen
     case unsupportedSourceVersification(String)
     /// The resolved source candidate does not use the persisted versification exactly.
     case sourceVersificationMismatch(expected: String, actual: String)
-    /// The persisted source range has invalid or non-verse endpoints.
+    /// The persisted source range has invalid or non-scripture endpoints.
     case invalidSourceOrdinalRange(ClosedRange<Int>)
-    /// A normal source-canon ordinal is not exactly addressable by the source module.
+    /// A concrete source-canon ordinal is not exactly addressable by the source module.
     case sourceOrdinalIdentityMismatch(Int)
     /// The canonical source range does not equal the persisted OSIS reference byte-for-byte.
     case sourceReferenceMismatch(expected: String, actual: String)
-    /// The persisted KJVA range has invalid or non-verse endpoints.
+    /// The persisted KJVA range has invalid or non-scripture endpoints.
     case invalidKJVAOrdinalRange(ClosedRange<Int>)
     /// The canonical persisted KJVA range does not equal its OSIS reference byte-for-byte.
     case kjvaReferenceMismatch(expected: String, actual: String)
@@ -141,9 +141,9 @@ enum BibleReaderBookmarkNavigationFailure: Error, Equatable, LocalizedError, Sen
 struct BibleReaderBookmarkNavigationVerseAddress: Equatable, Sendable {
     /// OSIS book identifier.
     let osisBookID: String
-    /// One-based chapter number.
+    /// Chapter number, including `0` for a canon-owned book introduction.
     let chapter: Int
-    /// One-based normal verse number; zero is retained only while classifying canon structure.
+    /// Verse number, including `0` for a canon-owned book or chapter introduction.
     let verse: Int
 
     /**
@@ -188,13 +188,13 @@ struct BibleReaderBookmarkNavigationBiblePlan: Equatable, Sendable {
     let sourceOrdinalRange: ClosedRange<Int>
     /// Exact validated persisted source OSIS reference.
     let sourceOSISReference: String
-    /// Every normal source verse inside the persisted source ordinal range.
+    /// Every concrete source verse or introduction inside the persisted source ordinal range.
     let sourceVerses: [BibleReaderBookmarkNavigationOrdinalVerse]
     /// Exact validated persisted KJVA ordinal range.
     let kjvaOrdinalRange: ClosedRange<Int>
     /// Exact validated persisted KJVA OSIS reference.
     let kjvaOSISReference: String
-    /// Every normal KJVA verse inside the persisted KJVA ordinal range.
+    /// Every concrete KJVA verse or introduction inside the persisted KJVA ordinal range.
     let kjvaVerses: [BibleReaderBookmarkNavigationOrdinalVerse]
     /// Already-selected destination module to retain while committing.
     let destinationModuleInitials: String
@@ -279,6 +279,17 @@ struct BibleReaderBookmarkNavigationSQLiteFragment: Equatable, Sendable {
     let direction: String
     /// Source Strong's capability.
     let sourceHasStrongs: Bool?
+
+    /**
+     Exact `osisRef` serialized for the Vue `OsisDocument`.
+
+     Android and `BibleReaderDocumentPayloadFactory` prefer a direct annotation reference, then the
+     source fragment reference, then the persisted key. Keeping scroll authorization on that same
+     value prevents nested SQLite markup from being mistaken for the visible document identity.
+     */
+    var renderedDocumentOsisReference: String {
+        annotateReference ?? fragmentOsisReference ?? key
+    }
 
     /**
      Copies and validates one builder result as detached bookmark-navigation data.
@@ -496,6 +507,50 @@ enum BibleReaderBookmarkNavigationCommitPlan: Equatable, Sendable {
 }
 
 /**
+ Lazily retains one operation's admitted scripture-book inventory.
+
+ The bookmark planner may validate several verse-zero coordinates in the same source/destination.
+ SWORD derives its book list by traversing module keys, so repeating that traversal per coordinate
+ would make cross-chapter planning scale with both verses and books. This owner loads at most once,
+ retains only compact `BookInfo` metadata for the candidate's lifetime, and releases it with the
+ operation. It is thread-safe because candidate closures are escaping even though current planning
+ is synchronous.
+ */
+private final class BibleReaderBookmarkNavigationBookOwnership: @unchecked Sendable {
+    /// Exact installed source whose admitted inventory is retained.
+    private let source: BibleReaderInstalledScriptureSource
+    /// Protects one-shot resolution for escaping candidate closures.
+    private let lock = NSLock()
+    /// Whether the operation already attempted inventory resolution.
+    private var didResolve = false
+    /// Compact admitted OSIS identifiers; empty also records a failed/empty resolution.
+    private var osisBookIDs: Set<String> = []
+
+    /** Creates an unloaded operation owner without traversing module keys. */
+    init(source: BibleReaderInstalledScriptureSource) {
+        self.source = source
+    }
+
+    /**
+     Reports exact OSIS membership from the operation's one retained inventory snapshot.
+
+     - Parameter osisBookID: Canonical OSIS identifier to prove.
+     - Returns: True only when the exact installed source exposed the book in its retained snapshot.
+     - Side effects: On first use, reads the source book inventory once; later calls are in-memory.
+     - Failure modes: Failed and empty inventory reads are retained as an empty set and fail closed.
+     */
+    func owns(_ osisBookID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if !didResolve {
+            osisBookIDs = Set((try? source.bookList().map(\.osisId)) ?? [])
+            didResolve = true
+        }
+        return osisBookIDs.contains(osisBookID)
+    }
+}
+
+/**
  Read-only SWORD adapter used by the exact bookmark planner.
 
  Inputs are immutable metadata plus cursor-restoring exact lookup closures. Outputs are copied verse
@@ -524,6 +579,10 @@ struct BibleReaderBookmarkNavigationSwordCandidate {
      - Failure modes: None during construction; individual exact reads may fail later.
      */
     init(module: SwordModule) {
+        if module.info.category == .bible {
+            self = Self(source: .sword(module))
+            return
+        }
         initials = module.info.name
         category = module.info.category
         versification = VersificationMapper.versificationName(for: module)
@@ -558,11 +617,12 @@ struct BibleReaderBookmarkNavigationSwordCandidate {
      - Failure modes: Generic-key lookup always fails because this adapter represents a Bible only.
      */
     init(source: BibleReaderInstalledScriptureSource) {
+        let bookOwnership = BibleReaderBookmarkNavigationBookOwnership(source: source)
         initials = source.info.name
         category = source.info.category
         versification = source.versificationName
         referenceForOrdinal = { ordinal in
-            source.verseReference(ordinal: ordinal).map {
+            source.verseReference(ordinal: ordinal, ownsBook: bookOwnership.owns).map {
                 BibleReaderBookmarkNavigationOrdinalVerse(
                     ordinal: $0.ordinal,
                     reference: .init(
@@ -577,7 +637,8 @@ struct BibleReaderBookmarkNavigationSwordCandidate {
             source.verseOrdinal(
                 osisBookId: reference.osisBookID,
                 chapter: reference.chapter,
-                verse: reference.verse
+                verse: reference.verse,
+                ownsBook: bookOwnership.owns
             )
         }
         fragmentForExactKey = { key in
@@ -881,12 +942,18 @@ struct BibleReaderBookmarkNavigationInventory {
         myDocumentStore: MyDocumentStore?,
         epubReaders: [EpubReader]
     ) {
-        self.destinationBible = destinationBible.map(
+        let candidates = swordModules.map(
             BibleReaderBookmarkNavigationSwordCandidate.init(module:)
         )
-        swordCandidates = swordModules.map(
-            BibleReaderBookmarkNavigationSwordCandidate.init(module:)
-        )
+        swordCandidates = candidates
+        if let destinationBible,
+           let index = swordModules.firstIndex(where: { $0 === destinationBible }) {
+            self.destinationBible = candidates[index]
+        } else {
+            self.destinationBible = destinationBible.map(
+                BibleReaderBookmarkNavigationSwordCandidate.init(module:)
+            )
+        }
         sqliteCandidates = sqliteModules.map(
             BibleReaderBookmarkNavigationSQLiteCandidate.init(module:)
         )
@@ -954,12 +1021,12 @@ struct BibleReaderBookmarkNavigationCanon {
     let supportsVersification: (String) -> Bool
     /// Intro-inclusive source-canon ordinal decoder.
     let sourceReference: (Int, String) -> BibleReaderBookmarkNavigationVerseAddress?
-    /// Strict source-reference projection into canonical KJVA identity.
+    /// Strict source-reference projection into canonical intro-inclusive KJVA identity.
     let sourceToKJVA: (
         BibleReaderBookmarkNavigationVerseAddress,
         String
     ) -> BibleReaderBookmarkNavigationKJVAMapping?
-    /// Concrete KJVA verse decoder; structural introduction ordinals return `nil`.
+    /// Concrete KJVA verse/introduction decoder; global structural headings return `nil`.
     let kjvaVerse: (Int) -> BibleReaderBookmarkNavigationOrdinalVerse?
     /// Strict canonical KJVA projection into a destination versification.
     let kjvaToDestination: (
@@ -981,33 +1048,30 @@ struct BibleReaderBookmarkNavigationCanon {
             }
         },
         sourceToKJVA: { reference, sourceVersification in
-            guard let conversion = VersificationMapper.convertStrictly(
+            guard let ordinal = VersificationMapper.kjvaOrdinal(
                       osisBookId: reference.osisBookID,
                       chapter: reference.chapter,
                       verse: reference.verse,
-                      from: sourceVersification,
-                      to: JSwordKJVAVersification.name
+                      sourceVersification: sourceVersification
                   ),
-                  let ordinal = JSwordKJVAVersification.verseOrdinal(
-                      osisId: conversion.reference.osisBookId,
-                      chapter: conversion.reference.chapter,
-                      verse: conversion.reference.verse
+                  let canonical = JSwordKJVAVersification.referenceIncludingIntroductions(
+                    ordinal: ordinal
                   ) else {
                 return nil
             }
             return BibleReaderBookmarkNavigationKJVAMapping(
                 verse: .init(
-                    ordinal: ordinal,
+                    ordinal: canonical.ordinal,
                     reference: .init(
-                        osisBookID: conversion.reference.osisBookId,
-                        chapter: conversion.reference.chapter,
-                        verse: conversion.reference.verse
+                        osisBookID: canonical.osisId,
+                        chapter: canonical.chapter,
+                        verse: canonical.verse
                     )
                 )
             )
         },
         kjvaVerse: { ordinal in
-            JSwordKJVAVersification.verseReference(ordinal: ordinal).map {
+            JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: ordinal).map {
                 .init(
                     ordinal: $0.ordinal,
                     reference: .init(
@@ -1458,13 +1522,14 @@ struct BibleReaderBookmarkNavigationCoordinator {
     }
 
     /**
-     Reconstructs every normal source verse and proves exact module ordinal identity.
+     Reconstructs every concrete source verse/introduction and proves exact module identity.
 
      - Parameters:
-       - range: Persisted inclusive source ordinal range with normal verse endpoints.
+       - range: Persisted inclusive source ordinal range with concrete scripture endpoints.
        - versification: Exact source canon name.
        - source: Source module candidate whose forward and reverse lookups must agree with the canon.
-     - Returns: Every normal verse in ordinal order; structural heading and intro slots are omitted.
+     - Returns: Every concrete verse or canon-owned introduction in ordinal order; global-heading
+       slots are omitted.
      - Side effects: Reads the canon and performs cursor-restoring source-module lookups.
      - Throws: A typed invalid-range or source ordinal/reference identity failure.
      - Complexity: Linear in the inclusive source ordinal span.
@@ -1475,22 +1540,14 @@ struct BibleReaderBookmarkNavigationCoordinator {
         source: BibleReaderBookmarkNavigationSwordCandidate
     ) throws -> [BibleReaderBookmarkNavigationOrdinalVerse] {
         guard range.lowerBound > 0,
-              let first = canon.sourceReference(range.lowerBound, versification),
-              first.chapter > 0,
-              first.verse > 0,
-              let last = canon.sourceReference(range.upperBound, versification),
-              last.chapter > 0,
-              last.verse > 0 else {
+              canon.sourceReference(range.lowerBound, versification) != nil,
+              canon.sourceReference(range.upperBound, versification) != nil else {
             throw BibleReaderBookmarkNavigationFailure.invalidSourceOrdinalRange(range)
         }
 
         var verses: [BibleReaderBookmarkNavigationOrdinalVerse] = []
         for ordinal in range {
             guard let canonical = canon.sourceReference(ordinal, versification) else { continue }
-            guard canonical.chapter > 0, canonical.verse >= 0 else {
-                throw BibleReaderBookmarkNavigationFailure.invalidSourceOrdinalRange(range)
-            }
-            guard canonical.verse > 0 else { continue }
             let expected = BibleReaderBookmarkNavigationOrdinalVerse(
                 ordinal: ordinal,
                 reference: canonical
@@ -1509,12 +1566,12 @@ struct BibleReaderBookmarkNavigationCoordinator {
     }
 
     /**
-     Reconstructs every concrete persisted KJVA verse while skipping structural intro slots.
+     Reconstructs every concrete persisted KJVA verse/introduction while skipping global headings.
 
-     - Parameter range: Persisted inclusive KJVA range with normal verse endpoints.
-     - Returns: Every concrete KJVA verse and its exact persisted ordinal in ascending order.
+     - Parameter range: Persisted inclusive KJVA range with concrete scripture endpoints.
+     - Returns: Every concrete KJVA coordinate and its exact persisted ordinal in ascending order.
      - Side effects: Reads the pinned KJVA canon only.
-     - Throws: `invalidKJVAOrdinalRange` when either endpoint is not a concrete verse.
+     - Throws: `invalidKJVAOrdinalRange` when either endpoint is not a concrete scripture coordinate.
      - Complexity: Linear in the inclusive KJVA ordinal span.
      */
     private func validatedKJVAVerses(

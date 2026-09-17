@@ -1539,3 +1539,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "Nie znaleziono „%1$@” w dokumencie: %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Zaimportowane notatki";

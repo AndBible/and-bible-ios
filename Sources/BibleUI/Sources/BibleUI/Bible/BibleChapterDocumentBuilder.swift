@@ -18,7 +18,7 @@ private let chapterBuilderLogger = Logger(subsystem: "org.andbible", category: "
  chapter boundaries.
  */
 struct BibleChapterDocumentBuilder {
-    struct LoadedChapterContent {
+    struct LoadedChapterContent: Sendable {
         let xml: String
         let verseCount: Int
         let addChapter: Bool
@@ -31,7 +31,7 @@ struct BibleChapterDocumentBuilder {
      shared projector can preserve Android-significant edge whitespace. Construction performs no
      I/O and cannot fail; `buildVerseChunkXML` owns structural repair and wrapper emission.
      */
-    struct VerseEntry {
+    struct VerseEntry: Sendable {
         /// One-based source verse number used by the synthetic OSIS wrapper.
         let verse: Int
 
@@ -59,6 +59,16 @@ struct BibleChapterDocumentBuilder {
         }
     }
 
+    /** Immutable native capture projected into reader XML away from the source owner. */
+    struct CapturedChapter: Sendable {
+        let osisBookId: String
+        let chapter: Int
+        let moduleInitials: String
+        let bookIntroduction: String?
+        let chapterIntroduction: String?
+        let sourceRange: SwordVerseSourceRange
+    }
+
     let module: SwordModule
     let includeHeadings: Bool
 
@@ -80,22 +90,20 @@ struct BibleChapterDocumentBuilder {
        caller cannot interleave cursor movement between entry metadata and source content.
      */
     func loadChapter(osisBookId: String, chapter: Int) -> LoadedChapterContent? {
-        var verseCount = 0
-        var currentVerseChunk: [VerseEntry] = []
-        var xmlParts: [String] = []
-        var hasChapterMarker = false
-
-        if includeHeadings, chapter == 1,
-           let bookIntroXML = rawEntryFragment(osisBookId: osisBookId, chapter: 0, verse: 0) {
-            appendPreservedOsisContent(bookIntroXML, to: &xmlParts)
-            hasChapterMarker = hasChapterMarker || bookIntroXML.contains("<chapter")
+        guard let capture = captureChapter(osisBookId: osisBookId, chapter: chapter) else {
+            return nil
         }
+        return Self.projectChapter(capture)
+    }
 
-        if includeHeadings,
-           let chapterIntroXML = rawEntryFragment(osisBookId: osisBookId, chapter: chapter, verse: 0) {
-            appendPreservedOsisContent(chapterIntroXML, to: &xmlParts)
-            hasChapterMarker = hasChapterMarker || chapterIntroXML.contains("<chapter")
-        }
+    /** Captures exact native source values without performing structural XML projection. */
+    func captureChapter(osisBookId: String, chapter: Int) -> CapturedChapter? {
+        let bookIntroduction = includeHeadings && chapter == 1
+            ? capturedIntroduction(osisBookId: osisBookId, chapter: 0, verse: 0)
+            : nil
+        let chapterIntroduction = includeHeadings
+            ? capturedIntroduction(osisBookId: osisBookId, chapter: chapter, verse: 0)
+            : nil
 
         guard let firstEntry = inspectedSourceEntry(
             osisBookId: osisBookId,
@@ -111,11 +119,17 @@ struct BibleChapterDocumentBuilder {
             return nil
         }
 
-        let sourceRange: SwordVerseSourceRange
         do {
-            sourceRange = try module.inspectVerseSourceRangeRestoringPrevious(
-                startOrdinal: firstEntry.verseKey.index,
-                endOrdinal: lastEntry.verseKey.index
+            return CapturedChapter(
+                osisBookId: osisBookId,
+                chapter: chapter,
+                moduleInitials: module.info.name,
+                bookIntroduction: bookIntroduction,
+                chapterIntroduction: chapterIntroduction,
+                sourceRange: try module.inspectVerseSourceRangeRestoringPrevious(
+                    startOrdinal: firstEntry.verseKey.index,
+                    endOrdinal: lastEntry.verseKey.index
+                )
             )
         } catch {
             chapterBuilderLogger.error(
@@ -123,15 +137,57 @@ struct BibleChapterDocumentBuilder {
             )
             return nil
         }
+    }
 
-        for sourceEntry in sourceRange.entries {
+    /**
+     Projects one immutable native capture into complete reader chapter XML.
+
+     - Parameters:
+       - capture: Exact copied chapter source and optional structural introductions.
+       - includesBookIntroduction: Whether chapter one begins with its captured book introduction.
+     - Returns: Repaired reader XML with at least one positive verse, or nil when no verse survives.
+     - Side effects: Performs in-memory structural repair only.
+     - Failure modes: Empty or wholly irreparable positive-verse captures fail closed.
+     */
+    static func projectChapter(
+        _ capture: CapturedChapter,
+        includesBookIntroduction: Bool = true
+    ) -> LoadedChapterContent? {
+        var verseCount = 0
+        var currentVerseChunk: [VerseEntry] = []
+        var xmlParts: [String] = []
+        var hasChapterMarker = false
+
+        if includesBookIntroduction, let bookIntroXML = projectedIntroduction(
+            capture.bookIntroduction,
+            moduleInitials: capture.moduleInitials
+        ) {
+            appendPreservedOsisContent(bookIntroXML, to: &xmlParts)
+            hasChapterMarker = hasChapterMarker || bookIntroXML.contains("<chapter")
+        }
+
+        if let chapterIntroXML = projectedIntroduction(
+            capture.chapterIntroduction,
+            moduleInitials: capture.moduleInitials
+        ) {
+            appendPreservedOsisContent(chapterIntroXML, to: &xmlParts)
+            hasChapterMarker = hasChapterMarker || chapterIntroXML.contains("<chapter")
+        }
+
+        for sourceEntry in capture.sourceRange.entries {
             let reference = sourceEntry.reference
-            guard reference.osisBookId == osisBookId,
-                  reference.chapter == chapter,
+            guard reference.osisBookId == capture.osisBookId,
+                  reference.chapter == capture.chapter,
                   let text = sourceEntry.osisFragment,
                   !text.isEmpty else { continue }
             if !hasChapterMarker {
-                appendPreservedOsisContent(chapterMarkerXML(osisBookId: osisBookId, chapter: chapter), to: &xmlParts)
+                appendPreservedOsisContent(
+                    chapterMarkerXML(
+                        osisBookId: capture.osisBookId,
+                        chapter: capture.chapter
+                    ),
+                    to: &xmlParts
+                )
                 hasChapterMarker = true
             }
 
@@ -144,15 +200,25 @@ struct BibleChapterDocumentBuilder {
             currentVerseChunk.append(verseEntry)
         }
 
-        appendCurrentVerseChunk(osisBookId: osisBookId, chapter: chapter, verseChunk: &currentVerseChunk, xmlParts: &xmlParts)
+        appendCurrentVerseChunk(
+            osisBookId: capture.osisBookId,
+            chapter: capture.chapter,
+            moduleInitials: capture.moduleInitials,
+            verseChunk: &currentVerseChunk,
+            xmlParts: &xmlParts
+        )
 
         if verseCount == 0 {
-            chapterBuilderLogger.warning("SWORD: No verses found for \(osisBookId) \(chapter)")
+            chapterBuilderLogger.warning(
+                "SWORD: No verses found for \(capture.osisBookId) \(capture.chapter)"
+            )
             return nil
         }
 
         let xml = "<div>\(xmlParts.joined())</div>"
-        chapterBuilderLogger.info("SWORD: Loaded \(verseCount) verses for \(osisBookId) \(chapter)")
+        chapterBuilderLogger.info(
+            "SWORD: Loaded \(verseCount) verses for \(capture.osisBookId) \(capture.chapter)"
+        )
         return LoadedChapterContent(
             xml: xml,
             verseCount: verseCount,
@@ -160,16 +226,46 @@ struct BibleChapterDocumentBuilder {
         )
     }
 
+    /**
+     Projects only the exact book-introduction fragment captured with chapter one.
+
+     Android's `getWholeChapter(book.0.0, showIntros: false)` renders the compact `Book.0` range;
+     it does not append chapter-one verses. The native capture still reads chapter one to preserve
+     the existing bounded source transaction, while this projection publishes only the repaired
+     book-introduction children.
+
+     - Parameter capture: Immutable chapter-one capture with optional book-introduction source XML.
+     - Returns: One intro-only reader fragment, or nil when the exact book introduction is absent or
+       irreparable.
+     - Side effects: Performs in-memory structural repair only.
+     - Failure modes: Rejects non-chapter-one captures and missing/empty repaired introductions.
+     */
+    static func projectBookIntroduction(_ capture: CapturedChapter) -> LoadedChapterContent? {
+        guard capture.chapter == 1,
+              let introduction = projectedIntroduction(
+                capture.bookIntroduction,
+                moduleInitials: capture.moduleInitials
+              ) else { return nil }
+        var xmlParts: [String] = []
+        appendPreservedOsisContent(introduction, to: &xmlParts)
+        guard !xmlParts.isEmpty else { return nil }
+        return LoadedChapterContent(
+            xml: "<div>\(xmlParts.joined())</div>",
+            verseCount: 0,
+            addChapter: !introduction.contains("<chapter")
+        )
+    }
+
     static func ordinal(chapter: Int, verse: Int) -> Int {
         (chapter - 1) * 40 + max(1, verse)
     }
 
-    private func normalizedOsisSegment(_ xml: String) -> String {
+    private static func normalizedOsisSegment(_ xml: String) -> String {
         let trimmed = xml.trimmingCharacters(in: .whitespacesAndNewlines)
         return "<div>\(trimmed)</div>"
     }
 
-    private func chapterMarkerXML(osisBookId: String, chapter: Int) -> String {
+    private static func chapterMarkerXML(osisBookId: String, chapter: Int) -> String {
         normalizedOsisSegment(
             "<chapter osisID=\"\(osisBookId).\(chapter)\" sID=\"chapter-\(osisBookId)-\(chapter)\" />"
         )
@@ -189,15 +285,24 @@ struct BibleChapterDocumentBuilder {
      - Failure modes: Never substitutes stripped/rendered text; invalid or irreparable source is
        omitted so it cannot invalidate the complete Vue chapter template.
      */
-    private func rawEntryFragment(osisBookId: String, chapter: Int, verse: Int) -> String? {
+    private func capturedIntroduction(osisBookId: String, chapter: Int, verse: Int) -> String? {
         guard let sourceEntry = inspectedSourceEntry(
             osisBookId: osisBookId,
             chapter: chapter,
             verse: verse
         ), !sourceEntry.osisFragment.isEmpty else { return nil }
+        return sourceEntry.osisFragment
+    }
+
+    /** Repairs one copied verse-zero source fragment without accessing native state. */
+    private static func projectedIntroduction(
+        _ sourceXML: String?,
+        moduleInitials: String
+    ) -> String? {
+        guard let sourceXML else { return nil }
         let repaired = SwordJSwordOSISSourceCompatibility.repairedSourceXML(
-            sourceEntry.osisFragment,
-            moduleInitials: module.info.name
+            sourceXML,
+            moduleInitials: moduleInitials
         )
         guard !repaired.isEmpty else { return nil }
         return "<div>\(repaired)</div>"
@@ -238,7 +343,7 @@ struct BibleChapterDocumentBuilder {
         }
     }
 
-    private func osisFragmentBody(_ xml: String) -> String {
+    private static func osisFragmentBody(_ xml: String) -> String {
         let trimmed = xml.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let openEnd = trimmed.firstIndex(of: ">"),
               let closeStart = trimmed.range(of: "</div>", options: .backwards)?.lowerBound else {
@@ -247,25 +352,26 @@ struct BibleChapterDocumentBuilder {
         return String(trimmed[trimmed.index(after: openEnd)..<closeStart])
     }
 
-    private func appendOsisContent(_ xml: String, to xmlParts: inout [String]) {
+    private static func appendOsisContent(_ xml: String, to xmlParts: inout [String]) {
         xmlParts.append(osisFragmentBody(xml))
     }
 
-    private func appendPreservedOsisContent(_ xml: String, to xmlParts: inout [String]) {
+    private static func appendPreservedOsisContent(_ xml: String, to xmlParts: inout [String]) {
         xmlParts.append(xml.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private func appendCurrentVerseChunk(osisBookId: String,
-                                         chapter: Int,
-                                         verseChunk: inout [VerseEntry],
-                                         xmlParts: inout [String]) {
+    private static func appendCurrentVerseChunk(osisBookId: String,
+                                                chapter: Int,
+                                                moduleInitials: String,
+                                                verseChunk: inout [VerseEntry],
+                                                xmlParts: inout [String]) {
         guard !verseChunk.isEmpty else { return }
         appendOsisContent(
             Self.buildVerseChunkXML(
                 osisBookId: osisBookId,
                 chapter: chapter,
                 verses: verseChunk,
-                moduleInitials: module.info.name
+                moduleInitials: moduleInitials
             ),
             to: &xmlParts
         )

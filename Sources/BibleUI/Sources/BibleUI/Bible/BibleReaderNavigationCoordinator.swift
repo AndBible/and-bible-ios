@@ -26,17 +26,18 @@ struct BibleReaderNavigationBook: Equatable {
  Current visible Bible position for a reader pane.
 
  The value is copied into and out of `BibleReaderController` through closures so the coordinator can
- plan mutations without retaining an observable controller. All numbers are one-based and already
- validated by the caller's active module/compatibility lookup.
+ plan mutations without retaining an observable controller. Ordinary locations are one-based;
+ chapter/book introductions use verse zero (and chapter zero for a book introduction) only after an
+ explicit ordinal proof from the caller's active source.
  */
 struct BibleReaderNavigationPosition: Equatable {
     /// User-facing book name.
     let book: String
 
-    /// One-based chapter number.
+    /// One-based chapter, or zero for a verified book introduction.
     let chapter: Int
 
-    /// One-based verse number.
+    /// One-based verse, or zero for a verified book/chapter introduction.
     let verse: Int
 }
 
@@ -56,6 +57,9 @@ struct BibleReaderNavigationVerseReference: Equatable {
 
     /// OSIS book identifier associated with the resolved verse.
     let osisBookId: String
+
+    /// Exact source-module ordinal captured with the resolved verse.
+    let ordinal: Int
 }
 
 /**
@@ -118,11 +122,14 @@ struct BibleReaderNavigationContext {
     /// Resolves a module-local ordinal into a chapter/verse identity.
     let verseReference: (_ book: String, _ ordinal: Int) -> BibleReaderNavigationVerseReference?
 
-    /// Records an Android-style history checkpoint after explicit navigation.
-    let recordHistory: (_ book: String, _ chapter: Int, _ verse: Int) -> Void
+    /// Admits and stages the Android-style location being left before navigation mutates state.
+    let recordHistory: (_ book: String, _ chapter: Int, _ verse: Int) -> Bool
 
     /// Persists mutated workspace/page state.
     let persistState: () -> Void
+
+    /// Scrolls to a target already retained by the current Vue document generation.
+    let scrollToLoadedPosition: (_ position: BibleReaderNavigationPosition, _ highlight: Bool) -> Bool
 
     /// Reloads visible content through the reader controller.
     let loadCurrentContent: () -> Void
@@ -161,7 +168,8 @@ final class BibleReaderNavigationCoordinator {
        - ordinalForVerse: Active-module lookup used to convert the restored verse into an anchor.
      - Side effects: Clears explicit navigation highlighting and replaces the stored scroll target.
      - Failure modes: If the verse has no ordinal or is verse one, restoration falls back to the
-       chapter top to preserve Android's top-of-chapter behavior.
+       chapter top to preserve Android's top-of-chapter behavior. Verse zero restores only when the
+       caller's active source resolves its exact introduction ordinal.
      */
     func restoreSavedPosition(
         _ position: BibleReaderNavigationPosition,
@@ -169,7 +177,11 @@ final class BibleReaderNavigationCoordinator {
     ) {
         originalNavigationOrdinalRange = nil
         shouldRestoreScroll = false
-        if position.verse > 1,
+        if position.verse == 0,
+           let ordinal = ordinalForVerse(position.book, position.chapter, 0) {
+            lastScrollTarget = .ordinal(ordinal)
+            shouldRestoreScroll = true
+        } else if position.verse > 1,
            let ordinal = ordinalForVerse(position.book, position.chapter, position.verse) {
             lastScrollTarget = .ordinal(ordinal)
         } else {
@@ -198,28 +210,66 @@ final class BibleReaderNavigationCoordinator {
      - Parameters:
        - book: User-facing book name to make visible.
        - chapter: One-based chapter number.
-       - verse: Optional one-based verse; omitted navigation lands at the chapter top.
+       - verse: Optional one-based verse; omitted navigation lands at the chapter top. Zero is
+         accepted only with `verifiedIntroductionOrdinal`.
+       - verifiedIntroductionOrdinal: Exact active-source ordinal proving the requested zero verse.
        - context: Controller-owned lookup, persistence, history, and reload callbacks.
+     - Returns: `true` after history admission and the requested location mutate reader state;
+       `false` before mutation when history admission fails or an introduction proof is absent or stale.
      - Side effects: Mutates controller position through `context`, writes PageManager Bible fields,
-       records history, persists workspace state, and reloads content when the Vue client is ready.
-     - Failure modes: If no PageManager is available, controller state and history still update but
-       no durable page-position write occurs; if the explicit verse has no ordinal, highlighting is
-       skipped while navigation still lands on the requested verse number.
+       records the prior location, persists workspace state, and either scrolls retained content or reloads when
+       the Vue client is ready.
+     - Failure modes: Rejected history admission or an invalid introduction proof returns before
+       reader state, PageManager, persistence, scroll, or reload mutation. If no PageManager is
+       available after admission, controller state and history still update without a durable page
+       position write. If an explicit verse has no ordinal, highlighting is skipped while navigation
+       still lands on the requested verse number.
      */
-    func navigateTo(book: String, chapter: Int, verse: Int? = nil, context: BibleReaderNavigationContext) {
-        let resolvedVerse = max(1, verse ?? 1)
+    @discardableResult
+    func navigateTo(
+        book: String,
+        chapter: Int,
+        verse: Int? = nil,
+        verifiedIntroductionOrdinal: Int? = nil,
+        context: BibleReaderNavigationContext
+    ) -> Bool {
+        let introductionOrdinal: Int?
+        if let verifiedIntroductionOrdinal {
+            guard verse == 0,
+                  chapter >= 0,
+                  context.ordinalForVerse(book, chapter, 0) == verifiedIntroductionOrdinal else {
+                return false
+            }
+            introductionOrdinal = verifiedIntroductionOrdinal
+        } else {
+            introductionOrdinal = nil
+        }
+
+        let previousPosition = context.currentPosition()
+        guard context.recordHistory(
+            previousPosition.book,
+            previousPosition.chapter,
+            previousPosition.verse
+        ) else { return false }
+
+        let resolvedVerse = introductionOrdinal == nil ? max(1, verse ?? 1) : 0
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: resolvedVerse)
         context.setCurrentPosition(position)
 
-        if let explicitVerse = verse,
-           let ordinal = context.ordinalForVerse(book, chapter, max(1, explicitVerse)) {
+        if let ordinal = introductionOrdinal {
+            originalNavigationOrdinalRange = [ordinal, ordinal]
+        } else if let explicitVerse = verse,
+                  let ordinal = context.ordinalForVerse(book, chapter, max(1, explicitVerse)) {
             originalNavigationOrdinalRange = [ordinal, ordinal]
         } else {
             originalNavigationOrdinalRange = nil
         }
 
-        if resolvedVerse > 1,
-           let ordinal = context.ordinalForVerse(book, chapter, resolvedVerse) {
+        if let ordinal = introductionOrdinal {
+            lastScrollTarget = .ordinal(ordinal)
+            shouldRestoreScroll = true
+        } else if resolvedVerse > 1,
+                  let ordinal = context.ordinalForVerse(book, chapter, resolvedVerse) {
             lastScrollTarget = .ordinal(ordinal)
             shouldRestoreScroll = true
         } else {
@@ -227,14 +277,19 @@ final class BibleReaderNavigationCoordinator {
             shouldRestoreScroll = false
         }
 
-        context.recordHistory(book, chapter, resolvedVerse)
         if let pageManager = context.pageManager() {
             write(position: position, to: pageManager, bookList: context.bookList())
-            context.persistState()
         }
+        context.persistState()
 
-        guard context.clientReady() else { return }
+        guard context.clientReady() else { return true }
+        if context.scrollToLoadedPosition(position, verse != nil) {
+            originalNavigationOrdinalRange = nil
+            shouldRestoreScroll = false
+            return true
+        }
         context.loadCurrentContent()
+        return true
     }
 
     /**
@@ -330,7 +385,7 @@ final class BibleReaderNavigationCoordinator {
         lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
         let keyParts = key.split(separator: ".", omittingEmptySubsequences: true)
-        if keyParts.count >= 2 {
+        if keyParts.count >= 2, Int(keyParts[1]) != nil {
             updateVisiblePositionFromKey(
                 osisId: String(keyParts[0]),
                 chapterText: String(keyParts[1]),
@@ -338,20 +393,71 @@ final class BibleReaderNavigationCoordinator {
                 context: context
             )
         } else if let reference = context.verseReference(previousPosition.book, ordinal) {
-            var position = previousPosition
-            position = BibleReaderNavigationPosition(
-                book: position.book,
+            let position = BibleReaderNavigationPosition(
+                book: previousPosition.book,
                 chapter: reference.chapter,
                 verse: reference.verse
             )
-            context.setCurrentPosition(position)
-            if let pageManager = context.pageManager() {
-                write(position: position, to: pageManager, bookList: context.bookList())
+            let pageManager = context.pageManager()
+            _ = applyVisibleBiblePosition(
+                position,
+                pageManager: pageManager,
+                context: context
+            )
+            if pageManager != nil {
                 persistVisibleVerseState(immediate: false, persistState: context.persistState)
             }
         }
 
         return context.currentPosition() != previousPosition
+    }
+
+    /**
+     Applies a visible source-Bible reference already captured outside the main scroll callback.
+
+     Commentary documents report document-local anchor ordinals, so resolving those ordinals through
+     the active Bible module can both block the main thread and select the wrong Bible verse. This
+     entry point accepts the source-qualified reference captured with the commentary document and
+     applies the same PageManager/debounce policy as ordinary visible Bible telemetry, without
+     history, reload, or another SWORD/SQLite lookup.
+
+     - Parameters:
+       - reference: Exact source-Bible book, chapter, verse, and ordinal captured off-main.
+       - context: Controller-owned state and persistence callbacks.
+     - Returns: `true` only when the visible Bible position changed.
+     - Side effects: Updates controller and PageManager Bible position, retains the source ordinal
+       for a later Bible restore, and persists immediately across book/chapter boundaries or
+       debounced within one chapter.
+     - Failure modes: An OSIS book absent from the active book catalog leaves state unchanged.
+     */
+    @discardableResult
+    func updateVisiblePosition(
+        reference: BibleReaderNavigationVerseReference,
+        context: BibleReaderNavigationContext
+    ) -> Bool {
+        let previousPosition = context.currentPosition()
+        guard let book = context.bookNameForOsisId(reference.osisBookId) else { return false }
+        let position = BibleReaderNavigationPosition(
+            book: book,
+            chapter: reference.chapter,
+            verse: reference.verse
+        )
+        lastScrollTarget = .ordinal(reference.ordinal)
+        let pageManager = context.pageManager()
+        let changes = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        if pageManager != nil,
+           changes.positionChanged || changes.pageManagerChanged {
+            persistVisibleVerseState(
+                immediate: position.book != previousPosition.book
+                    || position.chapter != previousPosition.chapter,
+                persistState: context.persistState
+            )
+        }
+        return changes.positionChanged
     }
 
     /**
@@ -378,13 +484,17 @@ final class BibleReaderNavigationCoordinator {
         context: BibleReaderNavigationContext
     ) {
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: verse)
-        context.setCurrentPosition(position)
         originalNavigationOrdinalRange = nil
         lastScrollTarget = .ordinal(ordinal)
         shouldRestoreScroll = true
 
-        if let pageManager = context.pageManager() {
-            write(position: position, to: pageManager, bookList: context.bookList())
+        let pageManager = context.pageManager()
+        _ = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        if pageManager != nil {
             persistVisibleVerseState(immediate: false, persistState: context.persistState)
         }
     }
@@ -403,6 +513,31 @@ final class BibleReaderNavigationCoordinator {
         currentPosition: BibleReaderNavigationPosition,
         ordinalForVerse: (_ book: String, _ chapter: Int, _ verse: Int) -> Int?
     ) -> BibleReaderScrollRestoreTarget {
+        let restoreTarget = contentRestoreTarget(
+            currentPosition: currentPosition,
+            ordinalForVerse: ordinalForVerse
+        )
+        shouldRestoreScroll = false
+        return restoreTarget
+    }
+
+    /**
+     Peeks at the setup target without consuming it before bridge acceptance.
+
+     Asynchronous document preparation can fail or be superseded after source capture. Keeping this
+     read non-mutating lets a retry preserve the same explicit highlight or visible-scroll target.
+
+     - Parameters:
+       - currentPosition: Current Bible position represented by the prepared document.
+       - ordinalForVerse: Active-source lookup for the current verse.
+     - Returns: The exact ordinal or chapter-top marker to pass to Vue `setup_content`.
+     - Side effects: None.
+     - Failure modes: If no ordinal can be resolved for the current verse, returns `.chapterTop`.
+     */
+    func contentRestoreTarget(
+        currentPosition: BibleReaderNavigationPosition,
+        ordinalForVerse: (_ book: String, _ chapter: Int, _ verse: Int) -> Int?
+    ) -> BibleReaderScrollRestoreTarget {
         let restoreTarget: BibleReaderScrollRestoreTarget
         if shouldRestoreScroll {
             restoreTarget = lastScrollTarget
@@ -416,8 +551,22 @@ final class BibleReaderNavigationCoordinator {
         } else {
             restoreTarget = .chapterTop
         }
-        shouldRestoreScroll = false
         return restoreTarget
+    }
+
+    /**
+     Commits a setup target only after the bridge accepts its replacement document.
+
+     - Parameter originalOrdinalRange: Explicit navigation range represented by the accepted setup.
+     - Side effects: Clears one-shot scroll restoration and clears the original range when it still
+       matches the accepted setup.
+     - Failure modes: A superseding original range is preserved for its newer request.
+     */
+    func commitAcceptedContentRestore(originalOrdinalRange: [Int]?) {
+        shouldRestoreScroll = false
+        if self.originalNavigationOrdinalRange == originalOrdinalRange {
+            self.originalNavigationOrdinalRange = nil
+        }
     }
 
     /**
@@ -454,7 +603,8 @@ final class BibleReaderNavigationCoordinator {
        - context: Controller-owned lookup, state, and persistence callbacks.
      - Side effects: Mutates controller position and PageManager fields when the key identifies a
        changed book/chapter or when the same-chapter ordinal resolves to a different verse.
-     - Failure modes: Non-numeric chapter strings are ignored to preserve the previous position.
+     - Failure modes: Non-numeric chapter strings are handled by the caller's typed ordinal
+       fallback because intro-inclusive document keys can be ranges such as `Matt.0-Matt.1`.
      */
     private func updateVisiblePositionFromKey(
         osisId: String,
@@ -462,45 +612,48 @@ final class BibleReaderNavigationCoordinator {
         ordinal: Int,
         context: BibleReaderNavigationContext
     ) {
-        var position = context.currentPosition()
+        let previousPosition = context.currentPosition()
         guard let chapter = Int(chapterText) else {
             return
         }
 
-        if chapter != position.chapter {
+        var position = previousPosition
+        let isImmediateTransition: Bool
+        if chapter != previousPosition.chapter {
             position = BibleReaderNavigationPosition(
-                book: context.bookNameForOsisId(osisId) ?? position.book,
+                book: context.bookNameForOsisId(osisId) ?? previousPosition.book,
                 chapter: chapter,
-                verse: position.verse
+                verse: previousPosition.verse
             )
-            if let pageManager = context.pageManager() {
-                position = positionByResolvingVerse(
-                    from: position,
-                    ordinal: ordinal,
-                    context: context
-                )
-                write(position: position, to: pageManager, bookList: context.bookList())
-                persistVisibleVerseState(immediate: true, persistState: context.persistState)
-            }
-            context.setCurrentPosition(position)
-        } else if let name = context.bookNameForOsisId(osisId), name != position.book {
-            position = BibleReaderNavigationPosition(book: name, chapter: position.chapter, verse: position.verse)
-            if let pageManager = context.pageManager() {
-                position = positionByResolvingVerse(
-                    from: position,
-                    ordinal: ordinal,
-                    context: context
-                )
-                write(position: position, to: pageManager, bookList: context.bookList())
-                persistVisibleVerseState(immediate: true, persistState: context.persistState)
-            }
-            context.setCurrentPosition(position)
-        } else if let pageManager = context.pageManager() {
-            position = positionByResolvingVerse(from: position, ordinal: ordinal, context: context)
-            context.setCurrentPosition(position)
-            pageManager.bibleVerseNo = position.verse
-            persistVisibleVerseState(immediate: false, persistState: context.persistState)
+            isImmediateTransition = true
+        } else if let name = context.bookNameForOsisId(osisId), name != previousPosition.book {
+            position = BibleReaderNavigationPosition(
+                book: name,
+                chapter: previousPosition.chapter,
+                verse: previousPosition.verse
+            )
+            isImmediateTransition = true
+        } else {
+            isImmediateTransition = false
         }
+
+        guard let pageManager = context.pageManager() else {
+            if isImmediateTransition {
+                context.setCurrentPosition(position)
+            }
+            return
+        }
+
+        position = positionByResolvingVerse(from: position, ordinal: ordinal, context: context)
+        _ = applyVisibleBiblePosition(
+            position,
+            pageManager: pageManager,
+            context: context
+        )
+        persistVisibleVerseState(
+            immediate: isImmediateTransition,
+            persistState: context.persistState
+        )
     }
 
     /**
@@ -527,6 +680,51 @@ final class BibleReaderNavigationCoordinator {
             chapter: position.chapter,
             verse: reference.verse
         )
+    }
+
+    /**
+     Applies one resolved Bible position without assigning fields that already match.
+
+     - Parameters:
+       - position: Resolved visible Bible position.
+       - pageManager: Durable page state for the active window, when one exists.
+       - context: Controller-owned observed position and active book catalog.
+     - Returns: Independent flags for controller-coordinate and PageManager mutation.
+     - Side effects: Publishes the controller position before mutating only the PageManager fields
+       whose values differ, so immediate persistence observes one coherent target.
+     - Failure modes: A missing PageManager still permits the controller position to advance but
+       produces no durable mutation flag. An unresolved book index preserves the retained index while
+       chapter and verse repairs remain available.
+     */
+    private func applyVisibleBiblePosition(
+        _ position: BibleReaderNavigationPosition,
+        pageManager: PageManager?,
+        context: BibleReaderNavigationContext
+    ) -> (positionChanged: Bool, pageManagerChanged: Bool) {
+        let positionChanged = context.currentPosition() != position
+        if positionChanged {
+            context.setCurrentPosition(position)
+        }
+
+        guard let pageManager else {
+            return (positionChanged, false)
+        }
+        let resolvedBookIndex = context.bookList().firstIndex { $0.name == position.book }
+        var pageManagerChanged = false
+        if let resolvedBookIndex,
+           pageManager.bibleBibleBook != resolvedBookIndex {
+            pageManager.bibleBibleBook = resolvedBookIndex
+            pageManagerChanged = true
+        }
+        if pageManager.bibleChapterNo != position.chapter {
+            pageManager.bibleChapterNo = position.chapter
+            pageManagerChanged = true
+        }
+        if pageManager.bibleVerseNo != position.verse {
+            pageManager.bibleVerseNo = position.verse
+            pageManagerChanged = true
+        }
+        return (positionChanged, pageManagerChanged)
     }
 
     /**

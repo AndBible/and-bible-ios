@@ -18,6 +18,67 @@ private enum TestStartupContainerError: LocalizedError {
 }
 
 /**
+ Models a temporarily unreadable secret backend whose stored password still exists.
+
+ Reads return nil, as the production Keychain facade does on a read failure. Writes and deletes
+ reach the backing store so tests can detect accidental password loss after unrelated edits.
+ */
+private final class UnreadableSyncSecretStore: SecretStoring {
+    let backing = InMemorySecretStore()
+
+    /// Simulates unavailable reads without deleting the backing secret.
+    func secret(forKey key: String) -> String? { nil }
+
+    /// Forwards an explicit write, retaining its exact bytes and backend errors.
+    func setSecret(_ value: String, forKey key: String) throws {
+        try backing.setSecret(value, forKey: key)
+    }
+
+    /// Forwards an explicit removal so a mistaken clear remains observable.
+    func removeSecret(forKey key: String) throws {
+        try backing.removeSecret(forKey: key)
+    }
+}
+
+/**
+ Deterministically suspends a mode-change handler until a test releases it.
+
+ The entry continuation lets concurrency tests observe the admitted operation without polling or
+ sleeping. All state is main-actor isolated to match `SyncService.ModeChangeHandler`.
+ */
+@MainActor
+private final class SuspendedModeChangeHandler {
+    private var didEnter = false
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /** Suspends the caller after notifying every waiter that the handler was entered. */
+    func suspendUntilReleased() async {
+        didEnter = true
+        let waiters = entryWaiters
+        entryWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    /** Waits until the handler has entered its controlled suspension point. */
+    func waitUntilEntered() async {
+        guard !didEnter else { return }
+        await withCheckedContinuation { continuation in
+            entryWaiters.append(continuation)
+        }
+    }
+
+    /** Releases the currently suspended handler. */
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+/**
  BibleCore remote-sync state and bootstrap tests migrated out of the app-host bundle.
 
  This suite protects sync settings persistence, iCloud startup recovery, WebDAV configuration,
@@ -42,42 +103,17 @@ final class RemoteSyncStateTests: XCTestCase {
     }
 
     /**
-     Verifies the synced SwiftData schema itself satisfies CloudKit startup validation.
+     Verifies the shared base SwiftData schema satisfies CloudKit startup validation.
 
-     The crash fallback prevents a bad CloudKit schema from taking the whole app down, but the
-     feature contract is stronger: when the user enables iCloud sync, the CloudKit-backed
-     `AndBible` store should load instead of immediately falling back to local storage. This test
-     constructs the same split cloud/local model set as app startup with isolated store names.
-     Failure means the model still contains CloudKit-forbidden constraints, missing relationship
-     inverses, or required attributes without declaration-level defaults.
+     The crash fallback prevents a bad CloudKit schema from taking the whole app down. This test
+     isolates BibleCore's shared base cloud/local partitions under temporary store names. It does
+     not validate the combined application + AI CloudKit schema; that boundary remains outside this
+     test. Failure means a base model still contains CloudKit-forbidden constraints, missing
+     relationship inverses, or required attributes without declaration-level defaults.
      */
     func testICloudSwiftDataSchemaLoadsWithCloudKitConfiguration() throws {
-        let cloudModels: [any PersistentModel.Type] = [
-            Workspace.self,
-            Window.self,
-            PageManager.self,
-            HistoryItem.self,
-            BibleBookmark.self,
-            BibleBookmarkNotes.self,
-            BibleBookmarkToLabel.self,
-            GenericBookmark.self,
-            GenericBookmarkNotes.self,
-            GenericBookmarkToLabel.self,
-            Label.self,
-            StudyPadTextEntry.self,
-            StudyPadTextEntryText.self,
-            MyDocument.self,
-            MyDocumentPage.self,
-            MyDocumentPageContent.self,
-            AiPageCacheEntry.self,
-            ReadingPlan.self,
-            ReadingPlanDay.self,
-            ReadingPlanDefinitionPublicationState.self,
-        ]
-        let localModels: [any PersistentModel.Type] = [
-            Repository.self,
-            Setting.self,
-        ]
+        let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+        let localModels = BibleCoreBaseModelRegistration.localModels
         let schema = Schema(cloudModels + localModels)
         let storeSuffix = UUID().uuidString
         let temporaryDirectory = FileManager.default.temporaryDirectory
@@ -236,7 +272,7 @@ final class RemoteSyncStateTests: XCTestCase {
      applier result becomes the active mode immediately and keeps the toggle usable.
      */
     @MainActor
-    func testSyncServiceAppliesRuntimeModeChangeWithoutPendingRestart() throws {
+    func testSyncServiceAppliesRuntimeModeChangeWithoutPendingRestart() async throws {
         let defaultsName = "org.andbible.tests.sync-toggle-live.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
         defer {
@@ -256,11 +292,130 @@ final class RemoteSyncStateTests: XCTestCase {
             return SyncModeChangeResult(effectiveEnabled: requestedMode)
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertEqual(requestedModes, [true])
         XCTAssertTrue(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies one suspended runtime replacement excludes duplicate toggles and releases admission
+     after successful settlement.
+
+     The controlled handler models the app shell draining the old persistence runtime. A second
+     toggle during that interval must not request another replacement even if public sync status
+     changes independently. After the first operation settles, a fresh toggle must be admitted.
+     */
+    @MainActor
+    func testSyncServiceSerializesSuspendedSuccessfulModeChanges() async throws {
+        let defaultsName = "org.andbible.tests.sync-toggle-serialized-success.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
+        service.setInitialState(enabled: false)
+        let suspension = SuspendedModeChangeHandler()
+        var requestedModes: [Bool] = []
+        service.setModeChangeHandler { requestedMode in
+            requestedModes.append(requestedMode)
+            await suspension.suspendUntilReleased()
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+
+        let firstToggle = Task { await service.toggleSync() }
+        await suspension.waitUntilEntered()
+
+        XCTAssertTrue(service.isModeChangeInFlight)
+        XCTAssertEqual(service.state, .syncing)
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+
+        service.recordRemoteChange(at: Date(timeIntervalSince1970: 1_806_000_000))
+        XCTAssertEqual(service.state, .idle)
+        await service.toggleSync()
+        XCTAssertEqual(requestedModes, [true])
+
+        suspension.release()
+        await firstToggle.value
+
+        XCTAssertFalse(service.isModeChangeInFlight)
+        XCTAssertTrue(service.isEnabled)
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
+
+        service.setModeChangeHandler { requestedMode in
+            requestedModes.append(requestedMode)
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+        await service.toggleSync()
+
+        XCTAssertEqual(requestedModes, [true, false])
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertEqual(service.state, .disabled)
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+    }
+
+    /**
+     Verifies a suspended failed replacement rolls back preference and runtime state, releases its
+     admission guard, and permits a later independent toggle.
+     */
+    @MainActor
+    func testSyncServiceSettlesSuspendedFailureBeforeAdmittingFreshToggle() async throws {
+        enum RuntimeModeChangeError: LocalizedError {
+            case rejected
+
+            var errorDescription: String? { "CloudKit runtime rebuild failed" }
+        }
+
+        let defaultsName = "org.andbible.tests.sync-toggle-serialized-failure.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+
+        let syncEnabledKey = "icloud_sync_enabled"
+        let service = SyncService(
+            cloudKitContainerIdentifier: Self.testCloudKitContainerIdentifier,
+            defaults: defaults,
+            syncEnabledKey: syncEnabledKey
+        )
+        service.setInitialState(enabled: false)
+        let suspension = SuspendedModeChangeHandler()
+        var requestCount = 0
+        service.setModeChangeHandler { _ in
+            requestCount += 1
+            await suspension.suspendUntilReleased()
+            throw RuntimeModeChangeError.rejected
+        }
+
+        let failedToggle = Task { await service.toggleSync() }
+        await suspension.waitUntilEntered()
+        await service.toggleSync()
+        XCTAssertEqual(requestCount, 1)
+
+        suspension.release()
+        await failedToggle.value
+
+        XCTAssertFalse(service.isModeChangeInFlight)
+        XCTAssertFalse(service.isEnabled)
+        XCTAssertFalse(service.requiresRestart)
+        XCTAssertEqual(service.state, .error("CloudKit runtime rebuild failed"))
+        XCTAssertFalse(defaults.bool(forKey: syncEnabledKey))
+
+        service.setModeChangeHandler { requestedMode in
+            requestCount += 1
+            return SyncModeChangeResult(effectiveEnabled: requestedMode)
+        }
+        await service.toggleSync()
+
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertTrue(service.isEnabled)
         XCTAssertEqual(service.state, .idle)
         XCTAssertTrue(defaults.bool(forKey: syncEnabledKey))
     }
@@ -274,7 +429,7 @@ final class RemoteSyncStateTests: XCTestCase {
      requiring a restart or claiming the requested CloudKit mode is active.
      */
     @MainActor
-    func testSyncServiceRevertsPreferenceWhenRuntimeModeChangeFails() throws {
+    func testSyncServiceRevertsPreferenceWhenRuntimeModeChangeFails() async throws {
         enum RuntimeModeChangeError: LocalizedError {
             case rejected
 
@@ -299,7 +454,7 @@ final class RemoteSyncStateTests: XCTestCase {
             throw RuntimeModeChangeError.rejected
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertFalse(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
@@ -316,7 +471,7 @@ final class RemoteSyncStateTests: XCTestCase {
      container.
      */
     @MainActor
-    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() throws {
+    func testSyncServicePreservesCurrentRuntimeMetadataWhenModeChangeFails() async throws {
         enum RuntimeModeChangeError: LocalizedError {
             case rejected
 
@@ -346,7 +501,7 @@ final class RemoteSyncStateTests: XCTestCase {
             throw RuntimeModeChangeError.rejected
         }
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertTrue(service.isEnabled)
         XCTAssertFalse(service.requiresRestart)
@@ -364,7 +519,7 @@ final class RemoteSyncStateTests: XCTestCase {
      silent no-op when no runtime stack can be rebuilt.
      */
     @MainActor
-    func testSyncServiceFallsBackToPendingRestartWithoutRuntimeModeHandler() throws {
+    func testSyncServiceFallsBackToPendingRestartWithoutRuntimeModeHandler() async throws {
         let defaultsName = "org.andbible.tests.sync-toggle-fallback.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
         defer {
@@ -379,7 +534,7 @@ final class RemoteSyncStateTests: XCTestCase {
         )
         service.setInitialState(enabled: false)
 
-        service.toggleSync()
+        await service.toggleSync()
 
         XCTAssertTrue(service.isEnabled)
         XCTAssertTrue(service.requiresRestart)
@@ -395,6 +550,66 @@ final class RemoteSyncStateTests: XCTestCase {
         XCTAssertEqual(store.selectedBackend, .iCloud)
         XCTAssertNil(store.loadWebDAVConfiguration())
         XCTAssertNil(store.webDAVPassword())
+    }
+
+    /**
+     Keeps independently edited preferences visible while connection credentials are incomplete.
+
+     Each case models an Android credential preference entered before the others. The settings
+     facade is recreated to avoid reading a view draft. These in-memory checks prove store reads
+     and transport admission, not physical-store recovery; the app journeys cover editor reopen.
+     */
+    func testRemoteSyncSettingsEditorRestoresPartialCredentialsWithoutEnablingTransport() throws {
+        let configurations = [
+            WebDAVSyncConfiguration(serverURL: "", username: "", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "https://example.invalid", username: "", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "", username: "alice", folderPath: nil),
+            WebDAVSyncConfiguration(serverURL: "", username: "", folderPath: "Study"),
+            WebDAVSyncConfiguration(serverURL: "", username: "alice", folderPath: "Study")
+        ]
+        for configuration in configurations {
+            let settings = try makeInMemorySettingsStore()
+            let secrets = InMemorySecretStore()
+            try RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+                .saveWebDAVConfiguration(configuration, password: " secret ")
+            let reopened = RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+            XCTAssertEqual(reopened.loadWebDAVConfigurationForEditing(), configuration)
+            XCTAssertEqual(reopened.webDAVPassword(), " secret ")
+            XCTAssertNil(reopened.loadWebDAVConfiguration())
+            XCTAssertNil(try reopened.makeWebDAVClient())
+        }
+    }
+
+    /**
+     Editing ordinary preferences or changing backend must not delete an unreadable password.
+
+     Android stores credential preferences independently. This exercises a read-unavailable
+     secret facade and inspects its independent backing store after edits, including clears.
+     */
+    func testRemoteSyncCredentialEditsPreserveOtherFieldsAndUnreadablePassword() throws {
+        let settings = try makeInMemorySettingsStore()
+        let secrets = UnreadableSyncSecretStore()
+        let store = RemoteSyncSettingsStore(settingsStore: settings, secretStore: secrets)
+        try store.setWebDAVPassword(" secret ")
+        XCTAssertNil(store.webDAVPassword())
+
+        store.setWebDAVUsername(" alice ")
+        store.setWebDAVFolderPath(" Study ")
+        store.setWebDAVServerURL(" https://example.invalid ")
+        store.selectedBackend = .iCloud
+        store.setWebDAVUsername("")
+        XCTAssertEqual(
+            store.loadWebDAVConfigurationForEditing(),
+            WebDAVSyncConfiguration(serverURL: "https://example.invalid", username: "", folderPath: "Study")
+        )
+        store.setWebDAVFolderPath(nil)
+        XCTAssertEqual(store.loadWebDAVConfigurationForEditing().serverURL, "https://example.invalid")
+        XCTAssertNil(store.loadWebDAVConfigurationForEditing().folderPath)
+        XCTAssertEqual(secrets.backing.secret(forKey: "gdrive_password"), " secret ")
+
+        try store.setWebDAVPassword("")
+        XCTAssertNil(secrets.backing.secret(forKey: "gdrive_password"))
+        XCTAssertEqual(store.loadWebDAVConfigurationForEditing().serverURL, "https://example.invalid")
     }
 
     /**

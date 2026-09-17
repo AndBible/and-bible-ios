@@ -1192,6 +1192,7 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
             bookmark.sourcePromptId = preparedBookmark.bookmark.sourcePromptId
             bookmark.editAction = preparedBookmark.bookmark.editAction
+            modelContext.insert(bookmark)
             if let notes = preparedBookmark.bookmark.notes {
                 let noteEntity = BibleBookmarkNotes(
                     bookmarkId: bookmark.id,
@@ -1199,11 +1200,9 @@ public final class RemoteSyncBookmarkRestoreService {
                     contentType: preparedBookmark.bookmark.notesContentType
                 )
                 noteEntity.sourcePromptId = preparedBookmark.bookmark.notesSourcePromptId
-                noteEntity.bookmark = bookmark
-                bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
+                noteEntity.bookmark = bookmark
             }
-            modelContext.insert(bookmark)
             bibleBookmarksByID[bookmark.id] = bookmark
         }
 
@@ -1226,6 +1225,7 @@ public final class RemoteSyncBookmarkRestoreService {
             bookmark.customIcon = preparedBookmark.bookmark.customIcon
             bookmark.sourcePromptId = preparedBookmark.bookmark.sourcePromptId
             bookmark.editAction = preparedBookmark.bookmark.editAction
+            modelContext.insert(bookmark)
             if let notes = preparedBookmark.bookmark.notes {
                 let noteEntity = GenericBookmarkNotes(
                     bookmarkId: bookmark.id,
@@ -1233,11 +1233,9 @@ public final class RemoteSyncBookmarkRestoreService {
                     contentType: preparedBookmark.bookmark.notesContentType
                 )
                 noteEntity.sourcePromptId = preparedBookmark.bookmark.notesSourcePromptId
-                noteEntity.bookmark = bookmark
-                bookmark.notes = noteEntity
                 modelContext.insert(noteEntity)
+                noteEntity.bookmark = bookmark
             }
-            modelContext.insert(bookmark)
             genericBookmarksByID[bookmark.id] = bookmark
         }
 
@@ -1250,9 +1248,9 @@ public final class RemoteSyncBookmarkRestoreService {
                     indentLevel: link.indentLevel,
                     expandContent: link.expandContent
                 )
+                modelContext.insert(junction)
                 junction.bookmark = bookmark
                 junction.label = label
-                modelContext.insert(junction)
             }
         }
 
@@ -1265,9 +1263,9 @@ public final class RemoteSyncBookmarkRestoreService {
                     indentLevel: link.indentLevel,
                     expandContent: link.expandContent
                 )
+                modelContext.insert(junction)
                 junction.bookmark = bookmark
                 junction.label = label
-                modelContext.insert(junction)
             }
         }
 
@@ -1280,14 +1278,13 @@ public final class RemoteSyncBookmarkRestoreService {
                 contentType: preparedEntry.entry.contentType
             )
             entry.sourcePromptId = preparedEntry.entry.sourcePromptId
-            entry.label = label
             modelContext.insert(entry)
+            entry.label = label
 
             if let text = preparedEntry.entry.text {
                 let textEntity = StudyPadTextEntryText(studyPadTextEntryId: preparedEntry.entry.id, text: text)
-                textEntity.entry = entry
-                entry.textEntry = textEntity
                 modelContext.insert(textEntity)
+                textEntity.entry = entry
             }
         }
 

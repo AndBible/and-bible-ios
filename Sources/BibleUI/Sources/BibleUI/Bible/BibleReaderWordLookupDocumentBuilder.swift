@@ -17,6 +17,12 @@ import SwordKit
    projection failures return `nil` so the controller presents Android's not-found feedback.
  */
 struct BibleReaderWordLookupDocumentBuilder {
+    /** Copied exact dictionary fragments before pure bridge serialization. */
+    struct Capture: Sendable {
+        let fragments: [OsisFragment]
+        let requiresRenderOptionAuthorization: Bool
+    }
+
     /// Supplies currently enabled dictionary modules for selected-word lookup.
     typealias DictionaryModulesProvider = () -> [DictionaryModule]
 
@@ -194,14 +200,27 @@ struct BibleReaderWordLookupDocumentBuilder {
        controller can show the existing Android-parity not-found toast.
      */
     func buildWordLookupMultiDocumentJSON(query: String) -> String? {
+        guard let capture = captureWordLookupMultiDocument(query: query) else { return nil }
+        return BibleReaderMultiFragmentDocumentBuilder.buildJSON(
+            fragments: capture.fragments,
+            compare: false,
+            id: "strongs-multi-\(UUID().uuidString)"
+        )
+    }
+
+    /** Captures exact word-lookup source fragments without serializing the bridge document. */
+    func captureWordLookupMultiDocument(query: String) -> Capture? {
         let enabledModules = modules()
         guard !enabledModules.isEmpty else { return nil }
 
         let keyOptions = wordLookupKeyOptions(for: query)
         var fragments: [BibleReaderMultiFragmentDocumentBuilder.Fragment] = []
+        var requiresRenderOptionAuthorization = false
 
         for module in enabledModules {
             guard let lookup = module.lookup(keyOptions) else { continue }
+            requiresRenderOptionAuthorization = requiresRenderOptionAuthorization
+                || lookup.requiresRenderOptionAuthorization
             let xml = lookup.payloadReadyXML ?? (lookup.isNativeHtml
                 ? BibleReaderStrongsDocumentBuilder.buildDictionaryEntryHTML(
                     renderedText: lookup.renderedText
@@ -237,7 +256,10 @@ struct BibleReaderWordLookupDocumentBuilder {
         }
 
         guard !fragments.isEmpty else { return nil }
-        return BibleReaderMultiFragmentDocumentBuilder.buildJSON(fragments: fragments)
+        return Capture(
+            fragments: fragments.map(BibleReaderStrongsDocumentBuilder.osisFragment),
+            requiresRenderOptionAuthorization: requiresRenderOptionAuthorization
+        )
     }
 
     /**

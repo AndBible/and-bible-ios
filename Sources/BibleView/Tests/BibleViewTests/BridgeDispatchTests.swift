@@ -10,6 +10,21 @@ import XCTest
  request classification, malformed-argument rejection, and passive-scroll focus behavior.
  */
 final class BridgeDispatchTests: XCTestCase {
+    /** A detached bridge rejects a response so native callers cannot commit unpublished state. */
+    func testDetachedBridgeRejectsCallResponsePublication() {
+        let bridge = BibleBridge()
+
+        XCTAssertFalse(bridge.sendResponse(callId: 81, value: #"{"id":"chapter"}"#))
+    }
+
+    /** A recording observer accepts the same response and receives its exact call identity. */
+    func testRecordingBridgeAcceptsCallResponsePublication() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+
+        XCTAssertTrue(bridge.sendResponse(callId: 82, value: #"{"id":"chapter"}"#))
+        XCTAssertEqual(recordedScripts(), [#"bibleView.response(82, {"id":"chapter"});"#])
+    }
+
     /**
      Verifies document replacement uses Android's single-evaluation bridge contract.
 

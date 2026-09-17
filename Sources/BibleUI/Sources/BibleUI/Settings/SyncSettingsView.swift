@@ -4,6 +4,23 @@ import SwiftUI
 import SwiftData
 import BibleCore
 
+private struct RemoteSyncLifecycleServiceEnvironmentKey: EnvironmentKey {
+    static let defaultValue: RemoteSyncLifecycleService? = nil
+}
+
+public extension EnvironmentValues {
+    /**
+     App-owned lifecycle gate for manual remote synchronization.
+
+     Package previews and non-app hosts default to `nil`, which keeps manual synchronization
+     unavailable rather than creating a persistence writer outside the runtime owner.
+     */
+    var remoteSyncLifecycleService: RemoteSyncLifecycleService? {
+        get { self[RemoteSyncLifecycleServiceEnvironmentKey.self] }
+        set { self[RemoteSyncLifecycleServiceEnvironmentKey.self] = newValue }
+    }
+}
+
 /**
  Configures the active sync backend and surfaces backend-specific settings.
 
@@ -36,6 +53,9 @@ public struct SyncSettingsView: View {
     /// SwiftData context used to materialize the local settings store.
     @Environment(\.modelContext) private var modelContext
 
+    /// App-owned admission gate that serializes manual work with persistence runtime replacement.
+    @Environment(\.remoteSyncLifecycleService) private var remoteSyncLifecycleService
+
     /// Whether the destructive disable-sync confirmation dialog is presented.
     @State private var showDisableConfirmation = false
 
@@ -44,9 +64,6 @@ public struct SyncSettingsView: View {
 
     /// User-entered or persisted NextCloud/WebDAV server root URL.
     @State private var serverURL = ""
-
-    /// Last server URL accepted by Android-style edit validation and eligible for persistence.
-    @State private var lastCommittedServerURL = ""
 
     /// User-entered or persisted NextCloud/WebDAV username.
     @State private var username = ""
@@ -62,6 +79,9 @@ public struct SyncSettingsView: View {
 
     /// Whether a NextCloud/WebDAV connection test is currently in flight.
     @State private var isTestingConnection = false
+
+    /// Prevents duplicate manual operations while lifecycle admission or admitted work is pending.
+    @State private var isManualSynchronizationPending = false
 
     /// Latest result from the manual NextCloud/WebDAV connection test, if any.
     @State private var remoteConnectionStatus: RemoteConnectionStatus?
@@ -250,7 +270,7 @@ public struct SyncSettingsView: View {
             loadPersistedSettingsIfNeeded()
         }
         .onDisappear {
-            persistRemoteSettings()
+            persistBackendSelection()
         }
         .onChange(of: selectedBackend) { _, newValue in
             remoteSettingsStore.selectedBackend = newValue
@@ -275,7 +295,11 @@ public struct SyncSettingsView: View {
                 ], accessibilityIdentifier: "syncConfirmationDialog")
             } else if showDisableConfirmation {
                 AndroidDecisionDialog(title: String(localized: "disable_sync_title"), message: String(localized: "disable_sync_warning"), actions: [
-                    .init(id: "disable", title: String(localized: "disable_sync"), style: .destructive) { showDisableConfirmation = false; syncService.toggleSync() },
+                    .init(id: "disable", title: String(localized: "disable_sync"), style: .destructive) {
+                        guard !syncService.isModeChangeInFlight else { return }
+                        showDisableConfirmation = false
+                        Task { await syncService.toggleSync() }
+                    },
                     .init(id: "cancel", title: String(localized: "cancel"), style: .normal) { showDisableConfirmation = false }
                 ], accessibilityIdentifier: "syncDisableConfirmationDialog")
             } else if let message = remoteSyncErrorMessage {
@@ -329,9 +353,10 @@ public struct SyncSettingsView: View {
                             return
                         }
                         if !newValue {
+                            guard !syncService.isModeChangeInFlight else { return }
                             showDisableConfirmation = true
                         } else {
-                            syncService.toggleSync()
+                            Task { await syncService.toggleSync() }
                         }
                     }
                     ),
@@ -401,12 +426,12 @@ public struct SyncSettingsView: View {
     /**
      Returns whether the iCloud toggle should accept another user change.
 
-     Live runtime rebuilds complete synchronously from the settings screen, but the transient
-     `.syncing` state still protects the control from repeated taps while SwiftUI is reconciling
-     the updated data stack.
+     Live runtime rebuilds can suspend while the old persistence runtime drains. Admission is
+     therefore derived from the service's dedicated mode-change guard rather than `.syncing`,
+     which CloudKit notifications may independently replace.
      */
     private var isICloudToggleEnabled: Bool {
-        !syncService.requiresRestart && syncService.state != .syncing
+        !syncService.requiresRestart && !syncService.isModeChangeInFlight
     }
 
     /**
@@ -510,7 +535,7 @@ public struct SyncSettingsView: View {
 
     /** Closes the app-owned activity after committing valid remote settings. */
     private func close() {
-        persistRemoteSettings()
+        persistBackendSelection()
         if let onBack {
             onBack()
         } else {
@@ -635,8 +660,9 @@ public struct SyncSettingsView: View {
        dialog does after its change listener runs.
      - Side effects: Persists accepted credentials, clears stale connection state, or publishes the
        localized invalid-URL state and app-owned error dialog without changing the saved server URL.
-     - Failure modes: Invalid server URLs are rejected before mutation; local Keychain persistence
-       failures retain the existing best-effort behavior in `persistRemoteSettings()`.
+     - Failure modes: Invalid server URLs are rejected before mutation; Keychain edit failures
+       surface an error and retain the prior displayed password. Unrelated edits never rewrite
+       a password whose Keychain read may have been unavailable.
      */
     private func commitCredential(_ candidate: String, for field: NextCloudCredentialField) {
         switch field {
@@ -648,17 +674,25 @@ public struct SyncSettingsView: View {
                 remoteSyncErrorMessage = invalidURLMessage
                 return
             }
+            remoteSettingsStore.setWebDAVServerURL(trimmedCandidate)
             serverURL = trimmedCandidate
-            lastCommittedServerURL = serverURL
         case .username:
+            remoteSettingsStore.setWebDAVUsername(candidate)
             username = candidate
         case .password:
+            do {
+                try remoteSettingsStore.setWebDAVPassword(candidate)
+            } catch {
+                remoteConnectionStatus = .failure(error.localizedDescription)
+                remoteSyncErrorMessage = error.localizedDescription
+                return
+            }
             password = candidate
         case .folderPath:
+            remoteSettingsStore.setWebDAVFolderPath(candidate)
             folderPath = candidate
         }
         remoteConnectionStatus = nil
-        persistRemoteSettings()
     }
 
     /// Plain localized status text used by the app-owned iCloud value row.
@@ -983,7 +1017,6 @@ public struct SyncSettingsView: View {
             get: { remoteCategoryEnabled[category] ?? remoteSettingsStore.isSyncEnabled(for: category) },
             set: { newValue in
                 if newValue {
-                    remoteCategoryEnabled[category] = true
                     Task {
                         await beginRemoteSynchronization(for: category)
                     }
@@ -1001,7 +1034,8 @@ public struct SyncSettingsView: View {
      - returns `true` during connection tests, in-flight category sync, or pending confirmation prompts
      */
     private var isRemoteSyncInteractionLocked: Bool {
-        if isTestingConnection || pendingRemoteAdoption != nil || pendingRemoteConfirmation != nil {
+        if isTestingConnection || isManualSynchronizationPending
+            || pendingRemoteAdoption != nil || pendingRemoteConfirmation != nil {
             return true
         }
 
@@ -1052,32 +1086,12 @@ public struct SyncSettingsView: View {
             return
         }
 
-        if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
-            selectedBackend = .nextCloud
-            serverURL = "https://example.invalid/remote.php/dav/files/ui-test"
-            lastCommittedServerURL = serverURL
-            username = "ui-test"
-            password = "ui-test"
-            folderPath = ""
-            remoteCategoryEnabled = Dictionary(
-                uniqueKeysWithValues: RemoteSyncCategory.activeSyncCases.map { category in
-                    (category, false)
-                }
-            )
-            hasLoadedSettings = true
-            return
-        }
-
         selectedBackend = remoteSettingsStore.selectedBackend
 
-        if let configuration = remoteSettingsStore.loadWebDAVConfiguration() {
-            serverURL = configuration.serverURL
-            lastCommittedServerURL = configuration.serverURL
-            username = configuration.username
-            folderPath = configuration.folderPath ?? ""
-        } else {
-            lastCommittedServerURL = serverURL
-        }
+        let configuration = remoteSettingsStore.loadWebDAVConfigurationForEditing()
+        serverURL = configuration.serverURL
+        username = configuration.username
+        folderPath = configuration.folderPath ?? ""
         password = remoteSettingsStore.webDAVPassword() ?? ""
         remoteCategoryEnabled = Dictionary(
             uniqueKeysWithValues: RemoteSyncCategory.activeSyncCases.map { category in
@@ -1088,32 +1102,14 @@ public struct SyncSettingsView: View {
     }
 
     /**
-     Persists the currently edited remote-sync state.
+     Saves backend selection without resaving independently committed credential preferences.
 
-     Side effects:
-     - writes the selected backend to `sync_adapter`
-     - writes WebDAV server, username, folder path, and password through `RemoteSyncSettingsStore`
-       into SwiftData and Keychain
-
-     Failure modes:
-     - persistence errors from Keychain writes are swallowed because this view should not crash on
-       local settings save failures; the user still receives connection-test feedback separately
+     - Side effects: Writes the selected backend key through `RemoteSyncSettingsStore`.
+     - Failure modes: Retains the settings store's best-effort save policy. Route dismissal and
+       connection attempts never rewrite credentials or clear an unavailable Keychain secret.
      */
-    private func persistRemoteSettings() {
-        let store = remoteSettingsStore
-        store.selectedBackend = selectedBackend
-        guard isAndroidValidNextCloudServerURL(serverURL) else {
-            return
-        }
-        try? store.saveWebDAVConfiguration(
-            WebDAVSyncConfiguration(
-                serverURL: serverURL,
-                username: username,
-                folderPath: normalizedFolderPath
-            ),
-            password: password
-        )
-        lastCommittedServerURL = serverURL
+    private func persistBackendSelection() {
+        remoteSettingsStore.selectedBackend = selectedBackend
     }
 
     /**
@@ -1166,7 +1162,33 @@ public struct SyncSettingsView: View {
      */
     @MainActor
     private func beginRemoteSynchronization(for category: RemoteSyncCategory) async {
-        persistRemoteSettings()
+        guard !isManualSynchronizationPending else { return }
+        isManualSynchronizationPending = true
+        defer { isManualSynchronizationPending = false }
+
+        let lifecycleService = remoteSyncLifecycleService
+        guard let lifecycleService else {
+            reportUnavailableRemoteSynchronization(for: category, resetOptimisticEnablement: true)
+            return
+        }
+
+        let admitted = await lifecycleService.performManualSynchronization {
+            await beginAdmittedRemoteSynchronization(for: category)
+        }
+        if !admitted {
+            reportUnavailableRemoteSynchronization(for: category, resetOptimisticEnablement: true)
+        }
+    }
+
+    /**
+     Performs one admitted initial synchronization against the lifecycle owner's current runtime.
+
+     The lifecycle gate keeps this complete operation, including configuration persistence,
+     factory construction, category enablement, and UI settlement, ahead of any pause or retirement.
+     */
+    @MainActor
+    private func beginAdmittedRemoteSynchronization(for category: RemoteSyncCategory) async {
+        persistBackendSelection()
         lastRemoteConfirmationAction = nil
 
         do {
@@ -1221,6 +1243,40 @@ public struct SyncSettingsView: View {
      */
     @MainActor
     private func continueRemoteSynchronization(after confirmation: PendingRemoteConfirmation) async {
+        guard !isManualSynchronizationPending else { return }
+        isManualSynchronizationPending = true
+        defer { isManualSynchronizationPending = false }
+
+        let lifecycleService = remoteSyncLifecycleService
+        guard let lifecycleService else {
+            reportUnavailableRemoteSynchronization(
+                for: confirmation.category,
+                resetOptimisticEnablement: false
+            )
+            return
+        }
+
+        let admitted = await lifecycleService.performManualSynchronization {
+            await continueAdmittedRemoteSynchronization(after: confirmation)
+        }
+        if !admitted {
+            reportUnavailableRemoteSynchronization(
+                for: confirmation.category,
+                resetOptimisticEnablement: false
+            )
+        }
+    }
+
+    /**
+     Performs one admitted destructive-confirmation branch against the lifecycle owner's runtime.
+
+     The captured confirmation and environment lifecycle owner are resolved before suspension;
+     storage services and the route's model context are first accessed inside the admitted closure.
+     */
+    @MainActor
+    private func continueAdmittedRemoteSynchronization(
+        after confirmation: PendingRemoteConfirmation
+    ) async {
         let category = confirmation.category
         remoteCategoryStatuses[category] = .syncing
 
@@ -1255,6 +1311,32 @@ public struct SyncSettingsView: View {
         } catch {
             handleRemoteSynchronizationError(error, for: category, revertEnablement: false)
         }
+    }
+
+    /**
+     Surfaces lifecycle rejection without reading or writing persistence-owned sync settings.
+
+     - Parameters:
+       - category: Category whose requested manual operation was not admitted.
+       - resetOptimisticEnablement: Whether to undo the initial toggle's unpersisted visual state.
+     - Side effects: Optionally restores the optimistic in-memory toggle and presents a visible
+       retryable error.
+     - Failure modes: none.
+     */
+    @MainActor
+    private func reportUnavailableRemoteSynchronization(
+        for category: RemoteSyncCategory,
+        resetOptimisticEnablement: Bool
+    ) {
+        let message = [
+            String(localized: "sync_error"),
+            String(localized: "please_wait"),
+        ].joined(separator: " ")
+        if resetOptimisticEnablement {
+            remoteCategoryEnabled[category] = false
+        }
+        remoteCategoryStatuses[category] = .failed(message)
+        remoteSyncErrorMessage = message
     }
 
     /**
@@ -1338,13 +1420,10 @@ public struct SyncSettingsView: View {
      */
     private func makeRemoteSynchronizationService() throws -> RemoteSyncSynchronizationService {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "org.andbible.ios"
-        if UITestRuntimeConfiguration.remoteSyncBootstrapScenario == .adoptExisting {
-            return RemoteSyncSynchronizationService(
-                adapter: UITestRemoteSyncAdapter.appSession,
-                bundleIdentifier: bundleIdentifier,
-                deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
-                nowProvider: { 1_735_689_900_000 }
-            )
+        if let service = UITestRuntimeConfiguration.makeRemoteSynchronizationServiceOverride(
+            using: remoteSettingsStore
+        ) {
+            return service
         }
 
         let factory = RemoteSyncSynchronizationServiceFactory(bundleIdentifier: bundleIdentifier)
@@ -1470,7 +1549,7 @@ public struct SyncSettingsView: View {
     private func testRemoteConnection() async {
         isTestingConnection = true
         remoteConnectionStatus = nil
-        persistRemoteSettings()
+        persistBackendSelection()
         defer { isTestingConnection = false }
 
         do {

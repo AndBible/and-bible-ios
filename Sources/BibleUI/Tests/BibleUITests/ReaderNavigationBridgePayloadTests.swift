@@ -719,4 +719,27 @@ final class ReaderNavigationBridgePayloadTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(duplicateTokens["module"], "ESV")
         XCTAssertEqual(duplicateTokens["book"], "Genesis")
     }
+
+    /**
+     Verifies disabled detailed diagnostics do not evaluate their snapshot provider.
+
+     The provider mutates a counter so this assertion protects the evaluation boundary itself,
+     independent of SwiftUI rendering. Enabling the policy must evaluate exactly once and return the
+     resulting value; disabling it must return nil with no persistence-style work.
+     */
+    func testReaderDiagnosticProviderIsLazyWhenDetailedExportsAreDisabled() {
+        var evaluationCount = 0
+        let provider = {
+            evaluationCount += 1
+            return "reader-state"
+        }
+
+        XCTAssertNil(BibleReaderDiagnosticProvider.value(enabled: false, provider: provider))
+        XCTAssertEqual(evaluationCount, 0)
+        XCTAssertEqual(
+            BibleReaderDiagnosticProvider.value(enabled: true, provider: provider),
+            "reader-state"
+        )
+        XCTAssertEqual(evaluationCount, 1)
+    }
 }

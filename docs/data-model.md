@@ -92,7 +92,7 @@ Operational rules from the store layer:
 
 - Creating a workspace always creates one default Bible window and a matching `PageManager` with the same ID as the window: `Sources/BibleCore/Sources/BibleCore/Database/WorkspaceStore.swift:34-53`
 - Adding a window also creates a matching `PageManager`: `Sources/BibleCore/Sources/BibleCore/Database/WorkspaceStore.swift:170-186`
-- Cloning a workspace deep-copies windows, page managers, and history entries, then remaps links-window IDs and maximized-window IDs to the new window UUIDs: `Sources/BibleCore/Sources/BibleCore/Database/WorkspaceStore.swift:61-145`
+- Cloning a workspace deep-copies windows and current page-manager state, starts every cloned window with empty navigation history, then remaps links-window IDs and maximized-window IDs to the new window UUIDs, matching Android's workspace-clone contract: `Sources/BibleCore/Sources/BibleCore/Database/WorkspaceStore.swift:129-205`
 
 ### Display settings inheritance
 

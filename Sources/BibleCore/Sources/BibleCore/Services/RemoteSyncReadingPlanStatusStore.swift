@@ -358,12 +358,12 @@ public final class RemoteSyncReadingPlanStatusStore {
         "\(Keys.prefix).\(encodeKeySegment(planCode)).\(dayNumber)"
     }
 
-    private func decodeEntry(_ entry: Setting) -> Status? {
+    private func decodeEntry(_ entry: SettingEntry) -> Status? {
         try? decodeEntryStrict(entry)
     }
 
     /** Decodes and validates one key-bound envelope or valid legacy raw Android payload. */
-    private func decodeEntryStrict(_ entry: Setting) throws -> Status {
+    private func decodeEntryStrict(_ entry: SettingEntry) throws -> Status {
         let prefix = "\(Keys.prefix)."
         guard entry.key.hasPrefix(prefix) else {
             throw RemoteSyncReadingPlanStatusPersistenceError.malformedStoredStatus(entry.key)

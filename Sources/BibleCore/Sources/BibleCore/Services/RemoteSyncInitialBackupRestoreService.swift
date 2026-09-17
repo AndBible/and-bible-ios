@@ -198,7 +198,8 @@ public final class RemoteSyncInitialBackupRestoreService {
      - Returns: Category-specific restore report after the single commit succeeds.
      - Side Effects: Reads the staged database and atomically replaces content, metadata, and
        fingerprint state for one category; reading-plan restores also transactionally replace custom
-       definition files before graph reconstruction.
+       definition files before graph reconstruction. Changed My Documents registration publishes
+       through the settings transaction owner's post-success callback after the true outer commit.
      - Throws: Rethrows exact Room schema/bounds, parsing, category restore, context-contract,
        source-generation mismatch, checkpoint, cancellation, strict fetch, encoding, and commit
        errors; final failure rolls the category publish back.
@@ -210,6 +211,19 @@ public final class RemoteSyncInitialBackupRestoreService {
         settingsStore: SettingsStore,
         publishCheckpoint: @escaping () throws -> Void
     ) throws -> RemoteSyncInitialBackupRestoreReport {
+        let registrationBeforeCommit = try category == .myDocuments
+            ? MyDocumentRegistrationPublication.capture(in: modelContext)
+            : nil
+        var registrationAfterStaging: MyDocumentRegistrationPublication.Snapshot?
+        let publishMyDocumentRegistration: (() -> Void)? = category == .myDocuments
+            ? {
+                guard let registrationBeforeCommit, let registrationAfterStaging else { return }
+                MyDocumentRegistrationPublication.notifyIfChanged(
+                    from: registrationBeforeCommit,
+                    to: registrationAfterStaging
+                )
+            }
+            : nil
         let readingPlanSnapshot: RemoteSyncAndroidReadingPlanSnapshot?
         if category == .readingPlans {
             readingPlanSnapshot = try readingPlanRestoreService.readSnapshot(
@@ -246,7 +260,10 @@ public final class RemoteSyncInitialBackupRestoreService {
         )
 
         let publish: () throws -> RemoteSyncInitialBackupRestoreReport = { [self] in
-            try settingsStore.performAtomicBatch(in: modelContext) {
+            try settingsStore.performAtomicBatch(
+                in: modelContext,
+                afterSuccessfulCommit: publishMyDocumentRegistration
+            ) {
                 try publishCheckpoint()
                 let report: RemoteSyncInitialBackupRestoreReport
                 switch category {
@@ -287,6 +304,8 @@ public final class RemoteSyncInitialBackupRestoreService {
                     let snapshot = try myDocumentRestoreService.readSnapshot(
                         from: stagedBackup.databaseFileURL
                     )
+                    let registration = MyDocumentRegistrationPublication.capture(from: snapshot)
+                    registrationAfterStaging = registration
                     let myDocumentReport = try myDocumentRestoreService.replaceLocalMyDocuments(
                         from: snapshot,
                         modelContext: modelContext,

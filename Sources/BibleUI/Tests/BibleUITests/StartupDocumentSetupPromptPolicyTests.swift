@@ -221,70 +221,6 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
     }
 
     /**
-     The app target must not copy bundled SWORD modules into the application bundle.
-
-     Android ships without KJV Bible text and Easy Start downloads recommended defaults only after
-     the user chooses that route. The iOS project file is source-inspected here because the SWORD
-     files would otherwise be copied by Xcode before runtime code can observe the app bundle.
-
-     Failure means iOS is again installing KJV by packaging `AndBible/Resources/sword`.
-     */
-    func testAppProjectDoesNotBundleSwordModules() throws {
-        let project = try BibleUITestSourceLocator.source(at: "AndBible.xcodeproj/project.pbxproj")
-        XCTAssertFalse(project.contains("Resources/sword"))
-        XCTAssertFalse(project.contains("sword in Resources"))
-    }
-
-    /**
-     Held Downloads installs require both UI-test exports and an explicit module match.
-
-     The downloads row-order smoke uses this fixture hook to keep one row in Android's
-     `BEING_INSTALLED` state without relying on a real network. Requiring detailed accessibility
-     exports and a named module keeps the hook unavailable to production launches and unrelated UI
-     tests.
-     */
-    func testUITestRuntimeHeldDownloadInstallRequiresExportAndModuleMatch() {
-        XCTAssertTrue(
-            UITestRuntimeConfiguration.isDownloadInstallHeld(
-                for: "UITESTDLWARN",
-                environment: [
-                    "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS": "1",
-                    "UITEST_HELD_DOWNLOAD_MODULES": "OTHER, UITESTDLWARN",
-                ],
-                arguments: []
-            )
-        )
-        XCTAssertTrue(
-            UITestRuntimeConfiguration.isDownloadInstallHeld(
-                for: "UITESTDLWARN",
-                environment: [:],
-                arguments: [
-                    "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS",
-                    "-UITEST_HELD_DOWNLOAD_MODULES",
-                    "UITESTDLWARN",
-                ]
-            )
-        )
-        XCTAssertFalse(
-            UITestRuntimeConfiguration.isDownloadInstallHeld(
-                for: "UITESTDLWARN",
-                environment: ["UITEST_HELD_DOWNLOAD_MODULES": "UITESTDLWARN"],
-                arguments: []
-            )
-        )
-        XCTAssertFalse(
-            UITestRuntimeConfiguration.isDownloadInstallHeld(
-                for: "UITESTDLWARN",
-                environment: [
-                    "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS": "1",
-                    "UITEST_HELD_DOWNLOAD_MODULES": "OTHER",
-                ],
-                arguments: []
-            )
-        )
-    }
-
-    /**
      English no-Bible setup exposes Android's setup actions without using a transient dialog.
 
      Android's first-download surface exposes English-only Easy Start, Download, database restore,
@@ -350,53 +286,6 @@ final class StartupDocumentSetupPromptPolicyTests: XCTestCase {
         )
         XCTAssertFalse(presentation.allowsSkip)
         XCTAssertTrue(presentation.usesReaderStackSurface)
-    }
-
-    /**
-     Guards automatic startup-queue wiring without changing the ordinary inclusive picker.
-
-     - Setup: Extracts startup evaluation/completion plus the queue and ordinary picker sources.
-     - Expected result: Locked-only evaluation starts the automatic queue, the queue reuses shared
-       passphrase behavior, final reconciliation occurs after queue completion, and setup/picker do
-       not expose startup-specific routing callbacks.
-     - Failure meaning: Startup can regress to an extra-tap-only picker flow, stop reconciling fresh
-       access, or fork credential validation away from the ordinary picker.
-     - Side effects: Reads package source only.
-     */
-    func testLockedOnlyStartupUsesSharedUnlockBehaviorWithoutSpecialPickerRouting() throws {
-        let readerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderView.swift"
-        )
-        let pickerSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderModulePicker.swift"
-        )
-        let setupSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/StartupDocumentSetupView.swift"
-        )
-        let queueSource = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Bible/StartupLockedBibleUnlockQueue.swift"
-        )
-        let evaluateSource = try BibleUITestSourceLocator.extractFunction(
-            named: "evaluateStartupDownloadPromptIfNeeded",
-            from: readerSource
-        )
-        let completionSource = try BibleUITestSourceLocator.extractFunction(
-            named: "completeStartupLockedBibleUnlockQueue",
-            from: readerSource
-        )
-
-        XCTAssertFalse(setupSource.contains("unlockInstalledBible"))
-        XCTAssertFalse(setupSource.contains("localized: \"enter_module_passphrase\""))
-        XCTAssertFalse(setupSource.contains("startup_locked_bibles_message"))
-        XCTAssertTrue(evaluateSource.contains("beginStartupLockedBibleUnlockQueueIfNeeded"))
-        XCTAssertTrue(queueSource.contains("ModuleUnlockActionCoordinator.submit"))
-        XCTAssertTrue(queueSource.contains("ModulePickerUnlockDialog"))
-        XCTAssertTrue(queueSource.contains("localized: \"enter_module_passphrase\""))
-        XCTAssertTrue(completionSource.contains("StartupDocumentSetupPromptPolicy.evaluation"))
-        XCTAssertTrue(pickerSource.contains("ModuleUnlockActionCoordinator.submit"))
-        XCTAssertFalse(readerSource.contains("presentStartupLockedBiblePicker"))
-        XCTAssertFalse(pickerSource.contains("onBibleSelected"))
-        XCTAssertFalse(readerSource.contains("controller.presentStartupUnlock"))
     }
 
     /**

@@ -9,7 +9,7 @@ import SwordKit
  The value is backend-neutral so SWORD modules, My Documents, and EPUB adapters can all provide the
  same Android `ClientGenericBookmark` fields without substituting the active reader document.
  */
-struct GenericBookmarkSourceContent {
+struct GenericBookmarkSourceContent: Sendable {
     /// User-visible source document name.
     let bookName: String
     /// Compact source document abbreviation.
@@ -49,17 +49,96 @@ struct GenericBookmarkSourceContent {
 }
 
 /**
+ Persistence-only copy of one My Documents page used as a generic annotation source.
+
+ The copy is exact and self-contained: it owns no SwiftData model and performs no source lookup.
+ Rendering and text projection therefore happen on the preparation worker, while publication can
+ compare a fresh copy of the same bounded row graph before accepting the result.
+ */
+struct BibleReaderPreparedMyDocumentSource: Hashable, Sendable {
+    let documentID: UUID
+    let documentName: String
+    let documentInitials: BibleReaderPreparationExactText
+    let pageID: UUID
+    let pageTitle: String
+    let pageKey: BibleReaderPreparationExactText
+    let contentTypeRawValue: String
+    let rawContent: String
+    let language: String
+
+    /** Copies the exact persisted document/page values that affect annotation source projection. */
+    init(document: MyDocument, page: MyDocumentPage, fallbackLanguage: String) {
+        documentID = document.id
+        documentName = document.name
+        documentInitials = BibleReaderPreparationExactText(document.initials)
+        pageID = page.id
+        pageTitle = page.title
+        pageKey = BibleReaderPreparationExactText(page.pageKey)
+        contentTypeRawValue = page.contentTypeRawValue
+        rawContent = page.pageContent?.content ?? ""
+        let storedLanguage = page.languageCode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        language = storedLanguage?.isEmpty == false ? storedLanguage! : fallbackLanguage
+    }
+
+    /** Builds the source text and fragment from copied values without touching persistence. */
+    func genericBookmarkSourceContent() -> GenericBookmarkSourceContent {
+        let contentType = MyDocumentContentType(rawValue: contentTypeRawValue) ?? .markdown
+        let rendered = MyDocumentContentRenderer.render(rawContent, contentType: contentType)
+        return GenericBookmarkSourceContent(
+            bookName: documentName,
+            bookAbbreviation: documentInitials.rawValue,
+            keyName: pageTitle,
+            plainText: GenericBookmarkSourceTextProjection.myDocumentText(
+                rawContent,
+                contentType: contentType
+            ),
+            osisFragment: OsisFragment(
+                xml: rendered,
+                key: pageKey.rawValue,
+                keyName: pageTitle,
+                v11n: nil,
+                bookCategory: DocumentCategory.generalBook.rawValue,
+                bookInitials: documentInitials.rawValue,
+                bookAbbreviation: documentInitials.rawValue,
+                osisRef: pageKey.rawValue,
+                ordinalRange: nil,
+                language: language,
+                direction: Self.textDirection(language: language),
+                isNativeHtml: true
+            )
+        )
+    }
+
+    /** Matches a newly copied persisted page without relying on update timestamps. */
+    func matches(document: MyDocument, page: MyDocumentPage, fallbackLanguage: String) -> Bool {
+        self == Self(document: document, page: page, fallbackLanguage: fallbackLanguage)
+    }
+
+    private static func textDirection(language: String) -> String {
+        let primary = language.split(separator: "-").first?.lowercased() ?? ""
+        return ["ar", "fa", "he", "iw", "ps", "ur", "yi"].contains(primary) ? "rtl" : "ltr"
+    }
+}
+
+/**
  Couples resolved generic source metadata with the exact per-anchor text sequence Android uses.
 
  `GenericBookmarkSourceContent` remains backend-neutral for My Documents and EPUB providers. This
  wrapper adds the ordered `BVA` text segments available from generic SWORD fragments so UTF-16 start
  and end offsets apply to the first and last selected anchors rather than to one flattened string.
  */
-private struct ResolvedGenericBookmarkSourceContent {
+private struct ResolvedGenericBookmarkSourceContent: Sendable {
     /// Backend-neutral names, plain text, and optional bridge fragment.
     let content: GenericBookmarkSourceContent
     /// Ordered text segments for the bookmark's persisted local ordinal range.
     let selectedTexts: [String]
+}
+
+/** Immutable exact source capture used to enrich one persisted generic bookmark off-owner. */
+struct BibleReaderPreparedGenericBookmarkSource: Sendable {
+    let bookInitials: BibleReaderPreparationExactText
+    let key: BibleReaderPreparationExactText
+    fileprivate let resolvedSource: ResolvedGenericBookmarkSourceContent?
 }
 
 /**
@@ -75,7 +154,7 @@ private struct ResolvedGenericBookmarkSourceContent {
  Side effects: none
  Failure modes: missing source content produces `empty`; invalid offsets are clamped
  */
-struct BookmarkListTextProjection: Equatable {
+struct BookmarkListTextProjection: Equatable, Sendable {
     /// Text before the selected range in the first source segment.
     let prefix: String
 
@@ -215,6 +294,16 @@ struct BibleReaderAnnotationPayloadFactory {
        unlabeled relation required by the web client.
      */
     func bookmarkJSON(_ bookmark: BibleBookmark) -> BibleBookmarkData {
+        bookmarkJSON(
+            BibleReaderPreparedBibleBookmarkInput(
+                bookmark,
+                unlabeledLabelID: unlabeledLabelID
+            )
+        )
+    }
+
+    /** Enriches a persistence-only bookmark copy with active/source module content. */
+    func bookmarkJSON(_ bookmark: BibleReaderPreparedBibleBookmarkInput) -> BibleBookmarkData {
         bibleBookmarkJSON(bookmark, editAction: EditActionData())
     }
 
@@ -227,6 +316,18 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: same as `bookmarkJSON(_:)`.
      */
     func bookmarkJSONForMyNotes(_ bookmark: BibleBookmark) -> BibleBookmarkData {
+        bookmarkJSONForMyNotes(
+            BibleReaderPreparedBibleBookmarkInput(
+                bookmark,
+                unlabeledLabelID: unlabeledLabelID
+            )
+        )
+    }
+
+    /** Enriches a persistence-only My Notes bookmark in Android's KJVA display domain. */
+    func bookmarkJSONForMyNotes(
+        _ bookmark: BibleReaderPreparedBibleBookmarkInput
+    ) -> BibleBookmarkData {
         bibleBookmarkJSON(bookmark, editAction: EditActionData(), ordinalProjection: .kjva)
     }
 
@@ -240,7 +341,24 @@ struct BibleReaderAnnotationPayloadFactory {
        `BookmarkLabelSerializationSupport`.
      */
     func bookmarkJSONForStudyPad(_ bookmark: BibleBookmark) -> BibleBookmarkData {
-        bibleBookmarkJSON(bookmark, editAction: editActionData(bookmark.editAction))
+        let input = BibleReaderPreparedBibleBookmarkInput(
+            bookmark,
+            unlabeledLabelID: unlabeledLabelID
+        )
+        return bookmarkJSONForStudyPad(input)
+    }
+
+    /** Enriches a persistence-only StudyPad Bible bookmark with its stored edit action. */
+    func bookmarkJSONForStudyPad(
+        _ bookmark: BibleReaderPreparedBibleBookmarkInput
+    ) -> BibleBookmarkData {
+        bibleBookmarkJSON(
+            bookmark,
+            editAction: EditActionData(
+                mode: bookmark.editActionMode,
+                content: bookmark.editActionContent
+            )
+        )
     }
 
     /**
@@ -254,8 +372,62 @@ struct BibleReaderAnnotationPayloadFactory {
      */
     func genericBookmarkJSONForStudyPad(_ bookmark: GenericBookmark) -> GenericBookmarkData {
         genericBookmarkJSONForStudyPad(
+            BibleReaderPreparedGenericBookmarkInput(
+                bookmark,
+                unlabeledLabelID: unlabeledLabelID
+            )
+        )
+    }
+
+    /** Enriches one persistence-only generic bookmark from its exact stored source. */
+    func genericBookmarkJSONForStudyPad(
+        _ bookmark: BibleReaderPreparedGenericBookmarkInput
+    ) -> GenericBookmarkData {
+        genericBookmarkJSONForStudyPad(
             bookmark,
             resolvedSource: genericSourceContent(for: bookmark)
+        )
+    }
+
+    /** Captures exact generic source context for later pure bookmark projection. */
+    func captureGenericBookmarkSource(
+        for bookmark: BibleReaderPreparedGenericBookmarkInput
+    ) -> BibleReaderPreparedGenericBookmarkSource {
+        BibleReaderPreparedGenericBookmarkSource(
+            bookInitials: BibleReaderPreparationExactText(bookmark.sourceBookInitials),
+            key: BibleReaderPreparationExactText(bookmark.key),
+            resolvedSource: genericSourceContent(for: bookmark)
+        )
+    }
+
+    /** Captures an already-copied SQLite, EPUB, or persisted page source for pure projection. */
+    func captureGenericBookmarkSource(
+        for bookmark: BibleReaderPreparedGenericBookmarkInput,
+        source: GenericBookmarkSourceContent?
+    ) -> BibleReaderPreparedGenericBookmarkSource {
+        BibleReaderPreparedGenericBookmarkSource(
+            bookInitials: BibleReaderPreparationExactText(bookmark.sourceBookInitials),
+            key: BibleReaderPreparationExactText(bookmark.key),
+            resolvedSource: source.map {
+                ResolvedGenericBookmarkSourceContent(
+                    content: $0,
+                    selectedTexts: $0.plainText.isEmpty ? [] : [$0.plainText]
+                )
+            }
+        )
+    }
+
+    /** Projects one bookmark from a previously captured exact source without further I/O. */
+    func genericBookmarkJSONForStudyPad(
+        _ bookmark: BibleReaderPreparedGenericBookmarkInput,
+        capturedSource: BibleReaderPreparedGenericBookmarkSource
+    ) -> GenericBookmarkData {
+        let ownsSource = capturedSource.bookInitials
+                == BibleReaderPreparationExactText(bookmark.sourceBookInitials)
+            && capturedSource.key == BibleReaderPreparationExactText(bookmark.key)
+        return genericBookmarkJSONForStudyPad(
+            bookmark,
+            resolvedSource: ownsSource ? capturedSource.resolvedSource : nil
         )
     }
 
@@ -269,17 +441,31 @@ struct BibleReaderAnnotationPayloadFactory {
        active modules, or unresolved verses return an empty projection.
      */
     func bookmarkListTextProjection(_ bookmark: BibleBookmark) -> BookmarkListTextProjection {
-        let sourceInitials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+        bookmarkListTextProjection(
+            BibleReaderPreparedBibleBookmarkInput(
+                bookmark,
+                unlabeledLabelID: unlabeledLabelID
+            )
+        )
+    }
+
+    /** Resolves one copied Bible bookmark without accessing persistence-owned state. */
+    func bookmarkListTextProjection(
+        _ bookmark: BibleReaderPreparedBibleBookmarkInput
+    ) -> BookmarkListTextProjection {
+        let sourceInitials = bookmark.sourceBookInitials.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         if !sourceInitials.isEmpty, sourceModuleResolver(sourceInitials) == nil {
             return .empty
         }
-        let bookmarkBook = bookmark.book ?? currentBook
+        let bookmarkBook = bookmark.sourceBookName ?? currentBook
         let range = bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
-            sourceStartOrdinal: bookmark.ordinalStart,
-            sourceEndOrdinal: bookmark.ordinalEnd,
-            kjvStartOrdinal: bookmark.kjvOrdinalStart,
-            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            sourceStartOrdinal: bookmark.sourceOrdinalStart,
+            sourceEndOrdinal: bookmark.sourceOrdinalEnd,
+            kjvStartOrdinal: bookmark.kjvaOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvaOrdinalEnd,
             ordinalProjection: .activeModule
         )
         let hasSourceModule = !sourceInitials.isEmpty
@@ -301,9 +487,27 @@ struct BibleReaderAnnotationPayloadFactory {
        Android's first 200 UTF-16 code-unit preview.
      */
     func bookmarkListTextProjection(_ bookmark: GenericBookmark) -> BookmarkListTextProjection {
-        genericBookmarkListTextProjection(
+        let input = BibleReaderPreparedGenericBookmarkInput(
+            bookmark,
+            unlabeledLabelID: unlabeledLabelID
+        )
+        return genericBookmarkListTextProjection(
+            bookmark: input,
+            sourceTexts: genericSourceContent(for: input)?.selectedTexts ?? []
+        )
+    }
+
+    /** Projects one copied generic bookmark from source content captured under its owner lease. */
+    func bookmarkListTextProjection(
+        _ bookmark: BibleReaderPreparedGenericBookmarkInput,
+        capturedSource: BibleReaderPreparedGenericBookmarkSource
+    ) -> BookmarkListTextProjection {
+        let ownsSource = capturedSource.bookInitials
+                == BibleReaderPreparationExactText(bookmark.sourceBookInitials)
+            && capturedSource.key == BibleReaderPreparationExactText(bookmark.key)
+        return genericBookmarkListTextProjection(
             bookmark: bookmark,
-            sourceTexts: genericSourceContent(for: bookmark)?.selectedTexts ?? []
+            sourceTexts: ownsSource ? capturedSource.resolvedSource?.selectedTexts ?? [] : []
         )
     }
 
@@ -327,11 +531,15 @@ struct BibleReaderAnnotationPayloadFactory {
         _ bookmark: GenericBookmark,
         sourceSeed: SwordGenericBookmarkSeed
     ) -> GenericBookmarkData {
+        let input = BibleReaderPreparedGenericBookmarkInput(
+            bookmark,
+            unlabeledLabelID: unlabeledLabelID
+        )
         let resolvedSource = bookmark.bookInitials == sourceSeed.source.bookInitials
             && bookmark.key == sourceSeed.source.key
             ? genericSourceContent(for: sourceSeed)
             : nil
-        return genericBookmarkJSONForStudyPad(bookmark, resolvedSource: resolvedSource)
+        return genericBookmarkJSONForStudyPad(input, resolvedSource: resolvedSource)
     }
 
     /**
@@ -346,26 +554,10 @@ struct BibleReaderAnnotationPayloadFactory {
        fragment; active-reader metadata is never substituted.
      */
     private func genericBookmarkJSONForStudyPad(
-        _ bookmark: GenericBookmark,
+        _ bookmark: BibleReaderPreparedGenericBookmarkInput,
         resolvedSource: ResolvedGenericBookmarkSourceContent?
     ) -> GenericBookmarkData {
         let id = bookmark.id.uuidString
-        let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
-        let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
-        let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
-        let noteText = bookmark.notes?.notes ?? ""
-        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
-        // presence keys off the trimmed text while real notes keep their original whitespace.
-        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let labelPayload = BookmarkLabelSerializationSupport.genericPayload(
-            bookmarkID: bookmark.id,
-            links: bookmark.bookmarkToLabels,
-            unlabeledLabelID: unlabeledLabelID
-        )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelID(
-            primaryLabelID: bookmark.primaryLabelId,
-            validLabelIDs: labelPayload.labelIDs
-        )
         let source = resolvedSource?.content
         let textProjection = genericBookmarkTextProjection(
             bookmark: bookmark,
@@ -376,27 +568,39 @@ struct BibleReaderAnnotationPayloadFactory {
         return GenericBookmarkData(
             id: id,
             type: "generic-bookmark",
-            hashCode: hashCode,
+            hashCode: bookmark.hashCode,
             ordinalRange: [bookmark.ordinalStart, bookmark.ordinalEnd],
             offsetRange: bookmark.wholeVerse
                 ? nil
                 : bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
-            labels: labelPayload.labelIDs,
-            bookInitials: bookmark.bookInitials,
-            bookName: source?.bookName ?? bookmark.bookInitials,
-            bookAbbreviation: source?.bookAbbreviation ?? bookmark.bookInitials,
-            createdAt: createdAt,
+            labels: bookmark.labelIDs,
+            bookInitials: bookmark.sourceBookInitials,
+            bookName: source?.bookName ?? bookmark.sourceBookInitials,
+            bookAbbreviation: source?.bookAbbreviation ?? bookmark.sourceBookInitials,
+            createdAt: bookmark.createdAtMilliseconds,
             text: textProjection.text,
             fullText: textProjection.fullText,
-            bookmarkToLabels: labelPayload.relationItems,
-            primaryLabelId: primaryLabelId,
-            lastUpdatedOn: lastUpdated,
-            notes: hasNote ? noteText : nil,
-            notesContentType: bookmark.notes?.contentType,
-            hasNote: hasNote,
+            bookmarkToLabels: bookmark.bookmarkToLabels.map { relation in
+                BookmarkToLabelData(
+                    bookmarkId: relation.bookmarkID.rawValue,
+                    labelId: relation.labelID.rawValue,
+                    orderNumber: relation.orderNumber,
+                    indentLevel: relation.indentLevel,
+                    expandContent: relation.expandContent,
+                    type: relation.type.rawValue
+                )
+            },
+            primaryLabelId: bookmark.primaryLabelID,
+            lastUpdatedOn: bookmark.lastUpdatedOnMilliseconds,
+            notes: bookmark.note,
+            notesContentType: bookmark.notesContentType,
+            hasNote: bookmark.note != nil,
             wholeVerse: bookmark.wholeVerse,
             customIcon: bookmark.customIcon,
-            editAction: editActionData(bookmark.editAction),
+            editAction: EditActionData(
+                mode: bookmark.editActionMode,
+                content: bookmark.editActionContent
+            ),
             key: bookmark.key,
             keyName: source?.keyName ?? bookmark.key,
             highlightedText: textProjection.highlightedText,
@@ -420,7 +624,7 @@ struct BibleReaderAnnotationPayloadFactory {
        as non-verse keys so fabricated versification metadata cannot escape.
      */
     private func genericBookmarkOSISFragment(
-        bookmark: GenericBookmark,
+        bookmark: BibleReaderPreparedGenericBookmarkInput,
         source: GenericBookmarkSourceContent?
     ) -> OsisFragment? {
         guard bookmark.ordinalStart == nil || bookmark.ordinalEnd == nil,
@@ -451,15 +655,15 @@ struct BibleReaderAnnotationPayloadFactory {
        persisted ordinals outside the exact fragment fail closed without active-module fallback.
      */
     private func genericSourceContent(
-        for bookmark: GenericBookmark
+        for bookmark: BibleReaderPreparedGenericBookmarkInput
     ) -> ResolvedGenericBookmarkSourceContent? {
-        if let source = genericSourceResolver(bookmark.bookInitials, bookmark.key) {
+        if let source = genericSourceResolver(bookmark.sourceBookInitials, bookmark.key) {
             return ResolvedGenericBookmarkSourceContent(
                 content: source,
                 selectedTexts: source.plainText.isEmpty ? [] : [source.plainText]
             )
         }
-        guard let module = sourceModuleResolver(bookmark.bookInitials),
+        guard let module = sourceModuleResolver(bookmark.sourceBookInitials),
               let fragment = try? module.rawOSISFragment(forKey: bookmark.key) else {
             return nil
         }
@@ -599,7 +803,7 @@ struct BibleReaderAnnotationPayloadFactory {
        clamp to the first/last UTF-16 segment so malformed remote rows cannot trap.
      */
     private func genericBookmarkTextProjection(
-        bookmark: GenericBookmark,
+        bookmark: BibleReaderPreparedGenericBookmarkInput,
         sourceTexts: [String]
     ) -> (text: String, fullText: String, highlightedText: String) {
         let projection = genericBookmarkListTextProjection(
@@ -625,7 +829,7 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: Invalid offsets are clamped by the shared projection helper.
      */
     private func genericBookmarkListTextProjection(
-        bookmark: GenericBookmark,
+        bookmark: BibleReaderPreparedGenericBookmarkInput,
         sourceTexts: [String]
     ) -> BookmarkListTextProjection {
         guard let firstText = sourceTexts.first else { return .empty }
@@ -837,42 +1041,26 @@ struct BibleReaderAnnotationPayloadFactory {
        support.
      */
     private func bibleBookmarkJSON(
-        _ bookmark: BibleBookmark,
+        _ bookmark: BibleReaderPreparedBibleBookmarkInput,
         editAction: EditActionData?,
         ordinalProjection: BibleBookmarkOrdinalProjection = .activeModule
     ) -> BibleBookmarkData {
         let id = bookmark.id.uuidString
-        let hashCode = Self.normalizedBridgeHashCode(from: id.hashValue)
-        let createdAt = bridgeTimestampMilliseconds(bookmark.createdAt)
-        let lastUpdated = bridgeTimestampMilliseconds(bookmark.lastUpdatedOn)
-        let noteText = bookmark.notes?.notes ?? ""
-        // Android nulls out whitespace-only notes (ClientBibleBookmark's trim check), so note
-        // presence keys off the trimmed text while real notes keep their original whitespace.
-        let hasNote = !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let labelPayload = BookmarkLabelSerializationSupport.biblePayload(
-            bookmarkID: bookmark.id,
-            links: bookmark.bookmarkToLabels,
-            unlabeledLabelID: unlabeledLabelID
-        )
-        let primaryLabelId = BookmarkLabelSerializationSupport.primaryLabelID(
-            primaryLabelID: bookmark.primaryLabelId,
-            validLabelIDs: labelPayload.labelIDs
-        )
-        let bookmarkBook = bookmark.book ?? currentBook
+        let bookmarkBook = bookmark.sourceBookName ?? currentBook
         let rangeProjection = bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
-            sourceStartOrdinal: bookmark.ordinalStart,
-            sourceEndOrdinal: bookmark.ordinalEnd,
-            kjvStartOrdinal: bookmark.kjvOrdinalStart,
-            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            sourceStartOrdinal: bookmark.sourceOrdinalStart,
+            sourceEndOrdinal: bookmark.sourceOrdinalEnd,
+            kjvStartOrdinal: bookmark.kjvaOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvaOrdinalEnd,
             ordinalProjection: ordinalProjection
         )
         let textRangeProjection = ordinalProjection == .activeModule ? rangeProjection : bibleBookmarkRangeProjection(
             bookName: bookmarkBook,
-            sourceStartOrdinal: bookmark.ordinalStart,
-            sourceEndOrdinal: bookmark.ordinalEnd,
-            kjvStartOrdinal: bookmark.kjvOrdinalStart,
-            kjvEndOrdinal: bookmark.kjvOrdinalEnd,
+            sourceStartOrdinal: bookmark.sourceOrdinalStart,
+            sourceEndOrdinal: bookmark.sourceOrdinalEnd,
+            kjvStartOrdinal: bookmark.kjvaOrdinalStart,
+            kjvEndOrdinal: bookmark.kjvaOrdinalEnd,
             ordinalProjection: .activeModule
         )
         let fullText = loadVerseText(for: textRangeProjection)
@@ -893,40 +1081,49 @@ struct BibleReaderAnnotationPayloadFactory {
         let sourceModuleMetadata = sourceModuleMetadata(for: bookmark)
         let hasSourceModule = !sourceModuleMetadata.initials.isEmpty
         let effectiveWholeVerse = bookmark.wholeVerse || !hasSourceModule
-        let effectiveSourceEndOrdinal = bookmark.ordinalEnd > bookmark.ordinalStart
-            ? bookmark.ordinalEnd
-            : bookmark.ordinalStart
+        let effectiveSourceEndOrdinal = bookmark.sourceOrdinalEnd > bookmark.sourceOrdinalStart
+            ? bookmark.sourceOrdinalEnd
+            : bookmark.sourceOrdinalStart
 
         return BibleBookmarkData(
             id: id,
             type: "bookmark",
-            hashCode: hashCode,
+            hashCode: bookmark.hashCode,
             ordinalRange: [rangeProjection.start.ordinal, rangeProjection.end.ordinal],
             offsetRange: effectiveWholeVerse
                 ? nil
                 : bookmarkOffsetRange(startOffset: bookmark.startOffset, endOffset: bookmark.endOffset),
-            labels: labelPayload.labelIDs,
+            labels: bookmark.labelIDs,
             bookInitials: sourceModuleMetadata.initials,
             bookName: sourceModuleMetadata.name,
             bookAbbreviation: sourceModuleMetadata.abbreviation,
-            createdAt: createdAt,
+            createdAt: bookmark.createdAtMilliseconds,
             text: fullText,
             fullText: fullText,
-            bookmarkToLabels: labelPayload.relationItems,
-            primaryLabelId: primaryLabelId,
-            lastUpdatedOn: lastUpdated,
-            notes: hasNote ? noteText : nil,
-            notesContentType: bookmark.notes?.contentType,
-            hasNote: hasNote,
+            bookmarkToLabels: bookmark.bookmarkToLabels.map { relation in
+                BookmarkToLabelData(
+                    bookmarkId: relation.bookmarkID.rawValue,
+                    labelId: relation.labelID.rawValue,
+                    orderNumber: relation.orderNumber,
+                    indentLevel: relation.indentLevel,
+                    expandContent: relation.expandContent,
+                    type: relation.type.rawValue
+                )
+            },
+            primaryLabelId: bookmark.primaryLabelID,
+            lastUpdatedOn: bookmark.lastUpdatedOnMilliseconds,
+            notes: bookmark.note,
+            notesContentType: bookmark.notesContentType,
+            hasNote: bookmark.note != nil,
             wholeVerse: effectiveWholeVerse,
             customIcon: bookmark.customIcon,
             editAction: editAction,
             osisRef: displayProjection.osisRef,
-            originalOrdinalRange: [bookmark.ordinalStart, effectiveSourceEndOrdinal],
+            originalOrdinalRange: [bookmark.sourceOrdinalStart, effectiveSourceEndOrdinal],
             verseRange: displayProjection.verseRange,
             verseRangeOnlyNumber: displayProjection.verseRangeOnlyNumber,
             verseRangeAbbreviated: displayProjection.verseRangeAbbreviated,
-            v11n: hasSourceModule ? bookmark.v11n : JSwordKJVAVersification.name,
+            v11n: hasSourceModule ? bookmark.sourceVersification : JSwordKJVAVersification.name,
             osisFragment: bibleBookmarkOsisFragment(for: bookmark)
         )
     }
@@ -1024,16 +1221,18 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: Explicit missing or unreadable sources, unresolved canons, and incomplete
        content return `nil`; the web client keeps the collapsed quote.
      */
-    private func bibleBookmarkOsisFragment(for bookmark: BibleBookmark) -> OsisFragment? {
-        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func bibleBookmarkOsisFragment(
+        for bookmark: BibleReaderPreparedBibleBookmarkInput
+    ) -> OsisFragment? {
+        let initials = bookmark.sourceBookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
         let module = initials.isEmpty ? activeModule : sourceModuleResolver(initials)
         guard let module, module.info.category == .bible else { return nil }
         let source = BibleReaderInstalledScriptureSource.sword(module)
-        let sourceV11n = bookmark.v11n
-        guard !sourceV11n.isEmpty, bookmark.ordinalStart > 0 else { return nil }
-        let endOrdinal = max(bookmark.ordinalEnd, bookmark.ordinalStart)
+        let sourceV11n = bookmark.sourceVersification
+        guard !sourceV11n.isEmpty, bookmark.sourceOrdinalStart > 0 else { return nil }
+        let endOrdinal = max(bookmark.sourceOrdinalEnd, bookmark.sourceOrdinalStart)
         var references: [VerseKeyReference] = []
-        for ordinal in bookmark.ordinalStart...endOrdinal {
+        for ordinal in bookmark.sourceOrdinalStart...endOrdinal {
             guard let reference = SwordVersification.reference(
                 forIndex: ordinal,
                 versification: sourceV11n
@@ -1075,15 +1274,18 @@ struct BibleReaderAnnotationPayloadFactory {
      - Failure modes: Returns `nil`; callers fall back to the active-module display projection.
      */
     private func sourceDomainDisplayProjection(
-        for bookmark: BibleBookmark
+        for bookmark: BibleReaderPreparedBibleBookmarkInput
     ) -> BookmarkBridgeVerseRangeProjection? {
-        let v11n = bookmark.v11n
-        guard !v11n.isEmpty, bookmark.ordinalStart > 0 else { return nil }
-        let endOrdinal = bookmark.ordinalEnd > bookmark.ordinalStart
-            ? bookmark.ordinalEnd
-            : bookmark.ordinalStart
+        let v11n = bookmark.sourceVersification
+        guard !v11n.isEmpty, bookmark.sourceOrdinalStart > 0 else { return nil }
+        let endOrdinal = bookmark.sourceOrdinalEnd > bookmark.sourceOrdinalStart
+            ? bookmark.sourceOrdinalEnd
+            : bookmark.sourceOrdinalStart
         guard
-            let startRef = SwordVersification.reference(forIndex: bookmark.ordinalStart, versification: v11n),
+            let startRef = SwordVersification.reference(
+                forIndex: bookmark.sourceOrdinalStart,
+                versification: v11n
+            ),
             let endRef = SwordVersification.reference(forIndex: endOrdinal, versification: v11n),
             startRef.verse > 0,
             endRef.verse > 0
@@ -1092,7 +1294,7 @@ struct BibleReaderAnnotationPayloadFactory {
             osisBookId: startRef.osisBookId,
             chapter: startRef.chapter,
             verse: startRef.verse,
-            ordinal: bookmark.ordinalStart
+            ordinal: bookmark.sourceOrdinalStart
         )
         let end = VerseKeyReference(
             osisBookId: endRef.osisBookId,
@@ -1100,7 +1302,7 @@ struct BibleReaderAnnotationPayloadFactory {
             verse: endRef.verse,
             ordinal: endOrdinal
         )
-        let fallbackBook = bookmark.book ?? currentBook
+        let fallbackBook = bookmark.sourceBookName ?? currentBook
         return BookmarkBridgeVerseRangeProjection(
             startBookName: bridgeBookName(for: start, fallback: fallbackBook),
             startBookAbbreviation: bridgeBookAbbreviation(for: start),
@@ -1181,8 +1383,10 @@ struct BibleReaderAnnotationPayloadFactory {
      - Side effects: none.
      - Failure modes: Missing active-module description falls back to initials.
      */
-    private func sourceModuleMetadata(for bookmark: BibleBookmark) -> (initials: String, name: String, abbreviation: String) {
-        let initials = bookmark.bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func sourceModuleMetadata(
+        for bookmark: BibleReaderPreparedBibleBookmarkInput
+    ) -> (initials: String, name: String, abbreviation: String) {
+        let initials = bookmark.sourceBookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !initials.isEmpty else {
             return ("", "", "")
         }

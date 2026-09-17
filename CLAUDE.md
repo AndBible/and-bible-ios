@@ -118,13 +118,17 @@ npm run build-debug
 
 ## Testing
 
-**Run only tests relevant to the changes made.**
+Select tests according to the
+[repository impact and validation policy](AGENTS.md#repository-impact-and-validation-policy).
+A focused selection is sufficient only when it covers every affected contract
+and user workflow identified by the impact analysis.
 
 ### Package-Owned Logic and UI Contracts
 
 - Put new tests in the lowest package test target that owns the behavior after imports are minimized
 - Prefer targeted package-scheme runs for package logic, reader/controller contracts, bridge DTOs, SwiftData services, and Android parity helpers
-- Use `-only-testing:` whenever a focused subset is enough
+- Use `-only-testing:` when the selected tests cover the identified package
+  contracts and their affected workflows
 
 Examples:
 
@@ -143,7 +147,8 @@ xcodebuild -project AndBible.xcodeproj -scheme BibleUITests \
 - Use `AndBibleUnitTests` / `AndBibleTests` only for behavior that genuinely requires the app host, app delegate, scene wiring, or installed app bundle
 - Use `AndBibleUITests` only for true end-to-end workflows that require a launched app
 - Keep physical app-host and UI smoke test files under `Tests/AppHost/AndBibleTests/` and `Tests/UI/AndBibleUITests/`; target and `-only-testing` identifiers remain `AndBibleTests/...` and `AndBibleUITests/...`
-- Use `-only-testing:` whenever a focused subset is enough
+- Use `-only-testing:` when the selected tests cover the identified app-host or
+  end-to-end contracts and their affected workflows
 - `AndBibleUnitTests` contains only the app-host unit-test bundle; `AndBible` includes the app and XCUITest workflow bundle
 
 Examples:
@@ -153,10 +158,11 @@ xcodebuild -project AndBible.xcodeproj -scheme AndBibleUnitTests \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   test -only-testing:AndBibleTests/AndBibleTests/testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate
 
-xcodebuild -project AndBible.xcodeproj -scheme AndBible \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
-  test -only-testing:AndBibleUITests/AndBibleUITests/testSearchOptionControlsMutateVisibleState
 ```
+
+For UI journeys, follow the [fixture preparation and execution workflow](docs/howto/building-and-testing.md#ui-journeys).
+The repository wrapper owns the fixture service and reconciles the selected test
+identities. A direct Xcode UI run has no fixture service and fails before preparation.
 
 ### Vue.js Changes
 
@@ -174,8 +180,10 @@ npm run type-check
 ```bash
 git diff --check
 python3 scripts/check_repo_standards.py docblocks --all-files
+python3 scripts/check_adr_structure.py
 ```
-- The repository enforces Swift docblock style and commit-message structure in CI
+- The repository enforces Swift docblock style, commit-message structure, and
+  ADR identity/index/relationship integrity in CI
 
 ## Key Files
 
@@ -304,8 +312,14 @@ generated and must never be hand-edited. Screenshots are uploaded by hand and
 
 ### UI Test Flakiness
 
-- Prefer explicit accessibility identifiers and exported state labels over timing-based assertions
-- Reuse the existing in-memory `UITEST_*` harness patterns instead of inventing ad hoc global state
+- Prefer passive accessibility identifiers and visible controls/content. Use
+  exported state only when the test explicitly covers that diagnostic contract;
+  observation must not change the production interaction being tested.
+- Perform each user action once and wait for its correlated visible outcome;
+  retries must not convert a dropped action into a passing test.
+- Use existing in-memory `UITEST_*` harnesses for explicit setup and diagnostic
+  contracts only; harness observation must not alter the interaction,
+  visibility, focus, or timing behavior the test claims to exercise
 - If a focused test appears to run stale code, use `clean test` with a fresh derived-data path
 
 ### Search UI Regressions
@@ -347,7 +361,9 @@ Impact:
 
 ## Notes
 
-- Prefer targeted simulator validation over full-suite runs unless shared harness or coordinator state changed
+- Prefer targeted simulator validation when impact analysis shows it covers
+  the affected contracts and workflows; broaden the selection wherever that
+  reach or the remaining uncertainty requires it
 - Keep `CLAUDE.md` factual and current; do not leave milestone-style status sections that become stale after major repository changes
 
 <!-- gitnexus:start -->

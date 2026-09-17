@@ -990,3 +990,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ %2$@ құжатында табылмады.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Жазбалырымды көшіру";

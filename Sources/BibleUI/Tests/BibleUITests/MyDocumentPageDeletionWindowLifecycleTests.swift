@@ -63,8 +63,8 @@ final class MyDocumentPageDeletionWindowLifecycleTests: XCTestCase {
      switch its `PageManager` to Bible, and invoke persistence exactly once. A failure reintroduces
      the iOS behavior that silently reused every deleted My Documents pane as a Bible pane.
      */
-    func testBridgeDeletionRendersBibleOnlyWhenWindowOwnerCannotClosePane() throws {
-        let removableFixture = try makeActiveAIPageFixture(pageKey: "removable")
+    func testBridgeDeletionRendersBibleOnlyWhenWindowOwnerCannotClosePane() async throws {
+        let removableFixture = try await makeActiveAIPageFixture(pageKey: "removable")
         var closeResolutionCount = 0
         var removablePersistCount = 0
         removableFixture.controller.onDeleteActiveMyDocumentPage = {
@@ -90,7 +90,7 @@ final class MyDocumentPageDeletionWindowLifecycleTests: XCTestCase {
             DocumentCategory.generalBook.pageManagerKey
         )
 
-        let primaryFixture = try makeActiveAIPageFixture(pageKey: "primary")
+        let primaryFixture = try await makeActiveAIPageFixture(pageKey: "primary")
         var fallbackResolutionCount = 0
         var primaryPersistCount = 0
         primaryFixture.controller.onDeleteActiveMyDocumentPage = {
@@ -125,7 +125,7 @@ final class MyDocumentPageDeletionWindowLifecycleTests: XCTestCase {
      - Side effects: Inserts and saves a My Documents graph, then renders the page into the reader.
      - Failure modes: Throws if SwiftData setup/save fails or reports an XCTest unwrap failure.
      */
-    private func makeActiveAIPageFixture(pageKey: String) throws -> ActiveAIPageFixture {
+    private func makeActiveAIPageFixture(pageKey: String) async throws -> ActiveAIPageFixture {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
         let store = MyDocumentStore(modelContext: context)
@@ -142,29 +142,38 @@ final class MyDocumentPageDeletionWindowLifecycleTests: XCTestCase {
             languageCode: "en"
         )
         let content = MyDocumentPageContent(pageId: pageID, content: "Generated content")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let bridge = BibleBridge()
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let windowContainer = try makeWorkspaceModelContainer()
+        let windowContext = ModelContext(windowContainer)
         let window = BibleCore.Window()
         let pageManager = PageManager(
             id: window.id,
             currentCategoryName: DocumentCategory.generalBook.pageManagerKey
         )
+        windowContext.insert(window)
+        windowContext.insert(pageManager)
         window.pageManager = pageManager
         pageManager.window = window
         controller.activeWindow = window
         controller.myDocumentStore = store
         XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: bookInitials, pageKey: pageKey))
+        try await awaitReaderCondition("active AI My Documents page") {
+            controller.currentCategory == .generalBook
+                && controller.currentGeneralBookKey == pageKey
+        }
 
         return ActiveAIPageFixture(
             container: container,
+            windowContainer: windowContainer,
             store: store,
             controller: controller,
             bridge: bridge,
@@ -180,6 +189,8 @@ final class MyDocumentPageDeletionWindowLifecycleTests: XCTestCase {
 private struct ActiveAIPageFixture {
     /// Owns the in-memory SwiftData backing store for the fixture lifetime.
     let container: ModelContainer
+    /// Owns the reader window and page-manager relationship for the fixture lifetime.
+    let windowContainer: ModelContainer
     /// Store that resolves and deletes the generated page.
     let store: MyDocumentStore
     /// Reader whose active page and fallback behavior are under test.

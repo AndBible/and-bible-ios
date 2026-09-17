@@ -19,9 +19,9 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
      - Side effects: Loads one fixture chapter and records reader bridge events.
      - Failure modes: Fails if controller integration substitutes a module, drops the range endpoint,
        or emits a single-verse setup highlight.
-     */
+    */
     @MainActor
-    func testBibleTargetCommitsCompleteMappedRangeToActiveModule() throws {
+    func testBibleTargetCommitsCompleteMappedRangeToActiveModule() async throws {
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let sourceStart = try XCTUnwrap(
@@ -51,9 +51,14 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
 
         try controller.navigate(toBookmarkTarget: target)
 
+        let emissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "setup_content",
+            after: baseline
+        )
         let setup = try XCTUnwrap(
             bridgeEmissionPayload(
-                from: Array(scripts().dropFirst(baseline)),
+                from: emissions,
                 event: "setup_content"
             ) as? [String: Any]
         )
@@ -381,12 +386,12 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
         let document = MyDocument(name: "Collision Document", initials: "BOOKCOLLIDE")
         let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Local collision content")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let (bridge, scripts) = makeRecordingBridge()
@@ -435,22 +440,23 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
         let document = MyDocument(name: "Delayed bookmark document", initials: "DelayedLocal")
         let page = MyDocumentPage(title: "Entry", pageKey: "entry", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Private delayed content")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.myDocumentStore = MyDocumentStore(modelContext: context)
         let window = Window(isSynchronized: false, isLinksWindow: false)
-        window.pageManager = PageManager(
+        let pageManager = PageManager(
             id: window.id,
             currentCategoryName: DocumentCategory.bible.pageManagerKey
         )
+        self.retainReaderWindowGraph(window, attaching: pageManager)
         controller.activeWindow = window
         controller.bridgeDidSetClientReady(bridge)
         let target = BookmarkNavigationTarget.generic(.init(
@@ -477,7 +483,7 @@ final class BibleReaderBookmarkNavigationIntegrationTests: BibleUISwordFixtureTe
         if FileManager.default.fileExists(atPath: moduleCacheURL.path) {
             try FileManager.default.removeItem(at: moduleCacheURL)
         }
-        controller.refreshInstalledModules()
+        controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
         XCTAssertEqual(
             controller.registeredInstalledModuleInfo(named: document.initials)?.name,
             "LateNativeBookmarkOwner"

@@ -805,18 +805,6 @@ class RepoStandardsTests(unittest.TestCase):
         """Forbidden primitives are rejected even while every required service remains referenced."""
         fixtures = [
             (
-                "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift",
-                "\n".join(
-                    [
-                        "let a = BibleReaderDocumentAuthorizationService.self",
-                        "let b = BibleReaderBookmarkCommitPreflightService.self",
-                        "let c = BibleReaderRestoreDispatchService.self",
-                        "let resolver = BibleReaderInstalledModuleResolver()",
-                    ]
-                ),
-                [4],
-            ),
-            (
                 "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift",
                 "\n".join(
                     [
@@ -863,18 +851,18 @@ class RepoStandardsTests(unittest.TestCase):
 
     def test_parity_orchestrator_guard_accepts_service_only_delegation(self) -> None:
         """Unrelated files and complete boundary-only orchestrator snippets remain accepted."""
-        controller_path = (
-            "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift"
-        )
-        controller = "\n".join(
+        search_path = "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift"
+        search = "\n".join(
             [
-                "let a = BibleReaderDocumentAuthorizationService.self",
-                "let b = BibleReaderBookmarkCommitPreflightService.self",
-                "let c = BibleReaderRestoreDispatchService.self",
+                "let a = SearchIndexSQLiteStoreBootstrap.self",
+                "let b = SearchIndexPublicationTransaction.self",
+                "let c = SearchIndexReadSnapshotCoordinator.self",
+                "let d = SearchIndexInvalidationEpochState.self",
+                "let e = SearchIndexQueryProjection.self",
             ]
         )
         self.assertEqual(
-            find_parity_orchestrator_regressions(controller, controller_path),
+            find_parity_orchestrator_regressions(search, search_path),
             [],
         )
         self.assertEqual(

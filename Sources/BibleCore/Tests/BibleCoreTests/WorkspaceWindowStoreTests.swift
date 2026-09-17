@@ -158,11 +158,12 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     /**
      Protects the core workspace graph lifecycle used by workspace management UI.
 
-     The test creates, renames, clones, and deletes workspaces with windows and history entries in an
-     in-memory production schema. The expected result is that clone ordering, cloned window identity,
-     page-manager/history cloning, and delete cleanup all round trip together. A failure indicates
-     `WorkspaceStore` can corrupt workspace ordering, share mutable child rows between clones, or
-     leave stale workspace records behind.
+     The test creates, renames, clones, and deletes workspaces with windows and source-owned history
+     entries in an in-memory production schema. The expected result is that clone ordering, cloned
+     window identity, page-manager state, empty cloned history, and delete cleanup all round trip
+     together. A failure indicates `WorkspaceStore` can corrupt workspace ordering, share mutable
+     child rows between clones, copy Android's live history into a new workspace, or leave stale
+     workspace records behind.
      */
     func testWorkspaceStoreCreateRenameCloneAndDeleteRoundTripsWorkspaceGraph() throws {
         let container = try makeWorkspaceModelContainer()
@@ -193,8 +194,11 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertEqual(clonedWindows.count, sourceWindows.count)
         XCTAssertTrue(Set(clonedWindows.map(\.id)).isDisjoint(with: Set(sourceWindows.map(\.id))))
         XCTAssertEqual(clonedWindows.compactMap(\.pageManager).count, sourceWindows.compactMap(\.pageManager).count)
-        XCTAssertEqual(clonedWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 },
-                       sourceWindows.reduce(into: 0) { $0 += $1.historyItems?.count ?? 0 })
+        XCTAssertEqual(
+            sourceWindows.flatMap { store.history(windowId: $0.id) }.map(\.key).sorted(),
+            ["Gen.1.1", "Gen.1.2"]
+        )
+        XCTAssertTrue(clonedWindows.allSatisfy { store.history(windowId: $0.id).isEmpty })
 
         store.delete(clone)
 
@@ -356,7 +360,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: firstWindow.id))
         XCTAssertTrue(windowManager.hasPendingVisibleControllerRegistration)
 
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         XCTAssertFalse(windowManager.isControllerRegistrationPending(for: firstWindow.id))
         XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
@@ -377,7 +381,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "New Window Readiness")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
 
@@ -385,7 +389,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
         XCTAssertEqual(windowManager.controllerPendingWindowIds, Set([secondWindow.id]))
 
-        windowManager.registerController(NSObject(), for: secondWindow.id)
+        windowManager.registerController(NSObject(), for: secondWindow)
 
         XCTAssertFalse(windowManager.hasPendingVisibleControllerRegistration)
     }
@@ -406,7 +410,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Add Window Active List")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
 
@@ -447,6 +451,165 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies workspace color writes use the same object graph exposed by `WindowManager`.
+
+     The supplied workspace deliberately comes from another context, matching app bootstrap and
+     post-sync selection restoration. A successful mutation must update the manager-owned active
+     workspace immediately and remain visible through a fresh context after persistence.
+     */
+    func testWindowManagerWorkspaceColorUpdatesOwnedGraphAndPersists() throws {
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "window-manager-workspace-color"
+        )
+        let fixture = try makePersistentReadingPlanRestoreStore(in: storeDirectory)
+        let container = fixture.container
+        let seedStore = WorkspaceStore(modelContext: ModelContext(container))
+        let foreignWorkspace = seedStore.createWorkspace(name: "Workspace Color Owner")
+        let workspaceID = foreignWorkspace.id
+
+        let managerContext = ModelContext(container)
+        let managerStore = WorkspaceStore(modelContext: managerContext)
+        let managerSettingsStore = SettingsStore(modelContext: managerContext)
+        try RemoteSyncWorkspaceSnapshotService().refreshBaselineFingerprintsStrict(
+            modelContext: managerContext,
+            settingsStore: managerSettingsStore
+        )
+        let mutationJournal = RemoteSyncMutationJournalService()
+        mutationJournal.clearPendingMutations(
+            for: .workspaces,
+            settingsStore: managerSettingsStore
+        )
+        RemoteSyncLogEntryStore(settingsStore: managerSettingsStore).clearCategory(.workspaces)
+        let windowManager = WindowManager(workspaceStore: managerStore)
+        windowManager.setActiveWorkspace(foreignWorkspace)
+        let color = Int(Int32(bitPattern: 0xFF13579B))
+
+        XCTAssertTrue(windowManager.setWorkspaceColor(color, workspaceId: workspaceID))
+        XCTAssertEqual(windowManager.activeWorkspace?.workspaceColor, color)
+
+        let verificationStore = WorkspaceStore(modelContext: ModelContext(container))
+        XCTAssertEqual(verificationStore.workspace(id: workspaceID)?.workspaceColor, color)
+        let pending = try mutationJournal.pendingMutations(
+            for: .workspaces,
+            settingsStore: managerSettingsStore
+        )
+        XCTAssertEqual(pending.count, 1)
+        let colorMutation = try XCTUnwrap(pending.values.first)
+        var workspaceUUID = workspaceID.uuid
+        let workspaceIDBlob = withUnsafeBytes(of: &workspaceUUID) { Data($0) }
+        XCTAssertEqual(colorMutation.entry.tableName, "Workspace")
+        XCTAssertEqual(colorMutation.entry.entityID1, .blob(workspaceIDBlob))
+        XCTAssertEqual(colorMutation.entry.entityID2, .text(""))
+        XCTAssertEqual(colorMutation.entry.type, .upsert)
+        XCTAssertNotNil(colorMutation.stateFingerprint)
+    }
+
+    /**
+     Verifies a saved workspace replacement from an isolated operation context is visible when the
+     UI owner restores the active selection.
+
+     Lifecycle synchronization writes through a fresh context before asking the app's main-context
+     `WindowManager` to restore the selected workspace. The restore service deletes the registered
+     graph and inserts a same-ID workspace with a different window while falling back from a removed
+     active workspace. The test fails if selection restoration retains any pre-sync identity or value.
+     */
+    @MainActor
+    func testWindowManagerRestoreObservesSavedCrossContextWorkspaceReplacement() throws {
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "window-manager-cross-context-restore"
+        )
+        let fixture = try makePersistentReadingPlanRestoreStore(in: storeDirectory)
+        let container = fixture.container
+        let uiContext = container.mainContext
+        let uiStore = WorkspaceStore(modelContext: uiContext)
+        let workspace = uiStore.createWorkspace(name: "Pre-Sync Workspace")
+        let workspaceID = workspace.id
+        let oldWindowID = try XCTUnwrap(uiStore.windows(workspaceId: workspaceID).first).id
+        let removedActiveWorkspace = uiStore.createWorkspace(name: "Removed Active Workspace")
+        let windowManager = WindowManager(workspaceStore: uiStore)
+        windowManager.setActiveWorkspace(workspace)
+        let uiSettingsStore = SettingsStore(modelContext: uiContext)
+        uiSettingsStore.activeWorkspaceId = removedActiveWorkspace.id
+        XCTAssertEqual(uiSettingsStore.activeWorkspaceId, removedActiveWorkspace.id)
+
+        let operationContext = ModelContext(container)
+        let operationSettingsStore = SettingsStore(modelContext: operationContext)
+        let replacementWindowID = UUID()
+        let restoredColor = Int(Int32(bitPattern: 0xFF2468AC))
+        let pageManager = RemoteSyncAndroidWorkspacePageManager(
+            windowID: replacementWindowID,
+            bibleDocument: "SYNCHRONIZED",
+            bibleVersification: "KJVA",
+            bibleBook: 0,
+            bibleChapterNo: 2,
+            bibleVerseNo: 3,
+            commentaryDocument: nil,
+            commentaryAnchorOrdinal: nil,
+            commentarySourceBookAndKey: nil,
+            dictionaryDocument: nil,
+            dictionaryKey: nil,
+            dictionaryAnchorOrdinal: nil,
+            generalBookDocument: nil,
+            generalBookKey: nil,
+            generalBookAnchorOrdinal: nil,
+            mapDocument: nil,
+            mapKey: nil,
+            mapAnchorOrdinal: nil,
+            currentCategoryName: "BIBLE",
+            textDisplaySettings: nil,
+            jsState: nil
+        )
+        let replacementWindow = RemoteSyncAndroidWorkspaceWindow(
+            id: replacementWindowID,
+            workspaceID: workspaceID,
+            isSynchronized: true,
+            isPinMode: true,
+            isLinksWindow: false,
+            orderNumber: 0,
+            targetLinksWindowID: nil,
+            syncGroup: 0,
+            layoutState: "split",
+            layoutWeight: 1,
+            pageManager: pageManager,
+            historyItems: []
+        )
+        let snapshot = RemoteSyncAndroidWorkspaceSnapshot(
+            workspaces: [
+                RemoteSyncAndroidWorkspace(
+                    id: workspaceID,
+                    name: "Post-Sync Workspace",
+                    contentsText: "Synchronized graph",
+                    orderNumber: 0,
+                    textDisplaySettings: nil,
+                    workspaceSettings: WorkspaceSettings(),
+                    speakSettingsJSON: nil,
+                    unPinnedWeight: nil,
+                    maximizedWindowID: nil,
+                    primaryTargetLinksWindowID: nil,
+                    workspaceColor: restoredColor,
+                    windows: [replacementWindow]
+                )
+            ]
+        )
+
+        _ = try RemoteSyncWorkspaceRestoreService().replaceLocalWorkspaces(
+            from: snapshot,
+            modelContext: operationContext,
+            settingsStore: operationSettingsStore
+        )
+
+        let restoredID = try XCTUnwrap(uiSettingsStore.activeWorkspaceId)
+        windowManager.setActiveWorkspace(try XCTUnwrap(uiStore.workspace(id: restoredID)))
+
+        XCTAssertEqual(restoredID, workspaceID)
+        XCTAssertEqual(windowManager.activeWorkspace?.name, "Post-Sync Workspace")
+        XCTAssertEqual(windowManager.activeWorkspace?.workspaceColor, restoredColor)
+        XCTAssertEqual(windowManager.allWindows.map(\.id), [replacementWindowID])
+        XCTAssertFalse(windowManager.allWindows.contains { $0.id == oldWindowID })
+        XCTAssertEqual(windowManager.allWindows.first?.pageManager?.bibleDocument, "SYNCHRONIZED")
+    }
+
+    /**
      Ensures new-window creation exits maximized layout before waiting for controller registration.
 
      The setup maximizes the only pane, then adds a sibling pane. The expected result is that the
@@ -461,7 +624,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Maximized Add")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
         windowManager.maximizeWindow(firstWindow)
 
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
@@ -488,7 +651,7 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Hidden Readiness")
         let firstWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
-        windowManager.registerController(NSObject(), for: firstWindow.id)
+        windowManager.registerController(NSObject(), for: firstWindow)
         let secondWindow = try XCTUnwrap(windowManager.addWindow(from: firstWindow))
         XCTAssertTrue(windowManager.isControllerRegistrationPending(for: secondWindow.id))
 
@@ -899,21 +1062,18 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
-     Protects Android's synchronized-window old-key comparison.
+     Verifies core admits every visible grouped peer regardless of raw persisted coordinates.
 
-     Android updates the inactive window's Bible key before deciding whether to post a secondary
-     scroll, then skips the scroll when the target key was already equal to the source key. The setup
-     creates two synchronized panes in the same group, first with the target one verse behind and then
-     with the target at the source verse. The expected result is that only the stale target is returned
-     for secondary scrolling; a failure means iOS can keep injecting redundant scroll commands that
-     let synced panes alternate focus and walk back to an older visible position.
+     Book indices and chapter/verse numbers belong to each pane's active versification, so BibleCore
+     cannot compare them across panes. The target controller maps the typed source position and owns
+     target-local idempotence.
      */
-    func testWindowManagerSkipsSynchronizedTargetAlreadyAtSourceVerse() throws {
+    func testWindowManagerDoesNotFilterSynchronizedTargetByRawPageManagerCoordinates() throws {
         let container = try makeWorkspaceModelContainer()
         let context = ModelContext(container)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowManager = WindowManager(workspaceStore: workspaceStore)
-        let workspace = workspaceStore.createWorkspace(name: "Synchronized Target Freshness")
+        let workspace = workspaceStore.createWorkspace(name: "Synchronized Target Admission")
         let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
         windowManager.setActiveWorkspace(workspace)
         let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
@@ -922,20 +1082,16 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         targetWindow.isSynchronized = true
         targetWindow.syncGroup = 0
         sourceWindow.pageManager?.bibleBibleBook = 0
-        sourceWindow.pageManager?.bibleChapterNo = 1
-        sourceWindow.pageManager?.bibleVerseNo = 5
+        sourceWindow.pageManager?.bibleChapterNo = 10
+        sourceWindow.pageManager?.bibleVerseNo = 1
         targetWindow.pageManager?.bibleBibleBook = 0
-        targetWindow.pageManager?.bibleChapterNo = 1
-        targetWindow.pageManager?.bibleVerseNo = 4
+        targetWindow.pageManager?.bibleChapterNo = 10
+        targetWindow.pageManager?.bibleVerseNo = 1
 
         XCTAssertEqual(
             windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).map(\.id),
             [targetWindow.id]
         )
-
-        targetWindow.pageManager?.bibleVerseNo = 5
-
-        XCTAssertTrue(windowManager.synchronizedVerseUpdateTargets(for: sourceWindow).isEmpty)
     }
 
     /**
@@ -1566,6 +1722,66 @@ final class WorkspaceWindowStoreTests: XCTestCase {
     }
 
     /**
+     Verifies the window-scoped history fetch preserves SwiftData's pending-change behavior.
+
+     The target and unrelated windows both have durable rows. Before querying, one target row is
+     deleted and a newer target row is inserted without saving. A failure means moving filtering
+     into the database dropped pending changes, leaked another window, changed newest-first order,
+     or projected only part of the history model.
+     */
+    func testHistoryQueryIncludesPendingInsertExcludesPendingDeleteAndPreservesFidelity() throws {
+        let context = ModelContext(try makeWorkspaceModelContainer())
+        context.autosaveEnabled = false
+        let store = WorkspaceStore(modelContext: context)
+        let targetWorkspace = store.createWorkspace(name: "Target")
+        let otherWorkspace = store.createWorkspace(name: "Other")
+        let targetWindow = try XCTUnwrap(targetWorkspace.windows?.first)
+        let otherWindow = try XCTUnwrap(otherWorkspace.windows?.first)
+
+        let deleted = HistoryItem(
+            createdAt: Date(timeIntervalSince1970: 20),
+            document: "KJV",
+            key: "Gen.1.2"
+        )
+        deleted.anchorOrdinal = 2
+        deleted.window = targetWindow
+        let surviving = HistoryItem(
+            createdAt: Date(timeIntervalSince1970: 10),
+            document: "KJV",
+            key: "Gen.1.1"
+        )
+        surviving.anchorOrdinal = 1
+        surviving.window = targetWindow
+        let unrelated = HistoryItem(
+            createdAt: Date(timeIntervalSince1970: 40),
+            document: "KJV",
+            key: "Exod.1.1"
+        )
+        unrelated.window = otherWindow
+        [deleted, surviving, unrelated].forEach(context.insert)
+        try context.save()
+
+        context.delete(deleted)
+        let pending = HistoryItem(
+            createdAt: Date(timeIntervalSince1970: 30),
+            document: "NRSV",
+            key: "Gen.1.3"
+        )
+        pending.anchorOrdinal = 3
+        pending.window = targetWindow
+        context.insert(pending)
+
+        let result = store.history(windowId: targetWindow.id)
+
+        XCTAssertEqual(result.map(\.id), [pending.id, surviving.id])
+        XCTAssertEqual(result.map(\.document), ["NRSV", "KJV"])
+        XCTAssertEqual(result.map(\.key), ["Gen.1.3", "Gen.1.1"])
+        XCTAssertEqual(result.map(\.anchorOrdinal), [3, 1])
+        XCTAssertTrue(result.allSatisfy { $0.window?.id == targetWindow.id })
+        XCTAssertTrue(context.hasChanges)
+    }
+
+    /**
      Creates an in-memory SwiftData container for workspace/window package tests.
 
      The schema mirrors the production graph owned by `WorkspaceStore`, `WindowManager`,
@@ -1584,6 +1800,15 @@ final class WorkspaceWindowStoreTests: XCTestCase {
             Window.self,
             PageManager.self,
             HistoryItem.self,
+            BibleBookmark.self,
+            BibleBookmarkNotes.self,
+            BibleBookmarkToLabel.self,
+            GenericBookmark.self,
+            GenericBookmarkNotes.self,
+            GenericBookmarkToLabel.self,
+            Label.self,
+            StudyPadTextEntry.self,
+            StudyPadTextEntryText.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])

@@ -44,6 +44,87 @@ struct BibleReaderAuxiliaryModuleEntryRequest {
     let persistResolvedKey: (String) -> Void
 }
 
+/** Copied outcome of one bounded auxiliary source read. */
+enum BibleReaderAuxiliarySourceCapture: Sendable {
+    /// Exact structural SWORD fragment ready for annotation capture and encoding.
+    case fragment(SwordRawOSISFragment)
+    /// User-visible structural/read failure retained without carrying an Error across queues.
+    case failure(String)
+}
+
+/** Bridge-ready auxiliary result returned to its main publication owner. */
+enum BibleReaderPreparedAuxiliaryResult: Sendable {
+    /// Encoded document plus the exact resolved source identity committed after bridge acceptance.
+    case document(
+        json: String,
+        sourceInitials: String,
+        key: String,
+        keyName: String,
+        sourceProvenance: BibleReaderRenderSourceProvenance,
+        ownerIdentity: BibleReaderGenericDocumentOwnerIdentity,
+        sourceDependencies: [BibleReaderPreparationSourceDependency]
+    )
+    /// Source/read/encoding failure rendered through the existing error-document path.
+    case failure(String)
+}
+
+/** Applies family-specific effects around the shared prepared-document publication transaction. */
+extension BibleReaderAuxiliaryContentLoader {
+    /** Persists only the exact authorized document key; failures do not change selection. */
+    func commitPreparedSelection(
+        _ result: BibleReaderPreparedAuxiliaryResult,
+        request: BibleReaderAuxiliaryModuleEntryRequest
+    ) {
+        guard case .document(_, _, let key, _, _, _, _) = result else { return }
+        request.persistResolvedKey(key)
+    }
+
+    /** Dispatches one prepared document or bounded error payload without committing render state. */
+    func dispatchPreparedModuleEntry(
+        _ result: BibleReaderPreparedAuxiliaryResult,
+        request: BibleReaderAuxiliaryModuleEntryRequest
+    ) -> Bool {
+        switch result {
+        case .failure(let message):
+            guard let document = documentPayloadFactory.errorDocumentJSON(message: message) else {
+                return false
+            }
+            return documentReplacement.replace(
+                documentJSON: document,
+                setup: Self.setupContentPayload
+            )
+        case .document(let json, _, _, _, _, _, _):
+            return documentReplacement.replace(
+                documentJSON: json,
+                setup: Self.setupContentPayload
+            )
+        }
+    }
+
+    /** Commits rendered identity and background only after the prepared dispatch is accepted. */
+    func commitPreparedRender(
+        _ result: BibleReaderPreparedAuxiliaryResult,
+        request: BibleReaderAuxiliaryModuleEntryRequest
+    ) {
+        switch result {
+        case .failure:
+            let hasModule = request.module != nil
+            let selectedKey = request.requestedKey ?? request.currentKey
+            setRenderedContentState(
+                request.category,
+                request.moduleName,
+                hasModule ? (selectedKey ?? request.moduleName ?? request.fallbackBookName)
+                    : request.fallbackBookName,
+                hasModule ? (selectedKey ?? "none") : "none",
+                .independent
+            )
+        case .document(_, let sourceInitials, let key, let keyName, let provenance, _, _):
+            setRenderedContentState(request.category, sourceInitials, keyName, key, provenance)
+        }
+        applyNightModeBackground()
+    }
+}
+
 /**
  Loads auxiliary SWORD module content into the Vue reader.
 
@@ -65,7 +146,13 @@ struct BibleReaderAuxiliaryModuleEntryRequest {
  */
 struct BibleReaderAuxiliaryContentLoader {
     /// Updates the controller's compact rendered-content state after a document is emitted.
-    typealias RenderedContentStateSetter = (DocumentCategory, String?, String, String?) -> Void
+    typealias RenderedContentStateSetter = (
+        DocumentCategory,
+        String?,
+        String,
+        String?,
+        BibleReaderRenderSourceProvenance
+    ) -> Void
 
     /// Shared setup payload used by auxiliary single-document loads.
     private static let setupContentPayload = ReaderSetupContentPayload()
@@ -107,177 +194,14 @@ struct BibleReaderAuxiliaryContentLoader {
         self.applyNightModeBackground = applyNightModeBackground
     }
 
-    /**
-     Loads one dictionary, general-book, or map entry.
-
-     - Parameter request: Category-specific module/key/fallback details.
-     - Returns: The resolved entry key when concrete module content was selected; otherwise `nil`.
-     - Side effects: Resets transient reader state, may persist the resolved key, moves the module
-       cursor, emits Vue document/setup events, updates rendered-content state, and reapplies the
-       reader background.
-     - Failure modes: Missing module/key states render error documents; document serialization
-       failure stops before emitting `add_documents`.
-     */
-    @discardableResult
-    func loadModuleEntry(_ request: BibleReaderAuxiliaryModuleEntryRequest) -> String? {
+    /** Publishes a bounded missing-module or missing-key result without reading native content. */
+    func publishUnavailableModuleEntry(
+        _ request: BibleReaderAuxiliaryModuleEntryRequest,
+        message: String
+    ) {
         resetReaderState()
-
-        guard let module = request.module else {
-            emitErrorDocument(
-                request: request,
-                message: request.noModuleMessage,
-                renderedModuleName: request.moduleName,
-                renderedBook: request.fallbackBookName,
-                renderedKey: "none"
-            )
-            return nil
-        }
-
-        let entryKey = request.requestedKey ?? request.currentKey
-        guard let entryKey else {
-            let moduleName = request.moduleName ?? request.fallbackBookName
-            emitErrorDocument(
-                request: request,
-                message: request.noSelectionMessage,
-                renderedModuleName: moduleName,
-                renderedBook: moduleName,
-                renderedKey: "none"
-            )
-            return nil
-        }
-
-        let moduleName = request.moduleName ?? request.fallbackBookName
-        let fragment: SwordRawOSISFragment
-        do {
-            fragment = try module.rawOSISFragment(forKey: entryKey)
-        } catch {
-            emitErrorDocument(
-                request: request,
-                message: error.localizedDescription,
-                renderedModuleName: moduleName,
-                renderedBook: entryKey,
-                renderedKey: entryKey
-            )
-            return nil
-        }
-        guard fragment.hasRenderableContent else {
-            emitErrorDocument(
-                request: request,
-                message: "No \(request.noContentNoun) available for \"\(entryKey)\" in \(moduleName).",
-                renderedModuleName: moduleName,
-                renderedBook: entryKey,
-                renderedKey: entryKey
-            )
-            return nil
-        }
-        request.persistResolvedKey(fragment.key)
-
-        emitDocument(
-            request: request,
-            fragment: fragment,
-            renderedModuleName: moduleName,
-            renderedBook: fragment.keyName,
-            renderedKey: fragment.key
-        )
-        return fragment.key
-    }
-
-    /**
-     Serializes and emits one auxiliary document through the shared Vue reader bridge.
-
-     - Parameters:
-       - request: Category metadata for the generated document.
-       - fragment: Exact structural fragment read from SWORD.
-       - renderedModuleName: Module token recorded in rendered-content state.
-       - renderedBook: Book token recorded in rendered-content state.
-       - renderedKey: Key token recorded in rendered-content state.
-     - Side effects: Emits one Android-parity replacement transaction, updates the
-       controller-rendered content state through a closure, and reapplies reader background styling.
-     - Failure modes: If document serialization or transaction dispatch fails, the existing reader
-       document remains visible and rendered-content state is not advanced.
-     */
-    private func emitDocument(
-        request: BibleReaderAuxiliaryModuleEntryRequest,
-        fragment: SwordRawOSISFragment,
-        renderedModuleName: String?,
-        renderedBook: String,
-        renderedKey: String
-    ) {
-        let source = fragment.source
-        let contentOrdinalRange = fragment.contentOrdinalRange
-        guard let document = documentPayloadFactory.documentJSON(
-            BibleReaderDocumentPayloadRequest(
-                osisBookId: request.osisBookId,
-                bookName: fragment.keyName,
-                chapter: 1,
-                verseCount: 1,
-                isNewTestament: fragment.isNewTestament,
-                xml: fragment.xml,
-                bookCategory: request.bookCategory,
-                bookInitials: source.initials,
-                addChapter: false,
-                documentKey: fragment.key,
-                keyName: fragment.keyName,
-                ordinalRangeOverride: [
-                    contentOrdinalRange.lowerBound,
-                    contentOrdinalRange.upperBound,
-                ],
-                fragmentOrdinalRange: fragment.keyOrdinalRange.map {
-                    [$0.lowerBound, $0.upperBound]
-                },
-                fragmentKey: fragment.fragmentKey,
-                fragmentOsisRef: fragment.osisRef,
-                annotateRef: fragment.annotateRef,
-                fragmentFeatures: fragment.features,
-                moduleName: source.name,
-                moduleAbbreviation: source.abbreviation,
-                versificationName: source.versification,
-                language: source.language,
-                direction: source.direction,
-                sourceHasStrongs: source.hasStrongs
-            )
-        ) else {
-            return
-        }
-        guard documentReplacement.replace(
-            documentJSON: document,
-            setup: Self.setupContentPayload
-        ) else {
-            return
-        }
-        setRenderedContentState(request.category, renderedModuleName, renderedBook, renderedKey)
-        applyNightModeBackground()
-    }
-
-    /**
-     Emits a non-structural auxiliary failure as a Vue error document.
-
-     - Parameters:
-       - request: Category metadata used for rendered-state projection.
-       - message: User-visible no-content or structural failure message.
-       - renderedModuleName: Module token recorded in rendered state.
-       - renderedBook: Book token recorded in rendered state.
-       - renderedKey: Key token recorded in rendered state.
-     - Side effects: Emits one Android-parity replacement transaction and updates rendered
-       state/background.
-     - Failure modes: Serialization or dispatch failure leaves the existing reader document and
-       rendered state unchanged.
-     */
-    private func emitErrorDocument(
-        request: BibleReaderAuxiliaryModuleEntryRequest,
-        message: String,
-        renderedModuleName: String?,
-        renderedBook: String,
-        renderedKey: String
-    ) {
-        guard let document = documentPayloadFactory.errorDocumentJSON(message: message) else { return }
-        guard documentReplacement.replace(
-            documentJSON: document,
-            setup: Self.setupContentPayload
-        ) else {
-            return
-        }
-        setRenderedContentState(request.category, renderedModuleName, renderedBook, renderedKey)
-        applyNightModeBackground()
+        let result = BibleReaderPreparedAuxiliaryResult.failure(message)
+        guard dispatchPreparedModuleEntry(result, request: request) else { return }
+        commitPreparedRender(result, request: request)
     }
 }

@@ -94,9 +94,17 @@ def load_timing_manifest(
     if manifest_path is None or not manifest_path.exists():
         return {}
 
-    raw_manifest = json.loads(manifest_path.read_text())
-    if not isinstance(raw_manifest, dict):
+    manifest_document = json.loads(manifest_path.read_text())
+    if not isinstance(manifest_document, dict):
         raise ValueError("Timing manifest must be a JSON object.")
+    if manifest_document.get("schema_version") != 1:
+        raise ValueError("Timing manifest must declare schema_version 1.")
+    provenance = manifest_document.get("provenance")
+    if not isinstance(provenance, dict) or not provenance.get("sources"):
+        raise ValueError("Timing manifest must include nonempty provenance sources.")
+    raw_manifest = manifest_document.get("timings")
+    if not isinstance(raw_manifest, dict):
+        raise ValueError("Timing manifest timings must be a JSON object.")
 
     timings: dict[str, float] = {}
     for raw_identifier, duration in raw_manifest.items():

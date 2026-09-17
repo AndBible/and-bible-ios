@@ -172,7 +172,8 @@ public final class MyDocumentStore {
      - Side effects: Stores references only; no fetch or save occurs during initialization.
      - Failure modes: Errors thrown by `savePageContentChanges` are handled by
        `savePageContent(bookInitials:pageId:content:title:)`.
-     - Important: The closure must obey the operation context's actor/thread confinement.
+     - Important: The closure must obey the operation context's actor/thread confinement, must not
+       retain that context or its models, and must throw before committing when persistence fails.
      */
     init(
         modelContext: ModelContext,
@@ -227,6 +228,36 @@ public final class MyDocumentStore {
             ]
         )
         return try context.fetch(descriptor)
+    }
+
+    /**
+     Returns the first Android-ordered page key for one exact My Documents owner.
+
+     - Parameter bookInitials: Byte-exact registered document initials.
+     - Returns: The first page key by Android document order, or nil when the exact document/page
+       cannot be resolved.
+     - Side effects: Opens one isolated read context and reads metadata only.
+     - Failure modes: Empty, missing, duplicate, or unreadable document identities and empty page
+       collections fail closed as nil.
+     */
+    public func firstPageKey(bookInitials: String) -> String? {
+        let context = makeIsolatedContext()
+        guard let document = try? exactDocument(initials: bookInitials, in: context) else {
+            return nil
+        }
+        let documentID = document.id
+        var descriptor = FetchDescriptor<MyDocumentPage>(
+            predicate: #Predicate { $0.document?.id == documentID },
+            sortBy: [
+                SortDescriptor(\.orderNumber),
+                SortDescriptor(\.createdAt),
+                SortDescriptor(\.updatedAt),
+                SortDescriptor(\.title),
+                SortDescriptor(\.pageKey),
+            ]
+        )
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first?.pageKey
     }
 
     /**
@@ -500,15 +531,18 @@ public final class MyDocumentStore {
      */
     public func aiDocMarkers(kjvaRange range: ClosedRange<Int>) -> [MyDocumentAIDocMarker] {
         let context = makeIsolatedContext()
-        let descriptor = FetchDescriptor<AiPageCacheEntry>()
-        let entries: [AiPageCacheEntry] = (try? context.fetch(descriptor)) ?? []
-        return projectedAIDocMarkers(entries.filter { entry in
-            guard let start = entry.kjvOrdinalStart,
-                  let end = entry.kjvOrdinalEnd else {
-                return false
+        let rangeStart = range.lowerBound
+        let rangeEnd = range.upperBound
+        let descriptor = FetchDescriptor<AiPageCacheEntry>(
+            predicate: #Predicate {
+                $0.kjvOrdinalStart != nil &&
+                    $0.kjvOrdinalEnd != nil &&
+                    ($0.kjvOrdinalStart ?? 0) <= rangeEnd &&
+                    ($0.kjvOrdinalEnd ?? 0) >= rangeStart
             }
-            return start <= range.upperBound && end >= range.lowerBound
-        })
+        )
+        let entries: [AiPageCacheEntry] = (try? context.fetch(descriptor)) ?? []
+        return projectedAIDocMarkers(entries)
     }
 
     /**
@@ -596,7 +630,8 @@ public final class MyDocumentStore {
      - Parameter pageId: Stable page UUID from the Android-compatible reader action payload.
      - Returns: The deleted page context or the exact fail-closed refusal reason.
      - Side effects: Opens an operation-owned context, updates the parent timestamp, deletes the
-       page, commits the My Documents remote-sync journal, and posts one marker deletion event.
+       page and its content/cache rows, commits the My Documents remote-sync journal, and posts one
+       marker deletion event.
        Pending changes in the caller-owned context are neither read nor saved.
      - Failure modes: Missing and user-authored pages are refused; fetch or journaled-save failures
        return `.pageNotFound` or `.saveFailed` without committing the operation context.
@@ -617,9 +652,8 @@ public final class MyDocumentStore {
             document.updatedAt = now
         }
 
-        operationContext.delete(page)
-
         do {
+            try MyDocumentDeletionBoundary.stagePageDeletion(page, in: operationContext)
             try RemoteSyncMutationJournalService.savePendingGraphChanges(
                 for: .myDocuments,
                 modelContext: operationContext
@@ -629,7 +663,8 @@ public final class MyDocumentStore {
             )
             return .deleted(context)
         } catch {
-            operationContext.rollback()
+            // This context is private and never autosaves; abandoning it preserves the caller's
+            // pending graph without rolling back newly inserted relationships on iOS 17.
             return .saveFailed
         }
     }
@@ -647,7 +682,7 @@ public final class MyDocumentStore {
        timestamp, and its content row, commits the My Documents journal, and posts marker upserts.
        Pending changes in the caller-owned context are neither read nor saved.
      - Failure modes: Returns `false` when the persisted page cannot be resolved or the journaled
-       operation save fails; the operation context is rolled back without publishing marker changes.
+       operation save fails; the unsaved operation context is discarded without publishing marker changes.
      - Important: The synchronous operation inherits the store's actor/thread confinement.
      */
     @discardableResult
@@ -678,9 +713,8 @@ public final class MyDocumentStore {
             pageContent.content = content
         } else {
             let pageContent = MyDocumentPageContent(pageId: page.id, content: content)
-            pageContent.page = page
-            page.pageContent = pageContent
             operationContext.insert(pageContent)
+            page.pageContent = pageContent
         }
 
         do {
@@ -688,7 +722,8 @@ public final class MyDocumentStore {
             postAIDocMarkerUpserts(for: [page])
             return true
         } catch {
-            operationContext.rollback()
+            // No operation-owned model escapes and autosave is disabled. Discard the failed
+            // context rather than reversing a new inverse relationship in SwiftData's rollback.
             return false
         }
     }

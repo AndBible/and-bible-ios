@@ -125,6 +125,31 @@ public enum EpubPersistedKeyLookupError: Error, Equatable, LocalizedError, Senda
    an instance; resource serving opens a fresh instance per request.
  */
 public final class EpubReader: @unchecked Sendable {
+    /** Posted after a default-library EPUB publication succeeds and becomes visible to readers. */
+    public static let libraryDidChangeNotification = Notification.Name(
+        "org.andbible.epub-library-did-change"
+    )
+
+    /** Notification user-info key whose value identifies the completed library mutation. */
+    public static let libraryChangeKindUserInfoKey = "kind"
+
+    /** Stable change values carried by `libraryDidChangeNotification`. */
+    public enum LibraryChangeKind: String, Sendable {
+        case installed
+        case deleted
+        case rebuiltSearchIndex
+        case deletedSearchIndex
+    }
+
+    /** Publishes one completed default-library mutation with its stable EPUB identifier. */
+    private static func postLibraryChange(identifier: String, kind: LibraryChangeKind) {
+        NotificationCenter.default.post(
+            name: libraryDidChangeNotification,
+            object: identifier,
+            userInfo: [libraryChangeKindUserInfoKey: kind.rawValue]
+        )
+        SwordModuleStore.notifyModulesDidChange()
+    }
     /**
      Immutable EPUB identity proposed at the global installed-book admission boundary.
 
@@ -351,13 +376,15 @@ public final class EpubReader: @unchecked Sendable {
         admittingCandidateWith admission: InstallAdmission
     ) throws -> String {
         let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: moduleStoreRootURL)
-        return try coordinator.withExclusiveTransaction(kind: .epub, prepare: { () }, commit: { _ in
+        let identifier = try coordinator.withExclusiveTransaction(kind: .epub, prepare: { () }, commit: { _ in
             try install(
                 epubURL: epubURL,
                 libraryRootURL: defaultLibraryRootURL,
                 admittingCandidateWith: admission
             )
         })
+        postLibraryChange(identifier: identifier, kind: .installed)
+        return identifier
     }
 
     /**
@@ -387,6 +414,40 @@ public final class EpubReader: @unchecked Sendable {
     }
 
     /**
+     Reports whether an exact immutable generation is still the default library's published one.
+
+     This validation reads only the stable pointer while holding the EPUB mutation lock. It does
+     not open SQLite, migrate a legacy package, rebuild an index, or acquire another generation
+     lease, so reader publication can authorize secondary EPUB sources without requiring them to be
+     the pane's active document.
+     */
+    public static func isCurrentGeneration(
+        identifier: String,
+        generationIdentifier: String
+    ) -> Bool {
+        isCurrentGeneration(
+            identifier: identifier,
+            generationIdentifier: generationIdentifier,
+            libraryRootURL: defaultLibraryRootURL
+        )
+    }
+
+    /** Explicit-library form used by isolated generation and recovery tests. */
+    static func isCurrentGeneration(
+        identifier: String,
+        generationIdentifier: String,
+        libraryRootURL: URL
+    ) -> Bool {
+        libraryMutationLock.lock()
+        defer { libraryMutationLock.unlock() }
+        guard let manifest = generationManifest(
+            identifier: identifier,
+            libraryRootURL: libraryRootURL
+        ) else { return false }
+        return manifest.generationIdentifier == generationIdentifier
+    }
+
+    /**
      Deletes one installed EPUB's stable pointer from the default app library.
 
      - Parameter identifier: Stable identifier returned by a successful EPUB installation.
@@ -402,6 +463,7 @@ public final class EpubReader: @unchecked Sendable {
         try coordinator.withExclusiveTransaction(kind: .epub, prepare: { () }, commit: { _ in
             try delete(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
         })
+        postLibraryChange(identifier: identifier, kind: .deleted)
     }
 
     /**
@@ -420,7 +482,12 @@ public final class EpubReader: @unchecked Sendable {
        remains current when publication fails; existing readers are never mutated in place.
      */
     public static func rebuildSearchIndex(identifier: String) throws -> EpubReader {
-        try rebuildSearchIndex(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+        let reader = try rebuildSearchIndex(
+            identifier: identifier,
+            libraryRootURL: defaultLibraryRootURL
+        )
+        postLibraryChange(identifier: identifier, kind: .rebuiltSearchIndex)
+        return reader
     }
 
     /**
@@ -438,7 +505,12 @@ public final class EpubReader: @unchecked Sendable {
        generation remains selected whenever publication fails.
      */
     public static func deleteSearchIndex(identifier: String) throws -> EpubReader {
-        try deleteSearchIndex(identifier: identifier, libraryRootURL: defaultLibraryRootURL)
+        let reader = try deleteSearchIndex(
+            identifier: identifier,
+            libraryRootURL: defaultLibraryRootURL
+        )
+        postLibraryChange(identifier: identifier, kind: .deletedSearchIndex)
+        return reader
     }
 
     /**

@@ -9,6 +9,66 @@ import XCTest
 /** Verifies AI Search tools authorize the exact readable source generation they query. */
 final class AgentSearchSourceIdentityTests: BibleUISwordFixtureTestCase {
     /**
+     Keeps readable native content from bypassing the generated Search index contract.
+
+     - Setup: Opens the real KJV module and an empty temporary Search database, without running
+       index generation. The independently chosen text and lexical queries have native matches.
+     - Expected result: Explicit and automatic text/Strong's tools report their public not-indexed
+       errors, and installed-document metadata stays unindexed.
+     - Failure meaning: A missing index silently falls back to a native preview path, with different
+       annotation, truncation or source-identity semantics.
+     - Side effects: Creates transient stores and one temporary Search database; fixture teardown
+       and deferred cleanup remove them. No full-Bible indexing is needed for this failure path.
+     */
+    @MainActor
+    func testReadableNativeSourceCannotBypassMissingSearchIndex() throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        XCTAssertTrue(module.info.features.contains(.strongsNumbers))
+        let source = try module.inspectVerseKeyOSISSourceRestoringPrevious("Gen.1.1")
+        XCTAssertTrue(source.osisFragment.contains("beginning"))
+
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agent-search-no-index-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let searchIndexService = SearchIndexService(databasePath: databaseURL.path)
+        let adapter = try makeAdapter(
+            swordManager: manager,
+            searchIndexService: searchIndexService
+        )
+
+        for books in [["KJV"], []] {
+            XCTAssertThrowsError(try adapter.searchBible(
+                query: "beginning",
+                books: books,
+                maximum: 20,
+                offset: 0
+            )) { error in
+                XCTAssertEqual(
+                    (error as? BibleUIAgentDomainError)?.code,
+                    books.isEmpty ? "NO_INDEX" : "NOT_INDEXED"
+                )
+            }
+        }
+        for book: String? in ["KJV", nil] {
+            XCTAssertThrowsError(try adapter.searchByStrongs(
+                reportedNumber: "H0430",
+                canonicalToken: "H0430",
+                book: book,
+                maximum: 20,
+                offset: 0
+            )) { error in
+                XCTAssertEqual((error as? BibleUIAgentDomainError)?.code, "NOT_INDEXED")
+            }
+        }
+        XCTAssertEqual(
+            try installedIndexFlag(from: adapter.getInstalledDocuments(category: .bible), named: "KJV"),
+            .bool(false)
+        )
+    }
+
+    /**
      Rejects stale same-initials rows across text, Strong's, and installed-document readiness.
 
      - Setup: Indexes the readable KJV fixture, proves all three Agent projections are ready, then

@@ -343,20 +343,23 @@ final class BookmarkBehaviorParityTests: XCTestCase {
      - Expected result: SQLite-style nil offsets sort first in both Bible directions, `LAST_UPDATED`
        is ascending, selected-label `ORDER_NUMBER` wins, Bible rows precede generic rows, and generic
        rows always use `bookInitials,key` order without synthesizing ordinal zero.
-     - Side effects: Creates unsaved model objects only.
+     - Side effects: Creates unsaved model objects in an isolated in-memory context.
      - Failure modes: A failure means the visible iOS list disagrees with Android `BookmarksDao` or
        nullable generic ordinals leak into presentation as fake addresses.
      */
     func testBookmarkListProjectionMatchesAndroidOffsetOrderNumberAndNullableGenericOrdering() throws {
+        let container = try makeBookmarkBehaviorParityModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let fixture = try loadBookmarkBehaviorParityAndroidFixture()
         let firstInput = fixture.sameStartBibleHighlights[0]
         let secondInput = fixture.sameStartBibleHighlights[1]
         let nilOffsetID = UUID(uuidString: "a2000000-0000-0000-0000-000000000000")!
         let firstID = try XCTUnwrap(UUID(uuidString: firstInput.id))
         let secondID = try XCTUnwrap(UUID(uuidString: secondInput.id))
-        let nilOffset = bibleListItem(id: nilOffsetID, ordinal: 4, startOffset: nil)
-        let first = bibleListItem(id: firstID, ordinal: 4, startOffset: firstInput.startOffset)
-        let second = bibleListItem(id: secondID, ordinal: 4, startOffset: secondInput.startOffset)
+        let nilOffset = bibleListItem(in: modelContext, id: nilOffsetID, ordinal: 4, startOffset: nil)
+        let first = bibleListItem(in: modelContext, id: firstID, ordinal: 4, startOffset: firstInput.startOffset)
+        let second = bibleListItem(in: modelContext, id: secondID, ordinal: 4, startOffset: secondInput.startOffset)
 
         XCTAssertEqual(
             projectedIDs([second, nilOffset, first], sortOrder: .bibleOrder),
@@ -369,11 +372,13 @@ final class BookmarkBehaviorParityTests: XCTestCase {
 
         let updatedIDs = try fixture.sorting.lastUpdatedAscending.map { try XCTUnwrap(UUID(uuidString: $0)) }
         let older = bibleListItem(
+            in: modelContext,
             id: updatedIDs[0],
             ordinal: 4,
             lastUpdatedOn: Date(timeIntervalSince1970: 100)
         )
         let newer = bibleListItem(
+            in: modelContext,
             id: updatedIDs[1],
             ordinal: 5,
             lastUpdatedOn: Date(timeIntervalSince1970: 200)
@@ -381,10 +386,11 @@ final class BookmarkBehaviorParityTests: XCTestCase {
         XCTAssertEqual(projectedIDs([newer, older], sortOrder: .lastUpdated), updatedIDs)
 
         let label = Label(name: "Fixture Label")
+        modelContext.insert(label)
         let orderedIDs = try fixture.sorting.labelOrderNumberAscending.map { try XCTUnwrap(UUID(uuidString: $0)) }
         // Android BookmarksDao.orderBy2 orders BibleBookmarkToLabel.orderNumber ascending.
-        let earlierOrder = bibleListItem(id: orderedIDs[0], ordinal: 4, label: label, orderNumber: 2)
-        let laterOrder = bibleListItem(id: orderedIDs[1], ordinal: 5, label: label, orderNumber: 9)
+        let earlierOrder = bibleListItem(in: modelContext, id: orderedIDs[0], ordinal: 4, label: label, orderNumber: 2)
+        let laterOrder = bibleListItem(in: modelContext, id: orderedIDs[1], ordinal: 5, label: label, orderNumber: 9)
         XCTAssertEqual(
             BookmarkListProjection.filteredItems(
                 [earlierOrder, laterOrder],
@@ -396,11 +402,13 @@ final class BookmarkBehaviorParityTests: XCTestCase {
         )
 
         let genericB = genericListItem(
+            in: modelContext,
             id: UUID(uuidString: "a2000000-0000-0000-0000-000000000042")!,
             initials: "Z-DICT",
             key: "Beta"
         )
         let genericA = genericListItem(
+            in: modelContext,
             id: UUID(uuidString: "a2000000-0000-0000-0000-000000000041")!,
             initials: "A-DICT",
             key: "Alpha"
@@ -511,6 +519,7 @@ final class BookmarkBehaviorParityTests: XCTestCase {
      - Failure modes: This fixture builder cannot fail.
      */
     private func bibleListItem(
+        in modelContext: ModelContext,
         id: UUID,
         ordinal: Int,
         startOffset: Int? = nil,
@@ -528,13 +537,14 @@ final class BookmarkBehaviorParityTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 100),
             lastUpdatedOn: lastUpdatedOn
         )
+        modelContext.insert(bookmark)
         bookmark.book = "Genesis"
         bookmark.startOffset = startOffset
         if let label {
             let link = BibleBookmarkToLabel(orderNumber: orderNumber)
+            modelContext.insert(link)
             link.bookmark = bookmark
             link.label = label
-            bookmark.bookmarkToLabels = [link]
         }
         return BookmarkListItem(bibleBookmark: bookmark)
     }
@@ -546,19 +556,24 @@ final class BookmarkBehaviorParityTests: XCTestCase {
      - Side effects: None outside the returned in-memory object graph.
      - Failure modes: This fixture builder cannot fail.
      */
-    private func genericListItem(id: UUID, initials: String, key: String) -> BookmarkListItem {
-        BookmarkListItem(
-            genericBookmark: GenericBookmark(
-                id: id,
-                key: key,
-                bookInitials: initials,
-                createdAt: Date(timeIntervalSince1970: 1_000),
-                ordinalStart: nil,
-                ordinalEnd: nil,
-                lastUpdatedOn: Date(timeIntervalSince1970: 1_000),
-                wholeVerse: true
-            )
+    private func genericListItem(
+        in modelContext: ModelContext,
+        id: UUID,
+        initials: String,
+        key: String
+    ) -> BookmarkListItem {
+        let bookmark = GenericBookmark(
+            id: id,
+            key: key,
+            bookInitials: initials,
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            ordinalStart: nil,
+            ordinalEnd: nil,
+            lastUpdatedOn: Date(timeIntervalSince1970: 1_000),
+            wholeVerse: true
         )
+        modelContext.insert(bookmark)
+        return BookmarkListItem(genericBookmark: bookmark)
     }
 
     /** Returns visible row UUIDs after applying one list sort with no filters. */

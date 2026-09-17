@@ -460,8 +460,25 @@ extension BibleWebView {
         #endif
     }
 
-    /// Returns the bootstrap script injected into the packaged web client before it loads.
-    static func platformBootstrapScriptSource(deviceClass: String) -> String {
+    /**
+     Returns the platform bootstrap and native console-forwarding policy.
+
+     Warnings and errors remain available to native diagnostics. Ordinary console output stays in
+     WebKit unless verbose forwarding is explicitly requested, avoiding object serialization and
+     bridge messages on the reading path. Set `ANDBIBLE_READER_VERBOSE_LOGGING=1` when collecting a
+     diagnostic run; the policy does not change document or interaction behavior.
+
+     - Parameters:
+       - deviceClass: Native device class consumed by shared Vue presentation.
+       - forwardsVerboseConsole: Whether ordinary console logs are serialized for native logging.
+     - Returns: JavaScript injected at document start.
+     - Side effects: None during generation. The returned script installs platform and console hooks.
+     - Failure modes: Native logging failures are contained without interrupting the web client.
+     */
+    static func platformBootstrapScriptSource(
+        deviceClass: String,
+        forwardsVerboseConsole: Bool = ProcessInfo.processInfo.environment["ANDBIBLE_READER_VERBOSE_LOGGING"] == "1"
+    ) -> String {
         """
         window.__PLATFORM__ = 'ios';
         window.__activeLanguages__ = '["en"]';
@@ -506,13 +523,14 @@ extension BibleWebView {
             'a.morph, a.morph:link, a.morph:visited, a.morph:active { color: var(--verse-number-color, #aaa) !important; }',
         ].join(' ');
         (document.head || document.documentElement).appendChild(style);
-        // Route console.log/error/warn to native bridge for debugging
+        // Gate verbose forwarding before converting arguments or allocating bridge payloads.
         (function() {
             var origLog = console.log;
             var origError = console.error;
             var origWarn = console.warn;
             console.log = function() {
                 origLog.apply(console, arguments);
+                if (!\(forwardsVerboseConsole ? "true" : "false")) return;
                 try {
                     var msg = Array.prototype.slice.call(arguments).map(function(a) {
                         return typeof a === 'object' ? JSON.stringify(a) : String(a);

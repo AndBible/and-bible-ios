@@ -64,11 +64,28 @@ enum BibleReaderMultiFragmentDocumentBuilder {
                 isNativeHtml: fragment.isNativeHtml
             )
         }
+        return buildJSON(
+            fragments: osisFragments,
+            compare: false,
+            contentType: contentType,
+            stateJSON: stateJSON,
+            id: id
+        )
+    }
+
+    /** Purely encodes already-copied OSIS fragments for any Multi-family document. */
+    static func buildJSON(
+        fragments: [OsisFragment],
+        compare: Bool,
+        contentType: String? = nil,
+        stateJSON: String? = nil,
+        id: String
+    ) -> String? {
         let payload = MultiFragmentDocumentPayload(
             id: id,
             type: "multi",
-            osisFragments: osisFragments,
-            compare: false,
+            osisFragments: fragments,
+            compare: compare,
             contentType: contentType,
             state: bridgeJSONValue(from: stateJSON)
         )

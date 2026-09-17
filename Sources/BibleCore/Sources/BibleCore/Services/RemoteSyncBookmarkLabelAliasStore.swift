@@ -145,7 +145,7 @@ public final class RemoteSyncBookmarkLabelAliasStore {
         "\(Keys.prefix).\(remoteLabelID.uuidString.lowercased())"
     }
 
-    private func decodeAlias(_ entry: Setting) -> Alias? {
+    private func decodeAlias(_ entry: SettingEntry) -> Alias? {
         let prefix = "\(Keys.prefix)."
         guard entry.key.hasPrefix(prefix),
               let remoteLabelID = UUID(uuidString: String(entry.key.dropFirst(prefix.count))),

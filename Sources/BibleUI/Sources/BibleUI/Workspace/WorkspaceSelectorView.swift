@@ -588,13 +588,13 @@ public struct WorkspaceSelectorView: View {
             TextDisplaySettingsView(
                 settings: $globalDisplaySettings,
                 moduleStoreRootURL: moduleStoreRootURL,
-                workspaceColor: workspaceColorBinding(for: returningDraftID),
+                workspaceColor: nil,
                 navigationTitle: String(
                     localized: "global_text_display_settings_title",
                     defaultValue: "Global text options"
                 ),
                 scope: .global,
-                workspaceName: drafts.first(where: { $0.id == returningDraftID }).map(workspaceDisplayName),
+                workspaceName: nil,
                 surfacePalette: surfacePalette,
                 onBack: { settingsDestination = .workspace(returningDraftID) },
                 onChange: { settingsStore.setGlobalTextDisplaySettings(globalDisplaySettings) }

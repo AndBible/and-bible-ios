@@ -1,6 +1,7 @@
 // ReaderActivePaneIsolationTests.swift -- package coverage for multi-pane action targeting
 
 import XCTest
+import SwiftData
 @testable import BibleCore
 @testable import BibleUI
 @testable import BibleView
@@ -97,9 +98,20 @@ final class ReaderActivePaneIsolationTests: BibleUISwordFixtureTestCase {
      pane on, then cycle the third pane back to inherited hidden links while the first pane remains
      explicit.
      */
-    func testWindowScopedStrongsModeMutationTouchesOnlyTargetPane() {
-        let sourceWindow = windowWithPageManager(orderNumber: 0)
-        let targetWindow = windowWithPageManager(orderNumber: 2)
+    func testWindowScopedStrongsModeMutationTouchesOnlyTargetPane() throws {
+        let container = try makeWorkspaceModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
+        let sourceWindow = Window(orderNumber: 0)
+        let targetWindow = Window(orderNumber: 2)
+        let sourcePageManager = PageManager(id: sourceWindow.id)
+        let targetPageManager = PageManager(id: targetWindow.id)
+        modelContext.insert(sourceWindow)
+        modelContext.insert(targetWindow)
+        modelContext.insert(sourcePageManager)
+        modelContext.insert(targetPageManager)
+        sourceWindow.pageManager = sourcePageManager
+        targetWindow.pageManager = targetPageManager
         let parentSettings = TextDisplaySettings.appDefaults
 
         persistStrongsMode(1, to: targetWindow, parentSettings: parentSettings)
@@ -137,7 +149,9 @@ final class ReaderActivePaneIsolationTests: BibleUISwordFixtureTestCase {
         let targetWindow = windowWithPageManager(orderNumber: 2)
         let sourceController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
         let targetController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        self.retainReaderWindowGraph(sourceWindow)
         sourceController.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         targetController.activeWindow = targetWindow
         sourceController.navigateTo(book: "Genesis", chapter: 1)
         targetController.navigateTo(book: "Genesis", chapter: 1)
@@ -182,7 +196,9 @@ final class ReaderActivePaneIsolationTests: BibleUISwordFixtureTestCase {
         let targetWindow = windowWithPageManager(orderNumber: 2)
         let sourceController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
         let targetController = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
+        self.retainReaderWindowGraph(sourceWindow)
         sourceController.activeWindow = sourceWindow
+        self.retainReaderWindowGraph(targetWindow)
         targetController.activeWindow = targetWindow
         sourceController.navigateTo(book: "Genesis", chapter: 1)
         targetController.navigateTo(book: "Genesis", chapter: 1)

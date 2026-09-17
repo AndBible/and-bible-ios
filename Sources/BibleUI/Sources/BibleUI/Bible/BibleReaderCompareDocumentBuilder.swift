@@ -102,6 +102,32 @@ struct BibleReaderCompareDocumentBuilder {
         )
     }
 
+    /** Resolves a complete source chapter inside the serialized source operation. */
+    func makeChapterRequest(
+        bookInitials: String,
+        osisBookID: String,
+        chapter: Int
+    ) -> Request? {
+        guard chapter > 0,
+              let source = moduleResolver.scripture(named: bookInitials),
+              let startOrdinal = source.verseOrdinal(
+                osisBookId: osisBookID,
+                chapter: chapter,
+                verse: 1
+              ) else { return nil }
+        var endOrdinal = startOrdinal
+        while let next = source.verseReference(ordinal: endOrdinal + 1),
+              next.osisBookId == osisBookID,
+              next.chapter == chapter {
+            endOrdinal = next.ordinal
+        }
+        return makeRequest(
+            bookInitials: bookInitials,
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+    }
+
     /**
      Builds the Vue Compare document, converting the selected range independently for each target.
 
@@ -112,18 +138,7 @@ struct BibleReaderCompareDocumentBuilder {
        failure or bridge encoding failure returns `nil`.
      */
     static func buildDocumentJSON(_ request: Request) -> String? {
-        let fragments = request.sources.compactMap { source in
-            buildFragment(
-                source: source,
-                sourceVersification: request.sourceVersification,
-                sourceStart: request.sourceStart,
-                sourceEnd: request.sourceEnd
-            )
-        }
-        guard !fragments.isEmpty else {
-            compareDocumentBuilderLogger.warning("No Compare target mapped the selected source range")
-            return nil
-        }
+        guard let fragments = buildFragments(request) else { return nil }
         let payload = MultiFragmentDocumentPayload(
             id: "compare-\(UUID().uuidString)",
             type: "multi",
@@ -138,6 +153,23 @@ struct BibleReaderCompareDocumentBuilder {
             return nil
         }
         return json
+    }
+
+    /** Captures copied Compare fragments for a later pure encoding phase. */
+    static func buildFragments(_ request: Request) -> [OsisFragment]? {
+        let fragments = request.sources.compactMap { source in
+            buildFragment(
+                source: source,
+                sourceVersification: request.sourceVersification,
+                sourceStart: request.sourceStart,
+                sourceEnd: request.sourceEnd
+            )
+        }
+        guard !fragments.isEmpty else {
+            compareDocumentBuilderLogger.warning("No Compare target mapped the selected source range")
+            return nil
+        }
+        return fragments
     }
 
     /**

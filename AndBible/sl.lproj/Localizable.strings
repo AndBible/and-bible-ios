@@ -1539,3 +1539,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ ni mogoče najti v dokumentu %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Prenesi Moje opombe";

@@ -99,18 +99,22 @@ struct BibleReaderSQLiteModuleSwitchCoordinator {
        - moduleName: Requested case-insensitive initials.
        - updatesVisibleCategory: Whether commentary becomes the visible category.
        - context: Controller state, persistence, and dispatch seams.
+       - prepareForSwitch: Optional visible-mode transition invoked after module resolution and
+         immediately before selected state mutates.
      - Returns: True only when SQLite owns and applies the request.
-     - Side effects: Clears SWORD commentary state, persists selection, and reloads when commentary
-       is or becomes visible and the client is ready.
+     - Side effects: May invoke `prepareForSwitch`, clears SWORD commentary state, persists
+       selection, and reloads when commentary is or becomes visible and the client is ready.
      - Failure modes: Unknown, wrong-category, and SWORD-shadowed requests return false unchanged.
      */
     @discardableResult
     func switchCommentary(
         to moduleName: String,
         updatesVisibleCategory: Bool,
-        context: BibleReaderSQLiteModuleSwitchContext
+        context: BibleReaderSQLiteModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> Bool {
         guard let module = context.resolveModule(moduleName, .commentary) else { return false }
+        prepareForSwitch?()
         context.activateCommentary(module)
         if updatesVisibleCategory { context.setCurrentCategory(.commentary) }
         context.persistSelection(.commentary, module.info.name, nil, updatesVisibleCategory)
@@ -128,16 +132,20 @@ struct BibleReaderSQLiteModuleSwitchCoordinator {
        - moduleName: Requested case-insensitive initials.
        - updatesVisibleCategory: Whether dictionary becomes the visible category.
        - context: Controller state, persistence, and dispatch seams.
+       - prepareForSwitch: Optional visible-mode transition invoked after exact-key preflight and
+         immediately before selected state mutates.
      - Returns: Nil when SQLite does not own the request; otherwise exact-key preservation,
        chooser-required, or retryable failure.
-     - Side effects: Enumerates keys before mutation, then clears SWORD dictionary state, persists
-       the exact retained key, and reloads retained visible content when ready.
+     - Side effects: Enumerates keys before mutation, may invoke `prepareForSwitch`, then clears
+       SWORD dictionary state, persists the exact retained key, and reloads visible content when
+       ready.
      - Failure modes: Enumeration errors return `.failed` before any state/persistence callback.
      */
     func switchDictionary(
         to moduleName: String,
         updatesVisibleCategory: Bool,
-        context: BibleReaderSQLiteModuleSwitchContext
+        context: BibleReaderSQLiteModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderGenericModuleSwitchOutcome? {
         guard let module = context.resolveModule(moduleName, .dictionary) else { return nil }
         let plan: BibleReaderSQLiteDictionarySwitchPlan
@@ -149,6 +157,7 @@ struct BibleReaderSQLiteModuleSwitchCoordinator {
         } catch {
             return .failed(message: error.localizedDescription)
         }
+        prepareForSwitch?()
         context.activateDictionary(plan.module, plan.retainedKey)
         if updatesVisibleCategory { context.setCurrentCategory(.dictionary) }
         context.persistSelection(

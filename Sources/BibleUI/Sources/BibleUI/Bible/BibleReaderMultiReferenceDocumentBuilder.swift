@@ -63,8 +63,7 @@ struct BibleReaderMultiReferenceDocumentBuilder {
        fragment is fabricated.
      */
     func buildDocumentJSON(refs: [OsisRef]) -> String? {
-        let fragments = refs.compactMap(buildFragment(for:))
-        guard !fragments.isEmpty else { return nil }
+        guard let fragments = buildFragments(refs: refs) else { return nil }
 
         let payload = MultiFragmentDocumentPayload(
             id: "multi-\(UUID().uuidString)",
@@ -80,6 +79,12 @@ struct BibleReaderMultiReferenceDocumentBuilder {
             return nil
         }
         return json
+    }
+
+    /** Captures copied fragments for a later pure encoding phase. */
+    func buildFragments(refs: [OsisRef]) -> [OsisFragment]? {
+        let fragments = refs.compactMap(buildFragment(for:))
+        return fragments.isEmpty ? nil : fragments
     }
 
     /** Converts one complete source passage into its target module and renders it atomically. */

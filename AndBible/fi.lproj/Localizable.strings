@@ -1546,3 +1546,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ ei löytynyt teoksesta %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Siirretyt Omat Merkinnät";

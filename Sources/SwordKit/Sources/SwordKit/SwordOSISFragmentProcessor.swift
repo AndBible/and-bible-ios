@@ -37,6 +37,29 @@ public enum SwordOSISFragmentProcessor {
     private static let parserRootName = "andbible-fragment-root"
 
     /**
+     Matches the optional leading XML declaration removed before fragment parsing.
+
+     Swift initializes this immutable expression once and safely publishes the shared instance to
+     concurrent processor callers. A `nil` value preserves the existing no-replacement fallback if
+     Foundation ever rejects the fixed pattern. Matching changes no shared state.
+     */
+    private static let xmlDeclarationExpression = try? NSRegularExpression(
+        pattern: #"^\s*<\?xml[^?]*\?>"#,
+        options: [.caseInsensitive]
+    )
+
+    /**
+     Matches Android's immutable sentence boundaries before `BVA` anchor insertion.
+
+     Swift initializes this immutable expression once and safely publishes the shared instance to
+     concurrent processor callers. A `nil` value preserves the existing unsplit-text fallback if
+     Foundation ever rejects the fixed pattern. Matching changes no shared state.
+     */
+    private static let sentenceBoundaryExpression = try? NSRegularExpression(
+        pattern: #"((\d{2,}|\D)(([.,;:!?。，；][\"'\p{Pf}]?\p{Z}+)|(\p{Z}*\p{Pd}\p{Z}*)))([\"'¡¿\p{Pi}]?\p{L})"#
+    )
+
+    /**
      Processes one source-format-converted OSIS entry.
 
      - Parameters:
@@ -323,10 +346,7 @@ public enum SwordOSISFragmentProcessor {
      */
     private static func withoutXMLDeclaration(_ xml: String) -> String {
         let withoutBOM = xml.hasPrefix("\u{FEFF}") ? String(xml.dropFirst()) : xml
-        guard let expression = try? NSRegularExpression(
-            pattern: #"^\s*<\?xml[^?]*\?>"#,
-            options: [.caseInsensitive]
-        ) else {
+        guard let expression = xmlDeclarationExpression else {
             return withoutBOM
         }
         let range = NSRange(location: 0, length: (withoutBOM as NSString).length)
@@ -416,8 +436,7 @@ public enum SwordOSISFragmentProcessor {
      - Failure modes: If the regular expression cannot be compiled, returns the unsplit text.
      */
     static func splitSentences(_ text: String) -> [String] {
-        let pattern = #"((\d{2,}|\D)(([.,;:!?。，；][\"'\p{Pf}]?\p{Z}+)|(\p{Z}*\p{Pd}\p{Z}*)))([\"'¡¿\p{Pi}]?\p{L})"#
-        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+        guard let expression = sentenceBoundaryExpression else {
             return text.isEmpty ? [] : [text]
         }
 
@@ -526,19 +545,21 @@ public enum SwordOSISFragmentProcessor {
     }
 
     /**
-     Reads Android's nested direct-child `<div annotateRef>` metadata.
+     Reads annotation metadata only from Android's first direct no-namespace div.
+
+     Later sibling divs and deeper descendants cannot replace the first div's annotation. This
+     preserves `Element.getChild("div")` ownership even when the first div has no annotation.
 
      - Parameter root: Outer `BookData` fragment div.
-     - Returns: Non-empty annotation reference, or `nil`.
-     - Side effects: None.
-     - Failure modes: None.
+     - Returns: The first direct div's non-empty annotation reference, or `nil`.
+     - Side effects: None; source order and XML remain unchanged.
+     - Failure modes: Missing divs and missing or empty attributes return `nil`.
      */
     private static func directAnnotateRef(in root: SwordXMLNode) -> String? {
-        for div in directChildElements(named: "div", in: root) {
-            let value = div.attribute(named: "annotateRef") ?? ""
-            if !value.isEmpty { return value }
-        }
-        return nil
+        guard let div = directChildElements(named: "div", in: root).first,
+              let value = div.attribute(named: "annotateRef"),
+              !value.isEmpty else { return nil }
+        return value
     }
 
     /**

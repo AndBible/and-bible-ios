@@ -1,4 +1,5 @@
 import SwiftData
+import SwordKit
 import XCTest
 
 @testable import BibleCore
@@ -6,9 +7,10 @@ import XCTest
 /**
  Protects Android's generated-page transaction and strict/loose cache lookup contracts.
 
- Tests use an in-memory My Documents graph without `Setting`, so the production sync-journal helper
- deliberately takes its documented graph-only direct-save path. Marker delivery uses an isolated
- event center and is synchronous, making assertions deterministic without sleeps.
+ Most tests use an in-memory My Documents graph without `Setting`, so the production sync-journal
+ helper deliberately takes its documented graph-only direct-save path. The sparse cache-query
+ contract uses the complete app schema over process-lifetime SQLite stores. Marker delivery uses an
+ isolated event center and is synchronous, making assertions deterministic without sleeps.
  */
 @MainActor
 final class AIGeneratedPageStoreTests: XCTestCase {
@@ -80,6 +82,130 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     withExtendedLifetime(observation) {}
   }
 
+  /** First-time AI Documents registration wakes readers after commit; later page saves stay quiet. */
+  func testFirstAIDocumentsCreationPublishesCommittedRegistryOnce() throws {
+    let container = try makeContainer()
+    let setup = ModelContext(container)
+    setup.insert(MyDocument(
+      name: "Second",
+      initials: "MyDoc_Second",
+      orderNumber: 1,
+      createdAt: Date(timeIntervalSince1970: 2)
+    ))
+    setup.insert(MyDocument(
+      name: "First",
+      initials: "MyDoc_First",
+      orderNumber: 0,
+      createdAt: Date(timeIntervalSince1970: 1)
+    ))
+    try setup.save()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let observation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(observation) }
+    let store = AIGeneratedPageStore(
+      modelContext: setup,
+      moduleStoreRootURL: uniqueModuleStoreRootURL(),
+      isDocumentInitialsUnavailable: { _ in false }
+    )
+
+    _ = try store.save(
+      content: "First generated page",
+      title: "First",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "first source"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )
+
+    XCTAssertNil(publications.errorDescription)
+    XCTAssertEqual(publications.values, [
+      AIRegistrationSnapshot(
+        initials: ["AIDocuments", "MyDoc_First", "MyDoc_Second"],
+        orderNumbers: [0, 1, 2]
+      )
+    ])
+
+    _ = try store.save(
+      content: "Second generated page",
+      title: "Second",
+      promptID: UUID(),
+      context: cacheContext(selectedText: "second source"),
+      usedWriteTools: false,
+      sourceModelName: nil
+    )
+
+    XCTAssertEqual(publications.values.count, 1)
+  }
+
+  /** Cancellation before mutation creates no first-time registration and sends no wakeup. */
+  func testCancelledFirstAIDocumentsCreationPublishesNothing() async throws {
+    let container = try makeContainer()
+    let moduleStoreRootURL = uniqueModuleStoreRootURL()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let transactionEvents = LockedAIMutationEvents()
+    let observation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(observation) }
+    let transactionObservation = ModuleStoreMutationCoordinator.observeTransactions(
+      forModuleRoot: moduleStoreRootURL
+    ) { event in
+      transactionEvents.record(event)
+    }
+    defer { transactionObservation.cancel() }
+    let store = AIGeneratedPageStore(
+      modelContext: ModelContext(container),
+      moduleStoreRootURL: moduleStoreRootURL,
+      isDocumentInitialsUnavailable: { _ in
+        transactionEvents.recordAdmission()
+        return false
+      }
+    )
+
+    let result: Result<Void, Error> = await Task { @MainActor in
+      withUnsafeCurrentTask { task in
+        task?.cancel()
+      }
+      do {
+        _ = try store.save(
+          content: "Cancelled generated page",
+          title: "Cancelled",
+          promptID: UUID(),
+          context: cacheContext(selectedText: "cancelled source"),
+          usedWriteTools: false,
+          sourceModelName: nil
+        )
+        return .success(())
+      } catch {
+        return .failure(error)
+      }
+    }.value
+
+    switch result {
+    case .success:
+      XCTFail("Expected cancellation before the coordinator mutation boundary.")
+    case .failure(let error):
+      XCTAssertTrue(error is CancellationError, "Unexpected cancellation error: \(error)")
+    }
+    let mutationStages = transactionEvents.stages(for: .myDocument)
+    XCTAssertTrue(mutationStages.contains(.cancelledBeforeMutation))
+    XCTAssertFalse(mutationStages.contains(.willMutate))
+    XCTAssertEqual(transactionEvents.admissionCount, 0)
+    XCTAssertTrue(publications.values.isEmpty)
+    XCTAssertNil(publications.errorDescription)
+    XCTAssertTrue(try ModelContext(container).fetch(FetchDescriptor<MyDocument>()).isEmpty)
+  }
+
   /**
    Verifies strict cache matching uses the full canonical hash while loose matching uses only the
    exact KJVA range and returns the newest matching page.
@@ -134,6 +260,172 @@ final class AIGeneratedPageStoreTests: XCTestCase {
         )
       )
     )
+  }
+
+  /**
+   Verifies sparse cache lookup preserves live-owner selection after primary-row filtering.
+
+   - Setup: Persists two matching live pages with the same newest timestamp, matching rows with
+     incomplete owners, and newer live rows that violate each strict or loose predicate component.
+   - Expected result: Strict and loose lookup both return the live page with the greater stable UUID,
+     preserving the established timestamp and UUID ordering after dangling rows are omitted.
+   - Failure meaning: A bounded fetch changed Android's exact matching, allowed a missing page owner
+     to win, or made equal-time cache selection nondeterministic.
+   - Side effects: Creates complete process-lifetime cloud/local SQLite fixture stores.
+   */
+  func testCacheLookupIgnoresUnrelatedAndDanglingRowsBeforeStableLiveSelection() throws {
+    let directory = try makeProcessLifetimePersistentStoreDirectory(
+      label: "ai-cache-bounded-lookup"
+    )
+    let container = try makePersistentContainer(in: directory)
+    let context = ModelContext(container)
+    context.autosaveEnabled = false
+    let store = AIGeneratedPageStore(
+      modelContext: context,
+      isDocumentInitialsUnavailable: { _ in false }
+    )
+    let promptID = try XCTUnwrap(
+      UUID(uuidString: "11111111-1111-1111-1111-111111111111")
+    )
+    let cacheContext = cacheContext(selectedText: "bounded lookup")
+    let contextHash = try cacheContext.computeHash()
+    let document = MyDocument(name: "AI Documents", initials: "AIDocuments")
+    context.insert(document)
+
+    func insertLiveEntry(
+      pageID: UUID,
+      pageKey: String,
+      createdAt: TimeInterval,
+      sourcePromptID: UUID,
+      start: Int?,
+      end: Int?,
+      hash: String?
+    ) -> MyDocumentPage {
+      let page = MyDocumentPage(
+        id: pageID,
+        title: pageKey,
+        pageKey: pageKey,
+        createdAt: Date(timeIntervalSince1970: createdAt)
+      )
+      let cache = AiPageCacheEntry(
+        pageId: pageID,
+        sourcePromptId: sourcePromptID,
+        kjvOrdinalStart: start,
+        kjvOrdinalEnd: end,
+        contextHash: hash
+      )
+      context.insert(page)
+      context.insert(cache)
+      page.document = document
+      cache.page = page
+      return page
+    }
+
+    let lowerPage = insertLiveEntry(
+      pageID: try XCTUnwrap(UUID(uuidString: "22222222-2222-2222-2222-222222222222")),
+      pageKey: "lower",
+      createdAt: 10,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+    let higherPage = insertLiveEntry(
+      pageID: try XCTUnwrap(UUID(uuidString: "33333333-3333-3333-3333-333333333333")),
+      pageKey: "higher",
+      createdAt: 10,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-prompt",
+      createdAt: 20,
+      sourcePromptID: UUID(),
+      start: cacheContext.kjvOrdinalStart,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: contextHash
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-start",
+      createdAt: 21,
+      sourcePromptID: promptID,
+      start: 5,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: "wrong-start"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "wrong-end",
+      createdAt: 22,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: 5,
+      hash: "wrong-end"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "nil-start",
+      createdAt: 23,
+      sourcePromptID: promptID,
+      start: nil,
+      end: cacheContext.kjvOrdinalEnd,
+      hash: "nil-start"
+    )
+    _ = insertLiveEntry(
+      pageID: UUID(),
+      pageKey: "nil-end",
+      createdAt: 24,
+      sourcePromptID: promptID,
+      start: cacheContext.kjvOrdinalStart,
+      end: nil,
+      hash: "nil-end"
+    )
+
+    let ownerlessPage = MyDocumentPage(
+      id: UUID(),
+      title: "Ownerless",
+      pageKey: "ownerless",
+      createdAt: Date(timeIntervalSince1970: 30)
+    )
+    let ownerlessCache = AiPageCacheEntry(
+      pageId: ownerlessPage.id,
+      sourcePromptId: promptID,
+      kjvOrdinalStart: cacheContext.kjvOrdinalStart,
+      kjvOrdinalEnd: cacheContext.kjvOrdinalEnd,
+      contextHash: contextHash
+    )
+    let pagelessCache = AiPageCacheEntry(
+      pageId: UUID(),
+      sourcePromptId: promptID,
+      kjvOrdinalStart: cacheContext.kjvOrdinalStart,
+      kjvOrdinalEnd: cacheContext.kjvOrdinalEnd,
+      contextHash: contextHash
+    )
+    context.insert(ownerlessPage)
+    context.insert(ownerlessCache)
+    context.insert(pagelessCache)
+    ownerlessCache.page = ownerlessPage
+    try context.save()
+
+    let expected = AIGeneratedPageLocation(
+      pageID: higherPage.id,
+      documentInitials: document.initials,
+      pageKey: higherPage.pageKey
+    )
+    XCTAssertEqual(
+      try store.cachedPage(for: prompt(id: promptID, strict: true), context: cacheContext),
+      expected
+    )
+    XCTAssertEqual(
+      try store.cachedPage(for: prompt(id: promptID, strict: false), context: cacheContext),
+      expected
+    )
+    withExtendedLifetime(container) {}
   }
 
   /**
@@ -208,6 +500,15 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     let prior = MyDocument(name: "Prior", initials: "Prior", orderNumber: 0)
     setup.insert(prior)
     try setup.save()
+    let publications = LockedAIRegistrationPublications(container: container)
+    let registryObservation = NotificationCenter.default.addObserver(
+      forName: SwordModuleStore.modulesDidChangeNotification,
+      object: nil,
+      queue: nil
+    ) { _ in
+      publications.recordCommittedRegistry()
+    }
+    defer { NotificationCenter.default.removeObserver(registryObservation) }
     let events = LockedMarkerEvents()
     let center = MyDocumentAIDocMarkerEventCenter()
     let observation = center.observe { events.append($0) }
@@ -242,6 +543,8 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     XCTAssertTrue(try verification.fetch(FetchDescriptor<MyDocumentPageContent>()).isEmpty)
     XCTAssertTrue(try verification.fetch(FetchDescriptor<AiPageCacheEntry>()).isEmpty)
     XCTAssertTrue(events.values.isEmpty)
+    XCTAssertTrue(publications.values.isEmpty)
+    XCTAssertNil(publications.errorDescription)
     withExtendedLifetime(observation) {}
   }
 
@@ -553,6 +856,32 @@ final class AIGeneratedPageStoreTests: XCTestCase {
     )
   }
 
+  /** Opens the complete app schema over separate process-lifetime cloud and local SQLite stores. */
+  private func makePersistentContainer(in directory: URL) throws -> ModelContainer {
+    let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+      + AIModelRegistration.cloudSyncableModels
+    let localModels = BibleCoreBaseModelRegistration.localModels
+      + AIModelRegistration.localOnlyModels
+    let schema = Schema(cloudModels + localModels)
+    return try ModelContainer(
+      for: schema,
+      configurations: [
+        ModelConfiguration(
+          "AICacheBoundedLookupCloud",
+          schema: Schema(cloudModels),
+          url: directory.appendingPathComponent("AndBible.store"),
+          cloudKitDatabase: .none
+        ),
+        ModelConfiguration(
+          "AICacheBoundedLookupLocal",
+          schema: Schema(localModels),
+          url: directory.appendingPathComponent("LocalStore.store"),
+          cloudKitDatabase: .none
+        ),
+      ]
+    )
+  }
+
   /**
    Returns a unique canonical coordinator key without creating filesystem artifacts.
 
@@ -597,6 +926,90 @@ private final class LockedMarkerEvents: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return storage
+  }
+}
+
+/** Exact installed-registration projection captured from a notification's fresh context. */
+private struct AIRegistrationSnapshot: Equatable {
+  let initials: [String]
+  let orderNumbers: [Int]
+}
+
+/// Lock-backed registry recorder accepted by Foundation's sendable notification callback.
+private final class LockedAIRegistrationPublications: @unchecked Sendable {
+  private let container: ModelContainer
+  private let lock = NSLock()
+  private var storage: [AIRegistrationSnapshot] = []
+  private var storageErrorDescription: String?
+
+  init(container: ModelContainer) {
+    self.container = container
+  }
+
+  /** Reads the committed My Documents registration through a fresh context. */
+  func recordCommittedRegistry() {
+    do {
+      let modelContext = ModelContext(container)
+      let documents = try modelContext.fetch(FetchDescriptor<MyDocument>()).sorted {
+        if $0.orderNumber != $1.orderNumber { return $0.orderNumber < $1.orderNumber }
+        return $0.initials < $1.initials
+      }
+      let snapshot = AIRegistrationSnapshot(
+        initials: documents.map(\.initials),
+        orderNumbers: documents.map(\.orderNumber)
+      )
+      withExtendedLifetime(modelContext) {}
+      lock.lock()
+      storage.append(snapshot)
+      lock.unlock()
+    } catch {
+      lock.lock()
+      storageErrorDescription = error.localizedDescription
+      lock.unlock()
+    }
+  }
+
+  var values: [AIRegistrationSnapshot] {
+    lock.lock()
+    defer { lock.unlock() }
+    return storage
+  }
+
+  var errorDescription: String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return storageErrorDescription
+  }
+}
+
+/// Lock-backed coordinator recorder proving cancellation precedes admission and mutation.
+private final class LockedAIMutationEvents: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: [ModuleStoreMutationEvent] = []
+  private var storedAdmissionCount = 0
+
+  func record(_ event: ModuleStoreMutationEvent) {
+    lock.lock()
+    storage.append(event)
+    lock.unlock()
+  }
+
+  func recordAdmission() {
+    lock.lock()
+    storedAdmissionCount += 1
+    lock.unlock()
+  }
+
+  func stages(for kind: ModuleStoreMutationKind) -> [ModuleStoreMutationStage] {
+    lock.lock()
+    defer { lock.unlock() }
+    return storage.filter { $0.kind == kind }.map(\.stage)
+  }
+
+  var admissionCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return storedAdmissionCount
   }
 }
 

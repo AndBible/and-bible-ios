@@ -138,8 +138,10 @@ public final class ModuleStoreMutationCoordinator: @unchecked Sendable {
 
     private let condition = NSCondition()
     private var activeTransactionID: UUID?
+    private var activeReaderCount = 0
     private var waiters: [UUID] = []
     private var observers: [UUID: @Sendable (ModuleStoreMutationEvent) -> Void] = [:]
+    private var mutationGeneration: UInt64 = 0
 
     /// Creates the coordinator retained by the process-wide registry.
     private init(canonicalRootURL: URL) {
@@ -235,13 +237,18 @@ public final class ModuleStoreMutationCoordinator: @unchecked Sendable {
             throw error
         }
 
+        condition.lock()
+        mutationGeneration &+= 1
+        condition.unlock()
         emit(transactionID: transactionID, kind: kind, stage: .willMutate)
         do {
             let result = try commit(prepared)
+            finishMutationGeneration()
             emit(transactionID: transactionID, kind: kind, stage: .committed)
             release(transactionID: transactionID, kind: kind)
             return result
         } catch {
+            finishMutationGeneration()
             emit(transactionID: transactionID, kind: kind, stage: .rolledBack)
             release(transactionID: transactionID, kind: kind)
             throw error
@@ -252,7 +259,7 @@ public final class ModuleStoreMutationCoordinator: @unchecked Sendable {
     private func acquire(transactionID: UUID) throws {
         condition.lock()
         waiters.append(transactionID)
-        while activeTransactionID != nil || waiters.first != transactionID {
+        while activeTransactionID != nil || activeReaderCount > 0 || waiters.first != transactionID {
             if Task.isCancelled {
                 waiters.removeAll { $0 == transactionID }
                 condition.broadcast()
@@ -269,6 +276,65 @@ public final class ModuleStoreMutationCoordinator: @unchecked Sendable {
         }
         waiters.removeFirst()
         activeTransactionID = transactionID
+        condition.unlock()
+    }
+
+    /**
+     Runs a bounded live-module read while excluding module-tree mutation.
+
+     Readers that arrive after a queued writer wait behind it, so repeated rendering cannot starve
+     installation, replacement, recovery, or removal. Callers acquire this lease before entering
+     `SwordRuntime`; mutation code never waits for this lease while holding `SwordRuntime`, which
+     preserves one lock order.
+
+     - Parameter body: Bounded source operation whose native handles or files must remain stable.
+     - Returns: The copied result returned by `body`.
+     - Throws: Rethrows errors from `body`.
+     - Side effects: Briefly increments the canonical root's active-reader count.
+     */
+    public func withSharedRead<Result>(_ body: () throws -> Result) rethrows -> Result {
+        let depthKey = "org.andbible.ModuleStoreMutationCoordinator.read.\(canonicalRootURL.path)"
+        let threadDictionary = Thread.current.threadDictionary
+        if let depth = threadDictionary[depthKey] as? Int, depth > 0 {
+            threadDictionary[depthKey] = depth + 1
+            defer { threadDictionary[depthKey] = depth }
+            return try body()
+        }
+        condition.lock()
+        while activeTransactionID != nil || !waiters.isEmpty {
+            condition.wait()
+        }
+        activeReaderCount += 1
+        condition.unlock()
+        threadDictionary[depthKey] = 1
+        defer {
+            threadDictionary.removeObject(forKey: depthKey)
+            condition.lock()
+            activeReaderCount -= 1
+            condition.broadcast()
+            condition.unlock()
+        }
+        return try body()
+    }
+
+    /** Current live-tree generation for cheap publication authorization. */
+    public var currentMutationGeneration: UInt64 {
+        condition.lock()
+        defer { condition.unlock() }
+        return mutationGeneration
+    }
+
+    /** Whether an exclusive transaction is queued behind current readers. */
+    var hasQueuedExclusiveTransaction: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return !waiters.isEmpty
+    }
+
+    /** Closes the odd in-progress generation before terminal publication or rollback events. */
+    private func finishMutationGeneration() {
+        condition.lock()
+        mutationGeneration &+= 1
         condition.unlock()
     }
 

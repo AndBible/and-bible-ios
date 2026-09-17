@@ -3,6 +3,11 @@
 import XCTest
 import BibleCore
 @testable import BibleUI
+@testable import BibleView
+#if os(iOS)
+import UIKit
+import WebKit
+#endif
 
 /**
  Regression tests for native reader chrome colors derived from `TextDisplaySettings`.
@@ -103,3 +108,46 @@ final class ReaderThemeSurfacePaletteTests: XCTestCase {
     }
 
 }
+
+// MARK: - Native WebView surface contract
+
+#if os(iOS)
+extension ReaderThemeSurfacePaletteTests {
+    /**
+     Verifies the iOS reader host retains Android's opaque native background contract during Vue
+     document replacement.
+
+     - Side effects: Constructs an in-memory WebView host and loads its controller view.
+     - Failure modes: Fails if WebKit can expose a transparent/default backing surface or if any
+       native layer drifts from the resolved reader ARGB background.
+     */
+    @MainActor
+    func testReaderWebViewOwnsOpaqueResolvedBackgroundAcrossAllNativeSurfaces() {
+        let bridge = BibleBridge()
+        let webView = WKWebView()
+        let session = BibleWebViewSession(bridge: bridge)
+        _ = session.webView { webView }
+        let controller = BibleWebViewController(
+            webView: webView,
+            bridge: bridge,
+            session: session
+        )
+        let backgroundColorInt = Int(Int32(bitPattern: 0xFFDDE7FA))
+        let expectedColor = BibleWebView.uiColor(fromArgbInt: backgroundColorInt)
+        controller.backgroundColorInt = backgroundColorInt
+
+        controller.loadViewIfNeeded()
+
+        XCTAssertTrue(webView.isOpaque)
+        XCTAssertEqual(webView.backgroundColor, expectedColor)
+        XCTAssertEqual(webView.scrollView.backgroundColor, expectedColor)
+        XCTAssertEqual(controller.view.backgroundColor, expectedColor)
+        let underPageComponents = webView.underPageBackgroundColor.cgColor.components ?? []
+        let expectedComponents = expectedColor.cgColor.components ?? []
+        XCTAssertEqual(underPageComponents.count, expectedComponents.count)
+        for (actual, expected) in zip(underPageComponents, expectedComponents) {
+            XCTAssertEqual(actual, expected, accuracy: 0.000_001)
+        }
+    }
+}
+#endif

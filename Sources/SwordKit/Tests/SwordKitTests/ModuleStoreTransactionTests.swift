@@ -1721,6 +1721,44 @@ final class ModuleStoreTransactionTests: XCTestCase {
         let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
         XCTAssertFalse(names.contains { $0.hasPrefix(".module-transaction-") })
     }
+
+    /**
+     Verifies a bounded reader lease keeps a queued writer outside the live tree.
+
+     - Setup: Holds one shared read, queues an exclusive mutation, then releases the reader.
+     - Expected result: Reader exit is recorded before the writer crosses its commit boundary.
+     - Side effects: Advances one isolated coordinator generation without changing fixture files.
+     - Failure meaning: A module install/removal could replace files under an active native read.
+     */
+    func testSharedReadLeaseExcludesLiveTreeMutation() async throws {
+        let context = try makeContext()
+        defer { try? FileManager.default.removeItem(at: context.parent) }
+        let coordinator = ModuleStoreMutationCoordinator.shared(forModuleRoot: context.root)
+        let readerEntered = DispatchSemaphore(value: 0)
+        let releaseReader = DispatchSemaphore(value: 0)
+        let eventLog = ModuleStoreEventLog()
+
+        let reader = Task.detached {
+            coordinator.withSharedRead {
+                readerEntered.signal()
+                releaseReader.wait()
+                eventLog.append("reader-exit")
+            }
+        }
+        XCTAssertEqual(readerEntered.wait(timeout: .now() + 2), .success)
+        let writer = Task.detached {
+            try coordinator.withExclusiveTransaction(
+                kind: .remoteSword,
+                prepare: { () },
+                commit: { _ in eventLog.append("writer-commit") }
+            )
+        }
+
+        releaseReader.signal()
+        await reader.value
+        try await writer.value
+        XCTAssertEqual(eventLog.snapshot, ["reader-exit", "writer-commit"])
+    }
 }
 
 /** Isolated test root and independent publisher instances. */
@@ -1736,6 +1774,20 @@ private struct ModuleStoreStagedFixture: @unchecked Sendable {
     let stagingRoot: URL
     let payloadPath: String
     let plan: ModuleStoreStagedInstallPlan
+}
+
+/** Thread-safe event ordering recorder for shared/exclusive lease tests. */
+private final class ModuleStoreEventLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [String] = []
+
+    func append(_ event: String) {
+        lock.withLock { events.append(event) }
+    }
+
+    var snapshot: [String] {
+        lock.withLock { events }
+    }
 }
 
 /**

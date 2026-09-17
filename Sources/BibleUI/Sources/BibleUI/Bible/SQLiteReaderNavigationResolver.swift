@@ -52,13 +52,53 @@ enum SQLiteReaderNavigationResolver {
         chapter: Int,
         verse: Int
     ) -> SQLiteReaderVerseCoordinate? {
-        guard let ordinal = JSwordKJVAVersification.verseOrdinal(
-            osisId: osisBookId,
+        guard chapter > 0, verse > 0 else { return nil }
+        return coordinateIncludingIntroductions(
+            osisBookId: osisBookId,
             chapter: chapter,
             verse: verse
-        ) else {
-            return nil
+        )
+    }
+
+    /**
+     Validates one KJVA coordinate including JSword book and chapter introduction slots.
+
+     This boundary is deliberately separate from `coordinate`, whose SQLite document callers
+     require a real verse. A valid native SWORD annotation can become visible while an active
+     SQLite Bible owns the shared source position, so commentary preparation must retain
+     `Gen.0.0` and `Gen.1.0` without making SQLite row annotations authoritative.
+     */
+    static func coordinateIncludingIntroductions(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int
+    ) -> SQLiteReaderVerseCoordinate? {
+        let ordinal: Int?
+        if chapter == 0, verse == 0,
+           let firstVerse = JSwordKJVAVersification.verseOrdinal(
+               osisId: osisBookId,
+               chapter: 1,
+               verse: 1
+           ) {
+            ordinal = firstVerse - 2
+        } else if chapter > 0, verse == 0 {
+            ordinal = JSwordKJVAVersification.chapterIntroOrdinal(
+                osisId: osisBookId,
+                chapter: chapter
+            )
+        } else {
+            ordinal = JSwordKJVAVersification.verseOrdinal(
+                osisId: osisBookId,
+                chapter: chapter,
+                verse: verse
+            )
         }
+        guard let ordinal,
+              let canonical = JSwordKJVAVersification.referenceIncludingIntroductions(
+                  ordinal: ordinal
+              ), canonical.osisId == osisBookId,
+              canonical.chapter == chapter,
+              canonical.verse == verse else { return nil }
         return SQLiteReaderVerseCoordinate(
             osisBookId: osisBookId,
             chapter: chapter,

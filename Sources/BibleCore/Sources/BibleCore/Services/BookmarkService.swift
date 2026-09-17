@@ -765,12 +765,7 @@ public final class BookmarkService {
        fallback is attempted.
      */
     public func genericBookmarks(bookInitials: String, key: String) -> [GenericBookmark] {
-        store.genericBookmarks()
-            .filter { $0.bookInitials == bookInitials && $0.key == key }
-            .sorted {
-                if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
-                return $0.id.uuidString < $1.id.uuidString
-            }
+        store.genericBookmarks(bookInitials: bookInitials, key: key)
     }
 
     // MARK: - Generic Bookmarks
@@ -1104,33 +1099,42 @@ public final class BookmarkService {
             (Label.aiLabelName, Label.aiLabelId, nil, false),
         ]
 
-        let allLabels = store.labels(includeSystem: true)
+        var didRepair = false
 
         for definition in systemLabels {
-            let candidates = allLabels.filter {
-                $0.name == definition.name ||
-                    $0.id == definition.id ||
-                    $0.id == definition.legacyID
-            }
+            let candidates = store.reservedLabelCandidates(
+                name: definition.name,
+                canonicalID: definition.id,
+                legacyID: definition.legacyID
+            )
             var canonical = candidates.first(where: { $0.id == definition.id })
             if canonical == nil, let existing = candidates.first {
                 let oldID = existing.id
                 existing.id = definition.id
-                existing.name = definition.name
-                store.remapPrimaryLabelIdentifier(from: oldID, to: definition.id)
+                if existing.name != definition.name {
+                    existing.name = definition.name
+                }
+                _ = store.stageRemapPrimaryLabelIdentifier(from: oldID, to: definition.id)
+                didRepair = true
                 canonical = existing
             } else if canonical == nil, definition.createIfMissing {
                 let label = Label(id: definition.id, name: definition.name)
-                store.insert(label)
+                store.stageInsert(label)
+                didRepair = true
                 canonical = label
             }
             guard let canonical else { continue }
-            canonical.name = definition.name
+            if canonical.name != definition.name {
+                canonical.name = definition.name
+                didRepair = true
+            }
             for duplicate in candidates where duplicate !== canonical {
-                store.mergeLabel(duplicate, into: canonical)
+                didRepair = store.stageMergeLabel(duplicate, into: canonical) || didRepair
             }
         }
-        store.saveChanges()
+        if didRepair {
+            store.saveChanges()
+        }
     }
 
     private func attachParagraphBreakLabel(to bookmark: BibleBookmark) {
@@ -1278,12 +1282,45 @@ public final class BookmarkService {
     }
 
     /**
-     Seed default highlight labels on first launch (matches Android).
-     Only creates labels if no user labels exist yet.
+     Seeds Android's default highlight labels when no user-created label exists.
+
+     Android ignores reserved `__` labels and the exact localized migrated-My-Notes label when it
+     decides whether a user already owns labels. The four highlight labels are always seeded for a
+     qualifying library; Salvation is seeded only when the Bible-bookmark table is also empty.
+     Android's example bookmarks and example workspaces remain a separate bootstrap behavior.
+
+     - Side effects: Stages the complete selected label set and requests one bookmark-journal save.
+       The supplied store owns every pending model in its shared context during that save.
+     - Failure modes: A label or bookmark fetch failure produces no mutation. Journal or save
+       failures follow `BookmarkStore.saveChanges()` and must not be interpreted as a durable seed.
+     - Complexity: The user-label guard materializes all labels once. The Bible-bookmark existence
+       query is bounded to one row and runs only when the label guard admits seeding.
      */
     public func prepareDefaultLabels() {
-        let existingLabels = store.labels()  // already filters to isRealLabel
-        guard existingLabels.isEmpty else { return }
+        let existingLabels: [Label]
+        do {
+            existingLabels = try store.labelsStrict()
+        } catch {
+            return
+        }
+        let migratedNotesName = String(
+            localized: "migrated_my_notes",
+            defaultValue: "Migrated My Notes"
+        )
+        guard !existingLabels.contains(where: {
+            Self.isAndroidBootstrapUserLabelName(
+                $0.name,
+                migratedNotesName: migratedNotesName
+            )
+        }) else {
+            return
+        }
+        let hasBibleBookmarks: Bool
+        do {
+            hasBibleBookmarks = try store.hasBibleBookmarksStrict()
+        } catch {
+            return
+        }
 
         // Android ARGB values as signed Int32:
         // Color.argb(255, 255, 0, 0) = 0xFFFF0000 = -65536
@@ -1325,15 +1362,35 @@ public final class BookmarkService {
         )
         underline.type = LabelType.highlight.rawValue
 
-        let salvation = Label(
-            name: String(localized: "label_salvation", defaultValue: "Salvation"),
-            color: Int(Int32(bitPattern: 0xFF640096))
-        )
-        salvation.type = LabelType.example.rawValue
-
-        for label in [red, green, blue, underline, salvation] {
-            store.insert(label)
+        var labels = [red, green, underline, blue]
+        if !hasBibleBookmarks {
+            let salvation = Label(
+                name: String(localized: "label_salvation", defaultValue: "Salvation"),
+                color: Int(Int32(bitPattern: 0xFF640096))
+            )
+            salvation.type = LabelType.example.rawValue
+            labels.append(salvation)
         }
+        for label in labels {
+            store.stageInsert(label)
+        }
+        store.saveChanges()
+    }
+
+    /**
+     Applies Android's exact user-label guard used by first-run bookmark bootstrap.
+
+     - Parameters:
+       - name: Persisted label name.
+       - migratedNotesName: Current localized Android migrated-note label name.
+     - Returns: `true` for a user-owned label. Reserved `__` names and the Java-exact migrated-note
+       name do not suppress defaults.
+     */
+    static func isAndroidBootstrapUserLabelName(
+        _ name: String,
+        migratedNotesName: String
+    ) -> Bool {
+        !name.hasPrefix("__") && !SwordJavaStringIdentity.equals(name, migratedNotesName)
     }
 
     /// Get all user-visible labels.

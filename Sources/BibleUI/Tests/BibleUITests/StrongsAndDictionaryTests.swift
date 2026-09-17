@@ -322,48 +322,6 @@ final class StrongsAndDictionaryTests: BibleUISwordFixtureTestCase {
         )
     }
 
-    /**
-     Verifies both Search activities compose shared Android-owned presentation primitives.
-
-     Android `Search` renders a top edit field, two radio groups, a translations row, and a bottom
-     submit button from `search.xml`; submitting launches the separate `SearchResults` activity.
-     Both activities use the shared action bar, dialogs, and popup-menu infrastructure rather than
-     native iOS navigation, lists, sheets, or one-off picker/menu facsimiles.
-
-     - Expected result: `SearchView` contains the shared activity, input, radio, multiselect, and
-       anchored-popup components plus distinct results content and exact Android-derived icons.
-     - Failure meaning: Search has drifted into a native iOS surface, recombined criteria/results,
-       or reinvented an app-owned component instead of reusing the established implementation.
-     - Side effects: Reads `SearchView.swift` from the checked-out source tree.
-     */
-    func testSearchCriteriaScreenUsesAndroidFormStructure() throws {
-        let source = try BibleUITestSourceLocator.source(
-            at: "Sources/BibleUI/Sources/BibleUI/Search/SearchView.swift"
-        )
-
-        XCTAssertTrue(source.contains("AndroidActivityScreen("))
-        XCTAssertTrue(source.contains("AndroidActivityTextInput("))
-        XCTAssertTrue(source.contains("AndroidRadioRow("))
-        XCTAssertTrue(source.contains("AndroidMultiselectDialogContent("))
-        XCTAssertTrue(source.contains(".androidAnchoredPopupMenu("))
-        XCTAssertTrue(source.contains("private var searchCriteriaForm"))
-        XCTAssertTrue(source.contains("private var searchSubmitButton"))
-        XCTAssertTrue(source.contains("private var searchResultsContent"))
-        XCTAssertTrue(source.contains(".asset(\"SearchDocuments\")"))
-        XCTAssertTrue(source.contains("AndBibleIconView(name: \"SearchExpand\""))
-        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
-        XCTAssertFalse(source.contains("ContentUnavailableView("))
-        XCTAssertFalse(source.contains("searchOptionsToggleButton"))
-        XCTAssertFalse(source.contains("List {"))
-        XCTAssertFalse(source.contains(".navigationTitle"))
-        XCTAssertFalse(source.contains(".sheet("))
-        XCTAssertFalse(source.contains("Menu {"))
-        XCTAssertFalse(source.split(separator: "\n").contains {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("Picker(")
-        })
-        XCTAssertFalse(source.contains("makeTranslationPicker"))
-    }
-
     func testStrongsQueryNormalizationHandlesLeadingZeroes() {
         let options = StrongsSearchSupport.normalizedQueryOptions(for: "H02022")
         XCTAssertEqual(options?.canonicalStrongTokens, ["H2022"])

@@ -1533,3 +1533,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ није пронађен у документу %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Пребачене Моје Белешке";

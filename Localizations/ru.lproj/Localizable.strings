@@ -1531,3 +1531,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ не найдено в ресурсе %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Мои заметки перенесены";

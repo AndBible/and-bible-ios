@@ -10,9 +10,8 @@ import SwiftData
  * eager-saving: every mutation flushes immediately so the web view, bookmark overlays, and label
  * UI all observe a consistent database state.
  *
- * Several relationship lookups still fetch broadly and then filter in memory. Those call sites are
- * documented explicitly because they have different complexity characteristics than pure
- * predicate-backed fetches.
+ * Relationship lookups constrain stable persisted identifiers in SwiftData before applying any
+ * policy checks that cannot be represented as database predicates.
  *
  * - Important: This store inherits the thread/actor confinement of the supplied `ModelContext`.
  */
@@ -28,6 +27,35 @@ public final class BookmarkStore {
      */
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+
+    /**
+     Reads the complete label inventory without converting a fetch failure into an empty database.
+
+     Bootstrap callers use this throwing boundary before staging any absence-driven inserts. The
+     returned models remain owned by this store's context.
+
+     - Returns: All labels unsorted; bootstrap needs classification, not presentation.
+     - Side Effects: none.
+     - Throws: Rethrows the SwiftData fetch error.
+     - Complexity: Materializes the complete label inventory because Android's guard classifies
+       every label name, including future reserved names.
+     */
+    func labelsStrict() throws -> [Label] {
+        try modelContext.fetch(FetchDescriptor<Label>())
+    }
+
+    /**
+     Reads whether Android's Bible-bookmark table contains any row.
+
+     - Returns: `true` after the first visible Bible bookmark, otherwise `false`.
+     - Side Effects: none.
+     - Throws: Rethrows the SwiftData fetch error without mutating the context.
+     */
+    func hasBibleBookmarksStrict() throws -> Bool {
+        var bookmarkDescriptor = FetchDescriptor<BibleBookmark>()
+        bookmarkDescriptor.fetchLimit = 1
+        return try !modelContext.fetch(bookmarkDescriptor).isEmpty
     }
 
     // MARK: - Bible Bookmarks
@@ -234,6 +262,40 @@ public final class BookmarkStore {
     }
 
     /**
+     * Fetches generic bookmarks for one exact Android document and key identity.
+     *
+     * Android's Room query constrains both indexed columns in SQLite. The final UTF-16 comparison
+     * preserves Java string identity if a persistence backend applies canonical Unicode matching.
+     *
+     * - Parameters:
+     *   - bookInitials: Exact source document initials.
+     *   - key: Exact entry or page key within the document.
+     * - Returns: Matching bookmarks ordered by creation time and stable UUID.
+     * - Failure: Fetch errors are swallowed and reported as an empty array.
+     * - Complexity: Materializes only rows admitted by the compound persistence predicate before
+     *   applying the exact UTF-16 identity guard and deterministic tie-breaker.
+     */
+    public func genericBookmarks(bookInitials: String, key: String) -> [GenericBookmark] {
+        let requestedInitials = bookInitials
+        let requestedKey = key
+        let descriptor = FetchDescriptor<GenericBookmark>(
+            predicate: #Predicate {
+                $0.bookInitials == requestedInitials && $0.key == requestedKey
+            },
+            sortBy: [SortDescriptor(\.createdAt)]
+        )
+        return ((try? modelContext.fetch(descriptor)) ?? [])
+            .filter {
+                $0.bookInitials.utf16.elementsEqual(requestedInitials.utf16) &&
+                    $0.key.utf16.elementsEqual(requestedKey.utf16)
+            }
+            .sorted {
+                if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+    }
+
+    /**
      * Fetches a single generic bookmark by primary key.
      * - Parameter id: Bookmark UUID.
      * - Returns: The bookmark when found, otherwise `nil`.
@@ -435,17 +497,58 @@ public final class BookmarkStore {
      * - Parameter includeSystem: Whether reserved internal labels should be included.
      * - Returns: Matching labels.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Note: System-label exclusion currently happens in memory via `Label.isRealLabel`.
+     * - Note: Reserved-name exclusion is applied by SwiftData before materialization.
      */
     public func labels(includeSystem: Bool = false) -> [Label] {
+        if includeSystem {
+            let descriptor = FetchDescriptor<Label>(sortBy: [SortDescriptor(\.name)])
+            return (try? modelContext.fetch(descriptor)) ?? []
+        }
+
+        let speakName = Label.speakLabelName
+        let unlabeledName = Label.unlabeledName
+        let paragraphBreakName = Label.paragraphBreakLabelName
+        let aiName = Label.aiLabelName
         let descriptor = FetchDescriptor<Label>(
+            predicate: #Predicate {
+                $0.name != speakName &&
+                    $0.name != unlabeledName &&
+                    $0.name != paragraphBreakName &&
+                    $0.name != aiName
+            },
             sortBy: [SortDescriptor(\.name)]
         )
-        var results = (try? modelContext.fetch(descriptor)) ?? []
-        if !includeSystem {
-            results = results.filter { $0.isRealLabel }
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    /**
+     Fetches only rows that can participate in one reserved-label repair.
+
+     Duplicate names remain visible so bootstrap can merge corrupt or pre-parity rows instead of
+     choosing an arbitrary match. SwiftData also merges pending inserts and deletions into this
+     predicate-backed result on supported iOS 17 runtimes.
+
+     - Parameters:
+       - name: Android reserved label name.
+       - canonicalID: Android fixed identifier.
+       - legacyID: Optional pre-parity iOS identifier.
+     - Returns: Every matching candidate currently visible to the context.
+     - Failure modes: Fetch failures are swallowed and reported as an empty array.
+     */
+    func reservedLabelCandidates(name: String, canonicalID: UUID, legacyID: UUID?) -> [Label] {
+        let descriptor: FetchDescriptor<Label>
+        if let legacyID {
+            descriptor = FetchDescriptor(
+                predicate: #Predicate {
+                    $0.name == name || $0.id == canonicalID || $0.id == legacyID
+                }
+            )
+        } else {
+            descriptor = FetchDescriptor(
+                predicate: #Predicate { $0.name == name || $0.id == canonicalID }
+            )
         }
-        return results
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     /**
@@ -471,6 +574,11 @@ public final class BookmarkStore {
     public func insert(_ label: Label) {
         modelContext.insert(label)
         save()
+    }
+
+    /** Stages one label insertion for a caller-owned atomic repair. */
+    func stageInsert(_ label: Label) {
+        modelContext.insert(label)
     }
 
     /**
@@ -547,19 +655,17 @@ public final class BookmarkStore {
     ) {
         let labelId = label.id
 
-        let bibleLinksDescriptor = FetchDescriptor<BibleBookmarkToLabel>()
-        let genericLinksDescriptor = FetchDescriptor<GenericBookmarkToLabel>()
+        let bibleLinksDescriptor = FetchDescriptor<BibleBookmarkToLabel>(
+            predicate: #Predicate { $0.label?.id == labelId }
+        )
+        let genericLinksDescriptor = FetchDescriptor<GenericBookmarkToLabel>(
+            predicate: #Predicate { $0.label?.id == labelId }
+        )
 
         let bibleLinks = ((try? modelContext.fetch(bibleLinksDescriptor)) ?? [])
-            .filter {
-                guard let linkedLabel = $0.label, !linkedLabel.isDeleted else { return false }
-                return linkedLabel.id == labelId
-            }
+            .filter { $0.label?.isDeleted == false }
         let genericLinks = ((try? modelContext.fetch(genericLinksDescriptor)) ?? [])
-            .filter {
-                guard let linkedLabel = $0.label, !linkedLabel.isDeleted else { return false }
-                return linkedLabel.id == labelId
-            }
+            .filter { $0.label?.isDeleted == false }
 
         let bibleBookmarksToDelete = Set(
             bibleLinks.compactMap { link -> UUID? in
@@ -627,13 +733,34 @@ public final class BookmarkStore {
        the loaded model graph available for migration; save failures are logged by `save()`.
      */
     public func mergeLabel(_ source: Label, into destination: Label) {
-        guard source !== destination else { return }
+        guard stageMergeLabel(source, into: destination) else { return }
+        save()
+    }
+
+    /**
+     Stages a duplicate-label merge without committing unrelated caller changes.
+
+     - Returns: `true` when a distinct source row was staged for deletion.
+     */
+    @discardableResult
+    func stageMergeLabel(_ source: Label, into destination: Label) -> Bool {
+        guard source !== destination else { return false }
         let sourceID = source.id
         let destinationID = destination.id
 
-        let bibleLinks = (try? modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>())) ?? []
-        let genericLinks = (try? modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>())) ?? []
-        let studyPadEntries = (try? modelContext.fetch(FetchDescriptor<StudyPadTextEntry>())) ?? []
+        let bibleLinks = (try? modelContext.fetch(FetchDescriptor<BibleBookmarkToLabel>(
+            predicate: #Predicate {
+                $0.label?.id == sourceID || $0.label?.id == destinationID
+            }
+        ))) ?? []
+        let genericLinks = (try? modelContext.fetch(FetchDescriptor<GenericBookmarkToLabel>(
+            predicate: #Predicate {
+                $0.label?.id == sourceID || $0.label?.id == destinationID
+            }
+        ))) ?? []
+        let studyPadEntries = (try? modelContext.fetch(FetchDescriptor<StudyPadTextEntry>(
+            predicate: #Predicate { $0.label?.id == sourceID }
+        ))) ?? []
 
         for link in bibleLinks where link.label?.id == sourceID {
             if let bookmark = link.bookmark,
@@ -669,7 +796,7 @@ public final class BookmarkStore {
             entry.label = destination
         }
         modelContext.delete(source)
-        save()
+        return true
     }
 
     /**
@@ -682,15 +809,26 @@ public final class BookmarkStore {
      - Failure modes: Fetch failures are swallowed; save failures are logged by `save()`.
      */
     public func remapPrimaryLabelIdentifier(from sourceID: UUID, to destinationID: UUID) {
-        let bibleBookmarks = (try? modelContext.fetch(FetchDescriptor<BibleBookmark>())) ?? []
-        let genericBookmarks = (try? modelContext.fetch(FetchDescriptor<GenericBookmark>())) ?? []
-        for bookmark in bibleBookmarks where bookmark.primaryLabelId == sourceID {
-            bookmark.primaryLabelId = destinationID
-        }
-        for bookmark in genericBookmarks where bookmark.primaryLabelId == sourceID {
-            bookmark.primaryLabelId = destinationID
-        }
+        guard stageRemapPrimaryLabelIdentifier(from: sourceID, to: destinationID) else { return }
         save()
+    }
+
+    /** Stages scalar primary-label repairs and reports whether any row changed. */
+    @discardableResult
+    func stageRemapPrimaryLabelIdentifier(from sourceID: UUID, to destinationID: UUID) -> Bool {
+        let bibleBookmarks = (try? modelContext.fetch(FetchDescriptor<BibleBookmark>(
+            predicate: #Predicate { $0.primaryLabelId == sourceID }
+        ))) ?? []
+        let genericBookmarks = (try? modelContext.fetch(FetchDescriptor<GenericBookmark>(
+            predicate: #Predicate { $0.primaryLabelId == sourceID }
+        ))) ?? []
+        for bookmark in bibleBookmarks {
+            bookmark.primaryLabelId = destinationID
+        }
+        for bookmark in genericBookmarks {
+            bookmark.primaryLabelId = destinationID
+        }
+        return !bibleBookmarks.isEmpty || !genericBookmarks.isEmpty
     }
 
     // MARK: - StudyPad
@@ -699,18 +837,15 @@ public final class BookmarkStore {
      * Fetches StudyPad entries for a label ordered by `orderNumber`.
      * - Parameter labelId: Label UUID owning the StudyPad.
      * - Returns: Entries belonging to that label.
-     * - Note: The current implementation sorts in SwiftData, then filters by relationship in
-     *   memory.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Complexity: `O(n)` over all StudyPad entries because label matching happens after fetch.
+     * - Note: Label membership and display order are both applied by SwiftData.
      */
     public func studyPadEntries(labelId: UUID) -> [StudyPadTextEntry] {
         let descriptor = FetchDescriptor<StudyPadTextEntry>(
+            predicate: #Predicate { $0.label?.id == labelId },
             sortBy: [SortDescriptor(\.orderNumber)]
         )
-        // Filter by label relationship after fetch
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.filter { $0.label?.id == labelId }
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     /**
@@ -1012,16 +1147,16 @@ public final class BookmarkStore {
      *   - labelId: Label UUID.
      * - Returns: Matching junction row when present.
      * - Failure: Fetch errors are swallowed and reported as `nil`.
-     * - Complexity: `O(n)` over all Bible bookmark junction rows because filtering happens in memory.
+     * - Note: Stable identifiers are database-filtered before the in-memory ordinal-trust gate.
      */
     public func bibleBookmarkToLabel(bookmarkId: UUID, labelId: UUID) -> BibleBookmarkToLabel? {
-        let descriptor = FetchDescriptor<BibleBookmarkToLabel>()
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.first {
-            $0.bookmark?.id == bookmarkId &&
-                $0.bookmark?.hasTrustedPersistedOrdinals == true &&
-                $0.label?.id == labelId
-        }
+        let descriptor = FetchDescriptor<BibleBookmarkToLabel>(
+            predicate: #Predicate {
+                $0.bookmark?.id == bookmarkId && $0.label?.id == labelId
+            }
+        )
+        return ((try? modelContext.fetch(descriptor)) ?? [])
+            .first { $0.bookmark?.hasTrustedPersistedOrdinals == true }
     }
 
     /**
@@ -1031,12 +1166,16 @@ public final class BookmarkStore {
      *   - labelId: Label UUID.
      * - Returns: Matching junction row when present.
      * - Failure: Fetch errors are swallowed and reported as `nil`.
-     * - Complexity: `O(n)` over all generic bookmark junction rows because filtering happens in memory.
+     * - Note: Both relationship identifiers are applied by SwiftData.
      */
     public func genericBookmarkToLabel(bookmarkId: UUID, labelId: UUID) -> GenericBookmarkToLabel? {
-        let descriptor = FetchDescriptor<GenericBookmarkToLabel>()
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.first { $0.bookmark?.id == bookmarkId && $0.label?.id == labelId }
+        var descriptor = FetchDescriptor<GenericBookmarkToLabel>(
+            predicate: #Predicate {
+                $0.bookmark?.id == bookmarkId && $0.label?.id == labelId
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
     }
 
     /**
@@ -1051,14 +1190,14 @@ public final class BookmarkStore {
      * - Parameter labelId: Label UUID.
      * - Returns: Matching junction rows.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Complexity: `O(n)` over all Bible bookmark junction rows because filtering happens in memory.
+     * - Note: Label identity is database-filtered before the in-memory ordinal-trust gate.
      */
     public func bibleBookmarkToLabels(labelId: UUID) -> [BibleBookmarkToLabel] {
-        let descriptor = FetchDescriptor<BibleBookmarkToLabel>()
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.filter {
-            $0.label?.id == labelId && $0.bookmark?.hasTrustedPersistedOrdinals == true
-        }
+        let descriptor = FetchDescriptor<BibleBookmarkToLabel>(
+            predicate: #Predicate { $0.label?.id == labelId }
+        )
+        return ((try? modelContext.fetch(descriptor)) ?? [])
+            .filter { $0.bookmark?.hasTrustedPersistedOrdinals == true }
     }
 
     /**
@@ -1066,12 +1205,13 @@ public final class BookmarkStore {
      * - Parameter labelId: Label UUID.
      * - Returns: Matching junction rows.
      * - Failure: Fetch errors are swallowed and reported as an empty array.
-     * - Complexity: `O(n)` over all generic bookmark junction rows because filtering happens in memory.
+     * - Note: Label identity is applied by SwiftData before materialization.
      */
     public func genericBookmarkToLabels(labelId: UUID) -> [GenericBookmarkToLabel] {
-        let descriptor = FetchDescriptor<GenericBookmarkToLabel>()
-        let all = (try? modelContext.fetch(descriptor)) ?? []
-        return all.filter { $0.label?.id == labelId }
+        let descriptor = FetchDescriptor<GenericBookmarkToLabel>(
+            predicate: #Predicate { $0.label?.id == labelId }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     /**
@@ -1130,9 +1270,13 @@ public final class BookmarkStore {
     // MARK: - Persistence
 
     /**
-     * Saves pending bookmark-related mutations.
-     * - Side Effects: Flushes `modelContext` and its remote-sync mutation journal atomically.
-     * - Failure: Journal or save errors are swallowed after being logged.
+     * Requests one save of the caller-owned pending bookmark generation and its sync journal.
+     * - Side Effects: Stages journal settings and asks the supplied `ModelContext` to save all of
+     *   its pending mutations once. The context may span separate SwiftData configurations, so
+     *   this method does not promise cross-store atomic durability or compensation.
+     * - Failure: Journal or save errors are logged and swallowed. The journal boundary rolls back
+     *   pending context changes when possible; callers that require durable confirmation must read
+     *   through a fresh context.
      */
     public func saveChanges() {
         do {

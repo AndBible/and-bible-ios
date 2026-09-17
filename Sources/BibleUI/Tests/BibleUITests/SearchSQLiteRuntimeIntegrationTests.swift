@@ -205,10 +205,11 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
 
      - Setup: Adds a locked native Bible whose full description equals one MyBible initials token,
        plus an unrelated readable MyBible source, beside the normal readable KJV fixture.
-     - Expected result: The locked native stays in inclusive reader inventory, both it and its
-       shadowed SQLite collision are absent from Search, and the unrelated SQLite source remains.
-     - Failure meaning: Search can index/navigate a backend identity that the global registry routes
-       to an unlock-required native owner, or can hide unrelated readable SQLite content.
+     - Expected result: Manual Search candidates preserve the inclusive locked native row and KJV;
+       source execution rejects both the locked identity and its shadowed SQLite collision, while
+       the unrelated SQLite source remains readable.
+     - Failure meaning: Search either hides Android's installed locked picker row, indexes a backend
+       identity owned by an unlock-required native module, or drops unrelated readable SQLite content.
      - Side effects: Writes isolated SWORD/MyBible fixtures and reads their metadata through a fresh
        manager/controller snapshot; it does not attempt an unlock.
      */
@@ -242,9 +243,15 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             swordManagerOverride: manager
         )
         let registry = try XCTUnwrap(controller.makeSearchIndexSourceRegistry())
+        let manualSearchCandidates = SearchTranslationSelectionPolicy.candidateModules(
+            from: controller.installedBibleModules,
+            isStrongsFindAll: false
+        )
 
         XCTAssertTrue(controller.installedBibleModules.contains { $0.name == "LOCKEDSEARCH" })
         XCTAssertFalse(controller.installedBibleModules.contains { $0.name == "SQLLOCKED" })
+        XCTAssertTrue(manualSearchCandidates.contains { $0.name == "LOCKEDSEARCH" })
+        XCTAssertTrue(manualSearchCandidates.contains { $0.name == "KJV" })
         XCTAssertNil(registry.source(named: "LOCKEDSEARCH"))
         XCTAssertNil(registry.source(named: "SQLLOCKED"))
         XCTAssertTrue(registry.source(named: "SQLUNRELATED") is SQLiteDocumentModule)
@@ -326,7 +333,7 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
      - Side effects: Reads two isolated fixture verses and captures one in-memory window payload.
      */
     @MainActor
-    func testOpenSearchResultsInWindowPreservesEveryExactModuleMatch() throws {
+    func testOpenSearchResultsInWindowPreservesEveryExactModuleMatch() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         try installMyBiblePackage(
             initials: "SQLSEARCH",
@@ -376,9 +383,14 @@ final class SearchSQLiteRuntimeIntegrationTests: BibleUISwordFixtureTestCase {
             moduleOrder: ["KJV", "SQLSEARCH"]
         )
         var routedJSON: String?
-        controller.onOpenMultiReferenceDocumentInLinksWindow = { routedJSON = $0 }
+        controller.onOpenMultiReferenceDocumentInLinksWindow = {
+            routedJSON = $0.initialDocumentJSON
+        }
 
         XCTAssertTrue(controller.openSearchResultsInLinksWindow(grouped))
+        try await awaitReaderCondition("mixed Search results routed to the links-window owner") {
+            routedJSON != nil
+        }
         let data = try XCTUnwrap(routedJSON?.data(using: .utf8))
         let payload = try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any]

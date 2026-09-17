@@ -10,7 +10,7 @@ import Foundation
  projection mirrors the scanner states that affect visible text, TagSoup's `makeName` repair, and
  the supported block stack without introducing a UI or attributed-string dependency.
  */
-enum SwordHTMLVisibleTextProjection {
+public enum SwordHTMLVisibleTextProjection {
     /**
      Carries one committed start/end tag after TagSoup `Parser.makeName` repair.
 
@@ -24,6 +24,8 @@ enum SwordHTMLVisibleTextProjection {
         let isClosing: Bool
         /// Whether the scanner committed an immediately empty start tag.
         let isSelfClosing: Bool
+        /// Scanner-decoded no-namespace attributes keyed by Android root-lowercase name.
+        let attributes: [String: String]
     }
 
     /**
@@ -89,18 +91,45 @@ enum SwordHTMLVisibleTextProjection {
      - Failure modes: A lone/space-followed `<` remains text; scanner-committed malformed markup is
        dropped or repaired, and all open supported blocks are synthetically closed at EOF.
     */
-    static func project(_ source: String) -> String {
+    public static func project(_ source: String) -> String {
+        parse(source, collectFormatting: false).output
+    }
+
+    /**
+     Projects one complete HTML fragment into Android-visible text and semantic span ranges.
+
+     - Parameter source: Raw Android-style HTML fragment.
+     - Returns: Pure text and UTF-16 span values emitted by the same TagSoup repair pass as
+       `project(_:)`.
+     - Side effects: Loads pinned TagSoup resources on first use.
+     - Failure modes: Malformed markup follows the tolerant scanner/schema behavior documented by
+       `project(_:)`; unsupported visual attributes are ignored without losing their text.
+     */
+    public static func projectFormatted(_ source: String) -> SwordHTMLFormattedTextProjection {
+        let document = parse(source, collectFormatting: true)
+        return SwordHTMLFormattedTextProjection(text: document.output, spans: document.spans)
+    }
+
+    /// Runs the shared scanner and schema repair once for plain and formatted callers.
+    private static func parse(
+        _ source: String,
+        collectFormatting: Bool
+    ) -> SwordTagSoupVisibleDocument {
         let scannerSource = SwordTagSoupEntityDecoder.normalizeRawScannerText(source)
         let input = Array(scannerSource.unicodeScalars)
         let start = input.first?.value == 0xFEFF ? 1 : 0
-        var document = SwordTagSoupVisibleDocument()
+        var document = SwordTagSoupVisibleDocument(collectFormatting: collectFormatting)
         var scannerBuffer = SwordTagSoupEntityDecoder.ScannerBufferState()
         var textStart = start
         var cursor = start
 
         while cursor < input.count {
             guard input[cursor].value == 0x3C,
-                  let token = scannerToken(in: input, startingAt: cursor) else {
+                  let token = scannerToken(
+                    in: input,
+                    startingAt: cursor,
+                    collectFormatting: collectFormatting
+                  ) else {
                 cursor += 1
                 continue
             }
@@ -115,7 +144,8 @@ enum SwordHTMLVisibleTextProjection {
                     document.endTag(repairedName: tag.name)
                 } else if let cdataName = document.startTag(
                     repairedName: tag.name,
-                    isSelfClosing: tag.isSelfClosing
+                    isSelfClosing: tag.isSelfClosing,
+                    attributes: tag.attributes
                 ) {
                     let raw = rawElementContent(
                         in: input,
@@ -150,7 +180,7 @@ enum SwordHTMLVisibleTextProjection {
         }
         appendText(input[textStart..<input.count], bufferState: &scannerBuffer, to: &document)
         document.finish()
-        return document.output
+        return document
     }
 
     /**
@@ -195,7 +225,8 @@ enum SwordHTMLVisibleTextProjection {
      */
     private static func scannerToken(
         in source: [UnicodeScalar],
-        startingAt opening: Int
+        startingAt opening: Int,
+        collectFormatting: Bool
     ) -> ScannerToken? {
         let afterOpening = opening + 1
         guard afterOpening < source.count else { return nil }
@@ -222,7 +253,11 @@ enum SwordHTMLVisibleTextProjection {
         if first == 0x2F {
             return endTagToken(in: source, nameStart: afterOpening + 1)
         }
-        return startTagToken(in: source, nameStart: afterOpening)
+        return startTagToken(
+            in: source,
+            nameStart: afterOpening,
+            collectFormatting: collectFormatting
+        )
     }
 
     /**
@@ -352,7 +387,8 @@ enum SwordHTMLVisibleTextProjection {
      */
     private static func startTagToken(
         in source: [UnicodeScalar],
-        nameStart: Int
+        nameStart: Int,
+        collectFormatting: Bool
     ) -> ScannerToken {
         var cursor = nameStart
         while cursor < source.count,
@@ -373,7 +409,12 @@ enum SwordHTMLVisibleTextProjection {
         let name = makeName(source[nameStart..<cursor])
         if source[cursor].value == 0x3E {
             return ScannerToken(
-                payload: .tag(TagToken(name: name, isClosing: false, isSelfClosing: false)),
+                payload: .tag(TagToken(
+                    name: name,
+                    isClosing: false,
+                    isSelfClosing: false,
+                    attributes: [:]
+                )),
                 end: cursor + 1,
                 nonPCDATABufferRuns: [nameBufferCount]
             )
@@ -383,7 +424,12 @@ enum SwordHTMLVisibleTextProjection {
             let afterSlash = cursor + 1
             if afterSlash < source.count, source[afterSlash].value == 0x3E {
                 return ScannerToken(
-                    payload: .tag(TagToken(name: name, isClosing: false, isSelfClosing: true)),
+                    payload: .tag(TagToken(
+                        name: name,
+                        isClosing: false,
+                        isSelfClosing: true,
+                        attributes: [:]
+                    )),
                     end: afterSlash + 1,
                     nonPCDATABufferRuns: [nameBufferCount]
                 )
@@ -410,7 +456,10 @@ enum SwordHTMLVisibleTextProjection {
             payload: .tag(TagToken(
                 name: name,
                 isClosing: false,
-                isSelfClosing: remainder.isSelfClosing
+                isSelfClosing: remainder.isSelfClosing,
+                attributes: collectFormatting
+                    ? parsedAttributes(in: source, from: cursor + 1, to: remainder.end)
+                    : [:]
             )),
             end: remainder.end,
             nonPCDATABufferRuns: [nameBufferCount] + remainder.nonPCDATABufferRuns
@@ -444,7 +493,8 @@ enum SwordHTMLVisibleTextProjection {
             payload: .tag(TagToken(
                 name: nameScalars.isEmpty ? "" : makeName(nameScalars[...]),
                 isClosing: true,
-                isSelfClosing: false
+                isSelfClosing: false,
+                attributes: [:]
             )),
             end: end,
             nonPCDATABufferRuns: [utf16Count(nameScalars[...])]
@@ -581,6 +631,78 @@ enum SwordHTMLVisibleTextProjection {
         }
         completedBufferRun()
         return (source.count, false, completedRuns)
+    }
+
+    /**
+     Decodes the attributes of one scanner-committed start tag.
+
+     The commitment boundary still comes exclusively from `startTagEnd`; this second pass only
+     retains names and values needed by Android's formatting handler. It follows TagSoup's quoted
+     and unquoted value boundaries, decodes the same entity table as PCDATA, and never changes
+     whether malformed markup was accepted.
+
+     - Parameters:
+       - source: Complete normalized scanner source.
+       - start: First scalar after the tag-name delimiter.
+       - end: Exclusive committed tag boundary, including `>` when present.
+     - Returns: Last committed value for each Android root-lowercased repaired attribute name.
+     - Side effects: Loads the pinned entity table on first entity-bearing attribute.
+     - Failure modes: Missing values become empty strings; incomplete quotes consume through the
+       already-established token boundary.
+     */
+    private static func parsedAttributes(
+        in source: [UnicodeScalar],
+        from start: Int,
+        to end: Int
+    ) -> [String: String] {
+        let limit = end > start && source[end - 1].value == 0x3E ? end - 1 : end
+        var cursor = start
+        var result: [String: String] = [:]
+
+        while cursor < limit {
+            while cursor < limit,
+                  isScannerSpace(source[cursor]) || source[cursor].value == 0x2F {
+                cursor += 1
+            }
+            let nameStart = cursor
+            while cursor < limit,
+                  !isScannerSpace(source[cursor]),
+                  source[cursor].value != 0x3D,
+                  source[cursor].value != 0x2F {
+                cursor += 1
+            }
+            guard nameStart < cursor else { break }
+            let repairedName = makeName(source[nameStart..<cursor])
+            let key = SwordJavaTextCompatibility.lowercasedRoot(repairedName)
+
+            while cursor < limit, isScannerSpace(source[cursor]) { cursor += 1 }
+            guard cursor < limit, source[cursor].value == 0x3D else {
+                result[key] = ""
+                continue
+            }
+            cursor += 1
+            while cursor < limit, isScannerSpace(source[cursor]) { cursor += 1 }
+
+            let value: String
+            if cursor < limit,
+               source[cursor].value == 0x22 || source[cursor].value == 0x27 {
+                let quote = source[cursor].value
+                cursor += 1
+                let valueStart = cursor
+                while cursor < limit, source[cursor].value != quote { cursor += 1 }
+                value = string(from: source[valueStart..<cursor])
+                if cursor < limit { cursor += 1 }
+            } else {
+                let valueStart = cursor
+                while cursor < limit,
+                      !isScannerSpace(source[cursor]) {
+                    cursor += 1
+                }
+                value = string(from: source[valueStart..<cursor])
+            }
+            result[key] = SwordTagSoupEntityDecoder.decode(value)
+        }
+        return result
     }
 
     /**

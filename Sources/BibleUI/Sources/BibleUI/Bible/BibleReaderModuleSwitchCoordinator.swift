@@ -439,16 +439,19 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed commentary module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
+       - prepareForSwitch: Optional visible-mode transition invoked after authorization and
+         category validation, immediately before selected state mutates.
      - Returns: `.switched` after readable activation or `.failed` before mutation.
-     - Side effects: Mutates active commentary module/category state, persists
-       `commentaryDocument` and `currentCategoryName` together, and reloads once when ready.
+     - Side effects: May invoke `prepareForSwitch`, mutates active commentary module/category state,
+       persists `commentaryDocument` and `currentCategoryName` together, and reloads once when ready.
      - Failure modes: Locked, missing, unavailable, and wrong-category modules log and return
        `.failed` without reading content or changing controller, persistence, or rendered state.
      */
     @discardableResult
     func switchCommentaryDocument(
         to moduleName: String,
-        context: BibleReaderModuleSwitchContext
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderCommentaryModuleSwitchOutcome {
         guard let mod = module(
             named: moduleName,
@@ -467,6 +470,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return .failed
         }
 
+        prepareForSwitch?()
         context.setCommentaryModule(mod, moduleName)
         context.setCurrentCategory(plan.category)
         moduleSwitchLogger.info("Switched to commentary document: \(moduleName)")
@@ -530,17 +534,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed dictionary module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
+       - prepareForSwitch: Optional visible-mode transition invoked after module/key preflight and
+         immediately before selected state mutates.
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
-     - Side effects: Mutates active dictionary/category state, retains an exact target key or clears
-       an invalid key, persists dictionary document/category fields together, and reloads only when
-       an exact key can render immediately.
+     - Side effects: May invoke `prepareForSwitch`, mutates active dictionary/category state,
+       retains an exact target key or clears an invalid key, persists document/category fields
+       together, and reloads only when an exact key can render immediately.
      - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
        inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchDictionaryDocument(
         to moduleName: String,
-        context: BibleReaderModuleSwitchContext
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(
             named: moduleName,
@@ -568,6 +575,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return resolution.outcome
         }
         let plan = basePlan.retainingGenericKey(resolution.retainedKey)
+        prepareForSwitch?()
         context.setDictionaryModule(mod, moduleName)
         context.setDictionaryKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)
@@ -630,17 +638,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed general-book module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
+       - prepareForSwitch: Optional visible-mode transition invoked after module/key preflight and
+         immediately before selected state mutates.
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
-     - Side effects: Mutates active general-book/category state, retains an exact target key or
-       clears an invalid key, persists document/category fields together, and reloads only when an
-       exact key can render immediately.
+     - Side effects: May invoke `prepareForSwitch`, mutates active general-book/category state,
+       retains an exact target key or clears an invalid key, persists document/category fields
+       together, and reloads only when an exact key can render immediately.
      - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
        inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchGeneralBookDocument(
         to moduleName: String,
-        context: BibleReaderModuleSwitchContext
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(
             named: moduleName,
@@ -668,6 +679,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return resolution.outcome
         }
         let plan = basePlan.retainingGenericKey(resolution.retainedKey)
+        prepareForSwitch?()
         context.setGeneralBookModule(mod, moduleName)
         context.setGeneralBookKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)
@@ -734,17 +746,20 @@ struct BibleReaderModuleSwitchCoordinator {
      - Parameters:
        - moduleName: Installed map module initials to make current.
        - context: Controller-owned state and callbacks for the active pane.
+       - prepareForSwitch: Optional visible-mode transition invoked after module/key preflight and
+         immediately before selected state mutates.
      - Returns: Whether the exact key was retained, selection is required, or validation failed.
-     - Side effects: Mutates active map/category state, retains an exact target key or clears an
-       invalid key, persists map document/category fields together, and reloads only when an exact
-       key can render immediately.
+     - Side effects: May invoke `prepareForSwitch`, mutates active map/category state, retains an
+       exact target key or clears an invalid key, persists map document/category fields together,
+       and reloads only when an exact key can render immediately.
      - Failure modes: Locked, missing, unavailable, and wrong-category modules fail before key
        inspection. Backend key failures also leave controller and persisted state unchanged.
      */
     @discardableResult
     func switchMapDocument(
         to moduleName: String,
-        context: BibleReaderModuleSwitchContext
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderGenericModuleSwitchOutcome {
         guard let mod = module(
             named: moduleName,
@@ -772,6 +787,7 @@ struct BibleReaderModuleSwitchCoordinator {
             return resolution.outcome
         }
         let plan = basePlan.retainingGenericKey(resolution.retainedKey)
+        prepareForSwitch?()
         context.setMapModule(mod, moduleName)
         context.setMapKey(resolution.retainedKey)
         context.setCurrentCategory(plan.category)

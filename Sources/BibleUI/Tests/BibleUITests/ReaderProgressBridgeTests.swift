@@ -176,10 +176,10 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     /**
      Verifies memorization deltas convert from KJVA back into a divergent active module.
 
-     The fixture reuses deterministic KJV bytes under a Vulgate canon descriptor, selects Vulgate
-     Psalm 10:1, and dispatches the same bridge mutation as Vue. JSword maps that source verse to
-     the KJVA Psalm 11 superscription. Android then converts the stored KJVA event ordinal back to
-     Vulgate before notifying the document.
+     The fixture stores a sparse synthetic Psalm 10:1 row at the Vulgate canon's physical index and
+     dispatches the same bridge mutation as Vue. JSword maps that source verse to the KJVA Psalm 11
+     superscription. Android then converts the stored KJVA event ordinal back to Vulgate before
+     notifying the document.
 
      Expected result:
      - persistence contains the KJVA chapter-introduction ordinal
@@ -192,10 +192,16 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     func testBridgeMemorizationProjectsKJVAEventsBackIntoDivergentModule() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate projection fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Ps", 10, 1,
+                    #"<verse osisID="Ps.10.1">Synthetic Vulgate memorization source.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -208,6 +214,14 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         let module = try XCTUnwrap(manager.module(named: "VulgTest"))
         let renderedOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Ps", chapter: 10, verse: 1)
+        )
+        let source = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: renderedOrdinal,
+            endOrdinal: renderedOrdinal
+        )
+        XCTAssertTrue(
+            source.entries.compactMap(\.osisFragment).joined()
+                .contains("Synthetic Vulgate memorization source.")
         )
         let kjvaOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Ps", chapter: 11)
@@ -252,10 +266,10 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      Verifies a divergent target canon emits JSword's canonical chapter-introduction ordinal.
 
      Android expands every ordinal in the persisted KJVA range and converts each `Verse` into the
-     open document's versification. A Vulgate-configured SWORD module rejects the intermediate
-     Genesis 2:0 content lookup, but the Vulgate canon still owns that intro-inclusive ordinal. This
-     fixture crosses Genesis 1:31 through 2:2 and proves iOS round-trips the verse-zero reference
-     through Vulgate's canonical index instead of emitting sentinel `0` or dropping the entry.
+     open document's versification. The source-valid sparse Vulgate fixture has no Genesis 2:0 text
+     row, but the Vulgate canon still owns that intro-inclusive ordinal. This fixture crosses
+     Genesis 1:31 through 2:2 and proves iOS round-trips the verse-zero reference through Vulgate's
+     canonical index instead of emitting sentinel `0` or dropping the entry.
 
      Failure means divergent modules no longer receive Android-equivalent memorization deltas for
      cross-chapter target ranges.
@@ -264,10 +278,24 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
     func testBridgeMemorizationEmitsCanonicalIntroOrdinalForDivergentTargetCanon() throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate intro projection fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Gen", 1, 31,
+                    #"<verse osisID="Gen.1.31">Synthetic Vulgate Genesis one end.</verse>"#
+                ),
+                (
+                    "Gen", 2, 1,
+                    #"<verse osisID="Gen.2.1">Synthetic Vulgate Genesis two one.</verse>"#
+                ),
+                (
+                    "Gen", 2, 2,
+                    #"<verse osisID="Gen.2.2">Synthetic Vulgate Genesis two two.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -287,6 +315,14 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         let endOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2)
         )
+        let source = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: startOrdinal,
+            endOrdinal: endOrdinal
+        )
+        let sourceXML = source.entries.compactMap(\.osisFragment).joined()
+        XCTAssertTrue(sourceXML.contains("Synthetic Vulgate Genesis one end."))
+        XCTAssertTrue(sourceXML.contains("Synthetic Vulgate Genesis two one."))
+        XCTAssertTrue(sourceXML.contains("Synthetic Vulgate Genesis two two."))
         let kjvaIntroOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Gen", chapter: 2)
         )
@@ -344,7 +380,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      payload.
      */
     @MainActor
-    func testReaderMemorizeBridgeEmitsAndroidStyleDocumentPayload() throws {
+    func testReaderMemorizeBridgeEmitsAndroidStyleDocumentPayload() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -364,7 +400,11 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             endOrdinal: endOrdinal
         )
 
-        let memorizeScripts = Array(recordedScripts().dropFirst(initialScriptCount))
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialScriptCount
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
         )
@@ -413,8 +453,8 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      treat the pane as a full Bible window.
      */
     @MainActor
-    func testReaderMemorizeBridgeUsesAndroidCommentaryFakeDocumentIdentity() throws {
-        let (bridge, _) = makeRecordingBridge()
+    func testReaderMemorizeBridgeUsesAndroidCommentaryFakeDocumentIdentity() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
@@ -422,12 +462,17 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         controller.settingsStore = settingsStore
         let window = Window()
         let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = 0
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
+        self.retainReaderWindowGraph(window)
         controller.activeWindow = window
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
 
         controller.bridgeDidSetClientReady(bridge)
+        let initialScriptCount = recordedScripts().count
         controller.bridge(
             bridge,
             memorize: "KJV",
@@ -435,6 +480,11 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             endOrdinal: ordinal
         )
 
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialScriptCount
+        )
         XCTAssertEqual(controller.currentCategory, .commentary)
         XCTAssertEqual(controller.activeModuleName(for: .commentary), "Memorize")
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.commentary.pageManagerKey)
@@ -455,6 +505,22 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(controller.isCurrentPageSpeakable)
         XCTAssertFalse(controller.isCurrentPageSyncable)
         XCTAssertFalse(controller.allowsHorizontalDocumentNavigation)
+
+        let persisted = expectation(description: "memorize scroll does not persist")
+        persisted.isInverted = true
+        controller.onPersistState = { persisted.fulfill() }
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: ordinal + 2,
+            key: "Gen.1.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)
+        await fulfillment(of: [persisted], timeout: 0.45)
     }
 
     /**
@@ -469,22 +535,40 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      instead of using the configured multi-window target.
      */
     @MainActor
-    func testReaderMemorizeBridgeUsesLinksWindowRoutingCallbackWhenAvailable() throws {
+    func testReaderMemorizeBridgeUsesLinksWindowRoutingCallbackWhenAvailable() async throws {
         let (sourceBridge, sourceScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
-        let sourceController = BibleReaderController(bridge: sourceBridge, swordManagerOverride: manager)
+        let worker = DispatchQueue(label: "org.andbible.tests.memorize-links-route")
+        let sourceController = BibleReaderController(
+            bridge: sourceBridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: BibleReaderDocumentPreparationCoordinator(
+                workerQueue: worker
+            )
+        )
         sourceController.settingsStore = try makeInMemorySettingsStore()
-        var routedEmission: MemorizeDocumentEmission?
-        sourceController.onOpenMemorizeDocumentInLinksWindow = { emission in
-            routedEmission = emission
+        var routedRequests: [BibleReaderMemorizeRenderRequest] = []
+        sourceController.onOpenMemorizeDocumentInLinksWindow = { request in
+            routedRequests.append(request)
         }
         let module = try XCTUnwrap(manager.module(named: sourceController.activeModuleName))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
 
+        let sourceReadyBoundary = sourceScripts().count
         sourceController.bridgeDidSetClientReady(sourceBridge)
+        let sourceReadyScripts = try await awaitBridgeEmission(
+            from: sourceScripts,
+            event: "add_documents",
+            after: sourceReadyBoundary
+        )
+        let sourceReadyDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: sourceReadyScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(sourceReadyDocument["type"] as? String, "bible")
         let initialSourceScriptCount = sourceScripts().count
         let initialSourceRenderedState = sourceController.renderedContentState
+        worker.suspend()
 
         sourceController.bridge(
             sourceBridge,
@@ -492,16 +576,34 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             startOrdinal: ordinal,
             endOrdinal: ordinal
         )
+        sourceController.bridge(
+            sourceBridge,
+            memorize: "KJV",
+            startOrdinal: ordinal,
+            endOrdinal: ordinal
+        )
+        worker.resume()
 
+        try await awaitReaderCondition("Memorize emission routed to the links-window owner") {
+            routedRequests.count == 1
+        }
         let sourceMemorizeScripts = Array(sourceScripts().dropFirst(initialSourceScriptCount))
         XCTAssertFalse(sourceMemorizeScripts.contains { $0.contains("add_documents") })
         XCTAssertEqual(sourceController.currentCategory, .bible)
         XCTAssertEqual(sourceController.renderedContentState, initialSourceRenderedState)
 
-        let emission = try XCTUnwrap(routedEmission)
+        XCTAssertEqual(routedRequests.count, 1)
+        let routedRequest = try XCTUnwrap(routedRequests.first)
+        let emission = routedRequest.emission
         XCTAssertEqual(emission.bookInitials, "KJV")
         XCTAssertEqual(emission.startOrdinal, ordinal)
         XCTAssertEqual(emission.endOrdinal, ordinal)
+        XCTAssertEqual(emission.source.bookInitials, "KJV")
+        XCTAssertEqual(emission.source.references.count, 1)
+        XCTAssertEqual(emission.source.references.first?.osisBookId, "Gen")
+        XCTAssertEqual(emission.source.references.first?.chapter, 1)
+        XCTAssertEqual(emission.source.references.first?.verse, 1)
+        XCTAssertEqual(emission.source.references.first?.ordinal, ordinal)
 
         let (targetBridge, targetScripts) = makeRecordingBridge()
         let targetController = BibleReaderController(bridge: targetBridge, swordManagerOverride: manager)
@@ -509,14 +611,28 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         targetController.settingsStore = targetSettingsStore
         let window = Window(isSynchronized: false, isLinksWindow: true)
         let pageManager = PageManager(id: window.id)
-        window.pageManager = pageManager
+        self.retainReaderWindowGraph(window, attaching: pageManager)
         targetController.activeWindow = window
+        let targetReadyBoundary = targetScripts().count
         targetController.bridgeDidSetClientReady(targetBridge)
+        let targetReadyScripts = try await awaitBridgeEmission(
+            from: targetScripts,
+            event: "add_documents",
+            after: targetReadyBoundary
+        )
+        let targetReadyDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: targetReadyScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(targetReadyDocument["type"] as? String, "bible")
         let initialTargetScriptCount = targetScripts().count
 
-        targetController.renderMemorizeDocument(emission)
+        targetController.renderMemorizeDocument(routedRequest)
 
-        let targetMemorizeScripts = Array(targetScripts().dropFirst(initialTargetScriptCount))
+        let targetMemorizeScripts = try await awaitBridgeEmission(
+            from: targetScripts,
+            event: "add_documents",
+            after: initialTargetScriptCount
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: targetMemorizeScripts, event: "add_documents") as? [String: Any]
         )
@@ -543,16 +659,16 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      Verifies Memorize document payloads keep Android's full selected `VerseRange`.
 
      Android constructs a JSword `VerseRange` from the selected start/end ordinals and persists the
-     complete KJVA span, including its addressable chapter introduction. The iOS loader must not
-     collapse Memorize practice to the current chapter, but its Vue payload may contain only positive
-     ordinals for verses rendered by the SWORD document. This setup selects Genesis 1:31 through
-     Genesis 2:2, which crosses exactly one non-renderable iOS chapter-introduction ordinal.
+     complete KJVA span, including its addressable chapter introduction. Android emits one text row
+     for every element in that span. Its canonical-text handler ignores the OSIS chapter title, so
+     the introduction row remains addressable with empty text. This setup selects Genesis 1:31
+     through Genesis 2:2 and crosses exactly one chapter-introduction ordinal.
 
      Failure means iOS has preserved an artificial same-chapter document structure instead of
      matching Android's Memorize range behavior.
      */
     @MainActor
-    func testReaderMemorizeBridgeEmitsCrossChapterAndroidRangePayload() throws {
+    func testReaderMemorizeBridgeEmitsCrossChapterAndroidRangePayload() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -594,7 +710,11 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             endOrdinal: endOrdinal
         )
 
-        let memorizeScripts = Array(recordedScripts().dropFirst(initialScriptCount))
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialScriptCount
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
         )
@@ -619,10 +739,26 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         )
 
         let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
-        XCTAssertEqual(texts.map { $0["key"] }, ["Gen.1.31", "Gen.2.1", "Gen.2.2"])
-        XCTAssertTrue(texts[0]["text"]?.contains("saw every thing") == true)
-        XCTAssertTrue(texts[1]["text"]?.contains("heavens and the earth") == true)
-        XCTAssertTrue(texts[2]["text"]?.contains("seventh day") == true)
+        XCTAssertEqual(
+            texts.map { $0["key"] },
+            ["Gen.1.31", "Gen.2.0", "Gen.2.1", "Gen.2.2"]
+        )
+        let lastChapterVerse = try XCTUnwrap(
+            texts.first { $0["key"] == "Gen.1.31" }?["text"]
+        )
+        let introduction = try XCTUnwrap(
+            texts.first { $0["key"] == "Gen.2.0" }?["text"]
+        )
+        let firstChapterVerse = try XCTUnwrap(
+            texts.first { $0["key"] == "Gen.2.1" }?["text"]
+        )
+        let secondChapterVerse = try XCTUnwrap(
+            texts.first { $0["key"] == "Gen.2.2" }?["text"]
+        )
+        XCTAssertTrue(lastChapterVerse.contains("saw every thing"))
+        XCTAssertEqual(introduction, "")
+        XCTAssertTrue(firstChapterVerse.contains("heavens and the earth"))
+        XCTAssertTrue(secondChapterVerse.contains("seventh day"))
         XCTAssertFalse(
             texts.contains { ($0["text"] ?? "").contains("<H") },
             "Cross-chapter Memorize payloads should not preserve SWORD Strong's markup."
@@ -638,7 +774,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
      visible.
      */
     @MainActor
-    func testReaderMemorizeBridgeEmitsCanonicalGreekStrongText() throws {
+    func testReaderMemorizeBridgeEmitsCanonicalGreekStrongText() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -658,7 +794,11 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             endOrdinal: ordinal
         )
 
-        let memorizeScripts = Array(recordedScripts().dropFirst(initialScriptCount))
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: initialScriptCount
+        )
         let document = try XCTUnwrap(
             bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
         )
@@ -845,4 +985,408 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.readingProgressStore?.snapshot().settings, settings)
     }
 
+}
+
+/** Returns the latest memorization delta emitted inside a caller-defined action boundary. */
+private func latestMemorizationPayload(from scripts: [String]) throws -> [String: Any] {
+    try XCTUnwrap(
+        bridgeEmissionPayload(
+            from: scripts,
+            event: "update_memorization_data",
+            selection: .last
+        ) as? [String: Any]
+    )
+}
+
+/** Creates one trusted KJVA range for reader progress integration fixtures. */
+private func readerProgressVerifiedKJVARange(
+    start: Int,
+    end: Int
+) throws -> VerifiedKJVAOrdinalRange {
+    try XCTUnwrap(
+        VerifiedKJVAOrdinalRange(
+            resolvingSourceBookInitials: "KJVA",
+            sourceVersification: "KJVA",
+            sourceOrdinalStart: start,
+            sourceOrdinalEnd: end
+        )
+    )
+}
+
+// MARK: - KJVA memorization integration contracts
+
+extension ReaderProgressBridgeTests {
+    /**
+     Verifies bridge memorization mutations use Android's storage and event contracts.
+
+     The shared Vue client expects native `markAsMemorized`, `addMemorizationTarget`,
+     `removeMemorizationTarget`, and `unmarkMemorized` calls to emit
+     `update_memorization_data` deltas in the current rendered ordinal domain while persistence is
+     normalized to Android KJVA ordinals. The real KJV fixture gives the bridge an authoritative
+     source module; a no-module placeholder must not reinterpret arbitrary rendered ordinals as
+     KJVA merely to make a test mutation succeed.
+
+     Failure means the bridge can persist native state without updating the open Vue document, or
+     can continue writing iOS-only module-specific memorization rows.
+     */
+    func testMemorizationBridgePersistsKJVAGlobalRowsAndEmitsRenderedDeltas() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let store = try XCTUnwrap(controller.memorizationProgressStore)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
+        let kjvaStart = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 1)
+        )
+        let kjvaEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 2)
+        )
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: ["KJV", renderedStart, renderedEnd]
+            ),
+            .handled
+        )
+        XCTAssertEqual(
+            store.snapshot().targetRanges,
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaEnd)]
+        )
+        XCTAssertEqual(
+            try latestMemorizationPayload(from: recordedScripts())["addedTargets"] as? [Int],
+            [renderedStart, renderedEnd]
+        )
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "markAsMemorized",
+                args: ["KJV", renderedStart, renderedStart]
+            ),
+            .handled
+        )
+        XCTAssertEqual(
+            store.snapshot().memorizedRanges,
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaStart)]
+        )
+        XCTAssertEqual(
+            try latestMemorizationPayload(from: recordedScripts())["addedMemorized"] as? [Int],
+            [renderedStart]
+        )
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "removeMemorizationTarget",
+                args: ["KJV", renderedEnd, renderedEnd]
+            ),
+            .handled
+        )
+        XCTAssertEqual(store.snapshot().targetRanges, [
+            MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaStart),
+        ])
+        XCTAssertEqual(
+            try latestMemorizationPayload(from: recordedScripts())["removedTargets"] as? [Int],
+            [renderedEnd]
+        )
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "unmarkMemorized",
+                args: ["KJV", renderedStart, renderedStart]
+            ),
+            .handled
+        )
+        XCTAssertTrue(store.snapshot().memorizedRanges.isEmpty)
+        XCTAssertEqual(
+            try latestMemorizationPayload(from: recordedScripts())["removedMemorized"] as? [Int],
+            [renderedStart]
+        )
+    }
+
+    /**
+     Verifies cross-chapter bridge targets persist Android's complete KJVA ordinal span.
+
+     Android's `ProgressControl.addMemorizationTarget` converts the selected `VerseRange` to KJVA,
+     stores one inclusive `kjvOrdinalStart...kjvOrdinalEnd` row, and posts UI updates from that
+     same range. The KJVA span between Genesis 1:31 and Genesis 2:2 includes a chapter-intro
+     ordinal that is not a concrete verse; Android includes that ordinal in `addedTargets`, so iOS
+     must preserve it in both storage and the projected bridge event.
+
+     Failure means iOS is preserving a visible-verse-only storage shape, which changes Android
+     target totals, backup rows, duplicate-target detection, and removal behavior.
+     */
+    func testMemorizationBridgePersistsInclusiveKJVASpanAcrossChapterIntroOrdinals() throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let store = try XCTUnwrap(controller.memorizationProgressStore)
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+        let kjvaStart = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31))
+        let kjvaEnd = try XCTUnwrap(JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 2, verse: 2))
+
+        XCTAssertGreaterThan(kjvaEnd - kjvaStart, 2)
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "addMemorizationTarget", args: ["KJV", renderedStart, renderedEnd]),
+            .handled
+        )
+
+        XCTAssertEqual(
+            store.snapshot().targetRanges,
+            [MemorizationProgressRange(bookInitials: "", startOrdinal: kjvaStart, endOrdinal: kjvaEnd)]
+        )
+        XCTAssertEqual(
+            try latestMemorizationPayload(from: recordedScripts())["addedTargets"] as? [Int],
+            Array(kjvaStart...kjvaEnd)
+        )
+    }
+
+    /**
+     Verifies normal Bible documents project global KJVA progress back to rendered ordinals.
+
+     The bridge stores Android-compatible global KJVA rows, but Vue's Bible document payload still
+     consumes ordinals in the currently rendered document domain. A real KJV fixture keeps the
+     integration on Android's module-backed path instead of asking the fail-closed no-module
+     placeholder to reinterpret synthetic ordinals as KJVA.
+
+     Failure means a reload can highlight the wrong visible verses even though the bridge mutation
+     itself wrote Android-parity persistence rows.
+     */
+    @MainActor
+    func testBibleDocumentPayloadProjectsKJVAGlobalProgressToRenderedOrdinals() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedStart = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
+        let renderedEnd = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
+
+        XCTAssertEqual(
+            bridge.dispatchMessage(
+                method: "addMemorizationTarget",
+                args: ["KJV", renderedStart, renderedEnd]
+            ),
+            .handled
+        )
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "markAsMemorized", args: ["KJV", renderedStart, renderedStart]),
+            .handled
+        )
+
+        let publicationBoundary = recordedScripts().count
+        controller.bridgeDidSetClientReady(bridge)
+
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: publicationBoundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "bible")
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], [renderedStart, renderedEnd])
+        XCTAssertEqual(document["memorizedOrdinals"] as? [Int], [renderedStart])
+    }
+
+    /**
+     Verifies Memorize document payloads reuse saved page-manager state.
+
+     Android stores the full Vue state blob on `PageManager.jsState` through `saveState`, then passes
+     that same state into the next Memorize fake document. This regression keeps iOS from
+     synthesizing a fresh blur-mode-only state that loses the user's selected memorization mode or
+     sibling document state keys.
+
+     Failure means opening Memorize on iOS resets the shared Vue document state instead of restoring
+     the Android `pageManager.jsState` contract.
+     */
+    @MainActor
+    func testMemorizeDocumentUsesSavedPageManagerState() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let renderedOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1)
+        )
+
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.jsState = #"{"memorize":{"mode":"scramble","modeConfig":{"memorizeWordVisibility":"hidden","customLevel":7}},"otherDocument":{"selectedTab":"lexicon"}}"#
+        self.retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+
+        let baselineScriptCount = recordedScripts().count
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "memorize", args: ["KJV", renderedOrdinal, renderedOrdinal]),
+            .handled
+        )
+
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineScriptCount
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        let state = try XCTUnwrap(document["state"] as? [String: Any])
+        let memorizeState = try XCTUnwrap(state["memorize"] as? [String: Any])
+        XCTAssertEqual(memorizeState["mode"] as? String, "scramble")
+        XCTAssertEqual(
+            (memorizeState["modeConfig"] as? [String: Any])?["memorizeWordVisibility"] as? String,
+            "hidden"
+        )
+        XCTAssertEqual(
+            (state["otherDocument"] as? [String: Any])?["selectedTab"] as? String,
+            "lexicon"
+        )
+    }
+
+    /**
+     Verifies Memorize document payloads preserve Android's cross-chapter `VerseRange`.
+
+     Android creates the fake Memorize document from the selected JSword `VerseRange`, so a
+     selection spanning Genesis 1:31 through Genesis 2:2 yields one row for every range element,
+     including the Genesis 2 introduction between the three normal verses, plus a cross-chapter
+     title and OSIS range. This package test exercises the same contract through the reader
+     controller.
+
+     Failure means iOS is still using a same-chapter Memorize loader shape instead of the selected
+     Android range contract.
+     */
+    @MainActor
+    func testMemorizeDocumentPreservesCrossChapterAndroidRange() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
+        let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 31))
+        let endOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 2, verse: 2))
+
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+        XCTAssertEqual(
+            bridge.dispatchMessage(method: "memorize", args: ["KJV", startOrdinal, endOrdinal]),
+            .handled
+        )
+
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineScriptCount
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["title"] as? String, "Genesis 1:31-2:2")
+        XCTAssertEqual(document["osisRef"] as? String, "Gen.1.31-Gen.2.2")
+        XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
+        XCTAssertEqual(document["targetOrdinals"] as? [Int], Array(startOrdinal...endOrdinal))
+
+        let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
+        XCTAssertEqual(
+            texts.map { $0["key"] },
+            ["Gen.1.31", "Gen.2.0", "Gen.2.1", "Gen.2.2"]
+        )
+        let lastChapterVerse = try XCTUnwrap(texts.first { $0["key"] == "Gen.1.31" }?["text"])
+        let introduction = try XCTUnwrap(texts.first { $0["key"] == "Gen.2.0" }?["text"])
+        let firstChapterVerse = try XCTUnwrap(texts.first { $0["key"] == "Gen.2.1" }?["text"])
+        let secondChapterVerse = try XCTUnwrap(texts.first { $0["key"] == "Gen.2.2" }?["text"])
+        XCTAssertTrue(lastChapterVerse.contains("saw every thing"))
+        XCTAssertEqual(introduction, "")
+        XCTAssertTrue(firstChapterVerse.contains("heavens and the earth"))
+        XCTAssertTrue(secondChapterVerse.contains("seventh day"))
+        XCTAssertFalse(texts.compactMap { $0["text"] }.contains { $0.contains("<H") })
+    }
+
+    /**
+     Verifies Reading Progress memorization rows open practice from global KJVA ordinals.
+
+     Android's Reading Progress list is not scoped to the currently visible book. A memorized
+     passage or target row may point to any KJVA verse range, and tapping it opens Memorize for that
+     exact range after converting it to the default Bible module's versification. The native iOS
+     sheet therefore must not route row taps through the current reader book/chapter ordinal
+     resolver or relabel the rendered module range as KJVA.
+
+     Failure means the Reading Progress memorization list is preserving an iOS-only current-book
+     structure instead of using Android's global KJVA progress domain.
+     */
+    @MainActor
+    func testReadingProgressMemorizationRowOpensKJVARangeOutsideCurrentBook() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        self.retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+
+        let startOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Exod", chapter: 1, verse: 22)
+        )
+        let endOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Exod", chapter: 2, verse: 1)
+        )
+        XCTAssertEqual(startOrdinal, 1_609)
+        XCTAssertEqual(endOrdinal, 1_611)
+        try XCTUnwrap(controller.memorizationProgressStore)
+            .addMemorizationTarget(
+                try readerProgressVerifiedKJVARange(start: startOrdinal, end: endOrdinal)
+            )
+
+        controller.bridgeDidSetClientReady(bridge)
+        let baselineScriptCount = recordedScripts().count
+
+        XCTAssertTrue(
+            controller.openMemorizeKJVARange(startOrdinal: startOrdinal, endOrdinal: endOrdinal)
+        )
+
+        let memorizeScripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineScriptCount
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: memorizeScripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "memorize")
+        XCTAssertEqual(document["title"] as? String, "Exodus 1:22-2:1")
+        XCTAssertEqual(document["osisRef"] as? String, "Exod.1.22-Exod.2.1")
+        XCTAssertEqual(document["v11n"] as? String, "KJV")
+        XCTAssertEqual(document["startOrdinal"] as? Int, startOrdinal)
+        XCTAssertEqual(document["endOrdinal"] as? Int, endOrdinal)
+        // Android expands every ordinal covered by a MemorizationTarget when it builds
+        // targetOrdinals. KJVA places the Exodus 2 chapter introduction between Exodus 1:22 and
+        // Exodus 2:1, so the independently pinned inclusive integer range contains 1,610 even
+        // though the public iOS reference converter does not accept chapter-introduction verse 0.
+        XCTAssertEqual(
+            document["targetOrdinals"] as? [Int],
+            [1_609, 1_610, 1_611]
+        )
+
+        let texts = try XCTUnwrap(document["texts"] as? [[String: String]])
+        XCTAssertEqual(
+            texts.map { $0["key"] },
+            ["Exod.1.22", "Exod.2.0", "Exod.2.1"]
+        )
+    }
 }

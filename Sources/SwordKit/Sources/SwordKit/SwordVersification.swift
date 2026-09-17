@@ -22,7 +22,7 @@ public enum SwordVersification {
         /// OSIS book identifier in the target versification, such as `Gen`, `Ps`, or `1Macc`.
         public let osisBookId: String
 
-        /// One-based target chapter number.
+        /// Target chapter number; `0` denotes the book introduction.
         public let chapter: Int
 
         /// Target verse number; `0` denotes a chapter superscription/introduction.
@@ -33,8 +33,8 @@ public enum SwordVersification {
 
          - Parameters:
            - osisBookId: OSIS book identifier in the target versification.
-           - chapter: One-based target chapter number.
-           - verse: Target verse number, including `0` for chapter introductions.
+           - chapter: Target chapter number, including `0` for the book introduction.
+           - verse: Target verse number, including `0` for book and chapter introductions.
          - Side effects: None.
          - Failure modes: None; the SWORD mapping boundary validates values before construction.
          */
@@ -182,7 +182,7 @@ public enum SwordVersification {
     }
 
     /**
-     Resolves a valid reference to its intro-inclusive index in a named canon.
+     Resolves a valid reference to its book-and-chapter-intro-inclusive index in a named canon.
 
      This is the range-enumeration primitive used by the Android JSword mapping-table port. It
      deliberately exposes SWORD's canon dimensions without applying SWORD's verse mappings.
@@ -217,15 +217,16 @@ public enum SwordVersification {
     }
 
     /**
-     Resolves an intro-inclusive canon index to a chapter or verse reference.
+     Resolves an intro-inclusive canon index to a book introduction, chapter introduction, or verse.
 
      - Parameters:
        - index: Canon index produced by `referenceIndex(for:versification:)`.
        - versification: SWORD versification name. Empty means KJV.
-     - Returns: Chapter introduction or verse reference, or `nil` for an unknown versification,
-       invalid index, or non-reference heading slot.
+     - Returns: Book introduction, chapter introduction, or verse reference, or `nil` for an
+       unknown versification, invalid index, or non-reference heading slot.
      - Side effects: Reads SWORD's compiled canon tables on the shared serialization queue.
-     - Failure modes: Returns `nil`; module, testament, and book heading indexes are not references.
+     - Failure modes: Returns `nil`; module and testament heading indexes are not references. A
+       canon-owned book heading resolves to that book's `0:0` introduction coordinate.
      */
     public static func reference(
         forIndex index: Int,
@@ -259,8 +260,8 @@ public enum SwordVersification {
      - Parameters:
        - versification: SWORD versification name; empty means KJV.
        - ordinal: Positive canon index.
-     - Returns: Exact chapter-introduction or verse reference, or `nil` for an unknown system,
-       invalid index, or heading slot.
+     - Returns: Exact book-introduction, chapter-introduction, or verse reference, or `nil` for an
+       unknown system, invalid index, or module/testament heading slot.
      - Side effects: Reads SWORD's canon tables on the shared serialization queue.
      - Failure modes: Returns `nil`; unknown systems do not fall back to KJV.
      */

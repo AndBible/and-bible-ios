@@ -1536,3 +1536,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ nu s-a găsit în documentul %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Notițe transferate";

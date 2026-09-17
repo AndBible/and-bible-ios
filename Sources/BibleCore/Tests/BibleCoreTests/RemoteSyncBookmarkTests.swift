@@ -1020,6 +1020,127 @@ final class RemoteSyncBookmarkTests: XCTestCase {
     }
 
     /**
+     Verifies restore durably commits the complete Bible, generic, label-link, and StudyPad graph
+     to a production-shaped disk store.
+
+     The writer context remains alive while a distinct context faults every relationship from disk.
+     The persistent-store files remain owned by the xctest process because SwiftData exposes no
+     synchronous store-close boundary on iOS 17. A retained-simulator harness must verify this
+     process exited and remove only its PID subdirectory; disposable simulator deletion owns CI
+     cleanup.
+     */
+    func testRemoteSyncBookmarkRestorePersistsCompleteGraphAcrossFreshContext() throws {
+        let directory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "bookmark-restore-registered-graph"
+        )
+
+        let labelID = UUID(uuidString: "e1100000-0000-0000-0000-000000000001")!
+        let bibleID = UUID(uuidString: "e1100000-0000-0000-0000-000000000002")!
+        let genericID = UUID(uuidString: "e1100000-0000-0000-0000-000000000003")!
+        let studyPadID = UUID(uuidString: "e1100000-0000-0000-0000-000000000004")!
+        let databaseURL = try makeAndroidBookmarksDatabase(
+            labels: [.init(id: labelID, name: "Durable graph", colour: 0x10203040)],
+            bibleBookmarks: [
+                .init(
+                    id: bibleID,
+                    kjvOrdinalStart: 15,
+                    kjvOrdinalEnd: 15,
+                    ordinalStart: 15,
+                    ordinalEnd: 15,
+                    createdAt: Date(timeIntervalSince1970: 1_700_200_000),
+                    primaryLabelID: labelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_200_001)
+                )
+            ],
+            bibleNotes: [.init(bookmarkID: bibleID, notes: "Durable Bible note", contentType: "MARKDOWN")],
+            bibleLinks: [
+                .init(bookmarkID: bibleID, labelID: labelID, orderNumber: 1, indentLevel: 2, expandContent: false)
+            ],
+            genericBookmarks: [
+                .init(
+                    id: genericID,
+                    key: "Entry.1",
+                    createdAt: Date(timeIntervalSince1970: 1_700_200_002),
+                    bookInitials: "MHC",
+                    ordinalStart: 4,
+                    ordinalEnd: 4,
+                    primaryLabelID: labelID,
+                    lastUpdatedOn: Date(timeIntervalSince1970: 1_700_200_003)
+                )
+            ],
+            genericNotes: [.init(bookmarkID: genericID, notes: "Durable generic note", contentType: "HTML")],
+            genericLinks: [
+                .init(bookmarkID: genericID, labelID: labelID, orderNumber: 3, indentLevel: 1, expandContent: true)
+            ],
+            studyPadEntries: [
+                .init(id: studyPadID, labelID: labelID, orderNumber: 5, indentLevel: 2, contentType: "MARKDOWN")
+            ],
+            studyPadTexts: [.init(entryID: studyPadID, text: "Durable StudyPad text")]
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let snapshot = try RemoteSyncBookmarkRestoreService().readSnapshot(from: databaseURL)
+
+        try autoreleasepool {
+            let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+            let localModels = BibleCoreBaseModelRegistration.localModels
+            let schema = Schema(cloudModels + localModels)
+            let container = try ModelContainer(
+                for: schema,
+                configurations: [
+                    ModelConfiguration(
+                        "BookmarkRestoreRegisteredGraph",
+                        schema: Schema(cloudModels),
+                        url: directory.appendingPathComponent("BookmarkRestoreRegisteredGraph.store"),
+                        cloudKitDatabase: .none
+                    ),
+                    ModelConfiguration(
+                        "BookmarkRestoreRegisteredSettings",
+                        schema: Schema(localModels),
+                        url: directory.appendingPathComponent("BookmarkRestoreRegisteredSettings.store"),
+                        cloudKitDatabase: .none
+                    ),
+                ]
+            )
+            let writer = ModelContext(container)
+            writer.autosaveEnabled = false
+            _ = try RemoteSyncBookmarkRestoreService().replaceLocalBookmarks(
+                from: snapshot,
+                modelContext: writer,
+                settingsStore: SettingsStore(modelContext: writer)
+            )
+
+            let reader = ModelContext(container)
+            reader.autosaveEnabled = false
+            let bible = try XCTUnwrap(
+                try reader.fetch(FetchDescriptor<BibleBookmark>()).first { $0.id == bibleID }
+            )
+            XCTAssertEqual(bible.notes?.bookmark?.id, bibleID)
+            XCTAssertEqual(bible.notes?.notes, "Durable Bible note")
+            let bibleLink = try XCTUnwrap(bible.bookmarkToLabels?.first)
+            XCTAssertEqual(bibleLink.bookmark?.id, bibleID)
+            XCTAssertEqual(bibleLink.label?.id, labelID)
+            XCTAssertEqual(bibleLink.orderNumber, 1)
+
+            let generic = try XCTUnwrap(
+                try reader.fetch(FetchDescriptor<GenericBookmark>()).first { $0.id == genericID }
+            )
+            XCTAssertEqual(generic.notes?.bookmark?.id, genericID)
+            XCTAssertEqual(generic.notes?.notes, "Durable generic note")
+            let genericLink = try XCTUnwrap(generic.bookmarkToLabels?.first)
+            XCTAssertEqual(genericLink.bookmark?.id, genericID)
+            XCTAssertEqual(genericLink.label?.id, labelID)
+            XCTAssertEqual(genericLink.orderNumber, 3)
+
+            let studyPad = try XCTUnwrap(
+                try reader.fetch(FetchDescriptor<StudyPadTextEntry>()).first { $0.id == studyPadID }
+            )
+            XCTAssertEqual(studyPad.label?.id, labelID)
+            XCTAssertEqual(studyPad.textEntry?.entry?.id, studyPadID)
+            XCTAssertEqual(studyPad.textEntry?.text, "Durable StudyPad text")
+        }
+    }
+
+    /**
      Verifies bookmark replacement rolls graph and Android-only fidelity rows back together.
 
      The fixture starts with one durable local bookmark plus playback, label-alias, and raw-book
@@ -2924,13 +3045,42 @@ final class RemoteSyncBookmarkTests: XCTestCase {
     /**
      Verifies remote success followed by local acceptance failure retains a restart-safe bookmark outbox.
 
-     The first acceptance checkpoint throws after every bookkeeping mutation. The remote copy is then
-     removed to force a second service instance to re-upload. Both attempts must use identical bytes and
-     patch number, while `SyncStatus` uses the second adapter result and `lastPatchWritten` keeps the
-     original generation watermark.
+     The first acceptance checkpoint throws after every bookkeeping mutation in the complete
+     production app schema split across unique on-disk cloud and local stores. The remote copy is
+     then removed to force a second service instance to re-upload. Both attempts must use identical
+     bytes and patch number, while `SyncStatus` uses the second adapter result and
+     `lastPatchWritten` keeps the original generation watermark.
      */
     func testBookmarkUploadAcceptanceFailureRetriesExactOutboxGeneration() async throws {
-        let container = try makeBookmarkRestoreModelContainer()
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "bookmark-upload-acceptance-retry"
+        )
+        let cloudModels = BibleCoreBaseModelRegistration.cloudModels
+            + AIModelRegistration.cloudSyncableModels
+        let localModels = BibleCoreBaseModelRegistration.localModels
+            + AIModelRegistration.localOnlyModels
+        let schema = Schema(cloudModels + localModels)
+        let container = try ModelContainer(
+            for: schema,
+            configurations: [
+                ModelConfiguration(
+                    "BookmarkUploadAcceptanceCloud",
+                    schema: Schema(cloudModels),
+                    url: storeDirectory.appendingPathComponent(
+                        "BookmarkUploadAcceptanceCloud.store"
+                    ),
+                    cloudKitDatabase: .none
+                ),
+                ModelConfiguration(
+                    "BookmarkUploadAcceptanceLocal",
+                    schema: Schema(localModels),
+                    url: storeDirectory.appendingPathComponent(
+                        "BookmarkUploadAcceptanceLocal.store"
+                    ),
+                    cloudKitDatabase: .none
+                ),
+            ]
+        )
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
         let labelID = UUID(uuidString: "bd300000-0000-0000-0000-000000000001")!
@@ -2944,6 +3094,27 @@ final class RemoteSyncBookmarkTests: XCTestCase {
             settingsStore: settingsStore
         )
         let labelKey = try XCTUnwrap(oldSnapshot.labelRowsByKey.first { $0.value.id == labelID }?.key)
+        let storedBaselineBeforeDirtyEdit = try XCTUnwrap(
+            snapshotService.storedAcceptedBaseline(settingsStore: settingsStore)
+        )
+        let expectedBaselineBeforeDirtyEdit = RemoteSyncBookmarkAcceptedBaseline(
+            revision: storedBaselineBeforeDirtyEdit.revision,
+            fingerprintsByKey: oldSnapshot.fingerprintsByKey,
+            rowIdentities: [
+                RemoteSyncBookmarkAcceptedRowIdentity(
+                    key: labelKey,
+                    tableName: "Label",
+                    entityID1: .blob(bookmarkUUIDBlob(labelID)),
+                    entityID2: AndroidBookmarkDatabaseContract.emptySecondaryEntityID
+                ),
+            ],
+            suppressedKeys: []
+        )
+        XCTAssertEqual(
+            storedBaselineBeforeDirtyEdit,
+            expectedBaselineBeforeDirtyEdit,
+            "The diagnostic baseline must be independently pinned before the dirty edit"
+        )
         label.name = "Pending upload"
         try modelContext.save()
 
@@ -2972,6 +3143,25 @@ final class RemoteSyncBookmarkTests: XCTestCase {
         } catch {
             XCTAssertEqual((error as NSError).domain, "BookmarkUploadAcceptance")
         }
+
+        let sameContextBaselineAfterFailure = try snapshotService.storedAcceptedBaseline(
+            settingsStore: settingsStore
+        )
+        let freshContextAfterFailure = ModelContext(container)
+        freshContextAfterFailure.autosaveEnabled = false
+        let freshContextBaselineAfterFailure = try snapshotService.storedAcceptedBaseline(
+            settingsStore: SettingsStore(modelContext: freshContextAfterFailure)
+        )
+        XCTAssertEqual(
+            sameContextBaselineAfterFailure,
+            expectedBaselineBeforeDirtyEdit,
+            "The caller context must expose the complete pre-acceptance baseline after rollback"
+        )
+        XCTAssertEqual(
+            freshContextBaselineAfterFailure,
+            expectedBaselineBeforeDirtyEdit,
+            "A fresh context must expose the complete durable pre-acceptance baseline after failure"
+        )
 
         XCTAssertNotNil(settingsStore.getString("remote_sync.pending_upload.bookmarks"))
         XCTAssertEqual(

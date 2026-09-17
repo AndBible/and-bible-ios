@@ -296,11 +296,13 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
     }
 
     /**
-     Renders a Bible/commentary module action with mutually exclusive tap and long-press dispatch.
+     Renders a Bible/commentary module action through the shared tap/long-press Button owner.
 
      Android exposes the quick selector on tap and the full document chooser on long press. SwiftUI
-     `Button` plus `simultaneousGesture` can dispatch both paths for a long press, so this helper
-     owns the gesture contract directly and exposes a default accessibility action for the tap path.
+     exclusive tap/long-press composition received a touch without producing either terminal
+     callback in the supported-runtime UI journey. A subsequent high-priority composition failed
+     ordinary Downloads row-tap coverage, so the shared control instead resolves each Button press
+     from one stateless simultaneous gesture value.
 
      - Parameters:
        - isActive: Whether the represented document category is active in the focused pane.
@@ -321,47 +323,23 @@ struct BibleReaderToolbarActions<OverflowButton: View>: View {
         onLongPress: @escaping () -> Void,
         @ViewBuilder icon: () -> Icon
     ) -> some View {
-        icon()
-            .foregroundStyle(toolbarIconColor(isActive: isActive))
-            .opacity(moduleActionsEnabled ? 1 : 0.45)
-            .contentShape(Rectangle())
-            .gesture(moduleToolbarGesture(onTap: onTap, onLongPress: onLongPress))
+        AndroidTapLongPressButton(
+            minimumDuration: 0.5,
+            onTap: onTap,
+            onLongPress: {
+                guard moduleActionsEnabled else { return }
+                onLongPress()
+            }
+        ) {
+            icon()
+                .foregroundStyle(toolbarIconColor(isActive: isActive))
+                .opacity(moduleActionsEnabled ? 1 : 0.45)
+                .contentShape(Rectangle())
+        }
             .disabled(!moduleActionsEnabled)
             .accessibilityIdentifier(accessibilityIdentifier)
             .accessibilityLabel(accessibilityLabel)
-            .accessibilityAddTraits(.isButton)
             .accessibilityHidden(!moduleActionsEnabled)
-            .accessibilityAction {
-                guard moduleActionsEnabled else { return }
-                onTap()
-            }
-    }
-
-    /**
-     Builds the mutually exclusive module toolbar gesture used for tap versus long press.
-
-     - Parameters:
-       - onTap: Action for a completed tap gesture.
-       - onLongPress: Action for a completed long-press gesture.
-     - Returns: An exclusive gesture that resolves to exactly one callback.
-     - Side effects: Invokes one callback when the toolbar action is enabled.
-     - Failure modes: Disabled module actions ignore completed gestures.
-     */
-    private func moduleToolbarGesture(
-        onTap: @escaping () -> Void,
-        onLongPress: @escaping () -> Void
-    ) -> some Gesture {
-        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
-            guard moduleActionsEnabled else { return }
-            switch value {
-            case .first(true):
-                onLongPress()
-            case .second:
-                onTap()
-            case .first(false):
-                break
-            }
-        }
     }
 
     private var workspaceToolbarIcon: some View {

@@ -100,6 +100,31 @@ struct BibleReaderSpecialDocumentCoordinator {
     }
 
     /**
+     Evicts all serialized transient bytes while leaving durable and typed rebuild state to callers.
+
+     - Side effects: Clears both active and pending transient request slots.
+     - Failure modes: None; the controller must retain any selected PageManager key or typed rebuild
+       request before calling this method.
+     - Concurrency: Main-owner only through the containing reader controller.
+     */
+    mutating func evictPreparedReplay() {
+        transientDocumentCoordinator = BibleReaderTransientDocumentCoordinator()
+    }
+
+    /**
+     Evicts prepared special-document replay only when its captured source owner is obsolete.
+
+     Installed-source refresh advances source authorization before calling this method. Requests
+     backed by independent or still-current owners remain eligible for client-ready replay.
+
+     - Side effects: May clear the nested active and pending prepared request slots.
+     - Failure modes: None; typed rebuild requests remain controller-owned and are not changed.
+     */
+    mutating func invalidatePreparedReplayForInstalledSourceChange() {
+        transientDocumentCoordinator.invalidatePreparedReplayForInstalledSourceChange()
+    }
+
+    /**
      Builds the native identity transition for a transient rendered document.
 
      Requests without a durable page category preserve the legacy transient-Bible identity. Android

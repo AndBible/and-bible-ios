@@ -345,3 +345,176 @@ final class ProgressStoreTests: XCTestCase {
         )
     }
 }
+
+// MARK: - Android row contracts
+
+extension ProgressStoreTests {
+    /**
+     Verifies local memorization progress can write Android's KJVA-global rows directly.
+
+     Android stores memorized verses and memorization targets as KJV-normalized ordinals without a
+     module identity. This package regression test keeps that storage contract visible to the
+     BibleCore lane: inserts must accept an empty `bookInitials` global range,
+     return Android-style delta arrays, and remain readable from any module initials.
+
+     Failure means new iOS memorization writes still depend on an iOS-only module-specific storage
+     key instead of the Android progress domain used by backup/restore and the shared Vue client.
+     */
+    func testMemorizationProgressStoreWritesKJVGlobalRangesAndDeltas() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        let store = MemorizationProgressStore(settingsStore: settingsStore)
+
+        let targetRange = try verifiedKJVARange(start: 4, end: 5)
+        let addDelta = try store.addMemorizationTarget(targetRange)
+        XCTAssertEqual(addDelta.addedTargets, [4, 5])
+        XCTAssertEqual(addDelta.removedTargets, [])
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 5), [4, 5])
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "FinRK", startOrdinal: 4, endOrdinal: 5), [4, 5])
+
+        let noOpDelta = try store.addMemorizationTargetIfNeeded(targetRange)
+        XCTAssertTrue(noOpDelta.isEmpty)
+
+        let markDelta = try store.markAsMemorized(
+            verifiedKJVARange(start: 4, end: 4)
+        )
+        XCTAssertEqual(markDelta.addedMemorized, [4])
+        XCTAssertEqual(store.memorizedOrdinals(bookInitials: "ESV", startOrdinal: 4, endOrdinal: 4), [4])
+
+        let removeDelta = try store.removeMemorizationTarget(bookInitials: "", startOrdinal: 5, endOrdinal: 5)
+        XCTAssertEqual(removeDelta.removedTargets, [5])
+        XCTAssertEqual(store.targetOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 5), [4])
+
+        let unmarkDelta = try store.unmarkMemorized(bookInitials: "", startOrdinal: 4, endOrdinal: 4)
+        XCTAssertEqual(unmarkDelta.removedMemorized, [4])
+        XCTAssertEqual(store.memorizedOrdinals(bookInitials: "KJV", startOrdinal: 4, endOrdinal: 4), [])
+    }
+
+    /**
+     Verifies the memorization store preserves Android's row-level progress semantics.
+
+     Android stores `MemorizedVerse` rows per KJVA ordinal with `memorizedAt`, and
+     `MemorizationTarget` rows as independently created ranges. Explicit duplicate targets are not
+     collapsed, so target progress totals count each row even when their ordinal ranges overlap.
+
+     Failure means iOS is still normalizing memorization into an artificial range union and cannot
+     render Android's memorize list, timestamps, or target totals with parity.
+     */
+    func testMemorizationProgressStoreUsesAndroidRowsForTimestampsAndDuplicateTargets() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        var now: Int64 = 1_700_000_100_000
+        let store = MemorizationProgressStore(
+            settingsStore: settingsStore,
+            currentTimeMilliseconds: { now }
+        )
+
+        XCTAssertEqual(
+            try store.markAsMemorized(
+                verifiedKJVARange(start: 4, end: 6)
+            ).addedMemorized,
+            [4, 5, 6]
+        )
+        now = 1_700_000_200_000
+        XCTAssertEqual(
+            try store.unmarkMemorized(bookInitials: "", startOrdinal: 5, endOrdinal: 5).removedMemorized,
+            [5]
+        )
+        XCTAssertEqual(
+            try store.markAsMemorized(
+                verifiedKJVARange(start: 5, end: 5)
+            ).addedMemorized,
+            [5]
+        )
+
+        XCTAssertEqual(
+            store.memorizedVerseRangesWithTimestamps(),
+            [
+                MemorizedVerseRangeWithTimestamp(
+                    range: MemorizationProgressRange(bookInitials: "", startOrdinal: 4, endOrdinal: 6),
+                    latestMemorizedAt: 1_700_000_200_000
+                ),
+            ]
+        )
+
+        now = 1_700_000_300_000
+        XCTAssertEqual(
+            try store.addMemorizationTarget(
+                verifiedKJVARange(start: 10, end: 11)
+            ).addedTargets,
+            [10, 11]
+        )
+        now = 1_700_000_400_000
+        XCTAssertEqual(
+            try store.addMemorizationTarget(
+                verifiedKJVARange(start: 10, end: 11)
+            ).addedTargets,
+            [10, 11]
+        )
+
+        let targets = store.memorizationTargets()
+        XCTAssertEqual(targets.map(\.range), [
+            MemorizationProgressRange(bookInitials: "", startOrdinal: 10, endOrdinal: 11),
+            MemorizationProgressRange(bookInitials: "", startOrdinal: 10, endOrdinal: 11),
+        ])
+        XCTAssertEqual(targets.map(\.createdAt), [1_700_000_400_000, 1_700_000_300_000])
+        XCTAssertEqual(store.memorizationTargetProgress(), MemorizationTargetProgress(memorized: 0, total: 4))
+    }
+
+    /**
+     Verifies pre-row global-KJVA memorization JSON migrates into trusted Android-compatible rows.
+
+     Earlier iOS slices persisted normalized global KJVA ranges with an empty compatibility module
+     field. Decoding must preserve and trust that documented schema while continuing to quarantine
+     nonempty module-scoped legacy rows whose source versification remains unresolved.
+
+     Failure means valid existing progress is hidden or discarded during the trust-metadata upgrade.
+     */
+    func testMemorizationProgressStoreMigratesLegacyRangeSnapshotToAndroidRows() throws {
+        let settingsStore = try makeInMemorySettingsStore()
+        settingsStore.setString(
+            MemorizationProgressStore.settingsKey,
+            value: """
+            {
+              "memorizedRanges": [
+                {"bookInitials":"","startOrdinal":4,"endOrdinal":5}
+              ],
+              "targetRanges": [
+                {"bookInitials":"","startOrdinal":8,"endOrdinal":9}
+              ]
+            }
+            """
+        )
+
+        let store = MemorizationProgressStore(settingsStore: settingsStore)
+
+        let persisted = store.persistenceSnapshot()
+        XCTAssertEqual(persisted.memorizedVerses.count, 2)
+        XCTAssertEqual(persisted.targetRows.count, 1)
+        XCTAssertEqual(persisted.memorizedVerses.map(\.ordinalTrust.state), [
+            .verifiedMappingV1,
+            .verifiedMappingV1,
+        ])
+        XCTAssertEqual(persisted.targetRows.map(\.ordinalTrust.state), [.verifiedMappingV1])
+        XCTAssertEqual(persisted.memorizedVerses.map(\.ordinalTrust.provenance), [
+            .legacyMigration,
+            .legacyMigration,
+        ])
+        XCTAssertEqual(
+            store.memorizedVerseRangesWithTimestamps(),
+            [
+                MemorizedVerseRangeWithTimestamp(
+                    range: MemorizationProgressRange(
+                        bookInitials: "",
+                        startOrdinal: 4,
+                        endOrdinal: 5
+                    ),
+                    latestMemorizedAt: 0
+                ),
+            ]
+        )
+        XCTAssertEqual(store.memorizationTargets().map(\.createdAt), [0])
+        XCTAssertEqual(
+            store.targetOrdinals(bookInitials: "KJV", startOrdinal: 8, endOrdinal: 9),
+            [8, 9]
+        )
+    }
+}

@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import XCTest
+import Vision
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -43,28 +44,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns a stable, non-empty element name for XCTest wait diagnostics.
-     *
-     * - Parameter element: UI element whose identifier or label should describe the wait target.
-     * - Returns: the accessibility identifier, visible label, or a generic placeholder.
-     * - Side effects: none
-     * - Failure modes: Falls back to a placeholder when XCTest exposes neither identifier nor label.
-     */
-    func uiTestElementDiagnosticName(_ element: XCUIElement) -> String {
-        let identifier = element.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !identifier.isEmpty {
-            return identifier
-        }
-
-        let label = element.label.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !label.isEmpty {
-            return label
-        }
-
-        return "unidentified UI element"
-    }
-
-    /**
      Waits for a UI-test condition through XCTest's predicate waiter.
 
      - Parameters:
@@ -103,6 +82,8 @@ extension AndBibleUITests {
      *
      * - Parameters:
      *   - element: Resolved XCUI element expected to expose a tappable accessibility surface.
+     *   - diagnosticName: Stable caller-owned name used in the wait description. Reading the live
+     *     element's identifier or label solely for diagnostics would trigger two extra snapshots.
      *   - timeout: Maximum number of seconds to poll.
      * - Returns: `true` when XCTest reports the element as hittable before the timeout.
      * - Side effects:
@@ -111,10 +92,11 @@ extension AndBibleUITests {
      */
     func waitForElementToBecomeHittable(
         _ element: XCUIElement,
+        diagnosticName: String = "resolved UI element",
         timeout: TimeInterval
     ) -> Bool {
         waitForUITestCondition(
-            "Wait for \(uiTestElementDiagnosticName(element)) to become hittable",
+            "Wait for \(diagnosticName) to become hittable",
             timeout: max(0, timeout)
         ) { [weak self] in
             self?.isElementHittable(element) ?? false
@@ -147,28 +129,14 @@ extension AndBibleUITests {
             return
         }
 
-        let exists = element.exists || element.waitForExistence(timeout: min(timeout, 1))
-        XCTAssertTrue(
-            exists,
-            "Expected element '\(element.identifier)' to exist before tapping within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
-        guard exists else {
-            return
-        }
-        if elementHasUsableFrame(element) {
-            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            return
-        }
         XCTFail(
-            "Expected element '\(element.identifier)' to expose a usable frame before tapping within \(timeout) seconds.",
+            "Expected the resolved UI element to become hittable before its single tap within \(timeout) seconds.",
             file: file,
             line: line
         )
     }
 
-    /// Taps an element when it is currently actionable, falling back to its center coordinate.
+    /// Taps once when the element becomes hittable; returns false without input otherwise.
     @discardableResult
     func tapElementIfPossible(
         _ element: XCUIElement,
@@ -176,10 +144,6 @@ extension AndBibleUITests {
     ) -> Bool {
         if waitForElementToBecomeHittable(element, timeout: timeout) {
             element.tap()
-            return true
-        }
-        if elementHasUsableFrame(element) {
-            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             return true
         }
         return false
@@ -275,11 +239,6 @@ extension AndBibleUITests {
         )
     }
 
-    /// Shared geometry constants for the Search word-mode segmented control.
-    enum SearchWordModeControl {
-        static let segmentCount = 3
-    }
-
     /// Shared normalized screen coordinates used by no-query keyboard dismissal helpers.
     enum KeyboardDismissalCoordinate {
         static let focusDismissal = CGVector(dx: 0.5, dy: 0.08)
@@ -310,6 +269,8 @@ extension AndBibleUITests {
      *   - actionIdentifier: Full shared-dialog action identifier, including its semantic action ID.
      *   - dialogIdentifier: Stable identifier of the owning app dialog when SwiftUI exposes its
      *     noninteractive container separately from the parent activity.
+     *   - dialogElement: Optional concrete-role query for that container. Supplying the observed
+     *     role avoids a whole-tree fallback when the dialog's accessibility type is known.
      *   - expectedTitle: Optional English-locale label assertion that verifies visible copy without
      *     using it as the control locator.
      *   - app: Running application under test.
@@ -326,13 +287,14 @@ extension AndBibleUITests {
     func tapAppOwnedDialogAction(
         _ actionIdentifier: String,
         dialogIdentifier: String,
+        dialogElement: XCUIElement? = nil,
         expectedTitle: String? = nil,
         in app: XCUIApplication,
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let dialog = resolvedElement(dialogIdentifier, in: app)
+        let dialog = dialogElement ?? resolvedElement(dialogIdentifier, in: app)
         let action = requireElement(actionIdentifier, in: app, timeout: timeout, file: file, line: line)
         if let expectedTitle {
             XCTAssertEqual(
@@ -594,18 +556,17 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for the Settings screen to expose at least one stable production control.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before giving up.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: `true` when Settings is ready for interaction, otherwise `false`.
-     * - Side effects:
-     *   - attempts to dismiss the language restart confirmation between bounded readiness waits
-     *   - waits on the Settings form root through XCTest's predicate waiter
-     * - Failure modes: This helper does not fail directly.
+     Passively waits for a visible Settings form without dismissing unrelated dialogs.
+
+     - Parameters:
+       - app: Running application under test.
+       - timeout: Maximum time to observe Settings.
+       - file: XCTest failure attribution source.
+       - line: XCTest failure attribution line.
+     - Returns: Whether the actual Settings form is visible in the application viewport.
+     - Side effects: Samples accessibility through XCTest's predicate waiter.
+     - Failure modes: Returns false when the form does not become visible. A caller that changes
+       language or triggers another confirmation must explicitly exercise that dialog's action.
      */
     func waitForSettingsReady(
         in app: XCUIApplication,
@@ -613,94 +574,11 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        func settingsFormIsReady() -> Bool {
-            if let settingsForm = resolvedElement("settingsForm", in: app),
-               settingsForm.exists,
-               !settingsForm.frame.isEmpty
-            {
-                return true
-            }
-
-            return resolvedElement("settingsForm", in: app) != nil
+        waitForUITestCondition("Settings form becomes visible", timeout: timeout) {
+            guard let form = self.resolvedElement("settingsForm", in: app),
+                  self.elementHasUsableFrame(form) else { return false }
+            return app.frame.intersects(form.frame)
         }
-
-        func dismissRestartAlertIfReady() {
-            let alert = app.alerts.firstMatch
-            let okButton = alert.buttons["OK"].firstMatch
-            guard alert.exists,
-                  okButton.exists,
-                  elementHasUsableFrame(okButton)
-            else {
-                return
-            }
-            if okButton.isHittable {
-                okButton.tap()
-            } else {
-                okButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            }
-        }
-
-        let deadline = Date().addingTimeInterval(max(0, timeout))
-        let waitInterval: TimeInterval = 0.5
-
-        while true {
-            dismissRestartAlertIfReady()
-
-            let remaining = max(0, deadline.timeIntervalSinceNow)
-            let didResolveSettings = waitForUITestCondition(
-                "Wait for Settings ready",
-                timeout: min(waitInterval, remaining)
-            ) {
-                settingsFormIsReady()
-            }
-            if didResolveSettings {
-                return true
-            }
-
-            dismissRestartAlertIfReady()
-            if settingsFormIsReady() {
-                return true
-            }
-
-            guard Date() < deadline else {
-                return false
-            }
-        }
-    }
-
-    /**
-     Waits for the exported Settings screen state to contain one deterministic token.
-     *
-     * - Parameters:
-     *   - expectedToken: Token expected inside the semicolon-delimited Settings screen state.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to poll before failing.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - evaluates the production `settingsForm` accessibility value through the shared semantic
-     *     state waiter
-     * - Failure modes:
-     *   - records an XCTest failure if the requested token never appears before timeout
-     */
-    func waitForSettingsState(
-        containing expectedToken: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        waitForResolvedSemanticState(
-            named: "settingsForm",
-            timeout: timeout,
-            valueProvider: { self.semanticStateExportValue("settingsForm", in: app) },
-            success: { $0.contains(expectedToken) },
-            failureDescription: {
-                "Expected Settings state to contain '\(expectedToken)' within \(timeout) seconds. Last state: '\($0)'."
-            },
-            file: file,
-            line: line
-        )
     }
 
     /**
@@ -745,10 +623,10 @@ extension AndBibleUITests {
      * - Side effects:
      *   - opens the reader drawer, launches Choose Document, filters the Android-style chooser to
      *     the `FakeBookFactory` `My Note` initials, selects that row, and waits for the
-     *     WebView-owned My Notes document to render
+     *     native My Notes title; callers await their expected rendered content
      * - Failure modes:
-     *   - records an XCTest failure if the chooser search, pseudo-document row, or My Notes state
-     *     never becomes visible
+     *   - records an XCTest failure if the chooser search, pseudo-document row, or My Notes title
+     *     never appears; callers separately verify the actual rendered document
      */
     func openMyNotesFromReader(
         in app: XCUIApplication,
@@ -776,105 +654,186 @@ extension AndBibleUITests {
             timeout: timeout
         )
         waitForMyNotesPresentation(in: app, timeout: timeout, file: file, line: line)
-        waitForVisibleMyNotesState(
-            containing: "myNotesVisible=true",
-            in: app,
-            timeout: timeout,
-            file: file,
-            line: line
-        )
     }
 
     /**
-     Waits for the reader's compact My Notes state export to contain one token.
+     Tests whether Vision's ordered line observations contain the expected visible reader text.
+
+     Vision preserves CSS line-end hyphenation as a trailing ASCII hyphen on one observation and
+     the remainder of the word on the next. This matcher keeps observation boundaries as newlines
+     and permits that exact `-\n` sequence between adjacent letters in the expected phrase.
+     Ordinary expected whitespace can span a line boundary; authored hyphens remain required.
+
+     - Parameters:
+       - lines: Ordered best-candidate strings returned by the Vision text observations.
+       - expectedText: The semantic visible phrase required by the journey.
+     - Returns: `true` when the case-insensitive observed text contains the phrase, allowing only
+       the evidenced line-boundary forms described above.
+     - Side effects: none.
+     - Failure modes: Returns `false` for empty expectations and when no projection contains the
+       phrase. OCR cannot distinguish an authored hyphen from automatic hyphenation at the exact
+       end of a line, so `-\n` is accepted as a discretionary break only where the expected phrase
+       has adjacent letters.
      */
-    func waitForMyNotesState(
-        containing token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        waitForResolvedSemanticState(
-            named: "readerRenderedContentState",
-            timeout: timeout,
-            valueProvider: { self.readerRenderedContentStateValue(in: app) },
-            success: { $0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            },
-            file: file,
-            line: line
-        )
+    func visibleReaderOCRLines(_ lines: [String], contain expectedText: String) -> Bool {
+        let expected = expectedText
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard !expected.isEmpty else { return false }
+
+        let observed = lines
+            .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        guard !observed.isEmpty else { return false }
+
+        let expectedCharacters = Array(expected)
+        var pattern = ""
+        for index in expectedCharacters.indices {
+            let character = expectedCharacters[index]
+            if character.isWhitespace {
+                pattern += #"\s+"#
+            } else {
+                pattern += NSRegularExpression.escapedPattern(for: String(character))
+                let nextIndex = expectedCharacters.index(after: index)
+                if nextIndex < expectedCharacters.endIndex {
+                    let next = expectedCharacters[nextIndex]
+                    if character == "-" && !next.isWhitespace {
+                        pattern += #"(?:\n)?"#
+                    } else if character.isLetter && next.isLetter {
+                        pattern += #"(?:-\n)?"#
+                    }
+                }
+            }
+        }
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive]
+        ) else { return false }
+        return expression.firstMatch(
+            in: observed,
+            range: NSRange(observed.startIndex..., in: observed)
+        ) != nil
     }
 
     /**
-     Waits for a compact My Notes export that is both visible and contains one token.
+     Awaits text drawn in the on-screen WebView without changing the interaction.
+
+     Vision reads the actual composited WebView screenshot. WebKit can split scripture across
+     accessibility nodes, and an editable note's action label can replace its text in that tree.
+     Screenshot recognition observes both through the same boundary. These journeys use English
+     fixtures; expected text is never supplied to Vision as a recognition hint. Native toolbar
+     values and diagnostic snapshots cannot satisfy the check.
+
+     - Parameters:
+       - text: Expected text fragment in the rendered document.
+       - app: Running single-pane application under test.
+       - timeout: Maximum passive observation time.
+       - file: XCTest failure attribution source.
+       - line: XCTest failure attribution line.
+     - Side effects: Captures the WebView and recognizes its pixels in the test runner; does not
+       tap, scroll, or alter app state.
+     - Failure modes: Records a failure if no matching visible reader text arrives before timeout.
      */
-    func waitForVisibleMyNotesState(
-        containing token: String,
+    func waitForVisibleReaderText(
+        containing text: String,
         in app: XCUIApplication,
-        timeout: TimeInterval = 10,
+        timeout: TimeInterval = 20,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        waitForResolvedSemanticState(
-            named: "readerRenderedContentState",
-            timeout: timeout,
-            valueProvider: { self.readerRenderedContentStateValue(in: app) },
-            success: { $0.contains("myNotesVisible=true") && $0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected visible My Notes state to contain '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            },
-            file: file,
-            line: line
-        )
+        var observedText = ""
+        var recognitionError: String?
+        let expectedText = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let ready = waitForUITestCondition("Visible reader text: \(text)", timeout: timeout) {
+            let webView = app.webViews.firstMatch
+            guard webView.exists, self.elementHasUsableFrame(webView),
+                  app.frame.contains(webView.frame),
+                  let pixels = webView.screenshot().image.cgImage else { return false }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.recognitionLanguages = ["en-US"]
+            do {
+                try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
+                let observedLines = (request.results ?? [])
+                    .compactMap { $0.topCandidates(1).first?.string }
+                observedText = observedLines
+                    .joined(separator: " ")
+                    .split(whereSeparator: { $0.isWhitespace })
+                    .joined(separator: " ")
+                recognitionError = nil
+                return self.visibleReaderOCRLines(observedLines, contain: expectedText)
+            } catch {
+                recognitionError = error.localizedDescription
+                return false
+            }
+        }
+        if !ready {
+            XCTContext.runActivity(named: "Missing visible reader text: \(text)") { activity in
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.lifetime = .keepAlways
+                activity.add(screenshot)
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.lifetime = .keepAlways
+                activity.add(hierarchy)
+                let recognition = XCTAttachment(string:
+                    "Recognized visible text: \(observedText)\nError: \(recognitionError ?? "none")"
+                )
+                recognition.lifetime = .keepAlways
+                activity.add(recognition)
+            }
+        }
+        XCTAssertTrue(ready, "Expected visible reader text '\(text)'.", file: file, line: line)
     }
 
     /**
-     Waits for the reader's compact My Notes state export to stop containing one token.
-     */
-    func waitForMyNotesState(
-        notContaining token: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        waitForResolvedSemanticState(
-            named: "readerRenderedContentState",
-            timeout: timeout,
-            valueProvider: { self.readerRenderedContentStateValue(in: app) },
-            success: { !$0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            },
-            file: file,
-            line: line
-        )
-    }
+     Awaits usable Bookmarks navigation and content without tapping or consulting hidden exports.
 
-    /**
-     Waits for a compact My Notes export that is visible and no longer contains one token.
+     The Back and filter controls must fit inside the application viewport. The real scroll view
+     must have visible area, and its first row or explicit empty state must be visible within it.
+     A clipped filter alone cannot establish readiness for a zero-height or offscreen destination.
+     Returns false on timeout; callers own failure reporting and any diagnostic attachments.
+     This readiness check runs before the Bookmarks performance measurement interval. Its cached
+     frame reads reduce XCTest observation work without changing a timed branch.
      */
-    func waitForVisibleMyNotesState(
-        notContaining token: String,
+    func waitForUsableBookmarkList(
         in app: XCUIApplication,
-        timeout: TimeInterval = 10,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        waitForResolvedSemanticState(
-            named: "readerRenderedContentState",
-            timeout: timeout,
-            valueProvider: { self.readerRenderedContentStateValue(in: app) },
-            success: { $0.contains("myNotesVisible=true") && !$0.contains(token) },
-            failureDescription: { finalValue in
-                "Expected visible My Notes state to stop containing '\(token)' within \(timeout) seconds. Final value: '\(finalValue)'."
-            },
-            file: file,
-            line: line
-        )
+        requiresRows: Bool = false,
+        timeout: TimeInterval = 30
+    ) -> Bool {
+        waitForUITestCondition("Usable Bookmarks destination", timeout: timeout) {
+            let back = app.buttons["bookmarkListAppBarBackButton"]
+            let filter = app.buttons["bookmarkListLabelFilterButton"]
+            let scroll = app.scrollViews.firstMatch
+            guard back.exists, filter.exists, scroll.exists else { return false }
+            let appFrame = app.frame
+            let backFrame = back.frame
+            let filterFrame = filter.frame
+            let scrollFrame = scroll.frame
+            guard self.elementFrameIsUsable(backFrame),
+                  self.elementFrameIsUsable(filterFrame),
+                  self.elementFrameIsUsable(scrollFrame),
+                  appFrame.contains(backFrame), appFrame.contains(filterFrame),
+                  back.isHittable, filter.isHittable else { return false }
+            let visibleScroll = scrollFrame.intersection(appFrame)
+            guard !visibleScroll.isNull, visibleScroll.width >= 44,
+                  visibleScroll.height >= 44 else { return false }
+            let row = scroll.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "bookmarkListRowButton::")
+            ).firstMatch
+            if row.exists {
+                let rowFrame = row.frame
+                if self.elementFrameIsUsable(rowFrame), visibleScroll.intersects(rowFrame) {
+                    return row.isHittable
+                }
+            }
+            guard !requiresRows else { return false }
+            let empty = app.staticTexts["bookmarkListEmptyText"]
+            guard empty.exists else { return false }
+            let emptyFrame = empty.frame
+            return self.elementFrameIsUsable(emptyFrame) && visibleScroll.intersects(emptyFrame)
+        }
     }
 
 }

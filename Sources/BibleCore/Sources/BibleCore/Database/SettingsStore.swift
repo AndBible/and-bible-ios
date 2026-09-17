@@ -53,6 +53,9 @@ public enum SettingsStoreAtomicBatchError: Error, Equatable {
 
     /// The context already had unsaved changes that the batch could not safely own or roll back.
     case pendingModelChanges
+
+    /// A journal-owned boundary cannot accept durable recovery registered by an atomic child.
+    case nestedDurableRecoveryRequiresAtomicOwner
 }
 
 /**
@@ -68,6 +71,108 @@ public struct SettingsStoreAtomicRecoveryError: Error {
 
     /// Error raised while restoring one pre-commit store generation.
     public let recoveryError: Error
+}
+
+/**
+ Owns one synchronous settings persistence boundary for an exact SwiftData context.
+
+ The owner contains only call-stack-local transaction state. `SettingsStoreAtomicScope` retains it
+ for the duration of the synchronous mutation closure so separately constructed facades on the same
+ context defer saves, report handled failures, and register successful publications with one owner.
+ */
+private final class SettingsStoreAtomicOwner: NSObject {
+    enum Kind {
+        case atomicRestore
+        case journaledSave
+    }
+
+    let modelContext: ModelContext
+    let kind: Kind
+    var firstFailure: Error?
+    var recoveryActions: [(ModelContainer) throws -> Void]
+    var successfulCommitActions: [() -> Void]
+    var pendingSettings: [String: SettingsStorePendingValue] = [:]
+
+    init(
+        modelContext: ModelContext,
+        kind: Kind,
+        recoveryActions: [(ModelContainer) throws -> Void] = [],
+        successfulCommitActions: [() -> Void] = []
+    ) {
+        self.modelContext = modelContext
+        self.kind = kind
+        self.recoveryActions = recoveryActions
+        self.successfulCommitActions = successfulCommitActions
+    }
+
+    func recordFailure(_ error: Error) {
+        if firstFailure == nil {
+            firstFailure = error
+        }
+    }
+}
+
+/** One immutable settings read, detached from SwiftData and subsequent owner mutations. */
+public struct SettingEntry: Equatable, Sendable {
+    public let key: String
+    public let value: String
+}
+
+/** The last requested value for one key in a synchronous settings owner. */
+private enum SettingsStorePendingValue {
+    case value(String)
+    case removed
+}
+
+/**
+ Tracks nested synchronous persistence owners on the current thread.
+
+ The public batch closures cannot suspend and every participating `SettingsStore` inherits the
+ supplied `ModelContext`'s thread confinement. A stack therefore makes ownership context-wide for
+ the complete synchronous call tree without a process-global context registry. Searching ancestors
+ preserves an outer A-context owner across a nested B-context operation. The entry is removed with
+ `defer` before any success publication runs, so later or reentrant work starts a new boundary.
+
+ This mechanism must be replaced by explicit ownership propagation before a persistence mutation
+ closure becomes asynchronous or permits its context to cross threads.
+ */
+private enum SettingsStoreAtomicScope {
+    private static let threadDictionaryKey =
+        "org.andbible.ios.SettingsStoreAtomicScope.ownerStack"
+
+    private final class Stack: NSObject {
+        var owners: [SettingsStoreAtomicOwner] = []
+    }
+
+    static func owner(for modelContext: ModelContext) -> SettingsStoreAtomicOwner? {
+        guard let stack = Thread.current.threadDictionary[threadDictionaryKey] as? Stack else {
+            return nil
+        }
+        return stack.owners.reversed().first { $0.modelContext === modelContext }
+    }
+
+    static func withOwner<Result>(
+        _ owner: SettingsStoreAtomicOwner,
+        _ operation: () throws -> Result
+    ) rethrows -> Result {
+        let dictionary = Thread.current.threadDictionary
+        let stack: Stack
+        if let existing = dictionary[threadDictionaryKey] as? Stack {
+            stack = existing
+        } else {
+            stack = Stack()
+            dictionary[threadDictionaryKey] = stack
+        }
+        stack.owners.append(owner)
+        defer {
+            precondition(stack.owners.last === owner)
+            stack.owners.removeLast()
+            if stack.owners.isEmpty {
+                dictionary.removeObject(forKey: threadDictionaryKey)
+            }
+        }
+        return try operation()
+    }
 }
 
 /**
@@ -112,15 +217,6 @@ public final class SettingsStore {
      */
     var persistenceModelContext: ModelContext { modelContext }
 
-    /// Number of nested explicit atomic scopes currently deferring this store's internal saves.
-    @ObservationIgnored private var atomicBatchDepth = 0
-
-    /// First soft persistence failure captured while an explicit atomic scope is active.
-    @ObservationIgnored private var atomicBatchFailure: Error?
-
-    /// Store-specific durable recovery actions registered by the outer batch and nested callers.
-    @ObservationIgnored private var atomicBatchRecoveryActions: [(ModelContainer) throws -> Void] = []
-
     /**
      * Creates a settings store bound to the caller's SwiftData context.
      * - Parameter modelContext: Context used for `Setting` persistence.
@@ -133,11 +229,15 @@ public final class SettingsStore {
     /**
      Performs settings and related SwiftData mutations as one explicit atomic persistence batch.
 
-     All `SettingsStore` SwiftData upserts, removals, and propagation writes reached from `mutations`
-     defer their normal immediate saves. The outermost scope then executes one primary save through
-     `ModelContext.transaction(block:)`. Nested calls on this same store join the outer scope and
-     register their durable recovery actions with that commit owner; a nested error marks the whole
-     outer batch failed even if an intermediate caller catches it.
+     `SettingsStore` upserts and removals remain detached values until `mutations` succeeds. Reads
+     through any facade on this context see those pending values, including prefix enumeration.
+     Settings mutations inside the scope must use this API rather than directly changing `Setting`
+     models; unrelated graph models still use the supplied context. The outermost scope then
+     materializes the final settings values and executes one primary save through
+     `ModelContext.transaction(block:)`. Nested calls through any `SettingsStore` facade on the exact
+     context join the outer synchronous scope and register their durable recovery actions with that
+     commit owner; a nested error marks the whole outer batch failed even if an intermediate caller
+     catches it.
 
      SwiftData configurations backed by different SQLite files do not share one durable transaction.
      If one configuration commits before another reports a save error, this store restores its exact
@@ -155,6 +255,8 @@ public final class SettingsStore {
        - durableRecovery: Optional store-specific recovery that restores the pre-commit generation
          through fresh contexts after a partial multi-configuration commit. Nested recoveries join the
          outer batch. The settings store snapshots and recovers all `Setting` rows automatically.
+       - afterSuccessfulCommit: Optional nonthrowing publication registered with this batch. Nested
+         publications join the outer owner and run only after its complete transaction succeeds.
        - mutations: Synchronous mutations whose SwiftData effects must commit or roll back together.
      - Returns: Value returned by `mutations` after the primary save succeeds.
      - Side Effects:
@@ -164,6 +266,7 @@ public final class SettingsStore {
        - rolls back pending state on mutation, cancellation, fetch, or commit failure
        - restores pre-commit settings and attempts every registered graph recovery after a partial
          store commit; graph recoveries run in reverse registration order
+       - invokes registered success publications in registration order after resetting batch state
      - Throws:
        - `SettingsStoreAtomicBatchError.modelContextMismatch` when contexts differ
        - `SettingsStoreAtomicBatchError.pendingModelChanges` when the outer context is not clean
@@ -173,26 +276,36 @@ public final class SettingsStore {
      - Important: This method is synchronous and inherits `ModelContext` confinement. A caller must
        not mutate or save any participating configuration from another context until this method
        returns; durable compensation restores whole generations and would overwrite such writes.
+       Facade-wide ownership relies on this closure remaining synchronous and on the context staying
+       on its current thread for the complete call tree.
      */
     public func performAtomicBatch<Result>(
         in modelContext: ModelContext,
         durableRecovery: ((ModelContainer) throws -> Void)? = nil,
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
         guard self.modelContext === modelContext else {
             throw SettingsStoreAtomicBatchError.modelContextMismatch
         }
 
-        if atomicBatchDepth > 0 {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
             if let durableRecovery {
-                atomicBatchRecoveryActions.append(durableRecovery)
+                guard owner.kind == .atomicRestore else {
+                    let error = SettingsStoreAtomicBatchError
+                        .nestedDurableRecoveryRequiresAtomicOwner
+                    owner.recordFailure(error)
+                    throw error
+                }
+                owner.recoveryActions.append(durableRecovery)
             }
-            atomicBatchDepth += 1
-            defer { atomicBatchDepth -= 1 }
+            if let afterSuccessfulCommit {
+                owner.successfulCommitActions.append(afterSuccessfulCommit)
+            }
             do {
                 return try mutations()
             } catch {
-                recordAtomicBatchFailure(error)
+                owner.recordFailure(error)
                 throw error
             }
         }
@@ -206,30 +319,36 @@ public final class SettingsStore {
                 ($0.key, $0.value)
             }
         )
-
+        let owner = SettingsStoreAtomicOwner(
+            modelContext: modelContext,
+            kind: .atomicRestore,
+            recoveryActions: durableRecovery.map { [$0] } ?? [],
+            successfulCommitActions: afterSuccessfulCommit.map { [$0] } ?? []
+        )
         let previousAutosaveEnabled = modelContext.autosaveEnabled
         modelContext.autosaveEnabled = false
-        atomicBatchDepth = 1
-        atomicBatchFailure = nil
-        atomicBatchRecoveryActions = durableRecovery.map { [$0] } ?? []
+        var didRestoreAutosave = false
         defer {
-            atomicBatchFailure = nil
-            atomicBatchRecoveryActions.removeAll()
-            atomicBatchDepth = 0
-            modelContext.autosaveEnabled = previousAutosaveEnabled
+            if !didRestoreAutosave {
+                modelContext.autosaveEnabled = previousAutosaveEnabled
+            }
         }
 
         var result: Result?
         var reachedCommitBoundary = false
         do {
-            try modelContext.transaction {
-                try Task.checkCancellation()
-                result = try mutations()
-                if let atomicBatchFailure {
-                    throw atomicBatchFailure
+            try SettingsStoreAtomicScope.withOwner(owner) {
+                try modelContext.transaction {
+                    try Task.checkCancellation()
+                    result = try mutations()
+                    if let failure = owner.firstFailure {
+                        throw failure
+                    }
+                    try Task.checkCancellation()
+                    try materializePendingSettings(owner)
+                    try Task.checkCancellation()
+                    reachedCommitBoundary = true
                 }
-                try Task.checkCancellation()
-                reachedCommitBoundary = true
             }
         } catch {
             if modelContext.hasChanges {
@@ -242,7 +361,7 @@ public final class SettingsStore {
                 } catch {
                     firstRecoveryError = error
                 }
-                for recovery in atomicBatchRecoveryActions.reversed() {
+                for recovery in owner.recoveryActions.reversed() {
                     do {
                         try recovery(modelContext.container)
                     } catch where firstRecoveryError == nil {
@@ -259,6 +378,11 @@ public final class SettingsStore {
                 }
             }
             throw error
+        }
+        modelContext.autosaveEnabled = previousAutosaveEnabled
+        didRestoreAutosave = true
+        for action in owner.successfulCommitActions {
+            action()
         }
         return result!
     }
@@ -304,16 +428,24 @@ public final class SettingsStore {
      APIs. This convenience preserves the same clean-context, nested-batch, cancellation, one-save,
      and rollback contract as `performAtomicBatch(in:_:)` without exposing the private context.
 
-     - Parameter mutations: Synchronous settings mutations that must commit or roll back together.
+     - Parameters:
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked after the outermost batch
+         commits and resets its ownership state.
+       - mutations: Synchronous settings mutations that must commit or roll back together.
      - Returns: Value returned by `mutations` after the transaction commits.
      - Side Effects: Delegates autosave suppression, deferred nested saves, one commit, and rollback
        to `performAtomicBatch(in:_:)` using this store's context.
      - Throws: Rethrows pending-change, cancellation, mutation, strict fetch, and commit errors.
      */
     public func performAtomicBatch<Result>(
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
-        try performAtomicBatch(in: modelContext, mutations)
+        try performAtomicBatch(
+            in: modelContext,
+            afterSuccessfulCommit: afterSuccessfulCommit,
+            mutations
+        )
     }
 
     /**
@@ -321,17 +453,20 @@ public final class SettingsStore {
 
      Database stores call this after mutating their graph but before saving. Unlike
      `performAtomicBatch(in:_:)`, this boundary intentionally accepts pending model changes owned by
-     the caller. Settings writes performed by `mutations` defer their normal eager saves, and the
-     shared context transaction commits the graph and journal together. Existing atomic restore
-     scopes absorb nested calls without starting another transaction.
+     the caller. Settings writes performed by `mutations` remain detached until it succeeds, and the
+     shared context transaction commits the graph and journal together. Existing scopes on the exact
+     context absorb nested calls from every `SettingsStore` facade without starting another
+     transaction.
 
      - Parameters:
        - modelContext: Exact context used to construct this settings store and stage the graph change.
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked only after the outermost
+         transaction commits and resets its ownership state.
        - mutations: Journal and bookkeeping mutations that must accompany the staged graph change.
      - Returns: Value returned by `mutations` after the transaction commits.
      - Side Effects:
        - temporarily disables autosave for the outermost boundary
-       - defers ordinary `SettingsStore` saves while journal rows are staged
+       - stages settings values shared by all facades on this context, then materializes them
        - commits pending graph and settings mutations through one `ModelContext.transaction`
        - rolls back all pending context changes when validation or commit fails
      - Throws:
@@ -339,44 +474,58 @@ public final class SettingsStore {
        - `CancellationError` when cancellation is observed before commit
        - any error thrown by `mutations`, a strict settings read, or the transaction commit
      - Important: The caller must own every pending mutation in `modelContext`; rollback affects the
-       complete unsaved context generation.
+       complete unsaved context generation. A nested atomic child may register durable recovery only
+       when the outer owner is an atomic restore boundary; a journal owner rejects that unsupported
+       composition instead of dropping the recovery action.
      */
     func performJournaledSave<Result>(
         in modelContext: ModelContext,
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
         guard self.modelContext === modelContext else {
             throw SettingsStoreAtomicBatchError.modelContextMismatch
         }
 
-        if atomicBatchDepth > 0 {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
+            if let afterSuccessfulCommit {
+                owner.successfulCommitActions.append(afterSuccessfulCommit)
+            }
             do {
                 return try mutations()
             } catch {
-                recordAtomicBatchFailure(error)
+                owner.recordFailure(error)
                 throw error
             }
         }
 
+        let owner = SettingsStoreAtomicOwner(
+            modelContext: modelContext,
+            kind: .journaledSave,
+            successfulCommitActions: afterSuccessfulCommit.map { [$0] } ?? []
+        )
         let previousAutosaveEnabled = modelContext.autosaveEnabled
         modelContext.autosaveEnabled = false
-        atomicBatchDepth = 1
-        atomicBatchFailure = nil
+        var didRestoreAutosave = false
         defer {
-            atomicBatchFailure = nil
-            atomicBatchDepth = 0
-            modelContext.autosaveEnabled = previousAutosaveEnabled
+            if !didRestoreAutosave {
+                modelContext.autosaveEnabled = previousAutosaveEnabled
+            }
         }
 
         var result: Result?
         do {
-            try modelContext.transaction {
-                try Task.checkCancellation()
-                result = try mutations()
-                if let atomicBatchFailure {
-                    throw atomicBatchFailure
+            try SettingsStoreAtomicScope.withOwner(owner) {
+                try modelContext.transaction {
+                    try Task.checkCancellation()
+                    result = try mutations()
+                    if let failure = owner.firstFailure {
+                        throw failure
+                    }
+                    try Task.checkCancellation()
+                    try materializePendingSettings(owner)
+                    try Task.checkCancellation()
                 }
-                try Task.checkCancellation()
             }
         } catch {
             if modelContext.hasChanges {
@@ -384,22 +533,35 @@ public final class SettingsStore {
             }
             throw error
         }
+        modelContext.autosaveEnabled = previousAutosaveEnabled
+        didRestoreAutosave = true
+        for action in owner.successfulCommitActions {
+            action()
+        }
         return result!
     }
 
     /**
      Commits settings-backed mutations and their remote-sync journal through the owned context.
 
-     - Parameter mutations: Settings and journal writes that form one local mutation generation.
+     - Parameters:
+       - afterSuccessfulCommit: Optional nonthrowing publication invoked after the outermost
+         transaction commits and resets its ownership state.
+       - mutations: Settings and journal writes that form one local mutation generation.
      - Returns: Value returned by `mutations` after commit.
      - Side Effects: Delegates save deferral, transaction commit, and rollback to the context-taking
        overload.
      - Throws: Rethrows cancellation, mutation, strict-read, and persistence failures.
      */
     func performJournaledSave<Result>(
+        afterSuccessfulCommit: (() -> Void)? = nil,
         _ mutations: () throws -> Result
     ) throws -> Result {
-        try performJournaledSave(in: modelContext, mutations)
+        try performJournaledSave(
+            in: modelContext,
+            afterSuccessfulCommit: afterSuccessfulCommit,
+            mutations
+        )
     }
 
     /// Local-only singleton setting key used for Android-style global text-display defaults.
@@ -408,13 +570,19 @@ public final class SettingsStore {
     // MARK: - String
 
     /**
-     * Reads a raw string setting from SwiftData.
+     * Reads a raw string setting from the context owner's pending values or SwiftData.
      * - Parameter key: Persisted setting key.
      * - Returns: Stored string value, or `nil` when the key does not exist or the fetch fails.
-     * - Note: This method has no side effects and does not consult `UserDefaults`.
+     * - Note: Fetch errors poison an active owner; this does not consult `UserDefaults`.
      */
     public func getString(_ key: String) -> String? {
-        fetchSetting(key)?.value
+        if let pending = SettingsStoreAtomicScope.owner(for: modelContext)?.pendingSettings[key] {
+            switch pending {
+            case .value(let value): return value
+            case .removed: return nil
+            }
+        }
+        return fetchSetting(key)?.value
     }
 
     /**
@@ -422,7 +590,7 @@ public final class SettingsStore {
      * - Parameters:
      *   - key: Persisted setting key.
      *   - value: New string value.
-     * - Side Effects: Inserts or updates a `Setting` row and saves the supplied `ModelContext`.
+     * - Side Effects: Stages a value when an owner exists; otherwise updates and saves SwiftData.
      * - Failure: Save errors are swallowed.
      */
     public func setString(_ key: String, value: String) {
@@ -567,10 +735,14 @@ public final class SettingsStore {
     /**
      Removes a persisted setting row when present.
      * - Parameter key: Unique setting key to delete.
-     * - Side Effects: Deletes the matching `Setting` row and saves `modelContext`.
+     * - Side Effects: Stages removal in an owner; otherwise deletes and saves the matching row.
      * - Failure: Save errors are swallowed.
      */
     public func remove(_ key: String) {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
+            owner.pendingSettings[key] = .removed
+            return
+        }
         guard let existing = fetchSetting(key) else {
             return
         }
@@ -579,17 +751,104 @@ public final class SettingsStore {
     }
 
     /**
-     Reads all persisted settings whose keys start with the supplied prefix.
-     * - Parameter prefix: Leading key prefix to match.
-     * - Returns: Matching `Setting` rows, filtered in memory when the fetch succeeds.
-     * - Note: This fetches all `Setting` rows first because the table is small and this avoids
-     *   relying on string-prefix support inside SwiftData predicates.
-     * - Failure: Fetch errors are swallowed and reported as an empty array.
+     Reads detached settings values whose keys have Swift's exact semantic prefix.
+
+     SQLite's binary string ordering can bound ASCII prefixes without materializing unrelated
+     settings. The final `hasPrefix` check remains authoritative. Empty and non-ASCII prefixes, plus
+     the three ASCII scalars with canonically equivalent non-ASCII spellings, use the complete fetch
+     so SQL cannot exclude a key that Swift considers a semantic prefix match.
+
+     - Parameter prefix: Leading key prefix to match using `String.hasPrefix` semantics.
+     - Returns: Immutable matching values including the current owner's pending writes/removals.
+       Retained entries do not change when later writes occur. Callers apply their own ordering;
+       updates must go through `SettingsStore`, not a returned managed model.
+     - Side effects: Reads the owned `ModelContext` and records an active atomic-batch failure.
+     - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
+       existing fail-soft settings reads.
      */
-    public func entries(withPrefix prefix: String) -> [Setting] {
-        let descriptor = FetchDescriptor<Setting>()
+    public func entries(withPrefix prefix: String) -> [SettingEntry] {
+        let descriptor: FetchDescriptor<Setting>
+        if let bounds = Self.binaryPrefixBounds(for: prefix) {
+            let lowerBound = bounds.lowerBound
+            let upperBound = bounds.upperBound
+            descriptor = FetchDescriptor<Setting>(
+                predicate: #Predicate {
+                    $0.key >= lowerBound && $0.key < upperBound
+                }
+            )
+        } else {
+            descriptor = FetchDescriptor<Setting>()
+        }
         do {
-            return try modelContext.fetch(descriptor).filter { $0.key.hasPrefix(prefix) }
+            return mergedEntries(try modelContext.fetch(descriptor), prefix: prefix)
+        } catch {
+            recordAtomicBatchFailure(error)
+            return []
+        }
+    }
+
+    /**
+     Returns a binary-order range that is a superset of Swift prefix matches for safe ASCII input.
+
+     Swift strings compare canonically equivalent Unicode spellings as equal. Greek question mark,
+     Kelvin sign, and Greek varia canonically map to ASCII semicolon, uppercase K, and grave accent,
+     respectively. A binary ASCII range would omit those spellings, so prefixes containing any of
+     those scalars use the complete-fetch fallback. Non-ASCII input also falls back because this
+     helper does not assume a persistence collation can represent Swift's Unicode prefix semantics.
+
+     - Parameter prefix: Candidate semantic prefix.
+     - Returns: Half-open binary bounds, or `nil` when only a complete fetch is a proven superset.
+     - Side effects: none.
+     - Failure modes: none.
+     */
+    private static func binaryPrefixBounds(
+        for prefix: String
+    ) -> (lowerBound: String, upperBound: String)? {
+        guard !prefix.isEmpty else { return nil }
+
+        for scalar in prefix.unicodeScalars {
+            guard scalar.value <= 0x7F else { return nil }
+            switch scalar.value {
+            case 0x3B, 0x4B, 0x60:
+                return nil
+            default:
+                break
+            }
+        }
+
+        guard let finalScalar = prefix.unicodeScalars.last,
+              let successor = UnicodeScalar(finalScalar.value + 1) else {
+            return nil
+        }
+        return (prefix, String(prefix.unicodeScalars.dropLast()) + String(successor))
+    }
+
+    /**
+     Reads the rows inside one dot-delimited settings namespace without materializing unrelated
+     settings.
+
+     The persisted key range from `namespace + "."` through `namespace + "/"` contains every key
+     whose next byte is the namespace delimiter under the store's binary ordering. A final exact
+     prefix check keeps the API's semantics explicit even if a future persistence backend uses a
+     broader comparison collation.
+
+     - Parameter namespace: Namespace without its trailing dot delimiter.
+     - Returns: Detached matching values including pending writes/removals. Callers apply their
+       own deterministic ordering and use `SettingsStore` for subsequent updates.
+     - Side effects: Reads the owned local `ModelContext` and records an active atomic-batch failure.
+     - Failure modes: Fetch errors are swallowed and reported as an empty array, matching the
+       existing fail-soft settings reads.
+     */
+    func entries(inExactNamespace namespace: String) -> [SettingEntry] {
+        let lowerBound = "\(namespace)."
+        let upperBound = "\(namespace)/"
+        let descriptor = FetchDescriptor<Setting>(
+            predicate: #Predicate {
+                $0.key >= lowerBound && $0.key < upperBound
+            }
+        )
+        do {
+            return mergedEntries(try modelContext.fetch(descriptor), prefix: lowerBound)
         } catch {
             recordAtomicBatchFailure(error)
             return []
@@ -640,14 +899,18 @@ public final class SettingsStore {
     }
 
     /**
-     * Inserts or updates a raw `Setting` row and saves the context immediately.
+     * Stages a raw settings value in an owner, or updates and saves the context immediately.
      * - Parameters:
      *   - key: Unique setting key.
      *   - value: Raw string payload to persist.
-     * - Side Effects: Mutates SwiftData and saves `modelContext`.
+     * - Side Effects: Updates the owner's values or, outside a batch, mutates and saves SwiftData.
      * - Failure: Save errors are swallowed.
      */
     private func upsert(key: String, value: String) {
+        if let owner = SettingsStoreAtomicScope.owner(for: modelContext) {
+            owner.pendingSettings[key] = .value(value)
+            return
+        }
         if let existing = fetchSetting(key) {
             existing.value = value
         } else {
@@ -657,31 +920,95 @@ public final class SettingsStore {
     }
 
     /**
-     Saves ordinary settings mutations immediately unless an explicit atomic batch owns the commit.
+     Projects fetched rows plus this exact context owner's pending values into detached entries.
+
+     Stored ordering is preserved where a row survives. New keys follow in sorted order; callers
+     needing a particular presentation order must sort explicitly. Prefix matching retains Swift
+     String semantics, including canonical Unicode equivalence. This performs no persistence write.
+     */
+    private func mergedEntries(_ rows: [Setting], prefix: String) -> [SettingEntry] {
+        let pending = SettingsStoreAtomicScope.owner(for: modelContext)?.pendingSettings ?? [:]
+        var visited = Set<String>()
+        var entries: [SettingEntry] = []
+        for row in rows where row.key.hasPrefix(prefix) {
+            visited.insert(row.key)
+            switch pending[row.key] {
+            case .value(let value): entries.append(SettingEntry(key: row.key, value: value))
+            case .removed: break
+            case nil: entries.append(SettingEntry(key: row.key, value: row.value))
+            }
+        }
+        let insertedKeys = pending.keys.filter { !visited.contains($0) && $0.hasPrefix(prefix) }
+        for key in insertedKeys.sorted() {
+            if case .value(let value) = pending[key] {
+                entries.append(SettingEntry(key: key, value: value))
+            }
+        }
+        return entries
+    }
+
+    /**
+     Materializes the owner's final settings values after its mutation closure has succeeded.
+
+     Every affected row is fetched in bounded key batches before the first model mutation, so read
+     failure leaves staged values detached and large writes avoid one query per setting. Changes
+     join the surrounding graph transaction; this method never saves.
+     Physical commit failures still require the caller's existing rollback and durable recovery.
+     Throws fetch errors directly and preserves failure already recorded by a fail-soft read.
+     */
+    private func materializePendingSettings(_ owner: SettingsStoreAtomicOwner) throws {
+        if let failure = owner.firstFailure { throw failure }
+        let keys = owner.pendingSettings.keys.sorted()
+        var rowsByKey: [String: Setting] = [:]
+        for start in stride(from: 0, to: keys.count, by: 250) {
+            let batchKeys = Array(keys[start..<min(start + 250, keys.count)])
+            let descriptor = FetchDescriptor<Setting>(predicate: #Predicate {
+                batchKeys.contains($0.key)
+            })
+            for row in try modelContext.fetch(descriptor) { rowsByKey[row.key] = row }
+        }
+        try Task.checkCancellation()
+        for key in keys {
+            guard let pending = owner.pendingSettings[key] else { continue }
+            let row = rowsByKey[key]
+            switch pending {
+            case .value(let value):
+                if let row {
+                    if row.value != value { row.value = value }
+                } else {
+                    modelContext.insert(Setting(key: key, value: value))
+                }
+            case .removed:
+                if let row { modelContext.delete(row) }
+            }
+        }
+        if let failure = owner.firstFailure { throw failure }
+    }
+
+    /**
+     Saves ordinary settings mutations immediately unless an exact-context synchronous batch owns
+     the commit.
 
      - Side Effects: Calls `modelContext.save()` only when no atomic batch is active.
      - Failure modes: Save errors remain intentionally swallowed for ordinary settings flows; the
        explicit batch performs its own throwing transaction commit after all nested mutations finish.
      */
     private func saveSoftlyUnlessBatching() {
-        guard atomicBatchDepth == 0 else {
+        guard SettingsStoreAtomicScope.owner(for: modelContext) == nil else {
             return
         }
         try? modelContext.save()
     }
 
     /**
-     Records the first otherwise-soft settings failure for the active atomic batch.
+     Records the first otherwise-soft settings failure for the active exact-context batch.
 
      - Parameter error: Fetch or nested-batch error that must invalidate the outer batch.
      - Side Effects: Stores the first error while an atomic scope is active.
      - Failure modes: Outside an atomic scope this remains a no-op, preserving ordinary soft reads.
      */
     private func recordAtomicBatchFailure(_ error: Error) {
-        guard atomicBatchDepth > 0, atomicBatchFailure == nil else {
-            return
-        }
-        atomicBatchFailure = error
+        SettingsStoreAtomicScope.owner(for: modelContext)?.recordFailure(error)
     }
 
     /**

@@ -1541,3 +1541,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@, %2$@ belgesinde bulunamadı.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Notlarım Taşındı";
