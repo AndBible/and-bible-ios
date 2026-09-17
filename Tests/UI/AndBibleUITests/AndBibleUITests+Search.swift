@@ -2533,8 +2533,10 @@ extension AndBibleUITests {
             timeout: 10
         )
         dragSeekBar(fontSizeSlider, fromNormalizedX: 0.3, toNormalizedX: 0.9)
+        let draftedFontSize = try seekBarNumericValue(fontSizeSlider)
+        let committedFontSize = Int(draftedFontSize.rounded())
         XCTAssertGreaterThan(
-            try seekBarNumericValue(fontSizeSlider),
+            draftedFontSize,
             35,
             "Expected the seek bar drag to raise the drafted font size well above its default."
         )
@@ -2542,10 +2544,28 @@ extension AndBibleUITests {
             requireElement("textDisplayPreferenceEditorOKButton", in: app, timeout: 10),
             timeout: 10
         )
-        tapElementReliably(
-            requireElement("textDisplaySettingsTopAppBarBackButton", in: app, timeout: 10),
+        let fontSizeButton = requireObservedSettingsElement(
+            app.buttons["textDisplayFontSizeButton"].firstMatch,
+            identifier: "textDisplayFontSizeButton",
             timeout: 10
         )
+        waitForObservedSettingsValue(
+            fontSizeButton,
+            identifier: "textDisplayFontSizeButton",
+            expectedDescription: "the committed \(committedFontSize) pt font size",
+            timeout: 10
+        ) { value in
+            value.contains("\(committedFontSize) pt")
+        }
+        tapElementReliably(
+            requireObservedSettingsElement(
+                app.buttons["textDisplaySettingsTopAppBarBackButton"].firstMatch,
+                identifier: "textDisplaySettingsTopAppBarBackButton",
+                timeout: 10
+            ),
+            timeout: 10
+        )
+        waitForElementToDisappear(textDisplayScreen, timeout: 10)
         XCTAssertTrue(waitForReaderShellReady(in: app, timeout: 20))
 
         var heightScale: CGFloat?
