@@ -558,7 +558,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenReadingPlansAction",
             destinationIdentifier: "readingPlanListScreen",
-            readinessIdentifiers: ["availablePlansScreen", "dailyReadingScreen"],
+            readinessIdentifiers: ["readingPlanTemplateButton", "dailyReadingPlanTitleButton"],
             in: app,
             timeout: timeout
         )
