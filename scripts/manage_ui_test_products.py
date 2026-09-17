@@ -16,6 +16,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from prepare_calvin_commentary_fixture import (
+    ARCHIVE_BYTES as CALVIN_ARCHIVE_BYTES,
+    ARCHIVE_SHA256 as CALVIN_ARCHIVE_SHA256,
+    ARCHIVE_URL as CALVIN_ARCHIVE_URL,
+    CALVIN_ENTRIES as CALVIN_FIXTURE_ENTRIES,
+)
+
 
 MANIFEST_VERSION = 1
 MANIFEST_NAME = "ui-test-products-manifest.json"
@@ -26,6 +33,9 @@ SWORD_FIXTURE_RELATIVE_PATH = Path(".ui-test/fixtures/sword")
 FIXTURE_RESOURCE_BUNDLE_NAMES = ("AndBible_BibleCore.bundle", "AndBible_SwordKit.bundle")
 SWORD_MODULE_PAYLOAD_FAMILIES = frozenset(
     {"comments", "genbook", "images", "lexdict", "maps", "texts"}
+)
+CALVIN_SCENARIOS = frozenset(
+    {"calvin-commentary-performance", "calvin-commentary-scroll-restoration"}
 )
 ALLOWED_ARCHIVE_ROOTS = frozenset({".derivedData", ".build", ".ui-test", MANIFEST_NAME})
 RUNNER_LOCAL_TEST_ENVIRONMENT_KEYS = frozenset(
@@ -438,6 +448,14 @@ def validate_required_products(
         raise ProductArchiveError(
             "SWORD fixture is incomplete: " + ", ".join(missing_sword_files)
         )
+    try:
+        fixture_scenarios = json.loads(fixture_manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProductArchiveError(f"Cannot read UI fixture manifest: {error}") from error
+    if not isinstance(fixture_scenarios, dict):
+        raise ProductArchiveError("UI fixture manifest must be a dictionary.")
+    if CALVIN_SCENARIOS.intersection(fixture_scenarios.values()):
+        validate_calvin_fixture(sword_fixture)
     xctestrun_path = discover_single_xctestrun(products_path)
     validate_app_excludes_bundled_sword_modules(
         required_app_bundle(products_path, xctestrun_path)
@@ -446,6 +464,42 @@ def validate_required_products(
     # staging, even when callers inject architecture reading in behavioral tests.
     required_product_executables(products_path, fixture_tool, xctestrun_path)
     return xctestrun_path
+
+
+def validate_calvin_fixture(sword_fixture: Path) -> None:
+    """Require the reviewed public-domain Calvin 1.1 module and provenance."""
+    provenance_path = sword_fixture / "calvincommentaries.provenance.json"
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProductArchiveError(f"Cannot read Calvin fixture provenance: {error}") from error
+    provenance_entries = provenance.get("entries")
+    if not isinstance(provenance_entries, dict):
+        raise ProductArchiveError("Calvin fixture provenance entries must be a dictionary.")
+    if (
+        provenance.get("format_version") != 1
+        or provenance.get("module") != "CalvinCommentaries"
+        or provenance.get("source_archive_bytes") != CALVIN_ARCHIVE_BYTES
+        or provenance.get("source_archive_url") != CALVIN_ARCHIVE_URL
+        or provenance.get("source_archive_sha256") != CALVIN_ARCHIVE_SHA256
+    ):
+        raise ProductArchiveError("Calvin fixture provenance does not match reviewed content.")
+    if set(provenance_entries) != CALVIN_FIXTURE_ENTRIES:
+        raise ProductArchiveError("Calvin fixture provenance entry set is not exact.")
+    for relative, details in provenance_entries.items():
+        if not isinstance(details, dict):
+            raise ProductArchiveError(f"Calvin fixture provenance entry is invalid: {relative}")
+        expected_size = details.get("bytes")
+        expected_hash = details.get("sha256")
+        path = sword_fixture / relative
+        if (
+            not isinstance(expected_size, int)
+            or not isinstance(expected_hash, str)
+            or not path.is_file()
+            or path.stat().st_size != expected_size
+            or sha256_file(path) != expected_hash
+        ):
+            raise ProductArchiveError(f"Calvin SWORD fixture is missing or changed: {relative}")
 
 
 def _write_manifest(stage_root: Path, manifest: Mapping[str, object]) -> None:

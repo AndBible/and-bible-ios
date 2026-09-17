@@ -1,0 +1,40 @@
+{
+  "distribution_license": "Public Domain",
+  "entries": {
+    "mods.d/calvincommentaries.conf": {
+      "bytes": 2570,
+      "sha256": "9fec2e4a9fc6c722926d44e8abe3c77c5ceb0c8d3cbd70e7f13229f240155d51"
+    },
+    "modules/comments/zcom/calvincommentaries/nt.bzs": {
+      "bytes": 3180,
+      "sha256": "496dcaca94c7d216969fc05c0076dacb4bc86f261ba1df4e90df04e92c6a67d5"
+    },
+    "modules/comments/zcom/calvincommentaries/nt.bzv": {
+      "bytes": 82460,
+      "sha256": "b2eafca8f656e41565f34b94e71085988e580533d2a6e73f23217ad79c86f01e"
+    },
+    "modules/comments/zcom/calvincommentaries/nt.bzz": {
+      "bytes": 6946573,
+      "sha256": "b389fa95e3d35c6ee5e76094c4733855ca6041ba81357e0d3c389441c1dff32d"
+    },
+    "modules/comments/zcom/calvincommentaries/ot.bzs": {
+      "bytes": 2748,
+      "sha256": "87a047f6681ff8b6ecced64664d93f5b1175fb256ec8b8a4d0cf0c8b0df14c38"
+    },
+    "modules/comments/zcom/calvincommentaries/ot.bzv": {
+      "bytes": 241150,
+      "sha256": "1fa87a936ec3b6d5478c601e5db74eb3e6fd04449c14a4ba550bb41878f75601"
+    },
+    "modules/comments/zcom/calvincommentaries/ot.bzz": {
+      "bytes": 14354655,
+      "sha256": "31f9194917bc9a183f304b30903ac4de2c8d35830735566843fd3dde8e37fefe"
+    }
+  },
+  "format_version": 1,
+  "module": "CalvinCommentaries",
+  "module_version": "1.1",
+  "source_archive_bytes": 20897508,
+  "source_archive_sha256": "df66fc8c03537499ad006d069481d2c95b600887cdbd6ce75ec5d264b573192a",
+  "source_archive_url": "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/CalvinCommentaries.zip",
+  "source_page": "https://www.crosswire.org/sword/modules/ModInfo.jsp?modName=CalvinCommentaries"
+}

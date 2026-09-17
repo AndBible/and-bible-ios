@@ -24,6 +24,7 @@ from manage_ui_test_products import (
     inventory_payload,
     package_products,
     strip_runner_local_ui_test_environment,
+    validate_calvin_fixture,
     verify_products,
 )
 
@@ -37,6 +38,35 @@ PROVENANCE = ToolchainProvenance(
 
 class ManageUITestProductsTests(unittest.TestCase):
     """Exercises product discovery, provenance checks, and payload integrity."""
+
+    def test_checked_in_calvin_fixture_matches_reviewed_provenance(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        validate_calvin_fixture(
+            repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+        )
+
+    def test_calvin_manifest_requires_self_contained_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+            fixture_manifest.write_text(
+                json.dumps({"AndBibleUITests/testCalvin": "calvin-commentary-scroll-restoration"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ProductArchiveError, "Calvin fixture"):
+                package_products(
+                    products_path=products,
+                    fixture_tool=fixture,
+                    fixture_manifest=fixture_manifest,
+                    sword_fixture=sword_fixture,
+                    output_path=root / "archive.tar.gz",
+                    commit_sha="abc123",
+                    configuration="Debug",
+                    code_signing_allowed="NO",
+                    provenance=PROVENANCE,
+                    architecture_reader=self.fake_architectures,
+                )
 
     def test_exported_consumer_paths_work_outside_the_restoring_directory(self) -> None:
         """A separate consumer can read every emitted path after relative restoration."""
