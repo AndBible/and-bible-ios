@@ -18,6 +18,7 @@ import select
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1335,6 +1336,7 @@ class UITestFixtureService:
                 ],
                 deadline,
                 self.configuration.request_timeout_seconds,
+                "simulator app termination",
             )
         except FixtureHostCommandTimeout as error:
             raise FixtureServiceError(
@@ -1343,6 +1345,7 @@ class UITestFixtureService:
                 f"command: {' '.join(error.command)}; "
                 f"direct child reaped: {error.direct_child_reaped}; "
                 f"process group gone: {error.process_group_gone}"
+                f"; stderr: {error.stderr.strip() or '<empty>'}"
             ) from error
         diagnostic = f"{result.stdout}\n{result.stderr}".lower()
         if result.returncode != 0 and not any(
@@ -1398,6 +1401,7 @@ class UITestFixtureService:
             ],
             deadline,
             20,
+            "installed app data-container lookup",
         )
 
     @staticmethod
@@ -1420,7 +1424,7 @@ class UITestFixtureService:
         deadline: float,
         maximum_seconds: float,
     ) -> CommandResult:
-        result = self._run(command, deadline, maximum_seconds)
+        result = self._run(command, deadline, maximum_seconds, label)
         if result.returncode != 0:
             raise FixtureServiceError(self._command_failure(label, result))
         return result
@@ -1430,13 +1434,77 @@ class UITestFixtureService:
         command: Sequence[str],
         deadline: float,
         maximum_seconds: float,
+        phase: str,
     ) -> CommandResult:
         if self._stop_event.is_set():
             raise FixtureServiceCancelled("fixture service stopped before command execution")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise FixtureServiceError("fixture request exceeded its total timeout")
-        return self.command_runner(command, min(maximum_seconds, remaining), self._stop_event)
+        timeout_seconds = min(maximum_seconds, remaining)
+        started = time.monotonic()
+        try:
+            result = self.command_runner(command, timeout_seconds, self._stop_event)
+        except FixtureHostCommandTimeout as error:
+            self._write_stage_diagnostic(
+                phase=phase,
+                command=command,
+                elapsed_seconds=error.elapsed_seconds,
+                timeout_seconds=error.timeout_seconds,
+                status="timeout",
+                returncode=error.returncode,
+                stdout=error.stdout,
+                stderr=error.stderr,
+                direct_child_reaped=error.direct_child_reaped,
+                process_group_gone=error.process_group_gone,
+            )
+            raise
+        self._write_stage_diagnostic(
+            phase=phase,
+            command=command,
+            elapsed_seconds=time.monotonic() - started,
+            timeout_seconds=timeout_seconds,
+            status="completed",
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+        return result
+
+    @staticmethod
+    def _write_stage_diagnostic(
+        *,
+        phase: str,
+        command: Sequence[str],
+        elapsed_seconds: float,
+        timeout_seconds: float,
+        status: str,
+        returncode: int | None,
+        stdout: str,
+        stderr: str,
+        direct_child_reaped: bool | None = None,
+        process_group_gone: bool | None = None,
+    ) -> None:
+        """Emit one bounded record so retained CI logs identify every fixture host stage."""
+        payload: dict[str, object] = {
+            "phase": phase,
+            "status": status,
+            "command": list(command),
+            "elapsedSeconds": round(elapsed_seconds, 3),
+            "timeoutSeconds": round(timeout_seconds, 3),
+            "returncode": returncode,
+            "stdout": _bounded_diagnostic_output(stdout, limit=4_096)["text"],
+            "stderr": _bounded_diagnostic_output(stderr, limit=4_096)["text"],
+        }
+        if direct_child_reaped is not None:
+            payload["directChildReaped"] = direct_child_reaped
+        if process_group_gone is not None:
+            payload["processGroupGone"] = process_group_gone
+        print(
+            "fixture-host-stage " + json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            file=sys.stderr,
+            flush=True,
+        )
 
     @staticmethod
     def _command_failure(label: str, result: CommandResult) -> str:

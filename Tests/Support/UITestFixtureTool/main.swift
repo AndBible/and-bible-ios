@@ -4,6 +4,18 @@ import SwiftData
 import BibleCore
 import SwordKit
 
+/// Emits compact phase timings to stderr so a killed fixture process retains its last stage.
+private enum FixtureStageDiagnostics {
+    private static let processStart = DispatchTime.now().uptimeNanoseconds
+
+    static func mark(_ phase: String) {
+        let started = processStart
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000_000
+        let line = String(format: "fixture-tool-stage phase=%@ elapsedSeconds=%.3f\n", phase, elapsed)
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+}
+
 /**
  Host-side fixture writer for XCUITests.
 
@@ -276,12 +288,16 @@ private struct FixtureTool {
     func run() throws {
         switch arguments.command {
         case .reset:
+            FixtureStageDiagnostics.mark("reset-start")
             try resetContainer()
+            FixtureStageDiagnostics.mark("reset-complete")
         case .seed:
             guard let scenario = arguments.scenario else {
                 throw FixtureToolError.usage("Seed command requires a scenario.")
             }
+            FixtureStageDiagnostics.mark("seed-start")
             try seedScenario(scenario)
+            FixtureStageDiagnostics.mark("seed-complete")
         }
     }
 
@@ -320,11 +336,13 @@ private struct FixtureTool {
      */
     private func seedScenario(_ scenario: FixtureScenario) throws {
         let paths = FixturePaths(dataContainerURL: arguments.dataContainerURL)
+        FixtureStageDiagnostics.mark("model-container-init-start")
         let context = try FixtureContext(
             paths: paths,
             bundleIdentifier: arguments.bundleIdentifier,
             swordFixtureURL: arguments.swordFixtureURL
         )
+        FixtureStageDiagnostics.mark("model-container-init-complete")
         let encodedPreferences = try context.seed(scenario)
         print(encodedPreferences)
     }
@@ -470,6 +488,7 @@ private final class FixtureContext {
      * - Throws: Validation errors when the baseline workspace graph cannot be created.
      */
     func seed(_ scenario: FixtureScenario) throws -> String {
+        FixtureStageDiagnostics.mark("scenario-seeding-start")
         let baseline = try ensureBaseline()
 
         switch scenario {
@@ -571,7 +590,10 @@ private final class FixtureContext {
             try seedLockedStartupQueue(baseline: baseline)
         }
 
+        FixtureStageDiagnostics.mark("scenario-seeding-complete")
+        FixtureStageDiagnostics.mark("model-context-save-start")
         try modelContext.save()
+        FixtureStageDiagnostics.mark("model-context-save-complete")
         return try encodedPreferences(["icloud_sync_enabled": false])
     }
 

@@ -1027,7 +1027,7 @@ class FixtureServiceTestCase(unittest.TestCase):
                 process_group_gone=True,
                 cleanup_error=None,
                 stdout="",
-                stderr="",
+                stderr="native simulator termination marker",
             )
 
         configuration = FixtureServiceConfiguration(
@@ -1042,9 +1042,11 @@ class FixtureServiceTestCase(unittest.TestCase):
         service = UITestFixtureService(configuration, command_runner=timed_terminate)
         original_service_directory = self.service_directory
         self.service_directory = configuration.directory
+        diagnostics = io.StringIO()
         try:
-            with service:
-                response = self.request()
+            with mock.patch("sys.stderr", diagnostics):
+                with service:
+                    response = self.request()
         finally:
             self.service_directory = original_service_directory
 
@@ -1052,12 +1054,54 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertRegex(
             response["error"],
             "simulator app termination timed out after 37.0s.*"
-            "direct child reaped: True; process group gone: True",
+            "direct child reaped: True; process group gone: True; "
+            "stderr: native simulator termination marker",
         )
         self.assertEqual(len(commands), 1)
         self.assertIn("terminate", commands[0])
         self.assertGreater(observed_timeouts[0], 36)
         self.assertLessEqual(observed_timeouts[0], 37)
+        records = [
+            json.loads(line.removeprefix("fixture-host-stage "))
+            for line in diagnostics.getvalue().splitlines()
+            if line.startswith("fixture-host-stage ")
+        ]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["phase"], "simulator app termination")
+        self.assertEqual(records[0]["status"], "timeout")
+        self.assertEqual(records[0]["stderr"], "native simulator termination marker")
+        self.assertTrue(records[0]["directChildReaped"])
+        self.assertTrue(records[0]["processGroupGone"])
+
+    def test_prepare_reports_each_host_stage_with_bounded_native_output(self) -> None:
+        """A retained log identifies every completed command and fixture-tool markers."""
+        self.runner.results["seed"] = CommandResult(
+            0,
+            "eyJ0aGVtZSI6Im5pZ2h0In0=\n",
+            "fixture-tool-stage phase=model-context-save-complete elapsedSeconds=1.250\n",
+        )
+        diagnostics = io.StringIO()
+        with mock.patch("sys.stderr", diagnostics):
+            with UITestFixtureService(self.configuration, command_runner=self.runner):
+                response = self.request()
+
+        self.assertTrue(response["succeeded"])
+        records = [
+            json.loads(line.removeprefix("fixture-host-stage "))
+            for line in diagnostics.getvalue().splitlines()
+            if line.startswith("fixture-host-stage ")
+        ]
+        self.assertEqual(
+            [record["phase"] for record in records],
+            [
+                "simulator app termination",
+                "installed app data-container lookup",
+                "fixture reset",
+                "fixture seed",
+            ],
+        )
+        self.assertIn("model-context-save-complete", records[-1]["stderr"])
+        self.assertTrue(all(record["status"] == "completed" for record in records))
 
     def test_missing_container_bootstraps_then_stops_app_before_fixture_mutation(self) -> None:
         """A first-run container is created by one launch and stopped before reset and seed."""
