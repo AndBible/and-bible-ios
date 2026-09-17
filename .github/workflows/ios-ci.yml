@@ -1021,6 +1021,7 @@ jobs:
           --fixture-tool .build/debug/UITestFixtureTool
           --fixture-manifest Tests/UI/Fixtures/ui_test_fixture_manifest.json
           --sword-fixture Sources/BibleUI/Tests/BibleUITests/Fixtures/sword
+          --calvin-fixture Tests/UI/Fixtures/calvin-sword
           --output "${UI_TEST_PRODUCTS_ARCHIVE_PATH}"
           --commit-sha "${GITHUB_SHA}"
           --configuration Debug

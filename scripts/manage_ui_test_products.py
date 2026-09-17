@@ -427,11 +427,23 @@ def inventory_payload(root: Path) -> list[dict[str, object]]:
     return inventory_paths(root, paths)
 
 
+def read_fixture_scenarios(fixture_manifest: Path) -> Mapping[str, object]:
+    """Read the UI fixture map while preserving the product archive error contract."""
+    try:
+        fixture_scenarios = json.loads(fixture_manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProductArchiveError(f"Cannot read UI fixture manifest: {error}") from error
+    if not isinstance(fixture_scenarios, dict):
+        raise ProductArchiveError("UI fixture manifest must be a dictionary.")
+    return fixture_scenarios
+
+
 def validate_required_products(
     products_path: Path,
     fixture_tool: Path,
     fixture_manifest: Path,
     sword_fixture: Path,
+    calvin_fixture: Path | None = None,
 ) -> Path:
     """Require the app, hosted/unit tests, UI products, fixture inputs, and xctestrun."""
     if not fixture_tool.is_file() or not os.access(fixture_tool, os.X_OK):
@@ -448,14 +460,9 @@ def validate_required_products(
         raise ProductArchiveError(
             "SWORD fixture is incomplete: " + ", ".join(missing_sword_files)
         )
-    try:
-        fixture_scenarios = json.loads(fixture_manifest.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ProductArchiveError(f"Cannot read UI fixture manifest: {error}") from error
-    if not isinstance(fixture_scenarios, dict):
-        raise ProductArchiveError("UI fixture manifest must be a dictionary.")
+    fixture_scenarios = read_fixture_scenarios(fixture_manifest)
     if CALVIN_SCENARIOS.intersection(fixture_scenarios.values()):
-        validate_calvin_fixture(sword_fixture)
+        validate_calvin_fixture(calvin_fixture or sword_fixture)
     xctestrun_path = discover_single_xctestrun(products_path)
     validate_app_excludes_bundled_sword_modules(
         required_app_bundle(products_path, xctestrun_path)
@@ -502,6 +509,34 @@ def validate_calvin_fixture(sword_fixture: Path) -> None:
             raise ProductArchiveError(f"Calvin SWORD fixture is missing or changed: {relative}")
 
 
+def validate_baseline_fixture_excludes_calvin(sword_fixture: Path) -> None:
+    """Reject Calvin content in the shared KJV fixture used by package and Core tests."""
+    forbidden = {"calvincommentaries.provenance.json", *CALVIN_FIXTURE_ENTRIES}
+    present = sorted(relative for relative in forbidden if (sword_fixture / relative).exists())
+    if present:
+        raise ProductArchiveError(
+            "Baseline SWORD fixture contains dedicated Calvin content: " + ", ".join(present)
+        )
+
+
+def compose_sword_fixture(
+    baseline_fixture: Path,
+    calvin_fixture: Path,
+    destination: Path,
+) -> None:
+    """Compose the packaged UI fixture without changing the shared KJV test baseline."""
+    shutil.copytree(baseline_fixture, destination, symlinks=True)
+    provenance = calvin_fixture / "calvincommentaries.provenance.json"
+    shutil.copy2(provenance, destination / provenance.name, follow_symlinks=False)
+    for relative in sorted(CALVIN_FIXTURE_ENTRIES):
+        source = calvin_fixture / relative
+        target = destination / relative
+        if target.exists() or target.is_symlink():
+            raise ProductArchiveError(f"Calvin fixture collides with baseline SWORD content: {relative}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target, follow_symlinks=False)
+
+
 def _write_manifest(stage_root: Path, manifest: Mapping[str, object]) -> None:
     (stage_root / MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -515,6 +550,7 @@ def package_products(
     fixture_tool: Path,
     fixture_manifest: Path,
     sword_fixture: Path,
+    calvin_fixture: Path | None = None,
     output_path: Path,
     commit_sha: str,
     configuration: str,
@@ -523,11 +559,17 @@ def package_products(
     architecture_reader: Callable[[Path], Sequence[str]] = macho_architectures,
 ) -> Mapping[str, object]:
     """Stage the complete build products and write a self-verifying tar archive."""
+    fixture_scenarios = read_fixture_scenarios(fixture_manifest)
+    requires_calvin = bool(CALVIN_SCENARIOS.intersection(fixture_scenarios.values()))
+    if requires_calvin and calvin_fixture is None:
+        raise ProductArchiveError("Calvin UI scenarios require a dedicated Calvin fixture root.")
+    validate_baseline_fixture_excludes_calvin(sword_fixture)
     xctestrun_path = validate_required_products(
         products_path,
         fixture_tool,
         fixture_manifest,
         sword_fixture,
+        calvin_fixture,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     stage_root = output_path.parent / "ui-test-products-stage"
@@ -549,11 +591,18 @@ def package_products(
         stage_root / FIXTURE_MANIFEST_RELATIVE_PATH,
         follow_symlinks=False,
     )
-    shutil.copytree(
-        sword_fixture,
-        stage_root / SWORD_FIXTURE_RELATIVE_PATH,
-        symlinks=True,
-    )
+    if requires_calvin:
+        compose_sword_fixture(
+            sword_fixture,
+            calvin_fixture,
+            stage_root / SWORD_FIXTURE_RELATIVE_PATH,
+        )
+    else:
+        shutil.copytree(
+            sword_fixture,
+            stage_root / SWORD_FIXTURE_RELATIVE_PATH,
+            symlinks=True,
+        )
 
     staged_xctestrun = stage_root / PRODUCTS_RELATIVE_PATH / xctestrun_path.name
     strip_runner_local_ui_test_environment(staged_xctestrun)
@@ -739,6 +788,7 @@ def create_parser() -> argparse.ArgumentParser:
     package.add_argument("--fixture-tool", type=Path, required=True)
     package.add_argument("--fixture-manifest", type=Path, required=True)
     package.add_argument("--sword-fixture", type=Path, required=True)
+    package.add_argument("--calvin-fixture", type=Path)
     package.add_argument("--output", type=Path, required=True)
     package.add_argument("--commit-sha", required=True)
     package.add_argument("--configuration", default="Debug")
@@ -763,6 +813,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fixture_tool=args.fixture_tool,
             fixture_manifest=args.fixture_manifest,
             sword_fixture=args.sword_fixture,
+            calvin_fixture=args.calvin_fixture,
             output_path=args.output,
             commit_sha=args.commit_sha,
             configuration=args.configuration,

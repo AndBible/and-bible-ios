@@ -21,10 +21,12 @@ from manage_ui_test_products import (
     ToolchainProvenance,
     _write_github_output,
     current_toolchain_provenance,
+    compose_sword_fixture,
     inventory_payload,
     package_products,
     strip_runner_local_ui_test_environment,
     validate_calvin_fixture,
+    validate_baseline_fixture_excludes_calvin,
     verify_products,
 )
 
@@ -42,8 +44,98 @@ class ManageUITestProductsTests(unittest.TestCase):
     def test_checked_in_calvin_fixture_matches_reviewed_provenance(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
         validate_calvin_fixture(
-            repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+            repository_root / "Tests/UI/Fixtures/calvin-sword"
         )
+
+    def test_shared_sword_fixture_retains_exact_pre_calvin_baseline(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        baseline = repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+        expected = {
+            "mods.d/kjv.conf",
+            "modules/texts/ztext/kjv/nt.bzs",
+            "modules/texts/ztext/kjv/nt.bzv",
+            "modules/texts/ztext/kjv/nt.bzz",
+            "modules/texts/ztext/kjv/ot.bzs",
+            "modules/texts/ztext/kjv/ot.bzv",
+            "modules/texts/ztext/kjv/ot.bzz",
+            "ui-test-encrypted-rawtext/nt",
+            "ui-test-encrypted-rawtext/nt.vss",
+            "ui-test-encrypted-rawtext/ot",
+            "ui-test-encrypted-rawtext/ot.vss",
+        }
+        self.assertEqual(
+            {path.relative_to(baseline).as_posix() for path in baseline.rglob("*") if path.is_file()},
+            expected,
+        )
+        validate_baseline_fixture_excludes_calvin(baseline)
+
+    def test_ui_product_composition_adds_reviewed_calvin_to_baseline_copy(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        baseline = repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+        calvin = repository_root / "Tests/UI/Fixtures/calvin-sword"
+        baseline_before = {
+            path.relative_to(baseline).as_posix(): path.read_bytes()
+            for path in baseline.rglob("*") if path.is_file()
+        }
+        calvin_before = {
+            path.relative_to(calvin).as_posix(): path.read_bytes()
+            for path in calvin.rglob("*") if path.is_file()
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            destination = Path(temporary_directory) / "composite"
+            compose_sword_fixture(baseline, calvin, destination)
+            validate_calvin_fixture(destination)
+            self.assertTrue((destination / "mods.d/kjv.conf").is_file())
+            self.assertFalse((baseline / "mods.d/calvincommentaries.conf").exists())
+        self.assertEqual(
+            {path.relative_to(baseline).as_posix(): path.read_bytes()
+             for path in baseline.rglob("*") if path.is_file()},
+            baseline_before,
+        )
+        self.assertEqual(
+            {path.relative_to(calvin).as_posix(): path.read_bytes()
+             for path in calvin.rglob("*") if path.is_file()},
+            calvin_before,
+        )
+
+    def test_calvin_ui_product_round_trip_restores_composed_fixture(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        calvin = repository_root / "Tests/UI/Fixtures/calvin-sword"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+            fixture_manifest.write_text(
+                json.dumps({"AndBibleUITests/testCalvin": "calvin-commentary-scroll-restoration"}),
+                encoding="utf-8",
+            )
+            archive = root / "ui-test-products.tar.gz"
+            package_products(
+                products_path=products,
+                fixture_tool=fixture,
+                fixture_manifest=fixture_manifest,
+                sword_fixture=sword_fixture,
+                calvin_fixture=calvin,
+                output_path=archive,
+                commit_sha="abc123",
+                configuration="Debug",
+                code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+            destination = root / "restored"
+            destination.mkdir()
+            verify_products(
+                archive_path=archive,
+                destination=destination,
+                expected_commit_sha="abc123",
+                expected_configuration="Debug",
+                expected_code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+            restored = destination / ".ui-test/fixtures/sword"
+            validate_calvin_fixture(restored)
+            self.assertTrue((restored / "mods.d/kjv.conf").is_file())
 
     def test_calvin_manifest_requires_self_contained_module(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -182,7 +274,19 @@ class ManageUITestProductsTests(unittest.TestCase):
         fixture_manifest.parent.mkdir(parents=True)
         fixture_manifest.write_text('{"testExample": "baseline"}\n', encoding="utf-8")
         sword_fixture = root / "source/Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
-        for relative_path in ("mods.d/kjv.conf", "modules/texts/ztext/kjv/ot.bzs"):
+        for relative_path in (
+            "mods.d/kjv.conf",
+            "modules/texts/ztext/kjv/nt.bzs",
+            "modules/texts/ztext/kjv/nt.bzv",
+            "modules/texts/ztext/kjv/nt.bzz",
+            "modules/texts/ztext/kjv/ot.bzs",
+            "modules/texts/ztext/kjv/ot.bzv",
+            "modules/texts/ztext/kjv/ot.bzz",
+            "ui-test-encrypted-rawtext/nt",
+            "ui-test-encrypted-rawtext/nt.vss",
+            "ui-test-encrypted-rawtext/ot",
+            "ui-test-encrypted-rawtext/ot.vss",
+        ):
             resource = sword_fixture / relative_path
             resource.parent.mkdir(parents=True, exist_ok=True)
             resource.write_text(relative_path, encoding="utf-8")
