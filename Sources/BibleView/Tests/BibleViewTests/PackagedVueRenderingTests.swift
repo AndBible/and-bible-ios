@@ -26,7 +26,7 @@ final class PackagedVueRenderingTests: XCTestCase {
     func testAppendedChapterSurvivesConfigurationAndScrollsIntoView() async throws {
         let surface = Surface()
         defer { surface.close() }
-        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+        try await waitForClientReady(surface)
 
         XCTAssertTrue(surface.bridge.replaceDocument(
             configData: config(night: false, initial: true),
@@ -79,7 +79,7 @@ final class PackagedVueRenderingTests: XCTestCase {
     func testRapidReplacementsRenderOnlyLatestContentAtRequestedPosition() async throws {
         let surface = Surface()
         defer { surface.close() }
-        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+        try await waitForClientReady(surface)
         for (id, number, start) in [("old-a", 1, 1), ("old-b", 2, 101), ("current", 3, 201)] {
             XCTAssertTrue(surface.bridge.replaceDocument(
                 configData: config(night: false, initial: true),
@@ -125,6 +125,97 @@ final class PackagedVueRenderingTests: XCTestCase {
     }
 
     /**
+     Retains the real bridge readiness callback for one packaged-renderer fixture.
+
+     The packaged surface intentionally has no BibleUI controller. Unused application callbacks are
+     no-ops because these tests author all content and exercise only the web renderer lifecycle.
+     */
+    private final class ClientReadinessDelegate: BibleBridgeDelegate {
+        var isReady = false
+
+        func bridge(_ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool) {}
+        func bridge(_ bridge: BibleBridge, requestMoreToBeginning callId: Int) {}
+        func bridge(_ bridge: BibleBridge, requestMoreToEnd callId: Int) {}
+        func bridgeDidRequestGoToNextChapter(_ bridge: BibleBridge) {}
+        func bridgeDidRequestGoToPreviousChapter(_ bridge: BibleBridge) {}
+        func bridge(_ bridge: BibleBridge, addBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {}
+        func bridge(_ bridge: BibleBridge, addGenericBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int, addNote: Bool) {}
+        func bridge(_ bridge: BibleBridge, createGenericWholePageBookmark request: GenericWholePageBookmarkRequest) {}
+        func bridge(_ bridge: BibleBridge, addParagraphBreakBookmark bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, addGenericParagraphBreakBookmark bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, removeBookmark bookmarkId: String) {}
+        func bridge(_ bridge: BibleBridge, removeGenericBookmark bookmarkId: String) {}
+        func bridge(_ bridge: BibleBridge, saveBookmarkNote bookmarkId: String, note: String?) {}
+        func bridge(_ bridge: BibleBridge, assignLabels bookmarkId: String) {}
+        func bridge(_ bridge: BibleBridge, toggleBookmarkLabel bookmarkId: String, labelId: String) {}
+        func bridge(_ bridge: BibleBridge, removeBookmarkLabel bookmarkId: String, labelId: String) {}
+        func bridge(_ bridge: BibleBridge, setPrimaryLabel bookmarkId: String, labelId: String) {}
+        func bridge(_ bridge: BibleBridge, setBookmarkWholeVerse bookmarkId: String, value: Bool) {}
+        func bridge(_ bridge: BibleBridge, setBookmarkCustomIcon bookmarkId: String, value: String?) {}
+        func bridge(_ bridge: BibleBridge, shareVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, shareBookmarkVerse bookmarkId: String) {}
+        func bridge(_ bridge: BibleBridge, copyVerse bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, compareVerses bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, speak bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, speakGeneric bookInitials: String, osisRef: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, speakMemorizationLoop bookInitials: String, v11n: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, memorize bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, markAsMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, addMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, removeMemorizationTarget bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, unmarkMemorized bookInitials: String, startOrdinal: Int, endOrdinal: Int) {}
+        func bridge(_ bridge: BibleBridge, recordChapterRead bookInitials: String, startOrdinal: Int, chapter: Int, source: String) {}
+        func bridge(_ bridge: BibleBridge, openChapterReadHistory bookInitials: String, startOrdinal: Int, chapter: Int) {}
+        func bridge(_ bridge: BibleBridge, openReadingProgress tab: Int) {}
+        func bridgeDidRequestOpenReadingProgressSettings(_ bridge: BibleBridge) {}
+        func bridge(_ bridge: BibleBridge, setReadingProgressSettings json: String) {}
+        func bridge(_ bridge: BibleBridge, unmarkChapterRead bookInitials: String, startOrdinal: Int, chapter: Int) {}
+        func bridge(_ bridge: BibleBridge, getMyDocumentPageRawContent callId: Int, bookInitials: String, pageKey: String) {}
+        func bridge(_ bridge: BibleBridge, copyMyDocumentContent bookInitials: String, pageKey: String) {}
+        func bridge(_ bridge: BibleBridge, shareMyDocumentContent bookInitials: String, pageKey: String) {}
+        func bridge(_ bridge: BibleBridge, saveMyDocumentPageContent bookInitials: String, pageId: String, content: String, title: String?) {}
+        func bridge(_ bridge: BibleBridge, reloadMyDocumentPage bookInitials: String) {}
+        func bridge(_ bridge: BibleBridge, regenerateMyDocumentPage pageId: String) {}
+        func bridge(_ bridge: BibleBridge, deleteMyDocumentPage pageId: String) {}
+        func bridge(_ bridge: BibleBridge, openStudyPad labelId: String, bookmarkId: String) {}
+        func bridge(_ bridge: BibleBridge, openMyNotes v11n: String, ordinal: Int) {}
+        func bridge(_ bridge: BibleBridge, openAIDocumentPage request: AIDocumentPageRequest) {}
+        func bridge(_ bridge: BibleBridge, openExternalLink link: String) {}
+        func bridgeDidRequestOpenDownloads(_ bridge: BibleBridge) {}
+        func bridge(_ bridge: BibleBridge, refChooserDialog callId: Int) {}
+        func bridge(_ bridge: BibleBridge, parseRef callId: Int, text: String) {}
+        func bridge(_ bridge: BibleBridge, helpDialog content: String, title: String?) {}
+        func bridgeDidRequestBookmarkHelp(_ bridge: BibleBridge) {}
+        func bridge(_ bridge: BibleBridge, showHelp scope: BibleBridgeHelpScope) {}
+        func bridge(_ bridge: BibleBridge, requestAIAction request: AISelectionActionRequest) {}
+        func bridge(_ bridge: BibleBridge, requestNoteEditorAIAction request: AINoteEditorActionRequest) {}
+        func bridge(_ bridge: BibleBridge, chooseAIDocumentPage markers: [AIDocumentPageMarker]) {}
+        func bridge(_ bridge: BibleBridge, openPromptEditor promptID: UUID) {}
+        func bridge(_ bridge: BibleBridge, selectionChanged text: String) {}
+        func bridgeSelectionCleared(_ bridge: BibleBridge) {}
+        func bridge(_ bridge: BibleBridge, createNewStudyPadEntry labelId: String, entryType: String, afterEntryId: String) {}
+        func bridge(_ bridge: BibleBridge, deleteStudyPadEntry studyPadId: String) {}
+        func bridge(_ bridge: BibleBridge, updateStudyPadTextEntry data: String) {}
+        func bridge(_ bridge: BibleBridge, updateStudyPadTextEntryText id: String, text: String) {}
+        func bridge(_ bridge: BibleBridge, updateOrderNumber labelId: String, data: String) {}
+        func bridge(_ bridge: BibleBridge, updateBookmarkToLabel data: String) {}
+        func bridge(_ bridge: BibleBridge, updateGenericBookmarkToLabel data: String) {}
+        func bridge(_ bridge: BibleBridge, setBookmarkEditAction bookmarkId: String, value: String) {}
+        func bridge(_ bridge: BibleBridge, setEditing enabled: Bool) {}
+        func bridge(_ bridge: BibleBridge, setStudyPadCursor labelId: String, orderNumber: Int) {}
+        func bridge(_ bridge: BibleBridge, saveState state: String) {}
+        func bridgeDidSetClientReady(_ bridge: BibleBridge) { isReady = true }
+        func bridge(_ bridge: BibleBridge, reportModalState isOpen: Bool) {}
+        func bridge(_ bridge: BibleBridge, reportInputFocus focused: Bool) {}
+        func bridge(_ bridge: BibleBridge, onKeyDown key: String) {}
+        func bridge(_ bridge: BibleBridge, showToast text: String) {}
+        func bridge(_ bridge: BibleBridge, shareHtml html: String) {}
+        func bridge(_ bridge: BibleBridge, toggleCompareDocument documentId: String) {}
+        func bridge(_ bridge: BibleBridge, openEpubLink bookInitials: String, toKey: String, toId: String) {}
+        func bridgeDidRequestToggleFullScreen(_ bridge: BibleBridge) {}
+    }
+
+    /**
      Owns an attached production WebView for one test and releases its native window on completion.
 
      Uses the same bootstrap, coordinator, resource resolution and retained session as the app.
@@ -132,6 +223,7 @@ final class PackagedVueRenderingTests: XCTestCase {
      */
     private final class Surface {
         let bridge = BibleBridge()
+        let clientReadiness = ClientReadinessDelegate()
         let session: BibleWebViewSession
         let webView: WKWebView
         let window: UIWindow
@@ -139,6 +231,7 @@ final class PackagedVueRenderingTests: XCTestCase {
 
         /** Creates and displays one isolated reader host; production bundle loading starts once. */
         init() {
+            bridge.delegate = clientReadiness
             let newSession = BibleWebViewSession(bridge: bridge)
             session = newSession
             let representation = BibleWebView(session: newSession)
@@ -167,7 +260,7 @@ final class PackagedVueRenderingTests: XCTestCase {
     private func assertTouchHeldCommentaryPrependPreservesViewport(releaseEvent: String) async throws {
         let surface = Surface()
         defer { surface.close() }
-        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+        try await waitForClientReady(surface)
 
         XCTAssertTrue(surface.bridge.replaceDocument(
             configData: manualNavigationConfig(initial: true),
@@ -238,7 +331,7 @@ final class PackagedVueRenderingTests: XCTestCase {
     private func assertClearedTouchHeldCommentaryResponseCannotRevive(releaseEvent: String) async throws {
         let surface = Surface()
         defer { surface.close() }
-        try await waitUntil(surface.webView, expression: "typeof window.bibleView.emit === 'function'")
+        try await waitForClientReady(surface)
 
         XCTAssertTrue(surface.bridge.replaceDocument(
             configData: manualNavigationConfig(initial: true),
@@ -393,6 +486,27 @@ final class PackagedVueRenderingTests: XCTestCase {
             return element.isConnected && Math.abs(element.getBoundingClientRect().top - r.top) < 1;
         })()
         """)
+    }
+
+    /**
+     Awaits the packaged client's real bridge-ready message across cold WebKit process startup.
+
+     Startup has its own bounded budget because a fresh simulator can spend most of the ordinary
+     DOM assertion budget launching GPU and WebContent processes. Later rendered-content checks
+     retain their narrower timeout and begin only after Vue has reported production readiness.
+     */
+    private func waitForClientReady(_ surface: Surface) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        while ContinuousClock.now < deadline {
+            if surface.clientReadiness.isReady { return }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        let diagnostics = (try? await surface.webView.callAsyncJavaScript(
+            "return JSON.stringify({readyState: document.readyState, bridgeType: typeof window.bibleView?.emit, url: location.href});",
+            arguments: [:], in: nil, contentWorld: .page
+        )) as? String ?? "WebKit diagnostics unavailable"
+        XCTFail("Timed out waiting for packaged client readiness: \(diagnostics)")
+        throw NSError(domain: "PackagedVueRenderingTests.ClientReady", code: 1)
     }
 
     /**
