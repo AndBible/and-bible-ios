@@ -156,9 +156,11 @@ extension WebViewCoordinator: UIScrollViewDelegate, UIGestureRecognizerDelegate 
 
      Swipes are also reported as native user interaction before navigation handling so the touched
      pane becomes active even if the swipe gesture itself is rejected by higher-level navigation
-     settings. Unknown directions are ignored after the focus signal.
+     settings. Unknown directions are ignored after the focus signal. Diagnostic logs record recognized
+     direction and callback availability so missed navigation can be distinguished from missed input.
      */
     @objc private func handleHorizontalSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        logger.info("Native horizontal swipe recognized: direction=\(recognizer.direction.rawValue, privacy: .public) callback=\(self.bridge.onNativeHorizontalSwipe != nil, privacy: .public)")
         bridge.onNativeUserInteraction?()
         switch recognizer.direction {
         case .left:

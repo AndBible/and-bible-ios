@@ -8,9 +8,13 @@ import SwiftData
 import BibleView
 import BibleCore
 import SwordKit
+import os.log
 #if os(iOS)
 import StoreKit
 #endif
+
+/// Records native gesture dispatch and policy rejection without logging reader content or identifiers.
+private let readerGestureLogger = Logger(subsystem: "org.andbible", category: "ReaderGesture")
 
 /// Captures the reader overflow trigger bounds so the popup can anchor to the real button.
 private struct ReaderOverflowButtonBoundsPreferenceKey: PreferenceKey {
@@ -6009,7 +6013,8 @@ public struct BibleReaderView: View {
        - window: Pane whose native swipe gesture triggered the callback.
        - direction: Swipe direction detected by the native web-view wrapper.
      - Side effects: May trigger chapter navigation through the focused `BibleReaderController` or
-       emit page-scroll commands into the active web view.
+       emit page-scroll commands into the active web view. Records the dispatch or rejection reason
+       in diagnostic logs without reader content or model identifiers.
      - Failure modes: Returns without action when the gesture did not originate from the active
        window, no focused controller is registered, an in-page text selection is active, the Vue
        client reports an open modal, the rendered document blocks host page navigation, or the
@@ -6019,15 +6024,23 @@ public struct BibleReaderView: View {
         from window: BibleCore.Window,
         direction: NativeHorizontalSwipeDirection
     ) {
-        guard windowManager.activeWindow?.id == window.id else { return }
-        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else { return }
-        switch ReaderHorizontalSwipePolicy.action(
+        guard windowManager.activeWindow?.id == window.id else {
+            readerGestureLogger.info("Horizontal swipe rejected: inactive pane")
+            return
+        }
+        guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else {
+            readerGestureLogger.info("Horizontal swipe rejected: missing controller")
+            return
+        }
+        let action = ReaderHorizontalSwipePolicy.action(
             modeRawValue: bibleViewSwipeMode,
             direction: direction,
             hasActiveSelection: ctrl.hasActiveSelection,
             hasOpenModal: ctrl.webModalIsOpen,
             allowsDocumentNavigation: ctrl.allowsHorizontalDocumentNavigation
-        ) {
+        )
+        readerGestureLogger.info("Horizontal swipe dispatch: action=\(String(describing: action), privacy: .public) mode=\(bibleViewSwipeMode, privacy: .public) selection=\(ctrl.hasActiveSelection, privacy: .public) modal=\(ctrl.webModalIsOpen, privacy: .public) pageable=\(ctrl.allowsHorizontalDocumentNavigation, privacy: .public)")
+        switch action {
         case .navigateNextChapter:
             ctrl.navigateNext()
         case .navigatePreviousChapter:

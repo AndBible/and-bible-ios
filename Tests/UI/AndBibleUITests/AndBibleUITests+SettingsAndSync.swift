@@ -413,7 +413,8 @@ extension AndBibleUITests {
      service contracts. Unprovisioned simulator apps cannot launch with CloudKit entitlements, so
      this test explicitly substitutes a local SwiftData container only at that unavailable boundary.
      It still exercises the production toggle, mode-change handler, runtime construction, deferred
-     shell swap, persistence, state transition, and app-owned route-survival wiring.
+     shell swap, persistence, state transition, and app-owned route-survival wiring. After dismissing
+     Settings, one real chapter swipe must render Genesis 2 without crashing the rebuilt reader.
      */
     func testSyncSettingsICloudToggleDoesNotRequireRestart() {
         let app = makeApp()
@@ -448,6 +449,20 @@ extension AndBibleUITests {
             app.otherElements["appOwnedSyncSettingsRoute"].exists,
             "The live runtime apply must preserve the app-owned Sync Settings activity."
         )
+
+        dismissSyncSettings(in: app)
+        waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
+        app.webViews.firstMatch.swipeLeft()
+        waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
+        let scripture = app.webViews.firstMatch.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "Thus the heavens")
+        ).firstMatch
+        XCTAssertTrue(
+            scripture.waitForExistence(timeout: 20)
+                && isElementVisible(scripture, within: app.webViews.firstMatch),
+            "Expected visible Genesis 2 after navigating with the rebuilt runtime."
+        )
+        XCTAssertEqual(app.state, .runningForeground)
     }
 
     /**

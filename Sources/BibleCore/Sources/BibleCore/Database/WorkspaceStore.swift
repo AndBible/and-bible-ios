@@ -380,9 +380,12 @@ public final class WorkspaceStore {
     // MARK: - History
 
     /**
-     * Appends a history item to a window.
+     * Appends a history item to a window owned by this store's context.
+     *
+     * Registers the new item before linking the already-persisted window, so SwiftData does not
+     * recursively adopt the window graph while inserting an unregistered history item.
      * - Parameters:
-     *   - window: Owning window.
+     *   - window: Owning window registered in this store's model context.
      *   - document: Document initials at the time of navigation.
      *   - key: Durable document key for the history location.
      *   - anchorOrdinal: Optional scroll anchor for restoring position.
@@ -392,8 +395,8 @@ public final class WorkspaceStore {
     public func addHistoryItem(to window: Window, document: String, key: String, anchorOrdinal: Int? = nil) {
         let item = HistoryItem(document: document, key: key)
         item.anchorOrdinal = anchorOrdinal
-        item.window = window
         modelContext.insert(item)
+        item.window = window
         save()
     }
 
