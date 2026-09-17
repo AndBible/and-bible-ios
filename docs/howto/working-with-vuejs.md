@@ -28,10 +28,12 @@ python3 ../scripts/manage_bibleview_bundle.py sync \
 ```
 
 CI rebuilds Debug twice and requires deterministic bytes with no checkout-specific Vue `__file`
-metadata. Xcode test jobs install that verified Debug artifact before SwiftPM resolution. CI also
-rebuilds Production and requires the committed fallback to match source exactly. The release workflow
-always rebuilds Production before either archive and verifies the embedded SwiftPM resource in both
-finished archives.
+metadata. BibleView and BibleUI package jobs install that verified Debug artifact before SwiftPM
+resolution so package-level bridge diagnostics remain available. CI also rebuilds Production and
+requires the committed fallback to match source exactly. App-host unit and UI jobs validate and test
+that checked-in Production bundle, matching the resource packaged by normal application builds. The
+release workflow always rebuilds Production before either archive and verifies the embedded SwiftPM
+resource in both finished archives.
 
 Available scripts come from:
 - `bibleview-js/package.json`
@@ -47,6 +49,11 @@ Relevant code:
 ## Logging
 
 `console.log`, `console.warn`, and `console.error` are forwarded back to native logging through the `jsLog` bridge message.
+
+UI shards also retain `reader-gestures.log` alongside their XCTest results before deleting the
+dedicated simulator. It contains notice-level native swipe recognition and policy dispatch records,
+filtered to exclude reader text, references, and model identifiers. This file is collected on passing
+and failing runs because XCTest does not always include simulator system logs in its result bundle.
 
 Relevant code:
 - `Sources/BibleView/Sources/BibleView/BibleWebView.swift:189-227`
