@@ -146,6 +146,17 @@ def workflow_job_block(workflow_text: str, job_name: str) -> str:
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
 
+    def test_reader_gesture_diagnostics_retain_swipe_and_action_lifecycle_records(self) -> None:
+        """Keep both established swipe traces and reader action lifecycle evidence exportable."""
+        workflow_text = (REPO_ROOT / ".github" / "workflows" / "ios-ci.yml").read_text(encoding="utf-8")
+        collect_run = workflow_step_run_block(workflow_text, "Collect reader gesture diagnostics")
+
+        self.assertIn('subsystem == "org.andbible"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "Native horizontal swipe"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "Horizontal swipe"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "reader "', collect_run)
+        self.assertIn("> .artifacts/reader-gestures.log 2>&1", collect_run)
+
     def test_ios_ci_upload_artifact_retention_matches_artifact_type(self) -> None:
         """Keep build products short-lived while retaining diagnostic result bundles."""
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")

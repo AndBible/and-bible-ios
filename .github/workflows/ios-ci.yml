@@ -1344,7 +1344,7 @@ jobs:
           mkdir -p .artifacts
           xcrun simctl spawn "${GESTURE_SIMULATOR_ID}" log show \
             --style compact --last 90m \
-            --predicate 'subsystem == "org.andbible" AND (eventMessage BEGINSWITH "Native horizontal swipe" OR eventMessage BEGINSWITH "Horizontal swipe")' \
+            --predicate 'subsystem == "org.andbible" AND (eventMessage BEGINSWITH "Native horizontal swipe" OR eventMessage BEGINSWITH "Horizontal swipe" OR eventMessage BEGINSWITH "reader ")' \
             > .artifacts/reader-gestures.log 2>&1
 
       - name: Upload xcodebuild test result bundle
