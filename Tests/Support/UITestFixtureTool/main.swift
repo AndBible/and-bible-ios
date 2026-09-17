@@ -432,6 +432,9 @@ private final class FixtureContext {
     private let fileManager = FileManager.default
     private let explicitSwordFixtureURL: URL?
     private var swordManager: SwordManager?
+    private var kjvModule: SwordModule?
+    private var kjvBooks: [BookInfo]?
+    private var kjvVerseCounts: [String: Int] = [:]
 
     /**
      Creates the store-backed fixture writer for one simulator container.
@@ -2096,8 +2099,9 @@ private final class FixtureContext {
         modelContext.autosaveEnabled = false
         defer { modelContext.autosaveEnabled = previousAutosave }
 
+        let referenceCount = min(41, max(1, count - 9))
         var references: [(book: String, range: VerifiedKJVAOrdinalRange)] = []
-        for referenceIndex in 0...40 {
+        for referenceIndex in 0..<referenceCount {
             let book = referenceIndex == 0 ? "Genesis" : "Exodus"
             let chapter = max(referenceIndex, 1)
             let ordinal = try resolveKJVOrdinal(bookName: book, chapter: chapter, verse: 1)
@@ -2558,6 +2562,9 @@ private final class FixtureContext {
      - Throws: `FixtureToolError.missingSwordModule` if SWORD cannot load KJV.
      */
     private func kjvSwordModule() throws -> SwordModule {
+        if let kjvModule {
+            return kjvModule
+        }
         let swordURL = try ensureKJVSwordFixtureModuleAvailable()
         let manager: SwordManager
         if let existingManager = swordManager {
@@ -2572,6 +2579,7 @@ private final class FixtureContext {
         guard let module = manager.module(named: "KJV") else {
             throw FixtureToolError.missingSwordModule("KJV")
         }
+        kjvModule = module
         return module
     }
 
@@ -2590,7 +2598,8 @@ private final class FixtureContext {
      */
     private func resolveOsisBookId(bookName: String, chapter: Int, module: SwordModule) throws -> String {
         let normalizedBookName = bookName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let book = module.getBookList().first(where: { book in
+        let books = cachedKJVBooks(module: module)
+        if let book = books.first(where: { book in
             book.name.lowercased() == normalizedBookName ||
             book.abbreviation.lowercased() == normalizedBookName ||
             book.osisId.lowercased() == normalizedBookName
@@ -2633,7 +2642,7 @@ private final class FixtureContext {
         var ordinal = 0
         var currentTestament: Int?
 
-        for book in module.getBookList() {
+        for book in cachedKJVBooks(module: module) {
             if currentTestament != book.testament {
                 ordinal += 1
                 currentTestament = book.testament
@@ -2645,10 +2654,17 @@ private final class FixtureContext {
             for candidateChapter in 1...book.chapterCount {
                 ordinal += 1
 
-                guard let verseCount = module.verseCount(
+                let verseCountKey = "\(book.osisId).\(candidateChapter)"
+                let verseCount: Int
+                if let cachedVerseCount = kjvVerseCounts[verseCountKey] {
+                    verseCount = cachedVerseCount
+                } else if let resolvedVerseCount = module.verseCount(
                     osisBookId: book.osisId,
                     chapter: candidateChapter
-                ) else {
+                ) {
+                    kjvVerseCounts[verseCountKey] = resolvedVerseCount
+                    verseCount = resolvedVerseCount
+                } else {
                     throw FixtureToolError.unresolvedVerse("\(book.osisId).\(candidateChapter).1")
                 }
 
@@ -2664,6 +2680,16 @@ private final class FixtureContext {
         }
 
         throw FixtureToolError.unresolvedVerse("\(osisBookId).\(chapter).\(verse)")
+    }
+
+    /** Returns KJV book metadata cached for this fixture-context lifetime. */
+    private func cachedKJVBooks(module: SwordModule) -> [BookInfo] {
+        if let kjvBooks {
+            return kjvBooks
+        }
+        let books = module.getBookList()
+        kjvBooks = books
+        return books
     }
 
     /**
