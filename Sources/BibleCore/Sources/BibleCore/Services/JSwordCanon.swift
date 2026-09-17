@@ -12,7 +12,7 @@ import SwordKit
  generated from `Versifications` at the revision recorded in the file and is therefore the sole
  ordering authority for `JSwordVersificationMapping`.
 
- Systems are expanded lazily because constructing every intro-inclusive reference for every canon
+ Systems are indexed lazily because constructing even the compact chapter offsets for every canon
  at startup would be unnecessary. A malformed or revision-mismatched fixture fails closed.
  */
 enum JSwordCanon {
@@ -34,46 +34,164 @@ enum JSwordCanon {
         let chapters: [Int]
     }
 
-    private struct Coordinate: Hashable {
-        let osisBookId: String
+    /// Offset range for one nonnegative fixture chapter, including its verse-zero intro slot.
+    private struct ChapterIndex {
         let chapter: Int
-        let verse: Int
+        let lastVerse: Int
+        let startIndex: Int
+        let endIndex: Int
+    }
 
-        init(_ reference: SwordVersification.Reference) {
-            osisBookId = reference.osisBookId
-            chapter = reference.chapter
-            verse = reference.verse
+    /// Ordered chapter offsets for one fixture book.
+    private struct BookIndex {
+        let osisBookId: String
+        let chapters: [ChapterIndex]
+        let startIndex: Int
+        let endIndex: Int
+
+        /// Finds one valid fixture chapter without materializing its verse coordinates.
+        func chapter(number: Int) -> ChapterIndex? {
+            var lowerBound = 0
+            var upperBound = chapters.count
+            while lowerBound < upperBound {
+                let candidate = lowerBound + (upperBound - lowerBound) / 2
+                let indexedChapter = chapters[candidate]
+                if indexedChapter.chapter < number {
+                    lowerBound = candidate + 1
+                } else {
+                    upperBound = candidate
+                }
+            }
+            guard chapters.indices.contains(lowerBound),
+                  chapters[lowerBound].chapter == number else {
+                return nil
+            }
+            return chapters[lowerBound]
         }
 
-        var reference: SwordVersification.Reference {
-            .init(osisBookId: osisBookId, chapter: chapter, verse: verse)
+        /// Finds the chapter whose intro-inclusive range owns an existing canon index.
+        func chapter(containing index: Int) -> ChapterIndex? {
+            var lowerBound = 0
+            var upperBound = chapters.count
+            while lowerBound < upperBound {
+                let candidate = lowerBound + (upperBound - lowerBound) / 2
+                if chapters[candidate].endIndex <= index {
+                    lowerBound = candidate + 1
+                } else {
+                    upperBound = candidate
+                }
+            }
+            guard chapters.indices.contains(lowerBound),
+                  chapters[lowerBound].startIndex <= index else {
+                return nil
+            }
+            return chapters[lowerBound]
         }
     }
 
-    private struct System {
-        let references: [Coordinate]
-        let indexes: [Coordinate: Int]
+    /**
+     Immutable offset index for one JSword system.
 
-        init(fixture: SystemFixture) {
-            var references: [Coordinate] = []
+     Each valid chapter contributes one range whose first position is verse zero. Negative fixture
+     dimensions contribute no range. Building
+     fails closed when fixture arithmetic overflows or duplicate book identifiers make lookup
+     ambiguous.
+     */
+    private struct System {
+        let books: [BookIndex]
+        let bookIndexes: [String: Int]
+        let count: Int
+
+        init?(fixture: SystemFixture) {
+            var books: [BookIndex] = []
+            var bookIndexes: [String: Int] = [:]
+            var nextIndex = 0
             for book in fixture.books {
+                guard bookIndexes[book.osis] == nil else { return nil }
+                let bookStartIndex = nextIndex
+                var chapters: [ChapterIndex] = []
                 for (chapter, lastVerse) in book.chapters.enumerated() where lastVerse >= 0 {
-                    for verse in 0...lastVerse {
-                        references.append(
-                            Coordinate(
-                                .init(osisBookId: book.osis, chapter: chapter, verse: verse)
-                            )
+                    let (chapterCount, chapterCountOverflow) = lastVerse.addingReportingOverflow(1)
+                    let (chapterEndIndex, indexOverflow) = nextIndex.addingReportingOverflow(
+                        chapterCount
+                    )
+                    guard !chapterCountOverflow, !indexOverflow else { return nil }
+                    chapters.append(
+                        ChapterIndex(
+                            chapter: chapter,
+                            lastVerse: lastVerse,
+                            startIndex: nextIndex,
+                            endIndex: chapterEndIndex
                         )
-                    }
+                    )
+                    nextIndex = chapterEndIndex
+                }
+                bookIndexes[book.osis] = books.count
+                books.append(
+                    BookIndex(
+                        osisBookId: book.osis,
+                        chapters: chapters,
+                        startIndex: bookStartIndex,
+                        endIndex: nextIndex
+                    )
+                )
+            }
+            self.books = books
+            self.bookIndexes = bookIndexes
+            self.count = nextIndex
+        }
+
+        /** Returns a strict intro-inclusive index only when the exact coordinate exists. */
+        func referenceIndex(for reference: SwordVersification.Reference) -> Int? {
+            guard reference.verse >= 0,
+                  let bookIndex = bookIndexes[reference.osisBookId],
+                  let chapter = books[bookIndex].chapter(number: reference.chapter),
+                  reference.verse <= chapter.lastVerse else {
+                return nil
+            }
+            let (index, overflow) = chapter.startIndex.addingReportingOverflow(reference.verse)
+            return overflow ? nil : index
+        }
+
+        /** Returns a chapter-introduction offset for parser-only unchecked verse arithmetic. */
+        func chapterIntroductionIndex(osisBookId: String, chapter: Int) -> Int? {
+            guard let bookIndex = bookIndexes[osisBookId] else { return nil }
+            return books[bookIndex].chapter(number: chapter)?.startIndex
+        }
+
+        /** Reconstructs one exact coordinate from the compact book and chapter ranges. */
+        func reference(at index: Int) -> SwordVersification.Reference? {
+            guard index >= 0, index < count else { return nil }
+            var lowerBound = 0
+            var upperBound = books.count
+            while lowerBound < upperBound {
+                let candidate = lowerBound + (upperBound - lowerBound) / 2
+                if books[candidate].endIndex <= index {
+                    lowerBound = candidate + 1
+                } else {
+                    upperBound = candidate
                 }
             }
-            self.references = references
-            self.indexes = Dictionary(
-                uniqueKeysWithValues: references.enumerated().map { ($0.element, $0.offset) }
+            guard books.indices.contains(lowerBound) else { return nil }
+            let book = books[lowerBound]
+            guard book.startIndex <= index,
+                  let chapter = book.chapter(containing: index) else {
+                return nil
+            }
+            return .init(
+                osisBookId: book.osisBookId,
+                chapter: chapter.chapter,
+                verse: index - chapter.startIndex
             )
         }
     }
 
+    /**
+     Owns lazy system construction and publication.
+
+     The lock covers lookup, construction, and insertion so each published `System` remains an
+     immutable value and concurrent callers cannot observe partially built offsets.
+     */
     private final class Cache: @unchecked Sendable {
         private let lock = NSLock()
         private var systems: [String: System] = [:]
@@ -85,7 +203,7 @@ enum JSwordCanon {
                 return system
             }
             guard let systemFixture = fixture.systems[name] else { return nil }
-            let system = System(fixture: systemFixture)
+            guard let system = System(fixture: systemFixture) else { return nil }
             systems[name] = system
             return system
         }
@@ -130,7 +248,7 @@ enum JSwordCanon {
        - reference: Coordinate in the named JSword system.
        - versification: JSword system name; empty means KJV.
      - Returns: Zero-based internal index, or `nil` when the system or coordinate is invalid.
-     - Side effects: Lazily expands and caches the requested canon.
+     - Side effects: Lazily builds and caches the requested canon's compact offset index.
      - Failure modes: Invalid fixture data and unsupported references return `nil`.
      */
     static func referenceIndex(
@@ -142,7 +260,7 @@ enum JSwordCanon {
               let system = cache.system(named: name, fixture: fixture) else {
             return nil
         }
-        return system.indexes[Coordinate(reference)]
+        return system.referenceIndex(for: reference)
     }
 
     /**
@@ -188,7 +306,7 @@ enum JSwordCanon {
        - versification: JSword system name; empty means KJV.
      - Returns: Zero-based JSword ordinal index, or `nil` when the book/chapter is invalid or the
        computed ordinal falls outside the canon.
-     - Side effects: Lazily expands and caches the requested canon.
+     - Side effects: Lazily builds and caches the requested canon's compact offset index.
      - Failure modes: Negative verses, unknown systems, invalid chapters, and out-of-canon results
        return `nil`.
      */
@@ -200,19 +318,14 @@ enum JSwordCanon {
               let fixture,
               let name = normalizedName(versification),
               let system = cache.system(named: name, fixture: fixture),
-              let chapterIntroductionIndex = system.indexes[
-                  Coordinate(
-                      .init(
-                          osisBookId: reference.osisBookId,
-                          chapter: reference.chapter,
-                          verse: 0
-                      )
-                  )
-              ] else {
+              let chapterIntroductionIndex = system.chapterIntroductionIndex(
+                  osisBookId: reference.osisBookId,
+                  chapter: reference.chapter
+              ) else {
             return nil
         }
         let (index, overflow) = chapterIntroductionIndex.addingReportingOverflow(reference.verse)
-        guard !overflow, system.references.indices.contains(index) else { return nil }
+        guard !overflow, index >= 0, index < system.count else { return nil }
         return index
     }
 
@@ -223,7 +336,7 @@ enum JSwordCanon {
        - index: Zero-based internal index returned by `referenceIndex`.
        - versification: JSword system name; empty means KJV.
      - Returns: Exact coordinate, or `nil` when the system or index is invalid.
-     - Side effects: Lazily expands and caches the requested canon.
+     - Side effects: Lazily builds and caches the requested canon's compact offset index.
      - Failure modes: Invalid fixture data, unknown systems, and out-of-range indexes return `nil`.
      */
     static func reference(
@@ -233,10 +346,9 @@ enum JSwordCanon {
         guard index >= 0,
               let fixture,
               let name = normalizedName(versification),
-              let system = cache.system(named: name, fixture: fixture),
-              system.references.indices.contains(index) else {
+              let system = cache.system(named: name, fixture: fixture) else {
             return nil
         }
-        return system.references[index].reference
+        return system.reference(at: index)
     }
 }
