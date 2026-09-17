@@ -989,6 +989,9 @@ public struct BibleReaderView: View {
             .overlay {
                 if showReaderNavigationDrawer {
                     readerNavigationDrawerOverlay
+                        .onAppear {
+                            readerGestureLogger.notice("reader presentation appeared surface=drawer")
+                        }
                 }
                 textSettingsCopyDialogOverlay
                 historyDialogOverlay
@@ -1001,16 +1004,25 @@ public struct BibleReaderView: View {
             .overlayPreferenceValue(ReaderOverflowButtonBoundsPreferenceKey.self) { anchor in
                 if showReaderOverflowMenu {
                     readerOverflowMenuOverlay(anchor: anchor)
+                        .onAppear {
+                            readerGestureLogger.notice("reader presentation appeared surface=overflow")
+                        }
                 }
             }
             .overlayPreferenceValue(ReaderBibleToolbarButtonBoundsPreferenceKey.self) { anchor in
                 if showBibleQuickModuleSelector {
                     bibleQuickModuleSelectorOverlay(anchor: anchor)
+                        .onAppear {
+                            readerGestureLogger.notice("reader presentation appeared surface=bibleQuickSelector")
+                        }
                 }
             }
             .overlayPreferenceValue(ReaderCommentaryToolbarButtonBoundsPreferenceKey.self) { anchor in
                 if showCommentaryQuickModuleSelector {
                     commentaryQuickModuleSelectorOverlay(anchor: anchor)
+                        .onAppear {
+                            readerGestureLogger.notice("reader presentation appeared surface=commentaryQuickSelector")
+                        }
                 }
             }
             .sheet(item: $manualBugReportMailPayload, onDismiss: finishBugReportMailPresentation) { payload in
@@ -3651,6 +3663,9 @@ public struct BibleReaderView: View {
         showReaderNavigationDrawer = false
         dismissCommentaryQuickSelector()
         showBibleQuickModuleSelector = true
+        readerGestureLogger.notice(
+            "reader presentation requested surface=bibleQuickSelector rows=\(rows.count, privacy: .public)"
+        )
     }
 
     /// Dismisses the Bible quick selector without changing the captured pane target.
@@ -3948,6 +3963,9 @@ public struct BibleReaderView: View {
         showReaderNavigationDrawer = false
         dismissBibleQuickSelector()
         showCommentaryQuickModuleSelector = true
+        readerGestureLogger.notice(
+            "reader presentation requested surface=commentaryQuickSelector rows=\(rows.count, privacy: .public)"
+        )
     }
 
     /// Dismisses the commentary quick selector without changing the captured pane target.
@@ -4697,10 +4715,12 @@ public struct BibleReaderView: View {
             avoidanceInsets: readerWindowControlsAvoidanceInsets,
             surfacePalette: readerThemeSurfacePalette,
             onOpenNavigationDrawer: {
+                readerGestureLogger.notice("reader action dispatched action=openDrawer")
                 pendingReaderNavigationDrawerActionID = nil
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showReaderNavigationDrawer = true
                 }
+                readerGestureLogger.notice("reader presentation requested surface=drawer")
             },
             onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(controller) },
             onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
@@ -5346,15 +5366,19 @@ public struct BibleReaderView: View {
                 presentWindowTextSettingEditor(.strongs, for: window)
             },
             onBibleTap: {
+                readerGestureLogger.notice("reader action dispatched action=bibleToolbarTap")
                 handleBibleToolbarTap(controller)
             },
             onBibleLongPress: {
+                readerGestureLogger.notice("reader action dispatched action=bibleToolbarLongPress")
                 handleBibleToolbarLongPress(controller)
             },
             onCommentaryTap: {
+                readerGestureLogger.notice("reader action dispatched action=commentaryToolbarTap")
                 handleCommentaryToolbarTap(controller)
             },
             onCommentaryLongPress: {
+                readerGestureLogger.notice("reader action dispatched action=commentaryToolbarLongPress")
                 handleCommentaryToolbarLongPress(controller)
             },
             onShowWorkspaces: { presentReaderDestination(.workspaces, from: windowManager.activeWindow?.id) }
@@ -5373,7 +5397,11 @@ public struct BibleReaderView: View {
     /// Trailing overflow trigger that must remain visible even when toolbar actions collapse.
     private var readerOverflowToolbarButton: some View {
         Button {
+            readerGestureLogger.notice("reader action dispatched action=toggleOverflow")
             showReaderOverflowMenu.toggle()
+            readerGestureLogger.notice(
+                "reader presentation requested surface=overflow visible=\(showReaderOverflowMenu, privacy: .public)"
+            )
         } label: {
             ToolbarAssetIcon(name: "ToolbarOverflow")
                 .foregroundStyle(toolbarIconColor())
@@ -6009,16 +6037,29 @@ public struct BibleReaderView: View {
      - Parameter controller: Focused pane controller, if one is currently registered.
      */
     private func performBibleMenuAction(_ controller: BibleReaderController?) {
-        guard let controller else { return }
+        guard let controller else {
+            readerGestureLogger.notice("reader action resolved action=bibleMenu result=noController")
+            return
+        }
+        let modules = controller.readableBibleModules
         switch BibleReaderQuickModuleSelectorPresentation.action(
-            for: controller.readableBibleModules,
+            for: modules,
             activeModuleName: currentBibleQuickSelectorModuleName(for: controller)
         ) {
         case .none:
+            readerGestureLogger.notice(
+                "reader action resolved action=bibleMenu result=none candidates=\(modules.count, privacy: .public)"
+            )
             return
         case .switchDirectly(let row):
+            readerGestureLogger.notice(
+                "reader action resolved action=bibleMenu result=direct candidates=\(modules.count, privacy: .public)"
+            )
             controller.switchBibleToolbarDocument(to: row.module.name)
         case .showPopup(let rows):
+            readerGestureLogger.notice(
+                "reader action resolved action=bibleMenu result=popup candidates=\(modules.count, privacy: .public) rows=\(rows.count, privacy: .public)"
+            )
             presentBibleQuickSelector(controller, rows: rows)
         }
     }
@@ -6071,23 +6112,38 @@ public struct BibleReaderView: View {
         _ controller: BibleReaderController?,
         includeAuxiliaryDocuments: Bool = true
     ) {
-        guard let controller else { return }
+        guard let controller else {
+            readerGestureLogger.notice("reader action resolved action=commentaryMenu result=noController")
+            return
+        }
         guard let documents = commentaryQuickSelectorDocuments(
             controller,
             includeAuxiliaryDocuments: includeAuxiliaryDocuments
-        ) else { return }
+        ) else {
+            readerGestureLogger.notice("reader action resolved action=commentaryMenu result=unavailable")
+            return
+        }
         switch BibleReaderQuickModuleSelectorPresentation.action(
             for: documents,
             activeModuleName: currentCommentaryQuickSelectorModuleName(for: controller)
         ) {
         case .none:
+            readerGestureLogger.notice(
+                "reader action resolved action=commentaryMenu result=none candidates=\(documents.count, privacy: .public)"
+            )
             return
         case .switchDirectly(let row):
+            readerGestureLogger.notice(
+                "reader action resolved action=commentaryMenu result=direct candidates=\(documents.count, privacy: .public)"
+            )
             let targetWindowId = windowManager.controllers.first { _, registeredController in
                 (registeredController as? BibleReaderController) === controller
             }?.key ?? windowManager.activeWindow?.id
             selectCommentaryQuickDocument(row.selection, targetWindowId: targetWindowId)
         case .showPopup(let rows):
+            readerGestureLogger.notice(
+                "reader action resolved action=commentaryMenu result=popup candidates=\(documents.count, privacy: .public) rows=\(rows.count, privacy: .public)"
+            )
             presentCommentaryQuickSelector(controller, rows: rows)
         }
     }
