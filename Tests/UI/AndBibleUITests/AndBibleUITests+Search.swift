@@ -2597,14 +2597,23 @@ extension AndBibleUITests {
             identifier: "textDisplayFontSizeButton",
             timeout: 10
         )
-        waitForObservedSettingsValue(
-            fontSizeButton,
-            identifier: "textDisplayFontSizeButton",
-            expectedDescription: "the committed \(committedFontSize) pt font size",
+        var observedFontSizeLabel = "missing"
+        let committedFontSizePublished = waitForUITestCondition(
+            "Wait for textDisplayFontSizeButton to publish the committed font size",
             timeout: 10
-        ) { value in
-            value.contains("\(committedFontSize) pt")
+        ) {
+            guard fontSizeButton.exists else {
+                observedFontSizeLabel = "missing"
+                return false
+            }
+            observedFontSizeLabel = fontSizeButton.label
+            return observedFontSizeLabel.contains("\(committedFontSize) pt")
         }
+        XCTAssertTrue(
+            committedFontSizePublished,
+            "Expected the font-size row label to publish \(committedFontSize) pt; "
+                + "last='\(observedFontSizeLabel)'."
+        )
         tapElementReliably(
             requireObservedSettingsElement(
                 app.buttons["textDisplaySettingsTopAppBarBackButton"].firstMatch,
