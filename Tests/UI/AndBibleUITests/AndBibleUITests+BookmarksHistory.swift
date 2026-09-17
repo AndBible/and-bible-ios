@@ -6,20 +6,51 @@ import UIKit
 #endif
 
 extension AndBibleUITests {
+
     /**
-     Verifies persisted Android manual night mode renders the reader with dark chrome.
+     Verifies a populated Bookmarks destination with notes remains usable without diagnostic exports.
+
+     The controlled fixture contains ten Genesis bookmarks and two notes. One real drawer action
+     must expose visible rows and reachable Back chrome; one Back tap must restore actual scripture.
+     Failure attachments retain the on-screen layout so clipped controls cannot be mistaken for a
+     missing identifier. Fixture preparation and screenshots are outside any performance interval.
+     */
+    func testBookmarksWithNotesRemainVisibleAndReturnToReader() {
+        let app = makeApp(enablesDetailedAccessibilityExports: false)
+        app.launch()
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
+        tapReaderAction("readerOpenBookmarksAction", in: app, timeout: 30)
+        guard waitForUsableBookmarkList(in: app, requiresRows: true) else {
+            XCTContext.runActivity(named: "Unusable populated Bookmarks destination") { activity in
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.lifetime = .keepAlways
+                activity.add(screenshot)
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.lifetime = .keepAlways
+                activity.add(hierarchy)
+            }
+            XCTFail("Expected visible bookmark rows and on-screen Back and filter controls.")
+            return
+        }
+        app.buttons["bookmarkListAppBarBackButton"].tap()
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
+    }
+
+    /**
+     Verifies persisted Android manual night mode keeps the reader drawer reachable.
 
      The fixture uses `night_mode_pref3=manual` plus `night_mode=true`, avoiding a dependency on
-     the simulator's system appearance. The assertion uses the reader header's exported rendered
-     state and stable drawer control instead of localized visual text.
+     the simulator's system appearance. The diagnostic state proves the resolved night policy; the
+     visible drawer interaction proves the reader shell remains usable. This journey does not claim
+     pixel-level coverage of the SwiftUI header or destination chrome.
 
      * - Side effects:
      *   - launches the reader with the dedicated persisted night-mode fixture
      * - Failure modes:
      *   - fails if the reader ignores its Android-equivalent persisted night-mode settings or
-     *     loses the app-owned navigation drawer while night chrome is active
+     *     loses the app-owned navigation drawer while the night policy is active
      */
-    func testReaderNightModeRendersDarkReaderChrome() {
+    func testPersistedManualNightModeKeepsReaderDrawerReachable() {
         let app = makeApp()
         app.launch()
 
@@ -107,24 +138,22 @@ extension AndBibleUITests {
      Verifies Read/Memory Progress uses Android's full reader destination rather than a generic sheet.
 
      Android launches `ReadingProgressActivity` from the main drawer and returns to the reader with
-     normal back navigation. The iOS equivalent must keep that destination owned by the launching
-     reader pane, retain the no-sheet invariant, and return through reader back chrome.
+     normal back navigation. This journey observes the visible destination's Back chrome and the
+     same scripture before and after returning. Pane ownership has separate controller coverage.
 
      * - Side effects:
      *   - opens Reading Progress from the production navigation drawer
-     *   - returns to the reader through the destination's explicit back control, retrying once if
-     *     a hosted simulator synthesizes the tap without changing destination state
+     *   - returns to the reader with one tap on the destination's explicit back control
      * - Failure modes:
      *   - fails if the route is absent from the drawer, becomes a generic sheet/modal, or cannot return
-     *   - fails if the destination loses its reader-stack ownership while visible
+     *   - fails if returning does not render the original scripture
      */
     func testReadingProgressUsesReaderDestinationAndReturns() {
         let app = makeApp()
         app.launch()
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
 
         let destination = openReadingProgress(in: app)
-        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerDestination=readingProgress", in: app, timeout: 10)
         XCTAssertFalse(
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Reading Progress should use reader destination back chrome, not a generic sheet Done button."
@@ -134,21 +163,8 @@ extension AndBibleUITests {
             requireElement("readingProgressAppBarBackButton", in: app, timeout: 10),
             timeout: 10
         )
-        if !waitForUITestCondition(
-            "Wait for Reading Progress back navigation",
-            timeout: 3,
-            condition: { !destination.exists }
-        ) {
-            tapElementReliably(
-                requireElement("readingProgressAppBarBackButton", in: app, timeout: 10),
-                timeout: 10
-            )
-        }
         waitForElementToDisappear(destination, timeout: 10)
-        XCTAssertTrue(
-            waitForReaderShellReady(in: app, timeout: 20),
-            "Expected destination back navigation to return to the reader shell."
-        )
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
     }
 
     /**
@@ -196,6 +212,7 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Exodus 2"),
             "Expected the captured History selection to navigate the reader to Exodus 2, but saw '\(updatedReference)'."
         )
+        waitForVisibleReaderText(containing: "there went a man of the house of Levi", in: app)
     }
 
     /**
@@ -220,7 +237,7 @@ extension AndBibleUITests {
         openReaderActionDestination(
             actionIdentifier: "readerOpenMyNotesAction",
             destinationIdentifier: "myDocumentsListScreen",
-            readinessIdentifiers: ["myDocumentsListStateExport"],
+            readinessIdentifiers: ["myDocumentsAddButton"],
             in: app,
             timeout: 20
         )
@@ -250,6 +267,252 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
+        waitForVisibleReaderText(
+            containing: "My Document page one.",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Selects real EPUB and My Documents owners from Android's shared commentary quick menu.
+
+     The fixture installs a production EPUB generation and a SwiftData My Document beside one
+     native commentary so the ordinary toolbar tap must expose the three-owner popup. Each local
+     row then publishes its own first-page body through the app's normal reader entrypoint. While
+     the EPUB is visible, its auxiliary header must retain Back navigation and expose the same
+     commentary action directly for the second selection.
+     */
+    func testCommentaryQuickMenuSelectsLocalEpubAndMyDocumentsBodies() {
+        let app = makeApp()
+        app.launch()
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV",
+            in: app,
+            timeout: 20
+        )
+        waitForVisibleReaderText(
+            containing: "God created the heaven and the earth",
+            in: app,
+            timeout: 20
+        )
+
+        let epubRowID = "readerCommentaryQuickSelectorRow_Epub-UITESTEPUB_epub"
+        let myDocumentRowID = "readerCommentaryQuickSelectorRow_UITESTDOC"
+        tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10))
+        _ = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
+        let epubRow = requireElement(epubRowID, in: app, timeout: 10)
+        XCTAssertTrue(requireElement(myDocumentRowID, in: app, timeout: 10).exists)
+        tapElementReliably(epubRow)
+
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=Epub-UITESTEPUB_epub",
+            in: app,
+            timeout: 20
+        )
+        waitForVisibleReaderText(
+            containing: "EPUB page one.",
+            in: app,
+            timeout: 20
+        )
+        let epubHeaderScreenshot = XCTAttachment(screenshot: app.screenshot())
+        epubHeaderScreenshot.name = "EPUB auxiliary document actions"
+        epubHeaderScreenshot.lifetime = .keepAlways
+        add(epubHeaderScreenshot)
+
+        let backToBibleButton = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Back to Bible")
+        ).firstMatch
+        XCTAssertTrue(
+            backToBibleButton.waitForExistence(timeout: 10),
+            "Expected the EPUB auxiliary header to retain its Back to Bible action."
+        )
+        tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10))
+        _ = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
+        XCTAssertTrue(requireElement(epubRowID, in: app, timeout: 10).exists)
+        let myDocumentRow = requireElement(myDocumentRowID, in: app, timeout: 10)
+        tapElementReliably(myDocumentRow)
+
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=UITESTDOC;book=UI Test Document;chapter=none;key=intro",
+            in: app,
+            timeout: 20
+        )
+        waitForVisibleReaderText(
+            containing: "My Document page one.",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Verifies the reader and workspace callers reach their distinct Android label behaviors.
+
+     The reader opens Label Assignment from the real WebView bookmark label, loads the saved
+     primary, changes it, commits through Back, and reopens the same route to prove persistence.
+     Label Manager then starts with independent workspace state, enables auto-assignment for that
+     label, commits, and reopens to prove the workspace primary and automatic assignment persist.
+     The existing bookmark-list workflow separately owns `.bookmarkList` routing and remains
+     selected; this journey does not use detailed accessibility exports.
+     */
+    func testReaderPrimaryAndWorkspaceAutoAssignmentPersistThroughActualRoutes() {
+        let app = makeApp(enablesDetailedAccessibilityExports: false)
+        app.launch()
+        let bookChooser = requireElement("bookChooserButton", in: app, timeout: 20)
+        XCTAssertTrue(
+            waitForUITestCondition("real KJV header publication", timeout: 20) {
+                guard let value = bookChooser.value as? String else { return false }
+                return value.localizedCaseInsensitiveContains("Genesis 1") &&
+                    value.localizedCaseInsensitiveContains("King James Version (1769)")
+            },
+            "Expected the installed KJV title, rather than the reader's pre-publication fallback."
+        )
+        waitForVisibleReaderText(
+            containing: "God created the heaven and the earth",
+            in: app
+        )
+
+        func waitForControl(
+            _ control: XCUIElement,
+            value expectedValue: String,
+            description: String
+        ) {
+            XCTAssertTrue(
+                waitForUITestCondition(description, timeout: 10) {
+                    control.exists && control.value as? String == expectedValue
+                },
+                "Expected \(description) to publish value '\(expectedValue)'."
+            )
+        }
+
+        func openReaderAssignmentFromVerse() -> XCUIElement {
+            let webView = app.webViews.firstMatch
+            let verse = webView.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "In the beginning")
+            ).firstMatch
+            XCTAssertTrue(verse.waitForExistence(timeout: 20))
+            tapElementReliably(verse, timeout: 10)
+            let label = webView.staticTexts["UI Test Seed"].firstMatch
+            XCTAssertTrue(
+                label.waitForExistence(timeout: 10),
+                "Expected the real reader bookmark modal to expose its seeded label."
+            )
+            tapElementReliably(label, timeout: 10)
+            let editLabels = webView.buttons["Select or edit labels…"].firstMatch
+            XCTAssertTrue(
+                editLabels.waitForExistence(timeout: 10),
+                "Expected Android's visible bookmark-label actions menu."
+            )
+            tapElementReliably(editLabels, timeout: 10)
+            return requireElement("labelAssignmentScreen", in: app, timeout: 10)
+        }
+
+        func reopenReaderAssignmentFromVisibleActions() -> XCUIElement {
+            let editLabels = app.webViews.firstMatch.buttons["Select or edit labels…"].firstMatch
+            XCTAssertTrue(
+                editLabels.waitForExistence(timeout: 10),
+                "Expected the reader bookmark actions to remain visible after assignment refresh."
+            )
+            tapElementReliably(editLabels, timeout: 10)
+            return requireElement("labelAssignmentScreen", in: app, timeout: 10)
+        }
+
+        func closeToReader(screen: XCUIElement, backIdentifier: String) {
+            tapElementReliably(requireElement(backIdentifier, in: app, timeout: 10), timeout: 10)
+            XCTAssertTrue(
+                waitForUITestCondition("Return from Manage Labels to reader", timeout: 20) {
+                    !screen.exists && self.waitForReaderShellReady(in: app, timeout: 0)
+                },
+                "Expected the real app-bar Back action to commit and return to the reader."
+            )
+        }
+
+        var assignmentScreen = openReaderAssignmentFromVerse()
+        let assignmentPrefix = "manageLabelsAssignment::"
+        let seedAssignment = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@",
+                assignmentPrefix,
+                "UI Test Seed"
+            )
+        ).firstMatch
+        let otherAssignment = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label == %@",
+                assignmentPrefix,
+                "Other Label"
+            )
+        ).firstMatch
+        XCTAssertTrue(seedAssignment.waitForExistence(timeout: 10))
+        XCTAssertTrue(otherAssignment.waitForExistence(timeout: 10))
+        waitForControl(seedAssignment, value: "on", description: "reader seed-label assignment")
+        waitForControl(otherAssignment, value: "Off", description: "reader other-label assignment")
+
+        guard seedAssignment.identifier.hasPrefix(assignmentPrefix),
+              otherAssignment.identifier.hasPrefix(assignmentPrefix) else {
+            XCTFail("Expected assignment controls to carry their exact persisted label IDs.")
+            return
+        }
+        let seedLabelID = String(seedAssignment.identifier.dropFirst(assignmentPrefix.count))
+        let otherLabelID = String(otherAssignment.identifier.dropFirst(assignmentPrefix.count))
+        let seedPrimaryID = "manageLabelsPrimary::\(seedLabelID)"
+        let otherPrimaryID = "manageLabelsPrimary::\(otherLabelID)"
+        let seedPrimary = app.buttons[seedPrimaryID].firstMatch
+        XCTAssertTrue(seedPrimary.waitForExistence(timeout: 10))
+        waitForControl(seedPrimary, value: "on", description: "reader persisted primary label")
+        XCTAssertFalse(app.buttons[otherPrimaryID].firstMatch.exists)
+
+        tapElementReliably(otherAssignment, timeout: 10)
+        waitForControl(otherAssignment, value: "on", description: "reader added label")
+        let otherPrimary = app.buttons[otherPrimaryID].firstMatch
+        XCTAssertTrue(otherPrimary.waitForExistence(timeout: 10))
+        waitForControl(otherPrimary, value: "Off", description: "reader non-primary added label")
+        tapElementReliably(otherPrimary, timeout: 10)
+        waitForControl(otherPrimary, value: "on", description: "reader selected primary label")
+        waitForControl(seedPrimary, value: "Off", description: "reader displaced primary label")
+        closeToReader(screen: assignmentScreen, backIdentifier: "labelAssignmentAppBarBackButton")
+
+        assignmentScreen = reopenReaderAssignmentFromVisibleActions()
+        waitForControl(
+            app.buttons[otherPrimaryID].firstMatch,
+            value: "on",
+            description: "reopened reader primary label"
+        )
+        waitForControl(
+            app.buttons[seedPrimaryID].firstMatch,
+            value: "Off",
+            description: "reopened reader non-primary label"
+        )
+        closeToReader(screen: assignmentScreen, backIdentifier: "labelAssignmentAppBarBackButton")
+
+        var managerScreen = openLabelManager(in: app)
+        let otherAutoAssign = app.buttons["manageLabelsAutoAssign::\(otherLabelID)"].firstMatch
+        XCTAssertTrue(otherAutoAssign.waitForExistence(timeout: 10))
+        waitForControl(
+            otherAutoAssign,
+            value: "Off",
+            description: "independent initial workspace auto-assignment"
+        )
+        XCTAssertFalse(app.buttons[otherPrimaryID].firstMatch.exists)
+        tapElementReliably(otherAutoAssign, timeout: 10)
+        waitForControl(otherAutoAssign, value: "on", description: "workspace auto-assignment")
+        let workspacePrimary = app.buttons[otherPrimaryID].firstMatch
+        XCTAssertTrue(workspacePrimary.waitForExistence(timeout: 10))
+        waitForControl(workspacePrimary, value: "on", description: "workspace auto-assignment primary")
+        closeToReader(screen: managerScreen, backIdentifier: "labelManagerAppBarBackButton")
+
+        managerScreen = openLabelManager(in: app)
+        waitForControl(
+            app.buttons["manageLabelsAutoAssign::\(otherLabelID)"].firstMatch,
+            value: "on",
+            description: "reopened workspace auto-assignment"
+        )
+        waitForControl(
+            app.buttons[otherPrimaryID].firstMatch,
+            value: "on",
+            description: "reopened workspace auto-assignment primary"
+        )
+        closeToReader(screen: managerScreen, backIdentifier: "labelManagerAppBarBackButton")
     }
 
     /**
@@ -270,8 +533,9 @@ extension AndBibleUITests {
      *     opens the full Label Edit activity, and returns to the reader shell
      *   - opens History from the reader menu and selects the seeded row
      *   - opens the bookmark list from the actual reader overflow menu
-     *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state, and
-     *     returns to the bookmark list
+     *   - opens Label Assignment for the seeded Genesis bookmark, verifies assignment state,
+     *     returns through the child and Bookmark app bars to the reader, then reopens Bookmarks
+     *   - holds the seeded row again, closes contextual selection, and ordinary-taps that same row
      *   - taps the seeded bookmark row and waits for the visible reader reference to reach
      *     `Genesis 1`
      *   - reopens Bookmarks, selects the seeded label through Android's spinner, verifies the
@@ -284,16 +548,37 @@ extension AndBibleUITests {
      *     reader to `Exodus 2`
      *   - fails if the bookmark list route regresses to sheet presentation
      *   - fails if the bookmark list, label-assignment screen, or seeded bookmark rows never appear
-     *   - fails if Label Assignment cannot dismiss back to the bookmark list
+     *   - fails if Label Assignment cannot return to the same Bookmark activity, or if Bookmark
+     *     Back cannot return to the reader and reopen the production route
      *   - fails if tapping the seeded bookmark row does not drive the reader back to `Genesis 1`
      *   - fails if the shared popup label selector does not filter the list like Android or the
      *     app-owned activity cannot return to the reader
      *
      * Label creation, favourite toggles, Bible label removal, and generic bookmark assignment are
      * covered by `LabelAssignmentMutationTests` in the app-host-free package lane.
-     */
+    */
     func testBookmarkSelectionNavigatesReaderToSeededReference() {
-        let app = makeApp()
+        runBookmarkSelectionNavigationWorkflow(enablesDetailedAccessibilityExports: true)
+    }
+
+    /**
+     Runs the identical seeded navigation workflow without Bookmark's detailed diagnostic export.
+
+     This temporary causal comparison preserves every production action and visible assertion from
+     `testBookmarkSelectionNavigatesReaderToSeededReference`; only the launch-time diagnostic-export
+     policy differs. The seeded label's real assignment checkbox remains the route-success boundary.
+     */
+    func testBookmarkSelectionNavigatesReaderWithoutDetailedAccessibilityExports() {
+        runBookmarkSelectionNavigationWorkflow(enablesDetailedAccessibilityExports: false)
+    }
+
+    /** Executes the shared production workflow with one explicit diagnostic-export policy. */
+    private func runBookmarkSelectionNavigationWorkflow(
+        enablesDetailedAccessibilityExports: Bool
+    ) {
+        let app = makeApp(
+            enablesDetailedAccessibilityExports: enablesDetailedAccessibilityExports
+        )
         app.launch()
 
         let initialReference = requireReaderReferenceValue(in: app, timeout: 20)
@@ -309,8 +594,6 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
-        waitForReaderRenderedContentState(containing: "readerModal=none", in: app, timeout: 10)
-        waitForReaderRenderedContentState(containing: "readerDestination=studyPads", in: app, timeout: 10)
         XCTAssertFalse(
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer StudyPads should use reader destination back chrome, not iOS sheet Done chrome."
@@ -337,10 +620,19 @@ extension AndBibleUITests {
                 "Expected Android's complete Study Pad search-mode popup row \(identifier)."
             )
         }
-        tapElementReliably(
-            requireElement("studyPadSelectorSearchMode::0", in: app, timeout: 10),
+        let selectedSearchMode = requireElement(
+            "studyPadSelectorSearchMode::0",
+            in: app,
             timeout: 10
         )
+        let searchModePopup = requireElement(
+            "studyPadSelectorSearchModeSurface",
+            in: app,
+            timeout: 10
+        )
+        tapElementReliably(selectedSearchMode, timeout: 10)
+        waitForElementToDisappear(selectedSearchMode, timeout: 10)
+        waitForElementToDisappear(searchModePopup, timeout: 10)
 
         tapElementReliably(
             requireElement("studyPadSelectorOverflowButton", in: app, timeout: 10),
@@ -363,14 +655,19 @@ extension AndBibleUITests {
             requireElement("studyPadSelectorHelpButton", in: app, timeout: 10),
             timeout: 10
         )
-        let helpDialog = requireElement("androidHelpDialog", in: app, timeout: 10)
-        XCTAssertTrue(helpDialog.exists, "Expected the canonical Android Study Pads Help dialog.")
-        XCTAssertFalse(app.sheets.firstMatch.exists, "Study Pads Help must remain app-owned.")
-        tapElementReliably(
-            requireElement("androidHelpDialogOKButton", in: app, timeout: 10),
-            timeout: 10
+        let helpTitle = app.staticTexts["Help"].firstMatch
+        let helpBody = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Study pads are designed")
+        ).firstMatch
+        let helpOKButton = requireElement("androidHelpDialogOKButton", in: app, timeout: 10)
+        XCTAssertTrue(
+            helpTitle.waitForExistence(timeout: 10) && helpBody.waitForExistence(timeout: 10),
+            "Expected the canonical visible Study Pads Help title and body."
         )
-        waitForElementToDisappear(helpDialog, timeout: 10)
+        XCTAssertFalse(app.sheets.firstMatch.exists, "Study Pads Help must remain app-owned.")
+        tapElementReliably(helpOKButton, timeout: 10)
+        waitForElementToDisappear(helpOKButton, timeout: 10)
+        waitForElementToDisappear(helpBody, timeout: 10)
 
         tapElementReliably(
             requireElement("studyPadSelectorAddButton", in: app, timeout: 10),
@@ -416,9 +713,9 @@ extension AndBibleUITests {
             historyReference.localizedCaseInsensitiveContains("Exodus 2"),
             "Expected selecting the seeded history row to navigate to Exodus 2, but saw '\(historyReference)'."
         )
+        waitForVisibleReaderText(containing: "there went a man of the house of Levi", in: app)
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
-        waitForReaderRenderedContentState(containing: "readerDestination=bookmarks", in: app, timeout: 10)
         XCTAssertFalse(
             app.navigationBars.buttons["Done"].firstMatch.exists,
             "Drawer Bookmarks should use reader destination back chrome, not iOS sheet Done chrome."
@@ -442,6 +739,31 @@ extension AndBibleUITests {
             "Expected the seeded label to be assigned when Label Assignment opens."
         )
         dismissLabelAssignmentToBookmarkList(in: app, timeout: 20)
+        tapElementReliably(
+            requireElement("bookmarkListAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        XCTAssertTrue(
+            waitForBookmarkListDismissal(in: app, timeout: 20),
+            "Expected Bookmark Back after the assignment child round trip to return to the reader."
+        )
+        XCTAssertTrue(
+            openBookmarkList(in: app, timeout: 20).exists,
+            "Expected the same reader instance to reopen Bookmarks after the child and parent Back actions."
+        )
+
+        let heldBookmarkRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
+        heldBookmarkRow.press(forDuration: 0.7)
+        let contextualAction = requireElement("bookmarkListAssignLabelsButton", in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("bookmarkListAppBarBackButton", in: app, timeout: 10),
+            timeout: 10
+        )
+        waitForElementToDisappear(contextualAction, timeout: 10)
+        XCTAssertTrue(
+            requireElement("bookmarkListSortButton", in: app, timeout: 10).exists,
+            "Contextual Close must restore the ordinary Bookmark activity before the next row tap."
+        )
 
         let bookmarkRow = requireBookmarkRow("Genesis_1_1", in: app, timeout: 10)
         tapElementReliably(bookmarkRow, timeout: 10)
@@ -454,17 +776,15 @@ extension AndBibleUITests {
             updatedReference.localizedCaseInsensitiveContains("Genesis 1"),
             "Expected selecting the seeded bookmark to navigate to Genesis 1, but saw '\(updatedReference)'."
         )
+        waitForVisibleReaderText(containing: "In the beginning", in: app)
 
         XCTAssertTrue(openBookmarkList(in: app).exists)
         selectBookmarkListLabelFilter("UI_Test_Seed", in: app, timeout: 10)
-        waitForBookmarkListState(
-            containing: "count=1;selectedLabel=UI_Test_Seed",
-            in: app,
-            timeout: 10
-        )
         XCTAssertTrue(requireBookmarkRow("Genesis_1_1", in: app, timeout: 10).exists)
+        let excludedBookmark = app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch
+        waitForElementToDisappear(excludedBookmark, timeout: 10)
         XCTAssertFalse(
-            app.buttons["bookmarkListRowButton::Exodus_2_1"].firstMatch.exists,
+            excludedBookmark.exists,
             "Expected Android's selected-label spinner to exclude the unassigned Exodus bookmark."
         )
         tapElementReliably(
@@ -499,14 +819,13 @@ extension AndBibleUITests {
      *   - fails if dismissing the dialog loses the typed note or the note does not survive relaunch
      * - Synchronization:
      *   - uses XCTest element and predicate waits instead of fixed sleeps
-     *   - retries the verse tap once because a first tap may only activate an inactive reader pane
+     *   - taps the verse once in the fixture's already active reader pane
      */
     func testReaderNoteEditorKeepsSoftwareKeyboardAndPersistsTypedNote() {
         let app = makeApp()
         let verseTextFragment = "In the beginning"
         let editorLabel = "My Notes note editor for Genesis 1:1"
         let sentinel = "Issue390NoteSentinel"
-        let persistedNoteToken = "|Genesis_1_1=\(sentinel)|"
 
         XCUIDevice.shared.orientation = .portrait
         app.launch()
@@ -538,9 +857,6 @@ extension AndBibleUITests {
             NSPredicate(format: "label == %@", "Note")
         ).firstMatch
         tapElementReliably(verse, timeout: 10)
-        if !noteButton.waitForExistence(timeout: 2) {
-            tapElementReliably(verse, timeout: 10)
-        }
         XCTAssertTrue(
             noteButton.waitForExistence(timeout: 10),
             "Expected the production verse-selection Note action."
@@ -572,7 +888,6 @@ extension AndBibleUITests {
             },
             "Expected a usable software-keyboard frame with character keys."
         )
-        waitForMyNotesState(containing: "myNotesEditing=true", in: app, timeout: 10)
         XCTAssertTrue(
             verse.exists && elementHasUsableFrame(verse),
             "Expected the rendered verse to remain attached while the keyboard is visible."
@@ -594,8 +909,6 @@ extension AndBibleUITests {
 
         waitForElementToDisappear(keyboard, timeout: 10)
         waitForElementToDisappear(modalCloseButton, timeout: 10)
-        waitForMyNotesState(containing: "myNotesEditing=false", in: app, timeout: 10)
-        waitForMyNotesState(containing: persistedNoteToken, in: app, timeout: 20)
         XCTAssertTrue(
             waitForUITestCondition("rendered verse remains attached after note dismissal", timeout: 15) {
                 verse.exists && self.elementHasUsableFrame(verse)
@@ -615,7 +928,6 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
-        waitForMyNotesState(containing: persistedNoteToken, in: app, timeout: 20)
         let relaunchedWebView = app.webViews.firstMatch
         XCTAssertTrue(
             relaunchedWebView.waitForExistence(timeout: 20),
@@ -628,6 +940,8 @@ extension AndBibleUITests {
             relaunchedVerse.waitForExistence(timeout: 20) && elementHasUsableFrame(relaunchedVerse),
             "Expected persisted note restoration to leave the Genesis reader body rendered."
         )
+        openMyNotesFromReader(in: app)
+        waitForVisibleReaderText(containing: sentinel, in: app, timeout: 20)
     }
 
     /**
@@ -640,20 +954,23 @@ extension AndBibleUITests {
      * - Side effects:
      *   - launches the reader shell with one deterministic Genesis note fixture
      *   - opens Choose Document, selects the My Notes pseudo-document, and waits for the embedded
-     *     My Notes document state to render
+     *     My Notes note text and the fixture-backed shared Bible action to render
      * - Failure modes:
-     *   - fails if the chooser route, pseudo-document row, or initial My Notes document state is
-     *     unavailable from the production reader path
+     *   - fails if the chooser route, pseudo-document row, actual rendered note, or Android-equivalent
+     *     Bible action is unavailable from the production reader path
      */
     func testMyNotesPseudoDocumentOpensFromChooser() {
         let app = makeApp()
-        let rowToken = "Genesis_1_1"
-        let originalNote = "UI_Test_My_Notes_Note"
+        let originalNote = "Creation begins with God."
         app.launch()
 
         openMyNotesFromReader(in: app)
-        waitForVisibleMyNotesState(containing: "myNotesCount=1", in: app, timeout: 20)
-        waitForVisibleMyNotesState(containing: "|\(rowToken)=\(originalNote)|", in: app, timeout: 20)
+        waitForVisibleReaderText(containing: originalNote, in: app, timeout: 20)
+        _ = requireElement("readerBibleToolbarButton", in: app, timeout: 10)
+        let myNotesHeaderScreenshot = XCTAttachment(screenshot: app.screenshot())
+        myNotesHeaderScreenshot.name = "My Notes document actions"
+        myNotesHeaderScreenshot.lifetime = .keepAlways
+        add(myNotesHeaderScreenshot)
     }
 
 }

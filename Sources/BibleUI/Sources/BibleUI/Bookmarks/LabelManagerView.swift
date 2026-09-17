@@ -22,7 +22,7 @@ enum LabelManagerMutation {
             .labelDeletionImpact(id: label.id)
     }
 
-    /** Deletes one label and applies the caller's explicit orphan-bookmark choice atomically. */
+    /** Deletes one label and applies the caller's explicit orphan-bookmark choice in one operation. */
     @discardableResult
     static func deleteLabel(
         _ label: BibleCore.Label,
@@ -50,7 +50,7 @@ enum LabelManagerMutation {
  - the reader/workspace-owned `ReaderThemeSurfacePalette`
 
  Side effects:
- - Back atomically commits favourite and workspace auto-assignment changes
+ - Back commits favourite and workspace auto-assignment changes through one journaled save
  - full-editor Save commits complete label and workspace-override values through BibleCore
  - Reset clears workspace auto-assignment and label favourites after app-owned confirmation
  - overflow export/import delegates to the one shared Android Study Pad archive workflow
@@ -482,7 +482,11 @@ public struct LabelManagerView: View {
         guard !hasLoaded else { return }
         do {
             let snapshot = try WorkspaceLabelConfigurationService(modelContext: modelContext)
-                .bookmarkLabelAssignmentSnapshot(bookmarkIDs: [], workspaceID: workspace?.id)
+                .bookmarkLabelAssignmentSnapshot(
+                    bookmarkIDs: [],
+                    workspaceID: workspace?.id,
+                    intent: .workspace
+                )
             autoAssignLabelIDs = snapshot.autoAssignLabelIDs
             autoAssignPrimaryLabelID = snapshot.autoAssignPrimaryLabelID
             recentLabelIDs = snapshot.recentLabelIDs
@@ -609,7 +613,7 @@ public struct LabelManagerView: View {
         newLabelDraft = AndroidLabelEditorDraft(newLabelName: suggestedName, color: color)
     }
 
-    /// Applies Android Reset semantics and closes only if the atomic commit succeeds.
+    /// Applies Android Reset semantics and closes only if the journaled save succeeds.
     private func resetAndClose() {
         showsResetConfirmation = false
         autoAssignLabelIDs = []
@@ -634,7 +638,8 @@ public struct LabelManagerView: View {
                     favouriteValues: favouriteValues,
                     autoAssignLabelIDs: autoAssignLabelIDs,
                     autoAssignPrimaryLabelID: autoAssignPrimaryLabelID,
-                    workspaceID: workspace?.id
+                    workspaceID: workspace?.id,
+                    intent: .workspace
                 )
             isCommitting = false
             close()

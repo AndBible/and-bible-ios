@@ -3,6 +3,31 @@
 import Foundation
 import Observation
 
+/**
+ Receives one final notification after ``WindowManager`` releases its last registry slot.
+
+ The protocol keeps lifecycle ownership in BibleCore without importing a concrete UI controller.
+ Implementations should cancel controller-local work and detach pane state synchronously. Registry
+ membership has already been removed when the callback runs, so reentrant lookups cannot recover
+ the retired owner. Duplicate registration of the same object does not invoke this callback.
+ */
+public protocol WindowControllerRegistrationLifecycle: AnyObject {
+    /**
+     Retires controller work after its final registry ownership has been removed.
+
+     - Side effects: Defined by the conformer; reader controllers cancel preparation and detach.
+     - Failure modes: None. Implementations must be idempotent because object teardown may overlap
+       with other owner-local cleanup.
+     - Concurrency: Called synchronously on the same actor or queue mutating ``WindowManager``.
+     */
+    func windowControllerWillUnregister()
+}
+
+/** Exact managed-window identity currently owning one controller slot. */
+private struct WindowControllerRegistrationOwner {
+    let windowIdentity: ObjectIdentifier
+}
+
 /// Manages window lifecycle, layout, and synchronization within workspaces.
 @Observable
 public final class WindowManager {
@@ -25,7 +50,19 @@ public final class WindowManager {
      Uses AnyObject to avoid circular dependency (BibleCore can't import BibleUI).
      BibleReaderView casts to BibleReaderController.
      */
-    public var controllers: [UUID: AnyObject] = [:]
+    public private(set) var controllers: [UUID: AnyObject] = [:]
+
+    /// Exact graph identity paired with each public controller entry.
+    @ObservationIgnored
+    private var controllerRegistrationOwners: [UUID: WindowControllerRegistrationOwner] = [:]
+
+    /// Window slots that cannot be mutated reentrantly from their retirement callback.
+    @ObservationIgnored
+    private var controllerRegistrationBlockedWindowIDs: Set<UUID> = []
+
+    /// Nonzero while a workspace transition exposes its new graph and retires the prior graph.
+    @ObservationIgnored
+    private var controllerRegistrationSuspensionDepth = 0
 
     /**
      Incremented on every controller register/unregister to guarantee SwiftUI
@@ -108,12 +145,32 @@ public final class WindowManager {
 
     /// Debounce work item for scroll sync (200ms matching Android WindowSync.kt:71).
     private var syncWorkItem: DispatchWorkItem?
+    /// Exact source slot associated with `syncWorkItem`, used for bounded lifecycle invalidation.
+    private var syncWorkSourceWindowID: UUID?
+    /// Group whose immutable source value is pending; valid immediate alignment supersedes it.
+    private var syncWorkGroup: Int?
+    /// Monotonic admission identity used to release completed work and reject superseded delivery.
+    private var syncWorkGeneration: UInt64 = 0
+    /// Per-window membership identity; away-and-back transitions never regain older authority.
+    private var synchronizationMembershipEpochs: [UUID: UInt64] = [:]
+
+    /** Admission-time witness for one target authorized to consume a delayed position. */
+    private struct SynchronizedScrollTargetWitness {
+        weak var window: Window?
+        let windowID: UUID
+        let membershipEpoch: UInt64
+    }
 
     /**
-     Callback to perform sync — set by the coordinator (BibleReaderView).
-     Parameters: (sourceWindow, ordinal, key)
+     Delivers one admitted typed source position to the reader coordinator.
+
+     - Parameters:
+       - sourceWindow: Exact managed window whose registered controller admitted the position.
+       - delivery: Immutable source-versification coordinate plus exact admitted target peers.
+     - Side Effects: The coordinator may strictly map and apply the position to admitted peers.
+     - Failure Modes: Delivery is suppressed when source ownership changes before the debounce fires.
      */
-    public var onSyncVerseChanged: ((Window, Int, String) -> Void)?
+    public var onSyncVerseChanged: ((Window, WindowSynchronizationDelivery) -> Void)?
 
     /**
      Creates a window manager for a workspace-backed window set.
@@ -123,24 +180,116 @@ public final class WindowManager {
         self.workspaceStore = workspaceStore
     }
 
+    /** Advances one window's synchronization membership and revokes work only when it is the source. */
+    private func advanceSynchronizationMembership(for windowID: UUID) {
+        synchronizationMembershipEpochs[windowID, default: 0] &+= 1
+        invalidatePendingSynchronizedScroll(sourceWindowID: windowID)
+    }
+
+    /** Revokes queued source authority and releases the manager-owned work item. */
+    private func invalidatePendingSynchronizedScroll(sourceWindowID: UUID? = nil) {
+        if let sourceWindowID, syncWorkSourceWindowID != sourceWindowID { return }
+        syncWorkItem?.cancel()
+        syncWorkItem = nil
+        syncWorkSourceWindowID = nil
+        syncWorkGroup = nil
+        syncWorkGeneration &+= 1
+    }
+
     // MARK: - Controller Registry
 
     /**
-     Registers a pane controller and marks its window ready for pane-scoped actions.
+     Reports whether an exact `Window` object belongs to the current managed graph.
+
+     - Parameter window: Concrete graph object whose membership should be checked.
+     - Returns: `true` only when the active workspace contains this exact object for its stable ID.
+     - Side Effects: None.
+     - Failure Modes: Returns `false` during an unbound workspace state or for a stale same-ID object.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner; production uses the main
+       thread.
+     */
+    public func managesWindow(_ window: Window) -> Bool {
+        activeWorkspace != nil
+            && allWindows.contains { $0.id == window.id && $0 === window }
+    }
+
+    /**
+     Returns the controller owned by an exact currently managed `Window` object.
+
+     - Parameter window: Concrete graph object whose registered owner is requested.
+     - Returns: The registered controller only when its owner record is bound to this exact object.
+     - Side Effects: None.
+     - Failure Modes: Returns `nil` for an unmanaged/stale object, an unregistered slot, or an owner
+       record that no longer matches the current graph.
+     - Concurrency: Call synchronously on the serialized workspace/pane lifecycle owner; callers must
+       not retain the result as proof after another lifecycle mutation.
+     */
+    public func registeredController(for window: Window) -> AnyObject? {
+        guard managesWindow(window),
+              let owner = controllerRegistrationOwners[window.id],
+              owner.windowIdentity == ObjectIdentifier(window) else {
+            return nil
+        }
+        return controllers[window.id]
+    }
+
+    /**
+     Registers a pane controller against the exact `Window` object currently managed for its ID.
 
      - Parameters:
-       - controller: Controller created by the visible pane.
-       - windowId: Identifier of the window now backed by `controller`.
-     - Side Effects: Mutates the controller registry, clears pending readiness for `windowId`, and
-       increments `controllerVersion` so SwiftUI consumers re-read registry-backed state.
-     - Failure Modes: None; repeated registration for the same window replaces the stored
-       controller.
-     - Note: This is the normal transition from pending to ready.
+       - controller: Pane controller claiming the slot.
+       - window: Concrete SwiftData graph object used to configure that controller.
+     - Returns: `true` while the controller still owns the exact managed slot after synchronous
+       retirement callbacks and graph reconciliation; `false` when admission is rejected or a
+       callback removes the newly installed owner.
+     - Side Effects: Installs the controller, records the exact graph object, clears pending
+       readiness, increments `controllerVersion` once, and retires a displaced final owner after
+       removal.
+     - Failure Modes: A same-ID object outside the current managed graph is rejected before mutation.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner; a synchronous retirement
+       callback may inspect the installed replacement but cannot reclaim or unregister this slot.
      */
-    public func registerController(_ controller: AnyObject, for windowId: UUID) {
-        controllers[windowId] = controller
-        controllerPendingWindowIds.remove(windowId)
+    @discardableResult
+    public func registerController(
+        _ controller: AnyObject,
+        for window: Window
+    ) -> Bool {
+        let windowID = window.id
+        guard controllerRegistrationSuspensionDepth == 0,
+              !controllerRegistrationBlockedWindowIDs.contains(windowID),
+              managesWindow(window) else {
+            return false
+        }
+
+        let priorController = controllers[windowID]
+        if priorController.map({ $0 !== controller }) ?? true {
+            advanceSynchronizationMembership(for: windowID)
+        }
+        let replaced = controllers.updateValue(controller, forKey: windowID)
+        controllerRegistrationOwners[windowID] = WindowControllerRegistrationOwner(
+            windowIdentity: ObjectIdentifier(window)
+        )
+        controllerPendingWindowIds.remove(windowID)
         controllerVersion += 1
+
+        if let replaced, replaced !== controller,
+           !controllers.values.contains(where: { $0 === replaced }) {
+            withControllerRegistrationBlocked(for: [windowID]) {
+                (replaced as? WindowControllerRegistrationLifecycle)?
+                    .windowControllerWillUnregister()
+            }
+        }
+
+        // Retirement may synchronously change the managed window graph while this slot is blocked.
+        // Reconcile once the block is released so such a change cannot strand the replacement.
+        reconcileControllerRegistrationsWithCurrentGraph()
+        guard controllers[windowID] === controller,
+              let owner = controllerRegistrationOwners[windowID],
+              let managedWindow = allWindows.first(where: { $0.id == windowID }),
+              owner.windowIdentity == ObjectIdentifier(managedWindow) else {
+            return false
+        }
+        return true
     }
 
     /**
@@ -148,13 +297,47 @@ public final class WindowManager {
 
      - Parameter windowId: Identifier whose controller should be dropped.
      - Side Effects: Mutates controller and readiness registries, then increments
-       `controllerVersion`.
-     - Failure Modes: Missing controller entries are ignored.
+       `controllerVersion`; a removed final owner is notified synchronously after its slot vanishes.
+     - Failure Modes: Missing entries still bump the version for compatibility. Calls reentered from
+       retirement or workspace transition are ignored so they cannot evict a newly installed owner.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func unregisterController(for windowId: UUID) {
-        controllers.removeValue(forKey: windowId)
+        guard controllerRegistrationSuspensionDepth == 0,
+              !controllerRegistrationBlockedWindowIDs.contains(windowId) else {
+            return
+        }
+        advanceSynchronizationMembership(for: windowId)
+        let removed = controllers.removeValue(forKey: windowId)
+        controllerRegistrationOwners.removeValue(forKey: windowId)
         controllerPendingWindowIds.remove(windowId)
         controllerVersion += 1
+        if let removed, !controllers.values.contains(where: { $0 === removed }) {
+            withControllerRegistrationBlocked(for: [windowId]) {
+                (removed as? WindowControllerRegistrationLifecycle)?
+                    .windowControllerWillUnregister()
+            }
+        }
+    }
+
+    /**
+     Prevents synchronous retirement callbacks from reclaiming or evicting their former slots.
+
+     - Parameters:
+       - windowIDs: Slots held unavailable until `body` returns.
+       - body: Retirement notification work allowed to inspect already-published registry state.
+     - Side Effects: Adds temporary registration blocks and preserves any enclosing blocks.
+     - Failure Modes: A reentrant claim/unregister for a blocked ID becomes a no-op.
+     - Concurrency: Requires the same serialized owner as every registry mutation.
+     */
+    private func withControllerRegistrationBlocked(
+        for windowIDs: Set<UUID>,
+        _ body: () -> Void
+    ) {
+        let newlyBlocked = windowIDs.subtracting(controllerRegistrationBlockedWindowIDs)
+        controllerRegistrationBlockedWindowIDs.formUnion(windowIDs)
+        defer { controllerRegistrationBlockedWindowIDs.subtract(newlyBlocked) }
+        body()
     }
 
     /**
@@ -177,23 +360,78 @@ public final class WindowManager {
      - Parameter workspace: Workspace selected by the app, possibly resolved through another
        `ModelContext`.
      - Side Effects: Clears registered pane controllers, rebinds the workspace by ID into the
-       manager-owned store when possible, refreshes visible/all window lists, and updates active
-       window fallback.
+       manager-owned store when possible, refreshes visible/all window lists, rebinds active focus,
+       then retires prior controllers while registration remains suspended.
      - Failure Modes: If the workspace cannot be resolved through the manager store, the supplied
-       instance is retained and refresh may expose no windows until the store can fetch it.
+       instance is retained and refresh may expose no windows until the store can fetch it. Reentrant
+       registry mutations from retirement callbacks are rejected against the authoritative new graph.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func setActiveWorkspace(_ workspace: Workspace) {
-        // Clear controllers from the previous workspace to prevent stale entries
+        invalidatePendingSynchronizedScroll()
+        synchronizationMembershipEpochs.removeAll()
+        // Capture by object identity so one controller temporarily backing two slots retires once.
+        let retiredControllers = controllers.values.reduce(into: [ObjectIdentifier: AnyObject]()) {
+            $0[ObjectIdentifier($1)] = $1
+        }
+        let registryChanged = !controllers.isEmpty
         controllers.removeAll()
+        controllerRegistrationOwners.removeAll()
         controllerPendingWindowIds.removeAll()
+
+        controllerRegistrationSuspensionDepth += 1
+        defer { controllerRegistrationSuspensionDepth -= 1 }
         activeWorkspace = workspaceStore.workspace(id: workspace.id) ?? workspace
         refreshWindows()
+        if registryChanged {
+            controllerVersion += 1
+        }
+        retiredControllers.values.forEach {
+            ($0 as? WindowControllerRegistrationLifecycle)?.windowControllerWillUnregister()
+        }
+    }
+
+    /**
+     Updates the durable accent color through the manager-owned workspace context.
+
+     Android mutates `windowRepository.workspaceSettings.workspaceColor`, so the active window
+     graph and the persisted workspace immediately share one value. Routing this mutation through
+     `WindowManager` gives SwiftUI the same owner used by workspace and pane presentation instead
+     of writing a second-context copy that the visible graph cannot observe.
+
+     - Parameters:
+       - color: Signed ARGB color, or `nil` to restore Android's `#ff444444` default.
+       - workspaceId: Exact workspace receiving the color.
+     - Returns: `true` when the workspace still belongs to the manager-owned store.
+     - Side Effects: Mutates the manager-owned workspace and persists the workspace graph and its
+       remote-sync mutation journal through `WorkspaceStore`.
+     - Failure Modes: A missing workspace is ignored and returns `false`. Existing store persistence
+       failures remain best-effort under `WorkspaceStore.persistChanges()`.
+     */
+    @discardableResult
+    public func setWorkspaceColor(_ color: Int?, workspaceId: UUID) -> Bool {
+        guard let workspace = workspaceStore.workspace(id: workspaceId) else {
+            return false
+        }
+        let resolvedColor = color ?? Workspace.defaultWorkspaceColor
+        guard workspace.workspaceColor != resolvedColor else {
+            return true
+        }
+        workspace.workspaceColor = resolvedColor
+        workspaceStore.persistChanges()
+        return true
     }
 
     /**
      Refresh the visible windows list from the active workspace.
      Respects maximized state, filters minimized windows, and applies Android's display grouping
      so links windows render after normal content panes without mutating persisted order numbers.
+
+     - Side Effects: Rebinds `allWindows`, `visibleWindows`, and `activeWindow` to the current
+       SwiftData graph; retires controllers whose same-ID `Window` object was replaced; reconciles
+       pending visible controller readiness.
+     - Failure Modes: A missing active workspace clears published window/readiness collections.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
      */
     public func refreshWindows() {
         guard let workspace = activeWorkspace else {
@@ -207,6 +445,7 @@ public final class WindowManager {
             workspaceStore.persistChanges()
         }
         allWindows = displayOrderedWindows(persistedWindows)
+        reconcileControllerRegistrationsWithCurrentGraph()
 
         // If a window is maximized, only show that one
         if let maxId = workspace.maximizedWindowId,
@@ -221,10 +460,31 @@ public final class WindowManager {
             }
         }
 
-        if activeWindow == nil || !visibleWindows.contains(where: { $0.id == activeWindow?.id }) {
-            activeWindow = visibleWindows.first
-        }
+        let selectedWindowID = activeWindow?.id
+        activeWindow = selectedWindowID.flatMap { selectedID in
+            visibleWindows.first(where: { $0.id == selectedID })
+        } ?? visibleWindows.first
         reconcileControllerReadiness()
+    }
+
+    /**
+     Retires controllers whose original SwiftData `Window` object is no longer the current graph
+     object for that stable ID.
+
+     - Side Effects: Unregisters each stale slot in deterministic ID order and synchronously notifies
+       each final owner after removal.
+     - Failure Modes: Current exact-object owners are preserved; an empty registry is a no-op.
+     - Concurrency: Requires the serialized workspace/pane lifecycle owner.
+     */
+    private func reconcileControllerRegistrationsWithCurrentGraph() {
+        let staleWindowIDs = controllerRegistrationOwners.compactMap { windowID, owner in
+            guard let managedWindow = allWindows.first(where: { $0.id == windowID }),
+                  ObjectIdentifier(managedWindow) == owner.windowIdentity else {
+                return windowID
+            }
+            return nil
+        }.sorted { $0.uuidString < $1.uuidString }
+        staleWindowIDs.forEach { unregisterController(for: $0) }
     }
 
     /**
@@ -828,7 +1088,8 @@ public final class WindowManager {
      - Failure Modes: None.
      */
     public func setSynchronized(_ window: Window, value: Bool) {
-        guard window.isSynchronized != value else { return }
+        guard managesWindow(window), window.isSynchronized != value else { return }
+        advanceSynchronizationMembership(for: window.id)
         window.isSynchronized = value
         workspaceStore.persistChanges()
         refreshWindows()
@@ -853,7 +1114,10 @@ public final class WindowManager {
        matching Android's synchronize-before-`WindowChangedEvent` ordering.
      */
     public func changeSyncGroup(_ window: Window, groupNumber: Int) {
-        guard (0..<6).contains(groupNumber) else { return }
+        guard managesWindow(window), (0..<6).contains(groupNumber) else { return }
+        if !window.isSynchronized || window.syncGroup != groupNumber {
+            advanceSynchronizationMembership(for: window.id)
+        }
         window.isSynchronized = true
         window.syncGroup = groupNumber
         synchronizeImmediatelyFromPeer(joining: window)
@@ -875,17 +1139,28 @@ public final class WindowManager {
             guard candidate.id != window.id,
                   candidate.isSynchronized,
                   candidate.syncGroup == window.syncGroup,
-                  let source = controllers[candidate.id] as? any WindowSynchronizationSource else {
+                  let source = registeredController(for: candidate)
+                    as? any WindowSynchronizationSource else {
                 return false
             }
             return source.canProvideWindowSynchronizationPosition
         }),
-        let source = controllers[peer.id] as? any WindowSynchronizationSource,
-        let position = source.currentWindowSynchronizationPosition() else {
+        let source = registeredController(for: peer) as? any WindowSynchronizationSource,
+        let position = source.currentWindowSynchronizationPosition(),
+        position.isStructurallyValid else {
             return
         }
 
-        onSyncVerseChanged?(peer, position.ordinal, position.key)
+        let targets = synchronizedVerseUpdateTargets(for: peer)
+        guard !targets.isEmpty else { return }
+
+        // Android resolves the peer's current key at immediate execution. That current full-group
+        // alignment supersedes any older immutable value queued for the same group, while work for
+        // another group remains authoritative for its independently admitted recipients.
+        if syncWorkGroup == peer.syncGroup {
+            invalidatePendingSynchronizedScroll()
+        }
+        onSyncVerseChanged?(peer, WindowSynchronizationDelivery(position: position, targets: targets))
     }
 
     /// Get windows in the same sync group as the given window.
@@ -896,45 +1171,99 @@ public final class WindowManager {
     /**
      Returns synchronized peer windows that still need a visible-verse update from the source.
 
-     Android's `WindowSync` updates an inactive window's Bible key, then compares the old key before
-     posting a secondary scroll. This mirrors that contract at the persisted window-state level: a
-     target whose concrete Bible book/chapter/verse already equals the source is not asked to scroll
-     again, while incomplete state is treated as stale so the existing sync path can repair it.
+     Cross-versification equality cannot be decided from raw persisted book indices and chapter/verse
+     numbers. Every visible grouped peer is admitted here; its controller strictly maps the typed
+     source coordinate into the target Bible versification and performs target-local idempotence.
 
      - Parameter sourceWindow: Window that reported the latest visible verse.
-     - Returns: Visible synchronized peer windows in the same sync group that differ from the source
-       Bible position or lack a complete comparable position.
+     - Returns: Every visible synchronized peer window in the same group except the source.
      - Side Effects: None.
      - Failure Modes: Returns an empty list when the source itself is not synchronized.
      */
     public func synchronizedVerseUpdateTargets(for sourceWindow: Window) -> [Window] {
         guard sourceWindow.isSynchronized else { return [] }
-        return syncedWindows(for: sourceWindow).filter { target in
-            guard target.id != sourceWindow.id else { return false }
-            guard let sourcePM = sourceWindow.pageManager,
-                  let targetPM = target.pageManager,
-                  let sourceBook = sourcePM.bibleBibleBook,
-                  let sourceChapter = sourcePM.bibleChapterNo,
-                  let sourceVerse = sourcePM.bibleVerseNo,
-                  let targetBook = targetPM.bibleBibleBook,
-                  let targetChapter = targetPM.bibleChapterNo,
-                  let targetVerse = targetPM.bibleVerseNo else {
-                return true
-            }
-            return sourceBook != targetBook
-                || sourceChapter != targetChapter
-                || sourceVerse != targetVerse
-        }
+        return syncedWindows(for: sourceWindow).filter { $0.id != sourceWindow.id }
     }
 
-    /// Notify that a verse changed in a window — triggers debounced sync to other windows.
-    public func notifyVerseChanged(sourceWindow: Window, ordinal: Int, key: String) {
-        guard sourceWindow.isSynchronized else { return }
-        syncWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.onSyncVerseChanged?(sourceWindow, ordinal, key)
+    /**
+     Admits one already-resolved source position for debounced grouped-window synchronization.
+
+     - Parameters:
+       - sourceWindow: Exact currently managed source window.
+       - source: Exact registered provider admitting the position; used only as an identity witness.
+       - position: Immutable coordinate resolved in the displayed page's source versification.
+     - Side Effects: An exact current producer always revokes prior pending work; a valid synchronized
+       position schedules delivery after 200 milliseconds.
+     - Failure Modes: Unmanaged windows and foreign/retired producers cannot revoke current work.
+       Invalid coordinates, changed group membership, disabled synchronization, replaced controllers,
+       released producers, and workspace replacement suppress delivery.
+     - Concurrency: Call on the serialized workspace/pane lifecycle owner.
+     */
+    public func notifyVerseChanged(
+        sourceWindow: Window,
+        source: any WindowSynchronizationSource,
+        position: WindowSynchronizationPosition
+    ) {
+        let sourceObject = source as AnyObject
+        guard managesWindow(sourceWindow),
+              let admittedController = registeredController(for: sourceWindow),
+              admittedController === sourceObject else { return }
+
+        // The exact current producer's latest observation supersedes older admitted work even when
+        // the new observation cannot itself synchronize. A retired producer cannot reach this point.
+        invalidatePendingSynchronizedScroll()
+        guard sourceWindow.isSynchronized, position.isStructurallyValid else { return }
+
+        let admittedSyncGroup = sourceWindow.syncGroup
+        let admittedSourceMembershipEpoch = synchronizationMembershipEpochs[sourceWindow.id, default: 0]
+        let admittedTargets = synchronizedVerseUpdateTargets(for: sourceWindow).map { target in
+            SynchronizedScrollTargetWitness(
+                window: target,
+                windowID: target.id,
+                membershipEpoch: synchronizationMembershipEpochs[target.id, default: 0]
+            )
+        }
+        guard !admittedTargets.isEmpty else { return }
+        let generation = syncWorkGeneration
+        let work = DispatchWorkItem { [weak self, weak sourceObject] in
+            guard let self,
+                  let sourceObject,
+                  self.syncWorkGeneration == generation else { return }
+            defer {
+                if self.syncWorkGeneration == generation {
+                    self.syncWorkItem = nil
+                    self.syncWorkSourceWindowID = nil
+                    self.syncWorkGroup = nil
+                }
+            }
+            guard sourceWindow.isSynchronized,
+                  sourceWindow.syncGroup == admittedSyncGroup,
+                  self.synchronizationMembershipEpochs[sourceWindow.id, default: 0]
+                    == admittedSourceMembershipEpoch,
+                  self.managesWindow(sourceWindow),
+                  let currentController = self.registeredController(for: sourceWindow),
+                  currentController === sourceObject else {
+                return
+            }
+            let targets = admittedTargets.compactMap { witness -> Window? in
+                guard self.synchronizationMembershipEpochs[witness.windowID, default: 0]
+                        == witness.membershipEpoch,
+                      let target = witness.window,
+                      self.managesWindow(target),
+                      self.visibleWindows.contains(where: { $0 === target }),
+                      target.isSynchronized,
+                      target.syncGroup == admittedSyncGroup else { return nil }
+                return target
+            }
+            guard !targets.isEmpty else { return }
+            self.onSyncVerseChanged?(
+                sourceWindow,
+                WindowSynchronizationDelivery(position: position, targets: targets)
+            )
         }
         syncWorkItem = work
+        syncWorkSourceWindowID = sourceWindow.id
+        syncWorkGroup = admittedSyncGroup
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 

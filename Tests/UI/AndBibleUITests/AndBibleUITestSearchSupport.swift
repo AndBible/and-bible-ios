@@ -6,8 +6,8 @@ import UIKit
 #endif
 
 private let seededSearchFixtureScenarios: Set<String> = [
+    "locked-picker-downloads",
     "search-indexed",
-    "search-multi-translation",
 ]
 
 /// Maximum Search readiness wait for fixture-seeded Search UI tests.
@@ -20,8 +20,8 @@ extension AndBibleUITests {
     /**
      Opens Search and waits for it to become interactive under the current fixture contract.
 
-     Normal Search UI tests use `search-indexed` or `search-multi-translation` fixture scenarios
-     from `Tests/UI/Fixtures/ui_test_fixture_manifest.json`. Those scenarios must be detected by the app as
+     Normal Search UI tests use the `search-indexed` fixture scenario from
+     `Tests/UI/Fixtures/ui_test_fixture_manifest.json`. That scenario must be detected by the app as
      already indexed and must not enter `state=needsIndex`; otherwise the test is hiding a fixture
      regression behind runtime index creation and long readiness waits. Intentional runtime
      index-creation coverage should use a non-seeded fixture path and test that workflow explicitly.
@@ -32,7 +32,7 @@ extension AndBibleUITests {
        - line: Source line used for XCTest failure attribution.
      - Returns: The visible Search root element after the readiness contract is satisfied.
      - Side effects:
-       - presents Search from the seeded launch route or reader action surface
+       - presents Search through the reader action surface
        - polls Search's accessibility state until the screen is ready
        - fails immediately for seeded Search fixtures if Search asks to create an index
      - Failure modes:
@@ -56,19 +56,6 @@ extension AndBibleUITests {
         let readinessTimeout = searchReadinessTimeout(
             allowsRuntimeIndexCreation: allowsRuntimeIndexCreation
         )
-
-        if app.launchArguments.contains("-UITEST_SEARCH_QUERY"),
-           let prePresentedSearch = waitForSearchScreenIfAlreadySeeded(in: app, timeout: 10) {
-            waitForSearchInteractionReady(
-                on: prePresentedSearch,
-                in: app,
-                timeout: readinessTimeout,
-                allowsRuntimeIndexCreation: allowsRuntimeIndexCreation,
-                file: file,
-                line: line
-            )
-            return prePresentedSearch
-        }
 
         let searchScreen = presentSearchFromReader(in: app, timeout: 20, file: file, line: line)
         waitForSearchInteractionReady(
@@ -102,42 +89,13 @@ extension AndBibleUITests {
             : seededSearchReadinessTimeout
     }
 
-    /// Reuses a Search destination that the app auto-presented from a launch-seeded UI-test query.
-    func waitForSearchScreenIfAlreadySeeded(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> XCUIElement? {
-        let didResolve = waitForResolvedSemanticState(
-            named: "searchScreen.seededPresentation",
-            timeout: max(0, timeout),
-            valueProvider: {
-                if self.resolvedSearchScreenElement(in: app) != nil {
-                    let state = self.resolvedSearchStateValue(in: app) ?? "<state missing>"
-                    return "searchScreen=visible;\(state)"
-                }
-                return self.resolvedSearchStateValue(in: app).map {
-                    "searchScreen=missing;\($0)"
-                }
-            },
-            success: { $0.contains("searchScreen=visible") },
-            recordsFailure: false,
-            failureDescription: {
-                "Expected launch-seeded Search screen within \(timeout) seconds. Last state: '\($0)'."
-            }
-        )
-        return didResolve ? resolvedSearchScreenElement(in: app) : nil
-    }
-
     /**
      Presents Search from the reader shell and verifies that the app actually entered Search state.
 
      The adaptive SwiftUI toolbar can expose multiple Search button candidates while `ViewThatFits`
-     settles. XCTest can report a native tap as completed even when that resolved node did not invoke
-     the production action. This helper keeps Search opening condition-based: the direct toolbar path
-     is attempted first, but success is only accepted after either the reader state export reports
-     `searchVisible=true` or the Search root appears. If the direct path does not change state, the
-     helper falls back to the Android-style drawer action instead of waiting out the full presentation
-     budget on a failed tap assumption.
+     settles. This helper chooses the production entry surface once, performs one action, and then
+     passively waits for the Search root. Reader state remains diagnostic context rather than an
+     alternate success path.
      *
      * - Parameters:
      *   - app: Running application under test.
@@ -147,12 +105,9 @@ extension AndBibleUITests {
      * - Returns: The visible Search root once presentation is confirmed.
      * - Side effects:
      *   - taps the direct reader Search affordance
-     *   - may open the reader navigation drawer and tap its Search action when the direct tap does not
-     *     produce Search presentation state
-     *   - polls the compact reader state export and Search root accessibility identifier
+     *   - passively polls the Search root after that single action
      * - Failure modes:
-     *   - records an XCTest failure when neither production activation path presents Search before
-     *     the timeout expires
+     *   - records an XCTest failure when the chosen production activation does not present Search
      */
     func presentSearchFromReader(
         in app: XCUIApplication,
@@ -160,52 +115,17 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let deadline = Date().addingTimeInterval(timeout)
-        var attemptedDrawerFallback = false
-        var observedSearchVisibleState = false
-
         tapReaderSearchEntry(in: app, timeout: min(10, timeout), file: file, line: line)
-
-        repeat {
-            if let searchScreen = resolvedSearchScreenElement(in: app) {
-                return searchScreen
-            }
-
-            if readerRenderedContentStateContains("searchVisible=true", in: app) {
-                observedSearchVisibleState = true
-            } else if !attemptedDrawerFallback,
-                      waitForReaderShellReady(in: app, timeout: 0.2) {
-                tapReaderAction(
-                    "readerOpenSearchAction",
-                    in: app,
-                    timeout: min(8, max(1, deadline.timeIntervalSinceNow)),
-                    file: file,
-                    line: line
-                )
-                attemptedDrawerFallback = true
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search presentation",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                if self.resolvedSearchScreenElement(in: app) != nil {
-                    return true
-                }
-                if self.readerRenderedContentStateContains("searchVisible=true", in: app) {
-                    observedSearchVisibleState = true
-                    return true
-                }
-                return false
-            }
-        } while Date() < deadline
-
+        let didPresentSearch = waitForUITestCondition(
+            "Wait for Search presentation after one entry action",
+            timeout: max(0, timeout)
+        ) {
+            self.resolvedSearchScreenElement(in: app) != nil
+        }
         let searchScreen = unresolvedElement("searchScreen", in: app)
         XCTAssertTrue(
-            searchScreen.exists,
-            "Expected Search to present from reader within \(timeout) seconds; "
-                + "observed searchVisible=\(observedSearchVisibleState), "
-                + "attemptedDrawerFallback=\(attemptedDrawerFallback).",
+            didPresentSearch && searchScreen.exists,
+            "Expected one Search entry action to present the visible Search root within \(timeout) seconds; passive reader state was '\(resolvedElementSemanticText("readerRenderedContentState", in: app) ?? "nil")'.",
             file: file,
             line: line
         )
@@ -259,59 +179,15 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for the Search screen to report that its current query is no longer in flight.
-     *
-     * - Parameters:
-     *   - searchScreen: Search root element exporting deterministic state in its accessibility
-     *     value.
-     *   - timeout: Maximum time to wait for the `state=ready;searching=false` state.
-     * - Side effects:
-     *   - blocks the current XCTest method until the search state reports ready completion or
-     *     times out
-     * - Failure modes:
-     *   - fails the test if the Search screen never reports `state=ready;searching=false`
-     *     before the timeout
-     */
-    func waitForSearchToFinish(in app: XCUIApplication, timeout: TimeInterval) {
-        waitForSearchState(containing: "", in: app, timeout: timeout)
-    }
-
-    /**
-     Returns from Android's SearchResults activity to the retained Search criteria activity.
+     Submits the retained Search criteria once through the currently focused control.
 
      - Parameters:
        - app: Running application under test.
-       - timeout: Maximum time to resolve Back and observe `stage=criteria`.
-     - Side effects: Taps the shared Search app bar's Up action only when results are visible.
-     - Failure modes: Records an XCTest failure when Search cannot return to settled criteria.
-     */
-    func returnToSearchCriteria(
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        let alreadyOnCriteria = searchStateCandidateValues(in: app).contains {
-            $0.contains("state=ready")
-                && $0.contains("searching=false")
-                && $0.contains("stage=criteria")
-        }
-        guard !alreadyOnCriteria else { return }
-
-        let backButton = requireElement("searchActivityAppBarBackButton", in: app, timeout: timeout)
-        tapElementReliably(backButton, timeout: timeout)
-        waitForSearchState(containing: "stage=criteria", in: app, timeout: timeout)
-    }
-
-    /**
-     Submits the retained Search criteria and waits for Android's separate results activity.
-
-     - Parameters:
-       - app: Running application under test.
-       - timeout: Maximum time to resolve Search and observe settled `stage=results`.
+       - timeout: Maximum time to resolve the visible submit command when the field lacks focus.
      - Side effects: Activates Android's keyboard Search action when the query field owns focus;
-       otherwise taps the criteria activity's bottom Search command. Both paths wait for the
-       asynchronous query to finish.
-     - Failure modes: Records an XCTest failure when the active submit path is unavailable or
-       results never reach a settled state.
+       otherwise taps the criteria activity's bottom Search command. The caller observes its
+       expected outcome: a reference can leave Search, while an indexed query displays results.
+     - Failure modes: Records an XCTest failure when the active submit path is unavailable.
      */
     func submitSearchCriteria(
         in app: XCUIApplication,
@@ -319,13 +195,11 @@ extension AndBibleUITests {
     ) {
         if searchFieldFocusIsActive(in: app) {
             app.typeText(XCUIKeyboardKey.return.rawValue)
-            waitForSearchState(containing: "stage=results", in: app, timeout: timeout)
             return
         }
 
         let submitButton = requireElement("searchSubmitButton", in: app, timeout: timeout)
         tapElementReliably(submitButton, timeout: timeout)
-        waitForSearchState(containing: "stage=results", in: app, timeout: timeout)
     }
 
     /**
@@ -515,970 +389,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for Search to report at least one settled result row count.
-     *
-     * - Parameters:
-     *   - minimumCount: Inclusive lower bound for the exported `results=` count.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait before failing.
-     * - Side effects:
-     *   - polls the Search accessibility export until it reports `state=ready;searching=false`
-     *     with a parsed result count at or above `minimumCount`
-     * - Failure modes:
-     *   - fails the test if Search never publishes a large-enough settled count
-     */
-    func waitForSearchResultCount(
-        atLeast minimumCount: Int,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        waitForSearchSemanticState(
-            in: app,
-            timeout: timeout,
-            success: {
-                $0.contains("state=ready")
-                    && $0.contains("searching=false")
-                    && (self.searchResultCount(from: $0) ?? -1) >= minimumCount
-            },
-            failureDescription: {
-                "Expected Search to report at least \(minimumCount) results within \(timeout) seconds; last value was '\($0)'."
-            }
-        )
-    }
-
-    /// Parses the deterministic `results=` token from Search accessibility state.
-    func searchResultCount(from state: String) -> Int? {
-        guard let range = state.range(of: "results=") else { return nil }
-        let suffix = state[range.upperBound...]
-        let digits = suffix.prefix { $0.isNumber }
-        return digits.isEmpty ? nil : Int(digits)
-    }
-
-    /**
-     Waits for Search to expose a selected-module set matching one semantic predicate.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait before failing.
-     *   - description: Human-readable predicate description for failure output.
-     *   - predicate: Assertion predicate applied to the parsed selected-module set.
-     * - Side effects:
-     *   - polls the Search accessibility export until it reaches a settled ready state
-     * - Failure modes:
-     *   - fails when Search never publishes a selected-module set matching `predicate`
-     */
-    func waitForSearchSelectedModules(
-        in app: XCUIApplication,
-        timeout: TimeInterval,
-        description: String,
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        predicate: @escaping (Set<String>) -> Bool
-    ) {
-        waitForSearchSemanticState(
-            in: app,
-            timeout: timeout,
-            success: {
-                $0.contains("state=ready")
-                    && $0.contains("searching=false")
-                    && self.searchSelectedModules(from: $0).map(predicate) == true
-            },
-            failureDescription: {
-                "Expected Search selected modules to match \(description) within \(timeout) seconds; last value was '\($0)'."
-            },
-            file: file,
-            line: line
-        )
-    }
-
-    /// Parses the deterministic `selectedModules=` token from Search accessibility state.
-    func searchSelectedModules(from state: String) -> Set<String>? {
-        guard let range = state.range(of: "selectedModules=") else { return nil }
-        let suffix = state[range.upperBound...]
-        let token = suffix.prefix { $0 != ";" }
-        return Set(token.split(separator: ",").map(String.init).filter { !$0.isEmpty })
-    }
-
-    /**
-     Taps one visible button by its accessibility label and waits for it to become hittable.
-     *
-     * - Parameters:
-     *   - label: Visible accessibility label expected on the target button.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the button to exist and become
-     *     hittable.
-     * - Side effects:
-     *   - resolves the requested button from the visible button hierarchy and taps its center
-     *     point directly
-     * - Failure modes:
-     *   - fails if the button never appears or never becomes hittable within the timeout
-     */
-    func tapButtonLabeled(
-        _ label: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        let button = app.buttons[label].firstMatch
-        XCTAssertTrue(
-            button.waitForExistence(timeout: timeout),
-            "Expected visible button '\(label)' to exist within \(timeout) seconds."
-        )
-        tapElementReliably(button, timeout: timeout)
-    }
-
-    /**
-     Taps one Search scope button through its stable accessibility identifier.
-     *
-     * - Parameters:
-     *   - scopeToken: Stable Search scope token exported by `SearchView`.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the scope button to exist and become
-     *     hittable.
-     * - Side effects:
-     *   - resolves the requested Search scope button from the accessibility hierarchy and taps
-     *     it through XCTest
-     *   - verifies the compact Search state export after each tap and retries when hosted
-     *     simulators synthesize a tap that does not activate the SwiftUI button
-     * - Failure modes:
-     *   - fails if the requested scope button never appears, never becomes hittable, or never
-     *     updates the exported Search scope within the allotted timeout
-     */
-    func tapSearchScope(
-        _ scopeToken: SearchScopeToken,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        let identifier = "searchScopeButton::\(scopeToken.rawValue)"
-        let expectedStateToken = "scope=\(scopeToken.rawValue)"
-
-        func isExpectedScopeSelected() -> Bool {
-            searchStateCandidateValues(in: app).contains { value in
-                value.contains("state=ready")
-                    && value.contains("searching=false")
-                    && value.contains(expectedStateToken)
-            }
-        }
-
-        while Date() < deadline {
-            if isExpectedScopeSelected() {
-                return
-            }
-            revealSearchControls(in: app)
-
-            let searchScreen = unresolvedElement("searchScreen", in: app)
-            let scopeStrip = resolvedElement("searchScopeStrip", in: app)
-                ?? searchScreen.scrollViews["searchScopeStrip"].firstMatch
-            let candidates = [
-                scopeStrip.buttons[identifier].firstMatch,
-                scopeStrip.otherElements[identifier].firstMatch,
-                searchScreen.buttons[identifier].firstMatch,
-                searchScreen.otherElements[identifier].firstMatch,
-            ]
-
-            if let identifierElement = candidates.first(where: {
-                ($0.exists || $0.waitForExistence(timeout: 0.2))
-                    && waitForElementToBecomeHittable($0, timeout: 0.5)
-            }) {
-                tapElementReliably(identifierElement, timeout: 3)
-                let activationTimeout = min(2, max(0, deadline.timeIntervalSinceNow))
-                if waitForUITestCondition(
-                    "Wait for Search scope \(scopeToken.rawValue) activation",
-                    timeout: activationTimeout,
-                    condition: isExpectedScopeSelected
-                ) {
-                    return
-                }
-                continue
-            }
-
-            if scopeStrip.exists, !scopeStrip.frame.isEmpty {
-                if let candidate = candidates.first(where: { $0.exists && !$0.frame.isEmpty }) {
-                    if candidate.frame.minX < scopeStrip.frame.minX {
-                        scopeStrip.swipeRight()
-                    } else {
-                        scopeStrip.swipeLeft()
-                    }
-                } else {
-                    scopeStrip.swipeLeft()
-                    scopeStrip.swipeRight()
-                }
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search scope \(scopeToken.rawValue) controls",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                isExpectedScopeSelected()
-                    || candidates.contains { $0.exists && !$0.frame.isEmpty }
-            }
-        }
-
-        let finalValues = searchStateCandidateValues(in: app)
-        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
-        XCTFail(
-            "Expected Search scope button '\(scopeToken.fallbackLabel)' to select '\(expectedStateToken)' within \(timeout) seconds; last Search state was '\(lastValue)'."
-        )
-    }
-
-    /**
-     Opens the Search translation picker through its stable Search options control.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the picker affordance.
-     * - Side effects:
-     *   - reveals Search options when needed and taps the translation picker button through the
-     *     shared reliable button-tap path
-     *   - retries the tap when Search does not publish the canonical picker-open state under CI load
-     * - Failure modes:
-     *   - fails when the Search state export never reports that the picker button action toggled
-     *     presentation within the timeout
-     */
-    func tapSearchTranslationPicker(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
-                return
-            }
-
-            revealSearchControls(in: app)
-            let searchScreen = unresolvedElement("searchScreen", in: app)
-            let candidates = [
-                searchScreen.buttons["searchTranslationPickerButton"].firstMatch,
-                searchScreen.otherElements["searchTranslationPickerButton"].firstMatch,
-                searchScreen.buttons["searchResultsTranslationPickerButton"].firstMatch,
-                searchScreen.otherElements["searchResultsTranslationPickerButton"].firstMatch,
-                app.buttons["searchTranslationPickerButton"].firstMatch,
-                app.otherElements["searchTranslationPickerButton"].firstMatch,
-                app.buttons["searchResultsTranslationPickerButton"].firstMatch,
-                app.otherElements["searchResultsTranslationPickerButton"].firstMatch,
-            ]
-
-            if let picker = candidates.first(where: {
-                ($0.exists || $0.waitForExistence(timeout: 0.2))
-                    && waitForElementToBecomeHittable($0, timeout: 0.5)
-            }) {
-                tapElementReliably(picker, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-
-                let remaining = deadline.timeIntervalSinceNow
-                if remaining > 0,
-                   searchTranslationPickerIsOpen(in: app, timeout: min(1.5, max(0.25, remaining))) {
-                    return
-                }
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search translation picker affordance",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                self.searchTranslationPickerStateIsOpen(in: app, timeout: 0)
-                    || candidates.contains { $0.exists && !$0.frame.isEmpty }
-            }
-        } while Date() < deadline
-
-        let finalState = resolvedSearchStateValue(in: app) ?? "nil"
-        if finalState.contains("translationPicker=open") {
-            return
-        }
-        XCTFail("Expected Search translation picker to open within \(timeout) seconds. Final Search state: '\(finalState)'.")
-    }
-
-    /**
-     Returns true once the Search translation picker overlay has exposed any stable child element.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Total time budget for polling the candidate set.
-     * - Returns: `true` when a picker-specific OK button or picker list exists.
-     * - Side effects:
-     *   - polls the live Search state export and picker accessibility hierarchy while SwiftUI
-     *     presents or dismisses the picker
-     * - Failure modes: This helper does not fail directly.
-     */
-    func searchTranslationPickerIsOpen(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> Bool {
-        waitForUITestCondition(
-            "Wait for Search translation picker to open",
-            timeout: max(0, timeout)
-        ) {
-            if self.searchTranslationPickerStateIsOpen(in: app, timeout: 0) {
-                return true
-            }
-            if self.firstExistingElement(
-                self.searchTranslationPickerOpenCandidates(in: app),
-                timeout: 0
-            ) != nil {
-                return true
-            }
-            return false
-        }
-    }
-
-    /**
-     Returns whether Search has published the translation-picker presentation state.
-     *
-     * The Search screen exports this state separately from overlay descendants so UI tests can
-     * distinguish "the button action has toggled presentation" from "SwiftUI has finished exposing
-     * the picker hierarchy." That keeps picker-opening retries focused on missed actions instead of
-     * treating slow accessibility snapshots as proof that the tap failed.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to poll the Search state export.
-     * - Returns: `true` when the Search state export contains `translationPicker=open`.
-     * - Side effects: samples the Search state export through the shared semantic-state waiter.
-     * - Failure modes: This helper does not fail directly.
-     */
-    func searchTranslationPickerStateIsOpen(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> Bool {
-        return waitForResolvedSemanticState(
-            named: "searchStateExport.translationPicker",
-            timeout: max(0, timeout),
-            valueProvider: {
-                let values = self.searchStateCandidateValues(in: app)
-                return values.isEmpty ? nil : values.joined(separator: " || ")
-            },
-            success: { $0.contains("translationPicker=open") },
-            recordsFailure: false,
-            failureDescription: {
-                "Expected Search translation picker state to open within \(timeout) seconds. Last state: '\($0)'."
-            }
-        )
-    }
-
-    /// Returns stable picker descendants that prove the Search translation picker overlay is open.
-    func searchTranslationPickerOpenCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        searchTranslationOKCandidates(in: app, includeLocalizedFallbacks: false)
-            + searchTranslationCancelCandidates(in: app, includeLocalizedFallbacks: false)
-            + searchTranslationPickerListCandidates(in: app)
-    }
-
-    /**
-     Toggles one module row in the Search translation picker.
-     *
-     * - Parameters:
-     *   - moduleName: Stable module abbreviation, such as `AATESTWEB`.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the row.
-     * - Side effects:
-     *   - taps the matching translation row
-     * - Failure modes:
-     *   - fails when the picker does not expose the requested row
-     *
-     * SwiftUI may materialize lazy-list rows outside the dialog's clipped viewport. Those rows
-     * expose usable frames, but XCTest correctly reports them as non-hittable. This helper waits
-     * for the requested row to become hittable before tapping so it cannot fall back to stale
-     * offscreen coordinates that hit the overlay chrome instead of the row.
-     */
-    func tapSearchTranslationRow(
-        moduleName: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let identifier = searchTranslationRowAccessibilityIdentifier(moduleName: moduleName)
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let row = firstExistingElement(
-                searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                timeout: 0
-            ) {
-                if waitForElementToBecomeHittable(row, timeout: 0.5) {
-                    let expectedValue = expectedSearchTranslationRowValue(afterTapping: row)
-                    row.tap()
-                    waitForSearchTranslationRowMutation(
-                        identifier: identifier,
-                        moduleName: moduleName,
-                        expectedValue: expectedValue,
-                        in: app,
-                        timeout: min(3, timeout)
-                    )
-                    return
-                }
-
-                if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
-                   pickerList.exists {
-                    if elementHasUsableFrame(row),
-                       row.frame.midY < app.frame.midY {
-                        pickerList.swipeDown()
-                    } else {
-                        pickerList.swipeUp()
-                    }
-                }
-                _ = waitForUITestCondition(
-                    "Wait for Search translation row \(moduleName) to settle after scroll",
-                    timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-                ) {
-                    !row.exists || self.waitForElementToBecomeHittable(row, timeout: 0)
-                }
-                continue
-            }
-
-            if let pickerList = firstExistingElement(searchTranslationPickerListCandidates(in: app), timeout: 0.1),
-               pickerList.exists {
-                pickerList.swipeUp()
-            }
-            _ = waitForUITestCondition(
-                "Wait for Search translation row \(moduleName)",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                self.firstExistingElement(
-                    self.searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                    timeout: 0
-                ) != nil
-            }
-        } while Date() < deadline
-
-        XCTFail("Expected Search translation row '\(moduleName)' to exist within \(timeout) seconds.")
-    }
-
-    /**
-     Builds the Java-exact accessibility identifier used by one Search translation row.
-
-     - Parameter moduleName: Raw module abbreviation whose canonical Unicode variants must remain
-       independently addressable.
-     - Returns: Search row identifier containing the module name's hyphen-delimited, uppercase
-       UTF-16 code units, or the literal `empty` segment for an empty name.
-     - Side effects: None.
-     - Failure modes: None; Swift strings always expose a deterministic UTF-16 representation.
-     */
-    func searchTranslationRowAccessibilityIdentifier(moduleName: String) -> String {
-        let codeUnits = Array(moduleName.utf16)
-        let segment = codeUnits.isEmpty
-            ? "empty"
-            : codeUnits.map { String(format: "%04X", $0) }.joined(separator: "-")
-        return "searchTranslationRow::\(segment)"
-    }
-
-    /// Returns list roots for the Search translation picker.
-    func searchTranslationPickerListCandidates(in app: XCUIApplication) -> [XCUIElement] {
-        let identifier = "searchTranslationPickerList"
-        return [
-            app.collectionViews[identifier].firstMatch,
-            app.tables[identifier].firstMatch,
-            app.scrollViews[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-        ]
-    }
-
-    /**
-     Returns scoped OK button candidates for the Search translation picker.
-     *
-     * The Android-parity picker is an in-place overlay with an explicit OK action, not a SwiftUI
-     * sheet toolbar. Stable identifiers are preferred; localized fallbacks are broad only for
-     * recovery after the picker state export has already confirmed the overlay is open.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - includeLocalizedFallbacks: Whether to include generic OK labels after stable identifiers.
-     * - Returns: Ordered OK button candidates.
-     * - Side effects: none.
-     * - Failure modes: This helper does not fail directly.
-     */
-    func searchTranslationOKCandidates(
-        in app: XCUIApplication,
-        includeLocalizedFallbacks: Bool = true
-    ) -> [XCUIElement] {
-        let identifiedCandidates = [
-            app.buttons["searchTranslationPickerApplyButton"].firstMatch,
-            app.otherElements["searchTranslationPickerApplyButton"].firstMatch,
-        ]
-        guard includeLocalizedFallbacks else {
-            return identifiedCandidates
-        }
-        return identifiedCandidates + [
-            app.buttons["OK"].firstMatch,
-            app.buttons["Ok"].firstMatch,
-            app.buttons["ok"].firstMatch,
-        ]
-    }
-
-    /**
-     Returns scoped Cancel button candidates for the Search translation picker.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - includeLocalizedFallbacks: Whether to include generic Cancel labels after stable IDs.
-     * - Returns: Ordered Cancel button candidates.
-     * - Side effects: none.
-     * - Failure modes: This helper does not fail directly.
-     */
-    func searchTranslationCancelCandidates(
-        in app: XCUIApplication,
-        includeLocalizedFallbacks: Bool = true
-    ) -> [XCUIElement] {
-        let identifiedCandidates = [
-            app.buttons["searchTranslationPickerCancelButton"].firstMatch,
-            app.otherElements["searchTranslationPickerCancelButton"].firstMatch,
-        ]
-        guard includeLocalizedFallbacks else {
-            return identifiedCandidates
-        }
-        return identifiedCandidates + [
-            app.buttons["Cancel"].firstMatch,
-            app.buttons["cancel"].firstMatch,
-        ]
-    }
-
-    /**
-     Determines the semantic accessibility value expected after one translation-row tap.
-     *
-     * - Parameter row: The row element that is about to be tapped.
-     * - Returns: `selected` or `unselected` when the row exposes a known pre-tap value; otherwise
-     *   `nil` so callers only wait for picker stability.
-     * - Side effects: none.
-     * - Failure modes: This helper does not fail directly.
-     */
-    func expectedSearchTranslationRowValue(afterTapping row: XCUIElement) -> String? {
-        switch row.value as? String {
-        case "selected":
-            return "unselected"
-        case "unselected":
-            return "selected"
-        default:
-            return nil
-        }
-    }
-
-    /**
-     Waits for a translation-row tap to settle before the picker toolbar is queried again.
-     *
-     * The grouped multi-translation search test toggles a row, which triggers SwiftUI to re-render
-     * the shared checkbox list. Waiting for either the row accessibility value to update or the
-     * picker list to remain visible prevents the next step from querying dialog actions during that
-     * transition; criteria changes do not execute a search until the explicit Search command.
-     *
-     * - Parameters:
-     *   - identifier: Stable row accessibility identifier.
-     *   - moduleName: Module abbreviation displayed by the row.
-     *   - expectedValue: Optional post-tap accessibility value to wait for.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the mutation to settle.
-     * - Side effects:
-     *   - polls the live picker accessibility hierarchy while SwiftUI settles row state
-     * - Failure modes: This helper does not fail directly; downstream assertions still validate
-     *   the selected-module Search state.
-     */
-    func waitForSearchTranslationRowMutation(
-        identifier: String,
-        moduleName: String,
-        expectedValue: String?,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        waitForUITestCondition(
-            "Wait for Search translation row \(moduleName) mutation",
-            timeout: max(0, timeout)
-        ) {
-            if let row = self.firstExistingElement(
-                self.searchTranslationRowCandidates(identifier, moduleName: moduleName, in: app),
-                timeout: 0
-            ) {
-                if let expectedValue, row.value as? String == expectedValue {
-                    return true
-                }
-                if expectedValue == nil, self.elementHasUsableFrame(row) {
-                    return true
-                }
-            }
-
-            if expectedValue == nil,
-               self.firstExistingElement(self.searchTranslationPickerListCandidates(in: app), timeout: 0) != nil {
-                return true
-            }
-
-            return false
-        }
-    }
-
-    /// Returns row candidates for one Search translation picker module.
-    func searchTranslationRowCandidates(
-        _ identifier: String,
-        moduleName _: String,
-        in app: XCUIApplication
-    ) -> [XCUIElement] {
-        [
-            app.buttons[identifier].firstMatch,
-            app.cells[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-        ]
-    }
-
-    /**
-     Taps the neutral Select all/Select none action in the Search translation picker.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the toolbar action.
-     * - Side effects:
-     *   - taps the picker dialog neutral select toggle
-     *   - waits for the toggle's semantic value to flip, proving the draft selection mutated
-     * - Failure modes:
-     *   - fails when the Search All action is not reachable
-     *   - fails when the neutral action does not mutate the picker draft
-     */
-    func tapSearchTranslationSelectAll(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let selectAll = app.buttons["searchTranslationPickerSelectToggleButton"].firstMatch
-        if selectAll.waitForExistence(timeout: timeout) {
-            let expectedValue = expectedSearchTranslationSelectToggleValue(afterTapping: selectAll)
-            tapElementReliably(selectAll, timeout: timeout)
-            waitForSearchTranslationSelectToggleValue(
-                expectedValue,
-                in: app,
-                timeout: min(3, timeout)
-            )
-            return
-        }
-
-        let fallbackSelectAll = app.buttons["Select all"].firstMatch
-        XCTAssertTrue(
-            fallbackSelectAll.waitForExistence(timeout: timeout),
-            "Expected Search translation select toggle to exist within \(timeout) seconds."
-        )
-        tapElementReliably(fallbackSelectAll, timeout: timeout)
-    }
-
-    /// Returns the expected neutral select-toggle semantic value after tapping it.
-    func expectedSearchTranslationSelectToggleValue(afterTapping toggle: XCUIElement) -> String? {
-        switch toggle.value as? String {
-        case "selectAll":
-            return "selectNone"
-        case "selectNone":
-            return "selectAll"
-        default:
-            return nil
-        }
-    }
-
-    /**
-     Waits for the Search translation picker neutral action to expose an expected semantic state.
-     *
-     * - Parameters:
-     *   - expectedValue: Expected accessibility value after a Select all/none tap. `nil` skips the
-     *     wait for localized fallback controls that do not expose the stable test value.
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the semantic state change.
-     * - Side effects: samples the live picker button through the shared semantic-state waiter.
-     * - Failure modes: fails when the stable picker button remains visible but does not reach the
-     *   expected value before the timeout.
-     */
-    func waitForSearchTranslationSelectToggleValue(
-        _ expectedValue: String?,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        guard let expectedValue else { return }
-
-        let toggle = app.buttons["searchTranslationPickerSelectToggleButton"].firstMatch
-        waitForResolvedSemanticState(
-            named: "searchTranslationPickerSelectToggleButton",
-            timeout: timeout,
-            valueProvider: {
-                guard toggle.exists else { return nil }
-                return toggle.value as? String
-            },
-            success: { $0 == expectedValue },
-            failureDescription: {
-                "Expected Search translation select toggle value '\(expectedValue)' within \(timeout) seconds; last value was '\($0)'."
-            }
-        )
-    }
-
-    /**
-     Commits the Search translation picker with its OK action.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the OK action.
-     * - Side effects:
-     *   - taps the picker dialog OK action
-     * - Failure modes:
-     *   - fails when the OK action is not reachable
-     */
-    func tapSearchTranslationOK(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let ok = firstExistingElement(searchTranslationOKCandidates(in: app), timeout: 0.2) {
-                tapElementReliably(ok, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-                if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
-                    return
-                }
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search translation OK action",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                self.firstExistingElement(self.searchTranslationOKCandidates(in: app), timeout: 0) != nil
-            }
-        } while Date() < deadline
-
-        XCTFail("Expected Search translation OK button to exist within \(timeout) seconds.")
-    }
-
-    /**
-     Cancels the Search translation picker without committing draft row changes.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the Cancel action.
-     * - Side effects:
-     *   - taps the picker dialog Cancel action
-     * - Failure modes:
-     *   - fails when the Cancel action is not reachable
-     */
-    func tapSearchTranslationCancel(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if let cancel = firstExistingElement(searchTranslationCancelCandidates(in: app), timeout: 0.2) {
-                tapElementReliably(cancel, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-                if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
-                    return
-                }
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search translation Cancel action",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                self.firstExistingElement(self.searchTranslationCancelCandidates(in: app), timeout: 0) != nil
-            }
-        } while Date() < deadline
-
-        XCTFail("Expected Search translation Cancel button to exist within \(timeout) seconds.")
-    }
-
-    /**
-     Dismisses the Search translation picker by tapping its dimmed area outside the dialog.
-     *
-     * Android `AlertDialog` cancellation returns an empty multiselect result, which Search ignores
-     * rather than committing draft row changes. This helper exercises the equivalent iOS overlay path
-     * without relying on a button-specific action.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the overlay to appear and then close.
-     * - Side effects:
-     *   - taps an app-level top-leading coordinate in the dimmed area outside the centered picker
-     *     dialog
-     * - Failure modes:
-     *   - fails when the picker overlay is not reachable or does not close after the outside tap
-     */
-    func tapSearchTranslationOutsideDismiss(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let overlay = app.otherElements["searchTranslationPickerOverlay"].firstMatch
-        guard overlay.waitForExistence(timeout: timeout) else {
-            XCTFail("Expected Search translation overlay to exist within \(timeout) seconds.")
-            return
-        }
-
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)).tap()
-        if !searchTranslationPickerIsOpen(in: app, timeout: 2) {
-            return
-        }
-
-        XCTFail("Expected Search translation overlay to close after outside dismissal.")
-    }
-
-    /**
-     Taps one Search word-mode control while staying scoped to the live Search screen.
-     *
-     * - Parameters:
-     *   - label: Visible segmented-control label, such as `Phrase` or `Any Word`.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait before failing.
-     * - Side effects:
-     *   - reveals Search controls before querying stable word-mode identifiers
-     *   - dismisses text-field focus before each activation attempt
-     *   - verifies the compact Search state export after each tap and retries when hosted
-     *     simulators synthesize a segmented-control tap without changing the selected mode
-     * - Failure modes:
-     *   - fails if the requested mode control never appears or never updates the exported
-     *     Search word mode within the timeout
-     */
-    func tapSearchWordMode(
-        _ label: String,
-        in app: XCUIApplication,
-        timeout: TimeInterval = 10
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        guard let expectedToken = searchWordModeToken(forVisibleLabel: label) else {
-            XCTFail("Expected Search mode button '\(label)' to map to a stable word-mode token.")
-            return
-        }
-        let expectedStateToken = "wordMode=\(expectedToken)"
-
-        func isExpectedWordModeSelected() -> Bool {
-            searchStateCandidateValues(in: app).contains { value in
-                value.contains("state=ready")
-                    && value.contains("searching=false")
-                    && value.contains(expectedStateToken)
-            }
-        }
-
-        func waitForExpectedWordModeActivation(until activationDeadline: Date) -> Bool {
-            waitForUITestCondition(
-                "Wait for Search word mode \(expectedToken) activation",
-                timeout: max(0, activationDeadline.timeIntervalSinceNow),
-                condition: isExpectedWordModeSelected
-            )
-        }
-
-        repeat {
-            if isExpectedWordModeSelected() {
-                return
-            }
-            revealSearchControls(in: app)
-            let searchScreen = unresolvedElement("searchScreen", in: app)
-
-            let identifier = "searchWordModeButton::\(expectedToken)"
-            let identifierCandidates = [
-                searchScreen.buttons[identifier].firstMatch,
-                searchScreen.otherElements[identifier].firstMatch,
-                searchScreen.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                searchScreen.segmentedControls.buttons[label].firstMatch,
-                app.buttons[identifier].firstMatch,
-                app.otherElements[identifier].firstMatch,
-                app.segmentedControls["searchWordModePicker"].buttons[label].firstMatch,
-                app.segmentedControls.buttons[label].firstMatch,
-            ]
-            if let candidate = identifierCandidates.first(where: {
-                ($0.exists || $0.waitForExistence(timeout: 0.2))
-                    && waitForElementToBecomeHittable($0, timeout: 0.5)
-            }) {
-                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
-                    return
-                }
-                continue
-            }
-
-            if let segmentIndex = searchWordModeSegmentIndex(forVisibleLabel: label),
-               let picker = [
-                   searchScreen.segmentedControls["searchWordModePicker"].firstMatch,
-                   searchScreen.otherElements["searchWordModePicker"].firstMatch,
-               ].first(where: {
-                   ($0.exists || $0.waitForExistence(timeout: 0.2))
-                       && !$0.frame.isEmpty
-               })
-            {
-                tapSegmentedControlSegment(
-                    picker,
-                    index: segmentIndex,
-                    segmentCount: SearchWordModeControl.segmentCount,
-                    timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
-                )
-                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
-                    return
-                }
-                continue
-            }
-
-            let fallbackCandidates = [
-                searchScreen.segmentedControls.buttons[label].firstMatch,
-                searchScreen.buttons[label].firstMatch,
-                app.segmentedControls.buttons[label].firstMatch,
-                app.buttons[label].firstMatch,
-            ]
-            if let candidate = fallbackCandidates.first(where: {
-                ($0.exists || $0.waitForExistence(timeout: 0.2))
-                    && waitForElementToBecomeHittable($0, timeout: 0.5)
-            }) {
-                tapElementReliably(candidate, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow)))
-                if waitForExpectedWordModeActivation(until: min(Date().addingTimeInterval(2), deadline)) {
-                    return
-                }
-                continue
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search word mode \(expectedToken) controls",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                isExpectedWordModeSelected()
-                    || identifierCandidates.contains { $0.exists && !$0.frame.isEmpty }
-                    || fallbackCandidates.contains { $0.exists && !$0.frame.isEmpty }
-            }
-        } while Date() < deadline
-
-        let finalValues = searchStateCandidateValues(in: app)
-        if finalValues.contains(where: { $0.contains(expectedStateToken) }) {
-            return
-        }
-        let lastValue = finalValues.isEmpty ? "nil" : finalValues.joined(separator: " || ")
-        XCTFail(
-            "Expected Search mode button '\(label)' to select '\(expectedStateToken)' within \(timeout) seconds; last Search state was '\(lastValue)'."
-        )
-    }
-
-    /**
-     Maps one visible Search word-mode label to the stable accessibility token exported by Search.
-     *
-     * - Parameter label: Visible segmented-control label used by the UI test.
-     * - Returns: Stable production token for the requested label, or `nil` when the label is
-     *   unknown to the test harness.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    func searchWordModeToken(forVisibleLabel label: String) -> String? {
-        switch label {
-        case "All Words":
-            return "allWords"
-        case "Any Word":
-            return "anyWord"
-        case "Phrase":
-            return "phrase"
-        default:
-            return nil
-        }
-    }
-
-    /**
-     Maps one visible Search word-mode label to its deterministic segment index within the Search
-     segmented control.
-     *
-     * - Parameter label: Visible segmented-control label used by the UI test.
-     * - Returns: Zero-based segment index for the requested label, or `nil` when the label is
-     *   unknown to the test harness.
-     * - Side effects: none.
-     * - Failure modes: This helper cannot fail.
-     */
-    func searchWordModeSegmentIndex(forVisibleLabel label: String) -> Int? {
-        switch label {
-        case "All Words":
-            return 0
-        case "Any Word":
-            return 1
-        case "Phrase":
-            return 2
-        default:
-            return nil
-        }
-    }
-
-    /**
      Reveals Search option controls that may be hidden behind the active search field or list
      scroll position.
      *
@@ -1571,37 +481,6 @@ extension AndBibleUITests {
     }
 
     /**
-     Waits for the compact Search state export to report that text-field focus has cleared.
-
-     - Parameters:
-       - app: Running application under test.
-       - timeout: Maximum number of seconds to poll the Search state export.
-     - Returns: `true` when an exported Search state explicitly reports
-       `searchFieldFocused=false`.
-     - Side effects: samples the Search state export through the shared semantic-state waiter.
-     - Failure modes: returns `false` when the state export continues reporting focused input until
-       timeout or becomes temporarily unavailable.
-     */
-    func waitForSearchFieldFocusToClear(
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> Bool {
-        return waitForResolvedSemanticState(
-            named: "searchStateExport.searchFieldFocused",
-            timeout: max(0, timeout),
-            valueProvider: {
-                let values = self.searchStateCandidateValues(in: app)
-                return values.isEmpty ? nil : values.joined(separator: " || ")
-            },
-            success: { $0.contains("searchFieldFocused=false") },
-            recordsFailure: false,
-            failureDescription: {
-                "Expected Search field focus to clear within \(timeout) seconds. Last state: '\($0)'."
-            }
-        )
-    }
-
-    /**
      Waits for the exported Search state to retain one expected query string.
      *
      * - Parameters:
@@ -1638,13 +517,14 @@ extension AndBibleUITests {
      * - Parameters:
      *   - identifier: Stable result-row accessibility identifier.
      *   - app: Running application under test.
-     *   - shouldExist: Whether the result row is expected to exist by the timeout.
+     *   - shouldExist: Whether the result row is expected to be visibly rendered by the timeout.
+     *   - expectedContent: User-visible label fragments the rendered row must expose.
      *   - timeout: Maximum number of seconds to wait before failing.
      *   - file: Source file used for XCTest failure attribution.
      *   - line: Source line used for XCTest failure attribution.
      * - Side effects:
-     *   - polls the live XCUI hierarchy until the requested row reaches the requested existence
-     *     state
+     *   - polls the live XCUI hierarchy until the requested row reaches the requested visibility
+     *     and content state
      * - Failure modes:
      *   - records an XCTest failure if the row never reaches the requested existence state
      */
@@ -1652,43 +532,56 @@ extension AndBibleUITests {
         _ identifier: String,
         in app: XCUIApplication,
         shouldExist: Bool,
+        expectedContent: [String] = [],
         timeout: TimeInterval = 10,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let rowToken = "|\(identifier)|"
-        waitForSearchSemanticState(
-            in: app,
-            timeout: timeout,
-            success: {
-                $0.contains("state=ready")
-                    && $0.contains("searching=false")
-                    && $0.contains(rowToken) == shouldExist
-            },
-            failureDescription: {
-                "Expected Search result '\(identifier)' existence to become \(shouldExist) within \(timeout) seconds. Final Search state: '\($0)'."
-            },
+        var lastVisibleContent = "<row unavailable>"
+        let reachedExpectedState = waitForUITestCondition(
+            "Wait for visible Search result \(identifier)",
+            timeout: max(0, timeout)
+        ) {
+            guard let searchState = self.resolvedSearchStateValue(in: app),
+                  searchState.contains("state=ready"),
+                  searchState.contains("searching=false") else {
+                lastVisibleContent = "<Search has not settled>"
+                return false
+            }
+            guard let row = self.firstExistingElement(
+                self.searchResultRowCandidates(identifier, in: app),
+                timeout: 0
+            ) else {
+                lastVisibleContent = "<row unavailable>"
+                return !shouldExist
+            }
+            guard shouldExist else {
+                lastVisibleContent = "<row still exists>"
+                return false
+            }
+
+            let intersection = row.frame.intersection(app.frame)
+            guard self.elementHasUsableFrame(row),
+                  !intersection.isNull,
+                  !intersection.isEmpty else {
+                lastVisibleContent = "<row has no visible geometry>"
+                return false
+            }
+            let semanticContent = [row.label, row.value as? String]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " | ")
+            lastVisibleContent = semanticContent.isEmpty ? "<row has no visible content>" : semanticContent
+            return expectedContent.allSatisfy {
+                semanticContent.localizedCaseInsensitiveContains($0)
+            }
+        }
+        XCTAssertTrue(
+            reachedExpectedState,
+            "Expected Search result '\(identifier)' visible state to become \(shouldExist) with content \(expectedContent) within \(timeout) seconds; last visible content was '\(lastVisibleContent)', passive Search state was '\(resolvedSearchStateValue(in: app) ?? "nil")'.",
             file: file,
             line: line
         )
-    }
-
-    /**
-     Extracts the exported numeric result count from the Search accessibility state token.
-     *
-     * - Parameter searchState: Semicolon-delimited Search screen state string.
-     * - Returns: Parsed result count, or `-1` when the token is missing or malformed.
-     * - Side effects: none.
-     * - Failure modes:
-       - returns `-1` when the Search screen accessibility export changes shape unexpectedly
-     */
-    func searchResultsCount(from searchState: String) -> Int {
-        guard let resultsToken = searchState
-            .split(separator: ";")
-            .first(where: { $0.hasPrefix("results=") }) else {
-            return -1
-        }
-        return Int(resultsToken.dropFirst("results=".count)) ?? -1
     }
 
     /**
@@ -1703,9 +596,8 @@ extension AndBibleUITests {
      *   - line: Source line used for XCTest failure attribution.
      * - Returns: First non-empty reader reference value that differs from `initialReference`.
      * - Side effects:
-     *   - taps the live Search result row, retrying inside the original timeout only while the row
-     *     remains visible and the reader reference has not changed
-     *   - samples the Search semantic state and reader reference on each poll for failure context
+     *   - taps the live, visibly rendered Search result row exactly once
+     *   - passively waits for the reader reference to change after the action
      * - Failure modes:
      *   - fails if the row cannot be tapped or if Search dismisses/settles without changing the
      *     reader reference
@@ -1718,58 +610,33 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> String {
-        let deadline = Date().addingTimeInterval(timeout)
-        var didTap = false
-        var lastTapTime = Date.distantPast
-        var lastReference = initialReference
-        var lastSearchState = resolvedSearchStateValue(in: app) ?? "nil"
-        var rowWasVisible = false
-
-        repeat {
-            if let reference = resolvedElementSemanticText("bookChooserButton", in: app),
-               !reference.isEmpty {
-                lastReference = reference
-                if reference != initialReference {
-                    return reference
-                }
-            }
-
-            lastSearchState = resolvedSearchStateValue(in: app) ?? "nil"
-            if let row = resolvedElement(identifier, in: app) {
-                rowWasVisible = true
-                if !didTap || Date().timeIntervalSince(lastTapTime) >= 1.0 {
-                    let remaining = max(0.1, deadline.timeIntervalSinceNow)
-                    if tapElementIfPossible(row, timeout: min(1, remaining)) {
-                        didTap = true
-                        lastTapTime = Date()
-                    }
-                }
-            } else {
-                rowWasVisible = false
-            }
-
-            _ = waitForUITestCondition(
-                "Wait for Search result \(identifier) navigation",
-                timeout: min(0.2, max(0, deadline.timeIntervalSinceNow))
-            ) {
-                guard let reference = self.resolvedElementSemanticText("bookChooserButton", in: app),
-                      !reference.isEmpty
-                else {
-                    return false
-                }
-                lastReference = reference
-                return reference != initialReference
-            }
-        } while Date() < deadline
-
-        XCTAssertNotEqual(
-            lastReference,
-            initialReference,
-            "Expected selecting Search result '\(identifier)' to move the reader away from '\(initialReference)' within \(timeout) seconds; last reader reference was '\(lastReference)', last Search state was '\(lastSearchState)', rowVisible=\(rowWasVisible).",
+        waitForSearchResultRow(
+            identifier,
+            in: app,
+            shouldExist: true,
+            timeout: timeout,
             file: file,
             line: line
         )
-        return lastReference
+        guard let row = firstExistingElement(
+            searchResultRowCandidates(identifier, in: app),
+            timeout: 0
+        ) else {
+            XCTFail(
+                "Expected visible Search result '\(identifier)' before its single selection action.",
+                file: file,
+                line: line
+            )
+            return initialReference
+        }
+        tapElementReliably(row, timeout: timeout, file: file, line: line)
+        return waitForReaderReferenceValueToChange(
+            from: initialReference,
+            in: app,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
     }
 
 }

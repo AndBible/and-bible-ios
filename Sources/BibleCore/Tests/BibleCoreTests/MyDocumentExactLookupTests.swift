@@ -14,9 +14,9 @@ final class MyDocumentExactLookupTests: XCTestCase {
         let fixture = try makeStore()
         let document = MyDocument(name: "Journal", initials: "Journal")
         let page = MyDocumentPage(title: "Entry", pageKey: "entry")
-        attach(page, to: document)
         fixture.context.insert(document)
         fixture.context.insert(page)
+        page.document = document
         try fixture.context.save()
 
         XCTAssertEqual(try fixture.store.exactDocument(initials: "Journal").id, document.id)
@@ -96,11 +96,11 @@ final class MyDocumentExactLookupTests: XCTestCase {
         let document = MyDocument(name: "Journal", initials: "Journal")
         let first = MyDocumentPage(title: "First", pageKey: "entry", orderNumber: 0)
         let second = MyDocumentPage(title: "Second", pageKey: "entry", orderNumber: 1)
-        attach(first, to: document)
-        attach(second, to: document)
         fixture.context.insert(document)
         fixture.context.insert(first)
         fixture.context.insert(second)
+        first.document = document
+        second.document = document
         try fixture.context.save()
 
         XCTAssertNotNil(fixture.store.page(bookInitials: "Journal", pageKey: "entry"))
@@ -112,12 +112,6 @@ final class MyDocumentExactLookupTests: XCTestCase {
                 .duplicatePages(bookInitials: "Journal", pageKey: "entry")
             )
         }
-    }
-
-    /** Associates one page with its parent on both sides of the SwiftData relationship. */
-    private func attach(_ page: MyDocumentPage, to document: MyDocument) {
-        page.document = document
-        document.pages = (document.pages ?? []) + [page]
     }
 
     /**

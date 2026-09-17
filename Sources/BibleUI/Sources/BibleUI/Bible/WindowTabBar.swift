@@ -328,9 +328,11 @@ struct WindowTabBar: View {
             )
         )
 
-        return Button {
-            actionDispatcher.perform(.select, for: window)
-        } label: {
+        return AndroidTapLongPressButton(
+            minimumDuration: 0.45,
+            onTap: { actionDispatcher.perform(.select, for: window) },
+            onLongPress: { onPresentWindowMenu?(window) }
+        ) {
             ZStack(alignment: .topLeading) {
                 tabShape
                     .fill(tabPalette.backgroundColor(isActive: isActive, isVisible: isVisible))
@@ -394,13 +396,7 @@ struct WindowTabBar: View {
             )
             .opacity(isMinimized ? 0.62 : 1.0)
         }
-        .buttonStyle(.plain)
         .androidPopupMenuAnchor(id: WindowTabMenuAnchor.id(for: window.id))
-        .highPriorityGesture(
-            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                onPresentWindowMenu?(window)
-            }
-        )
         .accessibilityIdentifier("windowTabButton::\(window.orderNumber)")
         .accessibilityValue(windowTabAccessibilityValue(
             isActive: isActive,

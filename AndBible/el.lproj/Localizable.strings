@@ -1543,3 +1543,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@ δεν βρέθηκε στο έγγραφο %2$@.";
+
+/* Android shared translations */
+"migrated_my_notes" = "Συχνωνευμένες Σημειώσεις Μου";

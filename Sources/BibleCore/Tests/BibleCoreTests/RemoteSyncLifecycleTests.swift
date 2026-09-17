@@ -2105,6 +2105,344 @@ final class RemoteSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 50_000)
     }
 
+    /**
+     Verifies permanent retirement drains admitted noncooperative work and suppresses every stale effect.
+
+     The first category is held by an explicit continuation while retirement closes admission. The
+     test proves retirement does not return early, then releases the operation and verifies the old
+     runtime publishes no callback or timestamp, starts no later category, and rejects new work.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServiceRetirementDrainsAndSuppressesStalePublication() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        let secretStore = InMemorySecretStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: secretStore
+        )
+        remoteSettingsStore.selectedBackend = .nextCloud
+        try remoteSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: "secret"
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+        remoteSettingsStore.setSyncEnabled(true, for: .workspaces)
+
+        let synchronizer = SuspendedRemoteSyncLifecycleSynchronizer()
+        synchronizer.failsAfterRelease = true
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: "org.andbible.ios",
+            synchronizationServiceFactory: { _ in synchronizer },
+            remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
+            nowProvider: { 51_000 }
+        )
+        var synchronizedCategories: [RemoteSyncCategory] = []
+        var failedCategories: [RemoteSyncCategory] = []
+        lifecycleService.onCategorySynchronized = { synchronizedCategories.append($0.category) }
+        lifecycleService.onCategoryError = { category, _ in failedCategories.append(category) }
+
+        let synchronization = Task { await lifecycleService.synchronizeIfNeeded(force: true) }
+        await synchronizer.waitUntilStarted()
+        var retirementCompleted = false
+        let retirementStarted = expectation(description: "Retirement reached lifecycle service")
+        let retirement = Task {
+            retirementStarted.fulfill()
+            await lifecycleService.retire()
+            retirementCompleted = true
+        }
+        await fulfillment(of: [retirementStarted])
+        retirement.cancel()
+
+        XCTAssertFalse(retirementCompleted)
+        let admittedWhileRetiring = await lifecycleService.synchronizeIfNeeded(force: true)
+        XCTAssertFalse(admittedWhileRetiring)
+
+        synchronizer.release()
+        let staleSynchronizationResult = await synchronization.value
+        XCTAssertFalse(staleSynchronizationResult)
+        await retirement.value
+
+        XCTAssertTrue(retirementCompleted)
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.bookmarks])
+        XCTAssertTrue(synchronizedCategories.isEmpty)
+        XCTAssertTrue(failedCategories.isEmpty)
+        XCTAssertNil(remoteSettingsStore.globalLastSynchronized)
+        lifecycleService.resumeAfterPause()
+        let admittedAfterRetirement = await lifecycleService.synchronizeIfNeeded(force: true)
+        XCTAssertFalse(admittedAfterRetirement)
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.bookmarks])
+    }
+
+    /**
+     Verifies every public sync entry rejects a retired runtime before reading container-backed settings.
+
+     The counting factory is the observable container-read boundary. Foreground, background, forced,
+     adopt, and replace entries must all return false without constructing a settings store after the
+     old runtime has been permanently retired.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServiceRetiredEntriesDoNotReadSettingsFactory() async throws {
+        var settingsFactoryReadCount = 0
+        let secretStore = InMemorySecretStore()
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: try makeInMemorySettingsContainer(),
+            bundleIdentifier: "org.andbible.ios",
+            remoteSettingsStoreFactory: { settingsStore in
+                settingsFactoryReadCount += 1
+                return RemoteSyncSettingsStore(settingsStore: settingsStore, secretStore: secretStore)
+            }
+        )
+        let candidate = RemoteSyncBootstrapCandidate(
+            category: .bookmarks,
+            syncFolderName: RemoteSyncCategory.bookmarks.syncFolderName(bundleIdentifier: "org.andbible.ios"),
+            remoteFolderID: "/existing-bookmarks"
+        )
+
+        await lifecycleService.retire()
+        let foregroundResult = await lifecycleService.sceneDidBecomeActive()
+        let backgroundResult = await lifecycleService.sceneDidEnterBackground()
+        let forcedResult = await lifecycleService.synchronizeIfNeeded(force: true)
+        let adoptResult = await lifecycleService.adoptRemoteFolderAndSynchronize(candidate)
+        let replaceResult = await lifecycleService.replaceRemoteFolderAndSynchronize(candidate)
+
+        XCTAssertFalse(foregroundResult)
+        XCTAssertFalse(backgroundResult)
+        XCTAssertFalse(forcedResult)
+        XCTAssertFalse(adoptResult)
+        XCTAssertFalse(replaceResult)
+        XCTAssertEqual(settingsFactoryReadCount, 0)
+    }
+
+    /**
+     Verifies a construction-failure pause drains safely and can explicitly reopen the old runtime.
+
+     The already admitted operation remains authoritative and publishes before the pause completes,
+     while no new work is admitted until ``RemoteSyncLifecycleService.resumeAfterPause()`` is called.
+     Resumption leaves the ordinary lifecycle service usable without implicitly restarting polling.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServicePauseCanResumeAfterReplacementFailure() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        let secretStore = InMemorySecretStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: secretStore
+        )
+        remoteSettingsStore.selectedBackend = .nextCloud
+        try remoteSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: "secret"
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+        remoteSettingsStore.setSyncEnabled(true, for: .workspaces)
+
+        let synchronizer = SuspendedRemoteSyncLifecycleSynchronizer()
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: "org.andbible.ios",
+            synchronizationServiceFactory: { _ in synchronizer },
+            remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) },
+            nowProvider: { 52_000 }
+        )
+        var synchronizedCategories: [RemoteSyncCategory] = []
+        lifecycleService.onCategorySynchronized = { synchronizedCategories.append($0.category) }
+
+        let synchronization = Task { await lifecycleService.synchronizeIfNeeded(force: true) }
+        await synchronizer.waitUntilStarted()
+        let pauseStarted = expectation(description: "Pause reached lifecycle service")
+        let pause = Task {
+            pauseStarted.fulfill()
+            await lifecycleService.pauseAndWait()
+        }
+        await fulfillment(of: [pauseStarted])
+        let admittedWhilePaused = await lifecycleService.synchronizeIfNeeded(force: true)
+        XCTAssertFalse(admittedWhilePaused)
+
+        synchronizer.release()
+        let pausedSynchronizationResult = await synchronization.value
+        XCTAssertTrue(pausedSynchronizationResult)
+        await pause.value
+        XCTAssertEqual(synchronizedCategories, [.bookmarks, .workspaces])
+        XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 52_000)
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.bookmarks, .workspaces])
+
+        lifecycleService.resumeAfterPause()
+        let resumedSynchronizationResult = await lifecycleService.synchronizeIfNeeded(force: true)
+        XCTAssertTrue(resumedSynchronizationResult)
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.bookmarks, .workspaces, .bookmarks, .workspaces])
+        XCTAssertEqual(synchronizedCategories, [.bookmarks, .workspaces, .bookmarks, .workspaces])
+        XCTAssertEqual(remoteSettingsStore.globalLastSynchronized, 52_000)
+    }
+
+    /**
+     Verifies ordinary polling stop remains a reusable lifecycle control rather than retirement.
+
+     Two foreground entries surround an explicit stop. Each entry must still admit its forced pass;
+     the test stops the second polling task as cleanup and performs no remote or wall-clock waiting.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServiceStopPeriodicSyncRemainsRestartable() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        let secretStore = InMemorySecretStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: secretStore
+        )
+        remoteSettingsStore.selectedBackend = .nextCloud
+        try remoteSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: "secret"
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+
+        let synchronizer = MockRemoteSyncLifecycleSynchronizer()
+        synchronizer.synchronizeResults[.bookmarks] = .synchronized(
+            makeLifecycleSyncReport(for: .bookmarks)
+        )
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: "org.andbible.ios",
+            synchronizationServiceFactory: { _ in synchronizer },
+            remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) }
+        )
+
+        let firstForegroundResult = await lifecycleService.sceneDidBecomeActive()
+        XCTAssertTrue(firstForegroundResult)
+        lifecycleService.stopPeriodicSync()
+        let secondForegroundResult = await lifecycleService.sceneDidBecomeActive()
+        XCTAssertTrue(secondForegroundResult)
+        lifecycleService.stopPeriodicSync()
+
+        XCTAssertEqual(synchronizer.synchronizeCalls, [.bookmarks, .bookmarks])
+    }
+
+    /**
+     Verifies temporary pause drains an admitted manual workflow and rejects later manual admission.
+
+     The complete manual closure remains authoritative while paused, matching the construction-failure
+     contract. After explicit resume, a new manual workflow can be admitted normally.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServicePauseDrainsManualSynchronization() async throws {
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: try makeInMemorySettingsContainer(),
+            bundleIdentifier: "org.andbible.ios"
+        )
+        let suspendedOperation = SuspendedManualRemoteSyncOperation()
+        let admittedManual = Task {
+            await lifecycleService.performManualSynchronization {
+                await suspendedOperation.run()
+            }
+        }
+        await suspendedOperation.waitUntilStarted()
+
+        let pauseStarted = expectation(description: "Manual-operation pause reached lifecycle service")
+        let pause = Task {
+            pauseStarted.fulfill()
+            await lifecycleService.pauseAndWait()
+        }
+        await fulfillment(of: [pauseStarted])
+        var rejectedInvocationCount = 0
+        let admittedWhilePaused = await lifecycleService.performManualSynchronization {
+            rejectedInvocationCount += 1
+        }
+
+        XCTAssertFalse(admittedWhilePaused)
+        XCTAssertEqual(rejectedInvocationCount, 0)
+
+        suspendedOperation.release()
+        let admittedManualResult = await admittedManual.value
+        XCTAssertTrue(admittedManualResult)
+        await pause.value
+
+        lifecycleService.resumeAfterPause()
+        let admittedAfterResume = await lifecycleService.performManualSynchronization {
+            rejectedInvocationCount += 1
+        }
+        XCTAssertTrue(admittedAfterResume)
+        XCTAssertEqual(rejectedInvocationCount, 1)
+    }
+
+    /**
+     Verifies queued manual sync rechecks admission after a busy lifecycle pass and retirement wins.
+
+     The manual closure queues behind a suspended category operation. Retirement closes admission
+     before that operation drains, so the queued closure never runs and both waiters finish only after
+     the explicit category continuation is released.
+     */
+    @MainActor
+    func testRemoteSyncLifecycleServiceRetirementRejectsManualSyncQueuedBehindLifecycleWork() async throws {
+        let container = try makeInMemorySettingsContainer()
+        let settingsStore = SettingsStore(modelContext: ModelContext(container))
+        let secretStore = InMemorySecretStore()
+        let remoteSettingsStore = RemoteSyncSettingsStore(
+            settingsStore: settingsStore,
+            secretStore: secretStore
+        )
+        remoteSettingsStore.selectedBackend = .nextCloud
+        try remoteSettingsStore.saveWebDAVConfiguration(
+            WebDAVSyncConfiguration(
+                serverURL: "https://nextcloud.example.com",
+                username: "alice",
+                folderPath: nil
+            ),
+            password: "secret"
+        )
+        remoteSettingsStore.setSyncEnabled(true, for: .bookmarks)
+
+        let synchronizer = SuspendedRemoteSyncLifecycleSynchronizer()
+        let lifecycleService = RemoteSyncLifecycleService(
+            modelContainer: container,
+            bundleIdentifier: "org.andbible.ios",
+            synchronizationServiceFactory: { _ in synchronizer },
+            remoteSettingsStoreFactory: { RemoteSyncSettingsStore(settingsStore: $0, secretStore: secretStore) }
+        )
+        let lifecyclePass = Task { await lifecycleService.synchronizeIfNeeded(force: true) }
+        await synchronizer.waitUntilStarted()
+
+        var manualInvocationCount = 0
+        let queuedManualStarted = expectation(description: "Queued manual sync reached lifecycle service")
+        let queuedManual = Task {
+            queuedManualStarted.fulfill()
+            return await lifecycleService.performManualSynchronization {
+                manualInvocationCount += 1
+            }
+        }
+        await fulfillment(of: [queuedManualStarted])
+        let retirementStarted = expectation(description: "Queued-manual retirement reached lifecycle service")
+        let retirement = Task {
+            retirementStarted.fulfill()
+            await lifecycleService.retire()
+        }
+        await fulfillment(of: [retirementStarted])
+
+        synchronizer.release()
+        let lifecycleResult = await lifecyclePass.value
+        let manualResult = await queuedManual.value
+        await retirement.value
+
+        XCTAssertFalse(lifecycleResult)
+        XCTAssertFalse(manualResult)
+        XCTAssertEqual(manualInvocationCount, 0)
+        XCTAssertNil(remoteSettingsStore.globalLastSynchronized)
+    }
+
     @MainActor
     func testRemoteSyncLifecycleServiceRespectsSyncIntervalForNonForcedPasses() async throws {
         let container = try makeInMemorySettingsContainer()

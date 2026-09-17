@@ -56,24 +56,13 @@ jobs:
             mapfile -t changed_files < <(git diff --name-only "${base}" "${head}")
           fi
 
-          required_checks_only=true
-          if [[ "${#changed_files[@]}" -eq 0 ]]; then
-            required_checks_only=false
-          fi
-
           for path in "${changed_files[@]}"; do
             echo "changed: ${path}"
-            case "${path}" in
-              docs/*|*.md|.github/workflows/ios-ci.yml)
-                ;;
-              *)
-                required_checks_only=false
-                ;;
-            esac
           done
 
-          echo "required_checks_only=${required_checks_only}"
-          echo "required_checks_only=${required_checks_only}" >> "${GITHUB_OUTPUT}"
+          python3 scripts/classify_ci_changes.py \
+            --github-output "${GITHUB_OUTPUT}" \
+            "${changed_files[@]}"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -94,6 +83,9 @@ jobs:
 
       - name: Run repo standards unit tests
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Check ADR structure
+        run: python3 scripts/check_adr_structure.py
 
       - name: Check bridge parity inventory
         run: python3 scripts/check_bridge_parity_inventory.py
@@ -910,24 +902,45 @@ jobs:
           --github-output "${GITHUB_OUTPUT}"
 
   ios-ui-foundation:
-    name: Prepare UI Test Foundation
+    name: Build UI Test Products
     runs-on: macos-15
     if: needs.repo-standards.outputs.required_checks_only != 'true'
     needs:
       - repo-standards
       - localization-guardrails
+      - bibleview-js
     timeout-minutes: 60
+    env:
+      DERIVED_DATA_PATH: .derivedData
+      BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-ui-products.xcresult
+      UI_TEST_PRODUCTS_ARCHIVE_PATH: .artifacts/ui-test-products.tar.gz
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Validate checked-in BibleView production bundle before SwiftPM resolution
+        run: >-
+          python3 scripts/manage_bibleview_bundle.py validate
+          --bundle Sources/BibleView/Sources/BibleView/Resources/bibleview-js
+          --mode production
 
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Restore SwiftPM and build caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            .derivedData/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
+
       - name: Restore libsword build cache
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -939,11 +952,18 @@ jobs:
             ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
 
       - name: Show Xcode version
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
         run: xcodebuild -version
 
+      - name: Ensure iOS simulator runtime is available
+        run: |
+          if xcrun simctl list runtimes available | grep -Fq 'iOS '; then
+            echo "An iOS simulator runtime is already installed."
+          else
+            echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
+            xcodebuild -downloadPlatform iOS
+          fi
+
       - name: Ensure libsword build prerequisites
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
         run: |
           if ! command -v cmake >/dev/null 2>&1; then
             brew install cmake
@@ -953,7 +973,6 @@ jobs:
           fi
 
       - name: Build libsword XCFramework
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
         working-directory: libsword
         env:
           INCLUDE_MACOS_SLICE: "1"
@@ -964,26 +983,96 @@ jobs:
             ./build-ios.sh
           fi
 
-      - name: Upload prepared libsword XCFramework
-        id: upload_libsword_xcframework
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
+      - name: Resolve iOS simulator destination
+        id: simulator
+        run: >-
+          python3 scripts/resolve_ios_simulator_destination.py
+          --project AndBible.xcodeproj
+          --scheme AndBible
+          --create-dedicated-device
+          --device-name-prefix "AndBible CI UI Product Builder"
+
+      - name: Boot selected simulator
+        run: >-
+          python3 scripts/wait_for_simulator_boot.py
+          --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
+          --timeout-seconds 300
+
+      - name: Build UI tests once
+        run: |
+          mkdir -p .artifacts
+          python3 -u scripts/run_xcodebuild_with_test_selection.py \
+            --project AndBible.xcodeproj \
+            --scheme AndBible \
+            --configuration Debug \
+            --destination "${{ steps.simulator.outputs.destination }}" \
+            --derived-data-path "${DERIVED_DATA_PATH}" \
+            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
+            --code-signing-allowed NO \
+            --action build-for-testing
+
+      - name: Build host-side UI fixture tool once
+        run: swift build --package-path . --product UITestFixtureTool
+
+      - name: Package validated UI test products
+        run: >-
+          python3 -u scripts/manage_ui_test_products.py package
+          --products-path "${DERIVED_DATA_PATH}/Build/Products"
+          --fixture-tool .build/debug/UITestFixtureTool
+          --fixture-manifest Tests/UI/Fixtures/ui_test_fixture_manifest.json
+          --sword-fixture Sources/BibleUI/Tests/BibleUITests/Fixtures/sword
+          --calvin-fixture Tests/UI/Fixtures/calvin-sword
+          --output "${UI_TEST_PRODUCTS_ARCHIVE_PATH}"
+          --commit-sha "${GITHUB_SHA}"
+          --configuration Debug
+          --code-signing-allowed NO
+
+      - name: Upload reusable UI test products
+        id: upload_ui_test_products
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: libsword-hosttool-xcframework
-          path: libsword/libsword.xcframework
+          name: andbible-ui-test-products-${{ github.run_id }}
+          path: ${{ env.UI_TEST_PRODUCTS_ARCHIVE_PATH }}
           if-no-files-found: error
           retention-days: 1
 
-      - name: Retry upload prepared libsword XCFramework
-        if: needs.repo-standards.outputs.required_checks_only != 'true' && steps.upload_libsword_xcframework.outcome == 'failure'
+      - name: Retry upload reusable UI test products
+        if: steps.upload_ui_test_products.outcome == 'failure'
         uses: actions/upload-artifact@v6
         with:
-          name: libsword-hosttool-xcframework
-          path: libsword/libsword.xcframework
+          name: andbible-ui-test-products-${{ github.run_id }}
+          path: ${{ env.UI_TEST_PRODUCTS_ARCHIVE_PATH }}
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+
+      - name: Upload UI product build result bundle
+        id: upload_ui_product_build_xcresult
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-product-build
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Retry upload UI product build result bundle
+        if: always() && steps.upload_ui_product_build_xcresult.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: andbible-xcresult-${{ github.run_id }}-ui-product-build
+          path: .artifacts/*.xcresult
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+          overwrite: true
+
+      - name: Delete dedicated simulator
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        run: xcrun simctl delete "${{ steps.simulator.outputs.simulator_id }}"
 
   ios-simulator-unit-tests:
     name: Unit Tests (Simulator)
@@ -997,13 +1086,11 @@ jobs:
       - ios-bibleview-package-tests
       - ios-bibleui-package-tests
       - bibleview-js
+      - ios-ui-foundation
     timeout-minutes: 60
     env:
-      DERIVED_DATA_PATH: .derivedData
-      BUILD_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleBuild-unit.xcresult
       TEST_XCRESULT_BUNDLE_PATH: .artifacts/AndBibleTests-unit.xcresult
-      TEST_SELECTION_ARGS: |-
-        -only-testing:AndBibleTests/AndBibleTests/testApplicationDelegateSceneConfigurationUsesWindowSceneDelegate
+      TEST_SELECTION_ARGS: -only-testing:AndBibleTests
     steps:
       - name: Verify package-test gate results
         run: |
@@ -1027,6 +1114,13 @@ jobs:
             fi
           done
 
+          if [[ "${{ needs.repo-standards.outputs.required_checks_only }}" != "true" ]]; then
+            echo "ios-ui-foundation: ${{ needs.ios-ui-foundation.result }}"
+            if [[ "${{ needs.ios-ui-foundation.result }}" != "success" ]]; then
+              failed=1
+            fi
+          fi
+
           if [[ "${failed}" -ne 0 ]]; then
             echo "One or more package or prerequisite checks failed; keeping Unit Tests as the aggregate required gate."
             exit 1
@@ -1046,36 +1140,30 @@ jobs:
           python3 scripts/manage_bibleview_bundle.py validate
           --bundle Sources/BibleView/Sources/BibleView/Resources/bibleview-js
           --mode production
-
       - name: Select Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
-      - name: Restore SwiftPM and build caches
+      - name: Download reusable UI test products for app-host execution
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        uses: actions/cache@v5
+        uses: actions/download-artifact@v5
         with:
-          path: |
-            .derivedData/SourcePackages
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
-          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
+          name: andbible-ui-test-products-${{ github.run_id }}
+          path: .artifacts/ui-test-products-download
 
-      - name: Restore libsword build cache
+      - name: Verify reusable products for app-host execution
+        id: app_host_products
         if: needs.repo-standards.outputs.required_checks_only != 'true'
-        uses: actions/cache@v5
-        with:
-          path: |
-            libsword/sword-src
-            libsword/build
-            libsword/libsword.xcframework
-          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-${{ hashFiles('libsword/build-ios.sh') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-iosonly-
+        run: >-
+          python3 -u scripts/manage_ui_test_products.py verify
+          --archive .artifacts/ui-test-products-download/ui-test-products.tar.gz
+          --destination .
+          --expected-commit-sha "${GITHUB_SHA}"
+          --expected-configuration Debug
+          --expected-code-signing-allowed NO
+          --github-output "${GITHUB_OUTPUT}"
 
       - name: Show Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -1089,28 +1177,6 @@ jobs:
           else
             echo "No iOS simulator runtime was found; downloading it for the selected Xcode."
             xcodebuild -downloadPlatform iOS
-          fi
-
-      - name: Ensure libsword build prerequisites
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: |
-          if ! command -v cmake >/dev/null 2>&1; then
-            brew install cmake
-          fi
-          if ! command -v svn >/dev/null 2>&1; then
-            brew install subversion
-          fi
-
-      - name: Build libsword XCFramework
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        working-directory: libsword
-        env:
-          INCLUDE_MACOS_SLICE: "0"
-        run: |
-          if [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
-            echo "Using cached libsword.xcframework"
-          else
-            ./build-ios.sh
           fi
 
       - name: Resolve iOS simulator destination
@@ -1130,31 +1196,17 @@ jobs:
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
-      - name: Build app-host sentinel test bundle
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: |
-          mkdir -p .artifacts
-          python3 -u scripts/run_xcodebuild_with_test_selection.py \
-            --project AndBible.xcodeproj \
-            --scheme AndBibleUnitTests \
-            --configuration Debug \
-            --destination "${{ steps.simulator.outputs.destination }}" \
-            --derived-data-path "${DERIVED_DATA_PATH}" \
-            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
-            --code-signing-allowed NO \
-            --action build-for-testing
-
-      - name: Run app-host sentinel test without rebuilding
+      - name: Run all discovered app-host tests without rebuilding
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         timeout-minutes: 10
         run: |
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
-            --project AndBible.xcodeproj \
-            --scheme AndBibleUnitTests \
-            --configuration Debug \
+            --xctestrun-path "${{ steps.app_host_products.outputs.xctestrun_path }}" \
             --destination "${{ steps.simulator.outputs.destination }}" \
-            --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
+            --test-source Tests/AppHost/AndBibleTests/AndBibleTests*.swift \
+            --test-target AndBibleTests \
+            --test-case-class AndBibleTests \
             --code-signing-allowed NO \
             --action test-without-building
 
@@ -1199,8 +1251,6 @@ jobs:
       matrix: ${{ fromJson(needs.ui-shard-plan.outputs.matrix) }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     env:
-      DERIVED_DATA_PATH: .derivedData
-      BUILD_XCRESULT_BUNDLE_PATH: ${{ matrix.build_xcresult_bundle_path }}
       TEST_XCRESULT_BUNDLE_PATH: ${{ matrix.test_xcresult_bundle_path }}
       TEST_SELECTION_ARGS: ${{ matrix.test_selection_args }}
     steps:
@@ -1212,42 +1262,27 @@ jobs:
           python3 scripts/manage_bibleview_bundle.py validate
           --bundle Sources/BibleView/Sources/BibleView/Resources/bibleview-js
           --mode production
-
       - name: Select Xcode version
         uses: maxim-lobanov/setup-xcode@v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
-      - name: Restore SwiftPM and build caches
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        uses: actions/cache@v5
-        with:
-          path: |
-            .derivedData/SourcePackages
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
-          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-${{ hashFiles('Package.swift', 'AndBible.xcodeproj/project.pbxproj') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-spm-
-
-      - name: Restore libsword build cache
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        uses: actions/cache@v5
-        with:
-          path: |
-            libsword/sword-src
-            libsword/build
-            libsword/libsword.xcframework
-          key: ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-${{ hashFiles('libsword/build-ios.sh') }}
-          restore-keys: |
-            ${{ runner.os }}-xcode-${{ env.XCODE_VERSION }}-libsword-hosttool-
-
-      - name: Download prepared libsword XCFramework
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
+      - name: Download reusable UI test products
         uses: actions/download-artifact@v5
         with:
-          name: libsword-hosttool-xcframework
-          path: libsword
+          name: andbible-ui-test-products-${{ github.run_id }}
+          path: .artifacts/ui-test-products-download
+
+      - name: Verify reusable UI test products
+        id: ui_test_products
+        run: >-
+          python3 -u scripts/manage_ui_test_products.py verify
+          --archive .artifacts/ui-test-products-download/ui-test-products.tar.gz
+          --destination .
+          --expected-commit-sha "${GITHUB_SHA}"
+          --expected-configuration Debug
+          --expected-code-signing-allowed NO
+          --github-output "${GITHUB_OUTPUT}"
 
       - name: Show Xcode version
         if: needs.repo-standards.outputs.required_checks_only != 'true'
@@ -1263,35 +1298,11 @@ jobs:
             xcodebuild -downloadPlatform iOS
           fi
 
-      - name: Ensure libsword build prerequisites
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: |
-          if ! command -v cmake >/dev/null 2>&1; then
-            brew install cmake
-          fi
-          if ! command -v svn >/dev/null 2>&1; then
-            brew install subversion
-          fi
-
-      - name: Build libsword XCFramework
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        working-directory: libsword
-        env:
-          INCLUDE_MACOS_SLICE: "1"
-        run: |
-          if [ -f libsword.xcframework/macos-arm64_x86_64/libsword.a ] && [ -f libsword.xcframework/ios-arm64/libsword.a ] && [ -f libsword.xcframework/ios-arm64_x86_64-simulator/libsword.a ]; then
-            echo "Using cached libsword.xcframework"
-          else
-            ./build-ios.sh
-          fi
-
       - name: Resolve iOS simulator destination
         id: simulator
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         run: >-
           python3 scripts/resolve_ios_simulator_destination.py
-          --project AndBible.xcodeproj
-          --scheme AndBible
           --create-dedicated-device
           --device-name-prefix "AndBible CI UI"
 
@@ -1309,37 +1320,18 @@ jobs:
           --simulator-id "${{ steps.simulator.outputs.simulator_id }}"
           --timeout-seconds 300
 
-      - name: Build for testing
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: |
-          mkdir -p .artifacts
-          python3 -u scripts/run_xcodebuild_with_test_selection.py \
-            --project AndBible.xcodeproj \
-            --scheme AndBible \
-            --configuration Debug \
-            --destination "${{ steps.simulator.outputs.destination }}" \
-            --derived-data-path "${DERIVED_DATA_PATH}" \
-            --result-bundle-path "${BUILD_XCRESULT_BUNDLE_PATH}" \
-            --code-signing-allowed NO \
-            --action build-for-testing
-
-      - name: Build host-side UI fixture tool
-        if: needs.repo-standards.outputs.required_checks_only != 'true'
-        run: swift build --package-path . --product UITestFixtureTool
-
       - name: Run selected simulator tests without rebuilding
         if: needs.repo-standards.outputs.required_checks_only != 'true'
         env:
-          UITEST_FIXTURE_TOOL_PATH: ${{ github.workspace }}/.build/debug/UITestFixtureTool
+          UITEST_FIXTURE_TOOL_PATH: ${{ steps.ui_test_products.outputs.fixture_tool_path }}
+          UITEST_FIXTURE_MANIFEST_PATH: ${{ steps.ui_test_products.outputs.fixture_manifest_path }}
+          UITEST_SWORD_FIXTURE_PATH: ${{ steps.ui_test_products.outputs.sword_fixture_path }}
           UITEST_BUNDLE_ID: org.andbible.ios
           UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
         run: |
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
-            --project AndBible.xcodeproj \
-            --scheme AndBible \
-            --configuration Debug \
+            --xctestrun-path "${{ steps.ui_test_products.outputs.xctestrun_path }}" \
             --destination "${{ steps.simulator.outputs.destination }}" \
-            --derived-data-path "${DERIVED_DATA_PATH}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
             --code-signing-allowed NO \
             --action test-without-building
@@ -1353,7 +1345,7 @@ jobs:
           mkdir -p .artifacts
           xcrun simctl spawn "${GESTURE_SIMULATOR_ID}" log show \
             --style compact --last 90m \
-            --predicate 'subsystem == "org.andbible" AND (eventMessage BEGINSWITH "Native horizontal swipe" OR eventMessage BEGINSWITH "Horizontal swipe")' \
+            --predicate 'subsystem == "org.andbible" AND (eventMessage BEGINSWITH "Native horizontal swipe" OR eventMessage BEGINSWITH "Horizontal swipe" OR eventMessage BEGINSWITH "reader ")' \
             > .artifacts/reader-gestures.log 2>&1
 
       - name: Upload xcodebuild test result bundle
@@ -1366,6 +1358,7 @@ jobs:
           path: |
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
+            .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 14
@@ -1378,6 +1371,7 @@ jobs:
           path: |
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
+            .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 14

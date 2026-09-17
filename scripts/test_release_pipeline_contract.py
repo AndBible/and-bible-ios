@@ -90,7 +90,11 @@ class ReleasePipelineContractTests(unittest.TestCase):
     def test_app_host_xcode_jobs_validate_checked_in_production_assets_before_building(self) -> None:
         """App-host jobs must test the checked-in Production bundle after source byte comparison."""
         jobs = workflow_jobs()
-        for job_name in ("ios-simulator-unit-tests", "ios-simulator-ui-tests"):
+        for job_name in (
+            "ios-ui-foundation",
+            "ios-simulator-unit-tests",
+            "ios-simulator-ui-tests",
+        ):
             job = jobs[job_name]
             with self.subTest(job=job_name):
                 self.assertIn("bibleview-js", job["needs"])

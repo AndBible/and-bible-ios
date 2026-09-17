@@ -5,8 +5,26 @@ import XCTest
 import SQLite3
 import SwiftData
 @testable import BibleCore
+import SwordKit
 
 private let myDocumentRestoreSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+private final class RemoteSyncMyDocumentRegistryNotificationCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
+}
 
 /**
  Android-compatible My Documents restore, patch replay, and upload coverage for BibleCore.
@@ -400,6 +418,99 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
     }
 
+    /** A nested initial restore publishes once, only after its true outer commit succeeds. */
+    func testNestedInitialRestorePublishesRegistryOnlyAfterOuterCommit() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(MyDocument(name: "Legacy", initials: "LEGACY"))
+        try modelContext.save()
+        let remoteID = UUID(uuidString: "c1200000-0000-0000-0000-000000000001")!
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: [.init(id: remoteID, name: "Remote", initials: "REMOTE")],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let notificationCount = RemoteSyncMyDocumentRegistryNotificationCounter()
+        let token = NotificationCenter.default.addObserver(
+            forName: SwordModuleStore.modulesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount.increment()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        _ = try settingsStore.performAtomicBatch(in: modelContext) {
+            let report = try RemoteSyncInitialBackupRestoreService().restoreInitialBackup(
+                stagedInitialBackup(databaseURL: databaseURL),
+                category: .myDocuments,
+                modelContext: modelContext,
+                settingsStore: settingsStore
+            )
+            XCTAssertEqual(notificationCount.value, 0)
+            return report
+        }
+
+        XCTAssertEqual(notificationCount.value, 1)
+        let verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<MyDocument>()).map(\.initials),
+            ["REMOTE"]
+        )
+    }
+
+    /** A later outer failure rolls the nested restore back without publishing its registry wakeup. */
+    func testNestedInitialRestoreOuterFailureDiscardsRegistryPublication() throws {
+        let container = try makeModelContainer()
+        let modelContext = ModelContext(container)
+        let settingsStore = SettingsStore(modelContext: modelContext)
+        modelContext.insert(MyDocument(name: "Legacy", initials: "LEGACY"))
+        try modelContext.save()
+        let remoteID = UUID(uuidString: "c1300000-0000-0000-0000-000000000001")!
+        let databaseURL = try makeAndroidMyDocumentsDatabase(
+            documents: [.init(id: remoteID, name: "Remote", initials: "REMOTE")],
+            pages: [],
+            pageContents: [],
+            aiPageCacheEntries: []
+        )
+        defer { try? FileManager.default.removeItem(at: databaseURL) }
+        let notificationCount = RemoteSyncMyDocumentRegistryNotificationCounter()
+        let token = NotificationCenter.default.addObserver(
+            forName: SwordModuleStore.modulesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount.increment()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        XCTAssertThrowsError(
+            try settingsStore.performAtomicBatch(in: modelContext) {
+                _ = try RemoteSyncInitialBackupRestoreService().restoreInitialBackup(
+                    stagedInitialBackup(databaseURL: databaseURL),
+                    category: .myDocuments,
+                    modelContext: modelContext,
+                    settingsStore: settingsStore
+                )
+                XCTAssertEqual(notificationCount.value, 0)
+                throw NSError(domain: "NestedMyDocumentRegistryPublication", code: 71)
+            }
+        ) { error in
+            XCTAssertEqual((error as NSError).domain, "NestedMyDocumentRegistryPublication")
+            XCTAssertEqual((error as NSError).code, 71)
+        }
+
+        XCTAssertEqual(notificationCount.value, 0)
+        let verificationContext = ModelContext(container)
+        XCTAssertEqual(
+            try verificationContext.fetch(FetchDescriptor<MyDocument>()).map(\.initials),
+            ["LEGACY"]
+        )
+    }
+
     /**
      Verifies initial My Documents restore includes sync metadata in the content transaction.
 
@@ -544,14 +655,6 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             sourcePromptId: duplicatePromptID,
             contextHash: "duplicate"
         )
-        document.pages = [validPage]
-        validPage.document = document
-        validPage.pageContent = validContent
-        validContent.page = validPage
-        validPage.aiPageCacheEntries = [validCacheEntry, duplicateCacheEntry]
-        validCacheEntry.page = validPage
-        duplicateCacheEntry.page = validPage
-
         let orphanPage = MyDocumentPage(
             id: orphanPageID,
             title: "Orphan",
@@ -563,11 +666,6 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             sourcePromptId: promptID,
             contextHash: "orphan"
         )
-        orphanPage.pageContent = orphanContent
-        orphanContent.page = orphanPage
-        orphanPage.aiPageCacheEntries = [orphanCacheEntry]
-        orphanCacheEntry.page = orphanPage
-
         let missingPageContent = MyDocumentPageContent(pageId: missingPageID, content: "Missing content")
         let missingPageCacheEntry = AiPageCacheEntry(
             pageId: missingPageID,
@@ -585,6 +683,12 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         modelContext.insert(orphanCacheEntry)
         modelContext.insert(missingPageContent)
         modelContext.insert(missingPageCacheEntry)
+        validPage.document = document
+        validPage.pageContent = validContent
+        validCacheEntry.page = validPage
+        duplicateCacheEntry.page = validPage
+        orphanPage.pageContent = orphanContent
+        orphanCacheEntry.page = orphanPage
         try modelContext.save()
 
         let service = RemoteSyncMyDocumentSnapshotService()
@@ -700,16 +804,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             sourceBookInitials: "KJV",
             sourceBookKey: "John.3.16"
         )
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
-        page.aiPageCacheEntries = [cacheEntry]
-        cacheEntry.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
         modelContext.insert(cacheEntry)
+        page.document = document
+        page.pageContent = content
+        cacheEntry.page = page
         try modelContext.save()
 
         RemoteSyncLogEntryStore(settingsStore: settingsStore).addEntry(
@@ -932,20 +1033,9 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             sourcePromptId: existingPromptID,
             contextHash: "local-cache"
         )
-        existingDocument.pages = [existingPage]
-        existingPage.document = existingDocument
-        existingPage.pageContent = existingContent
-        existingContent.page = existingPage
-        existingPage.aiPageCacheEntries = [existingCacheEntry]
-        existingCacheEntry.page = existingPage
-
         let deletedDocument = MyDocument(id: deletedDocumentID, name: "Deleted", initials: "DEL")
         let deletedPage = MyDocumentPage(id: deletedPageID, title: "Deleted Page", pageKey: "deleted")
         let deletedContent = MyDocumentPageContent(pageId: deletedPageID, content: "Delete me")
-        deletedDocument.pages = [deletedPage]
-        deletedPage.document = deletedDocument
-        deletedPage.pageContent = deletedContent
-        deletedContent.page = deletedPage
 
         modelContext.insert(existingDocument)
         modelContext.insert(existingPage)
@@ -954,6 +1044,11 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         modelContext.insert(deletedDocument)
         modelContext.insert(deletedPage)
         modelContext.insert(deletedContent)
+        existingPage.document = existingDocument
+        existingPage.pageContent = existingContent
+        existingCacheEntry.page = existingPage
+        deletedPage.document = deletedDocument
+        deletedPage.pageContent = deletedContent
         try modelContext.save()
 
         logEntryStore.replaceEntries(
@@ -1039,6 +1134,16 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
 
+        let notificationCount = RemoteSyncMyDocumentRegistryNotificationCounter()
+        let token = NotificationCenter.default.addObserver(
+            forName: SwordModuleStore.modulesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount.increment()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
         let report = try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
             [stagedArchive],
             modelContext: modelContext,
@@ -1046,6 +1151,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
 
         XCTAssertEqual(report.appliedPatchCount, 1)
+        XCTAssertEqual(notificationCount.value, 1)
         XCTAssertEqual(report.appliedLogEntryCount, 9)
         XCTAssertEqual(report.skippedLogEntryCount, 0)
         XCTAssertEqual(
@@ -1148,6 +1254,15 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
         var checkpointCount = 0
+        let notificationCount = RemoteSyncMyDocumentRegistryNotificationCounter()
+        let token = NotificationCenter.default.addObserver(
+            forName: SwordModuleStore.modulesDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount.increment()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
 
         XCTAssertThrowsError(
             try RemoteSyncMyDocumentPatchApplyService().applyPatchArchives(
@@ -1166,6 +1281,7 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             XCTAssertEqual((error as NSError).code, 89)
         }
         XCTAssertEqual(checkpointCount, 2)
+        XCTAssertEqual(notificationCount.value, 0)
 
         let verificationContext = ModelContext(container)
         XCTAssertEqual(
@@ -1391,13 +1507,11 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let document = MyDocument(id: documentID, name: "Batch Local", initials: "BATCH")
         let page = MyDocumentPage(id: pageID, title: "Batch Page", pageKey: "batch")
         let content = MyDocumentPageContent(pageId: pageID, content: "Before batch")
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
+        page.document = document
+        page.pageContent = content
         try modelContext.save()
 
         RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
@@ -1738,13 +1852,11 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let document = MyDocument(id: documentID, name: "Sync Replay", initials: "REPLAY")
         let page = MyDocumentPage(id: pageID, title: "Replay Page", pageKey: "replay")
         let content = MyDocumentPageContent(pageId: pageID, content: "Before replay")
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
+        page.document = document
+        page.pageContent = content
         try modelContext.save()
 
         RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
@@ -1905,16 +2017,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             contextHash: "old-context",
             sourceBookKey: "John.1"
         )
-        existingDocument.pages = [existingPage]
-        existingPage.document = existingDocument
-        existingPage.pageContent = existingContent
-        existingContent.page = existingPage
-        existingPage.aiPageCacheEntries = [existingCacheEntry]
-        existingCacheEntry.page = existingPage
         modelContext.insert(existingDocument)
         modelContext.insert(existingPage)
         modelContext.insert(existingContent)
         modelContext.insert(existingCacheEntry)
+        existingPage.document = existingDocument
+        existingPage.pageContent = existingContent
+        existingCacheEntry.page = existingPage
         try modelContext.save()
 
         logEntryStore.replaceEntries(
@@ -1967,16 +2076,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             sourceBookInitials: "KJV",
             sourceBookKey: "Rom.8"
         )
-        newDocument.pages = [newPage]
-        newPage.document = newDocument
-        newPage.pageContent = newContent
-        newContent.page = newPage
-        newPage.aiPageCacheEntries = [newCacheEntry]
-        newCacheEntry.page = newPage
         modelContext.insert(newDocument)
         modelContext.insert(newPage)
         modelContext.insert(newContent)
         modelContext.insert(newCacheEntry)
+        newPage.document = newDocument
+        newPage.pageContent = newContent
+        newCacheEntry.page = newPage
         try modelContext.save()
 
         let adapter = MyDocumentMockRemoteSyncAdapter()
@@ -2094,16 +2200,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let page = MyDocumentPage(id: pageID, title: "Idle Page", pageKey: "idle", sourcePromptId: promptID)
         let content = MyDocumentPageContent(pageId: pageID, content: "Unchanged")
         let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID, contextHash: "unchanged")
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
-        page.aiPageCacheEntries = [cacheEntry]
-        cacheEntry.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
         modelContext.insert(cacheEntry)
+        page.document = document
+        page.pageContent = content
+        cacheEntry.page = page
         try modelContext.save()
 
         RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
@@ -2224,16 +2327,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let page = MyDocumentPage(id: pageID, title: "Delete Page", pageKey: "delete", sourcePromptId: promptID)
         let content = MyDocumentPageContent(pageId: pageID, content: "Delete me")
         let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID, contextHash: "delete")
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
-        page.aiPageCacheEntries = [cacheEntry]
-        cacheEntry.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
         modelContext.insert(cacheEntry)
+        page.document = document
+        page.pageContent = content
+        cacheEntry.page = page
         try modelContext.save()
 
         RemoteSyncLogEntryStore(settingsStore: settingsStore).replaceEntries(
@@ -2326,16 +2426,13 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         let page = MyDocumentPage(id: pageID, title: "Sync Page", pageKey: "sync", sourcePromptId: promptID)
         let content = MyDocumentPageContent(pageId: pageID, content: "Sync")
         let cacheEntry = AiPageCacheEntry(pageId: pageID, sourcePromptId: promptID)
-        document.pages = [page]
-        page.document = document
-        page.pageContent = content
-        content.page = page
-        page.aiPageCacheEntries = [cacheEntry]
-        cacheEntry.page = page
         modelContext.insert(document)
         modelContext.insert(page)
         modelContext.insert(content)
         modelContext.insert(cacheEntry)
+        page.document = document
+        page.pageContent = content
+        cacheEntry.page = page
         try modelContext.save()
 
         logEntryStore.replaceEntries(
@@ -2561,6 +2658,9 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         try modelContext.save()
         let snapshotService = RemoteSyncMyDocumentSnapshotService()
         snapshotService.refreshBaselineFingerprints(modelContext: modelContext, settingsStore: settingsStore)
+        let acceptedBaseline = try XCTUnwrap(
+            snapshotService.storedAcceptedBaseline(settingsStore: settingsStore)
+        )
         let oldSnapshot = try snapshotService.snapshotCurrentStateThrowing(
             modelContext: modelContext,
             settingsStore: settingsStore
@@ -2600,6 +2700,16 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
             oldSnapshot.fingerprintsByKey[documentKey]
         )
         XCTAssertTrue(RemoteSyncPatchStatusStore(settingsStore: settingsStore).statuses(for: .myDocuments).isEmpty)
+        XCTAssertEqual(
+            try snapshotService.storedAcceptedBaseline(settingsStore: settingsStore),
+            acceptedBaseline
+        )
+        let freshModelContext = ModelContext(container)
+        let freshSettingsStore = SettingsStore(modelContext: freshModelContext)
+        XCTAssertEqual(
+            try snapshotService.storedAcceptedBaseline(settingsStore: freshSettingsStore),
+            acceptedBaseline
+        )
 
         await adapter.removeRemoteFiles()
         let retryService = RemoteSyncMyDocumentPatchUploadService(
@@ -2898,6 +3008,22 @@ final class RemoteSyncMyDocumentRestoreTests: XCTestCase {
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /** Wraps one test-built SQLite database as an initial My Documents restore candidate. */
+    private func stagedInitialBackup(databaseURL: URL) -> RemoteSyncStagedInitialBackup {
+        RemoteSyncStagedInitialBackup(
+            remoteFile: RemoteSyncFile(
+                id: "/org.andbible.ios-sync-mydocuments/initial.sqlite3.gz",
+                name: "initial.sqlite3.gz",
+                size: 4_096,
+                timestamp: 1_735_689_600_000,
+                parentID: "/org.andbible.ios-sync-mydocuments",
+                mimeType: "application/gzip"
+            ),
+            databaseFileURL: databaseURL,
+            schemaVersion: RemoteSyncMyDocumentRestoreService.supportedAndroidSchemaVersion
+        )
     }
 
     private func makeStagedMyDocumentPatchArchive(

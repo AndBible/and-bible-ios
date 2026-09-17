@@ -321,6 +321,38 @@ public final class RemoteSyncBookmarkSnapshotService {
         case strict
     }
 
+    /// Label plus immutable keys captured once before deterministic sorting.
+    private struct CapturedLabel {
+        let model: Label
+        let name: String
+        let id: UUID
+        let idString: String
+    }
+
+    /// Bible bookmark plus immutable keys captured once before deterministic sorting.
+    private struct CapturedBibleBookmark {
+        let model: BibleBookmark
+        let createdAt: Date
+        let id: UUID
+        let idString: String
+    }
+
+    /// Generic bookmark plus immutable keys captured once before deterministic sorting.
+    private struct CapturedGenericBookmark {
+        let model: GenericBookmark
+        let createdAt: Date
+        let id: UUID
+        let idString: String
+    }
+
+    /// StudyPad entry plus immutable keys captured once before deterministic sorting.
+    private struct CapturedStudyPadEntry {
+        let model: StudyPadTextEntry
+        let orderNumber: Int
+        let id: UUID
+        let idString: String
+    }
+
     /// Deterministic pre-fetch checkpoint used by tests to model a strict SwiftData read failure.
     private let strictSnapshotCheckpoint: () throws -> Void
 
@@ -454,16 +486,47 @@ public final class RemoteSyncBookmarkSnapshotService {
         let androidBookStore = RemoteSyncBookmarkAndroidBookStore(settingsStore: settingsStore)
 
         let labels = try fetch(FetchDescriptor<Label>(), from: modelContext, policy: fetchPolicy)
+            .map { label in
+                let id = label.id
+                return CapturedLabel(model: label, name: label.name, id: id, idString: id.uuidString)
+            }
             .sorted(by: sortLabels)
         let bibleBookmarks = try fetch(FetchDescriptor<BibleBookmark>(), from: modelContext, policy: fetchPolicy)
+            .map {
+                let id = $0.id
+                return CapturedBibleBookmark(
+                    model: $0,
+                    createdAt: $0.createdAt,
+                    id: id,
+                    idString: id.uuidString
+                )
+            }
             .sorted(by: sortBibleBookmarks)
         let bibleNotes = try fetch(FetchDescriptor<BibleBookmarkNotes>(), from: modelContext, policy: fetchPolicy)
         let bibleLinks = try fetch(FetchDescriptor<BibleBookmarkToLabel>(), from: modelContext, policy: fetchPolicy)
         let genericBookmarks = try fetch(FetchDescriptor<GenericBookmark>(), from: modelContext, policy: fetchPolicy)
+            .map {
+                let id = $0.id
+                return CapturedGenericBookmark(
+                    model: $0,
+                    createdAt: $0.createdAt,
+                    id: id,
+                    idString: id.uuidString
+                )
+            }
             .sorted(by: sortGenericBookmarks)
         let genericNotes = try fetch(FetchDescriptor<GenericBookmarkNotes>(), from: modelContext, policy: fetchPolicy)
         let genericLinks = try fetch(FetchDescriptor<GenericBookmarkToLabel>(), from: modelContext, policy: fetchPolicy)
         let studyPadEntries = try fetch(FetchDescriptor<StudyPadTextEntry>(), from: modelContext, policy: fetchPolicy)
+            .map {
+                let id = $0.id
+                return CapturedStudyPadEntry(
+                    model: $0,
+                    orderNumber: $0.orderNumber,
+                    id: id,
+                    idString: id.uuidString
+                )
+            }
             .sorted(by: sortStudyPadEntries)
         let studyPadTexts = try fetch(FetchDescriptor<StudyPadTextEntryText>(), from: modelContext, policy: fetchPolicy)
         let remoteLabelIDsByLocalID = Dictionary(
@@ -474,6 +537,60 @@ public final class RemoteSyncBookmarkSnapshotService {
                         ?? label.id
                 )
             }
+        )
+
+        var bibleLinksByBookmarkID: [UUID: [RemoteSyncAndroidBookmarkLabelLink]] = [:]
+        for link in bibleLinks {
+            guard let bookmarkID = link.bookmark?.id,
+                  let localLabelID = link.label?.id else {
+                continue
+            }
+            let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
+            bibleLinksByBookmarkID[bookmarkID, default: []].append(
+                RemoteSyncAndroidBookmarkLabelLink(
+                    labelID: remoteLabelID,
+                    orderNumber: link.orderNumber,
+                    indentLevel: link.indentLevel,
+                    expandContent: link.expandContent
+                )
+            )
+        }
+        for bookmarkID in Array(bibleLinksByBookmarkID.keys) {
+            bibleLinksByBookmarkID[bookmarkID]?.sort(by: sortLabelLinks)
+        }
+
+        var genericLinksByBookmarkID: [UUID: [RemoteSyncAndroidBookmarkLabelLink]] = [:]
+        for link in genericLinks {
+            guard let bookmarkID = link.bookmark?.id,
+                  let localLabelID = link.label?.id else {
+                continue
+            }
+            let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
+            genericLinksByBookmarkID[bookmarkID, default: []].append(
+                RemoteSyncAndroidBookmarkLabelLink(
+                    labelID: remoteLabelID,
+                    orderNumber: link.orderNumber,
+                    indentLevel: link.indentLevel,
+                    expandContent: link.expandContent
+                )
+            )
+        }
+        for bookmarkID in Array(genericLinksByBookmarkID.keys) {
+            genericLinksByBookmarkID[bookmarkID]?.sort(by: sortLabelLinks)
+        }
+
+        var preservedBiblePlaybackByID: [UUID: String] = [:]
+        var preservedGenericPlaybackByID: [UUID: String] = [:]
+        for entry in playbackSettingsStore.snapshotEntries() {
+            switch entry.bookmarkKind {
+            case .bible:
+                preservedBiblePlaybackByID[entry.bookmarkID] = entry.playbackSettingsJSON
+            case .generic:
+                preservedGenericPlaybackByID[entry.bookmarkID] = entry.playbackSettingsJSON
+            }
+        }
+        let preservedAndroidBookByID = Dictionary(
+            uniqueKeysWithValues: androidBookStore.snapshotEntries().map { ($0.bookmarkID, $0) }
         )
 
         let bibleNotesByBookmarkID = Dictionary(uniqueKeysWithValues: bibleNotes.map { ($0.bookmarkId, $0) })
@@ -492,7 +609,8 @@ public final class RemoteSyncBookmarkSnapshotService {
         var fingerprintsByKey: [String: String] = [:]
         var suppressedKeys: Set<String> = []
 
-        for label in labels {
+        for capturedLabel in labels {
+            let label = capturedLabel.model
             let remoteID = remoteLabelIDsByLocalID[label.id] ?? label.id
             let row = RemoteSyncAndroidLabel(
                 id: remoteID,
@@ -518,26 +636,15 @@ public final class RemoteSyncBookmarkSnapshotService {
             fingerprintsByKey[key] = Self.fingerprintHex(for: row)
         }
 
-        for bookmark in bibleBookmarks {
+        for capturedBookmark in bibleBookmarks {
+            let bookmark = capturedBookmark.model
             let bookmarkKey = logEntryStore.key(
                 for: .bookmarks,
                 tableName: "BibleBookmark",
                 entityID1: .blob(Self.uuidBlob(bookmark.id)),
                 entityID2: AndroidBookmarkDatabaseContract.emptySecondaryEntityID
             )
-            let projectedLabelLinks = bibleLinks.compactMap { link -> RemoteSyncAndroidBookmarkLabelLink? in
-                guard link.bookmark?.id == bookmark.id,
-                      let localLabelID = link.label?.id else {
-                    return nil
-                }
-                let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
-                return RemoteSyncAndroidBookmarkLabelLink(
-                    labelID: remoteLabelID,
-                    orderNumber: link.orderNumber,
-                    indentLevel: link.indentLevel,
-                    expandContent: link.expandContent
-                )
-            }.sorted(by: sortLabelLinks)
+            let projectedLabelLinks = bibleLinksByBookmarkID[bookmark.id] ?? []
 
             if !bookmark.hasTrustedPersistedOrdinals {
                 suppressedKeys.insert(bookmarkKey)
@@ -567,8 +674,14 @@ public final class RemoteSyncBookmarkSnapshotService {
             }
 
             let playbackJSON = Self.synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
-                ?? playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .bible)
+                ?? preservedBiblePlaybackByID[bookmark.id]
             let primaryLabelID = bookmark.primaryLabelId.map { remoteLabelIDsByLocalID[$0] ?? $0 }
+            let androidBook: String?
+            if let preservedBook = preservedAndroidBookByID[bookmark.id] {
+                androidBook = preservedBook.rawBook
+            } else {
+                androidBook = Self.androidBookColumnValue(for: bookmark)
+            }
 
             let row = RemoteSyncAndroidBibleBookmark(
                 id: bookmark.id,
@@ -579,10 +692,7 @@ public final class RemoteSyncBookmarkSnapshotService {
                 v11n: bookmark.v11n,
                 playbackSettingsJSON: playbackJSON,
                 createdAt: bookmark.createdAt,
-                book: androidBookStore.androidBookValue(
-                    for: bookmark.id,
-                    localBook: Self.androidBookColumnValue(for: bookmark)
-                ),
+                book: androidBook,
                 startOffset: bookmark.startOffset,
                 endOffset: bookmark.endOffset,
                 primaryLabelID: primaryLabelID,
@@ -637,23 +747,12 @@ public final class RemoteSyncBookmarkSnapshotService {
             }
         }
 
-        for bookmark in genericBookmarks {
+        for capturedBookmark in genericBookmarks {
+            let bookmark = capturedBookmark.model
             let playbackJSON = Self.synthesizedPlaybackSettingsJSON(from: bookmark.playbackSettings)
-                ?? playbackSettingsStore.playbackSettingsJSON(for: bookmark.id, kind: .generic)
+                ?? preservedGenericPlaybackByID[bookmark.id]
             let primaryLabelID = bookmark.primaryLabelId.map { remoteLabelIDsByLocalID[$0] ?? $0 }
-            let labelLinks = genericLinks.compactMap { link -> RemoteSyncAndroidBookmarkLabelLink? in
-                guard link.bookmark?.id == bookmark.id,
-                      let localLabelID = link.label?.id else {
-                    return nil
-                }
-                let remoteLabelID = remoteLabelIDsByLocalID[localLabelID] ?? localLabelID
-                return RemoteSyncAndroidBookmarkLabelLink(
-                    labelID: remoteLabelID,
-                    orderNumber: link.orderNumber,
-                    indentLevel: link.indentLevel,
-                    expandContent: link.expandContent
-                )
-            }.sorted(by: sortLabelLinks)
+            let labelLinks = genericLinksByBookmarkID[bookmark.id] ?? []
 
             let row = RemoteSyncAndroidGenericBookmark(
                 id: bookmark.id,
@@ -721,7 +820,8 @@ public final class RemoteSyncBookmarkSnapshotService {
             }
         }
 
-        for entry in studyPadEntries {
+        for capturedEntry in studyPadEntries {
+            let entry = capturedEntry.model
             guard let localLabelID = entry.label?.id else {
                 continue
             }
@@ -1383,9 +1483,9 @@ public final class RemoteSyncBookmarkSnapshotService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func sortLabels(_ lhs: Label, _ rhs: Label) -> Bool {
+    private func sortLabels(_ lhs: CapturedLabel, _ rhs: CapturedLabel) -> Bool {
         if lhs.name == rhs.name {
-            return lhs.id.uuidString < rhs.id.uuidString
+            return lhs.idString < rhs.idString
         }
         return lhs.name < rhs.name
     }
@@ -1400,9 +1500,9 @@ public final class RemoteSyncBookmarkSnapshotService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func sortBibleBookmarks(_ lhs: BibleBookmark, _ rhs: BibleBookmark) -> Bool {
+    private func sortBibleBookmarks(_ lhs: CapturedBibleBookmark, _ rhs: CapturedBibleBookmark) -> Bool {
         if lhs.createdAt == rhs.createdAt {
-            return lhs.id.uuidString < rhs.id.uuidString
+            return lhs.idString < rhs.idString
         }
         return lhs.createdAt < rhs.createdAt
     }
@@ -1417,9 +1517,9 @@ public final class RemoteSyncBookmarkSnapshotService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func sortGenericBookmarks(_ lhs: GenericBookmark, _ rhs: GenericBookmark) -> Bool {
+    private func sortGenericBookmarks(_ lhs: CapturedGenericBookmark, _ rhs: CapturedGenericBookmark) -> Bool {
         if lhs.createdAt == rhs.createdAt {
-            return lhs.id.uuidString < rhs.id.uuidString
+            return lhs.idString < rhs.idString
         }
         return lhs.createdAt < rhs.createdAt
     }
@@ -1434,9 +1534,9 @@ public final class RemoteSyncBookmarkSnapshotService {
      - Side effects: none.
      - Failure modes: This helper cannot fail.
      */
-    private func sortStudyPadEntries(_ lhs: StudyPadTextEntry, _ rhs: StudyPadTextEntry) -> Bool {
+    private func sortStudyPadEntries(_ lhs: CapturedStudyPadEntry, _ rhs: CapturedStudyPadEntry) -> Bool {
         if lhs.orderNumber == rhs.orderNumber {
-            return lhs.id.uuidString < rhs.id.uuidString
+            return lhs.idString < rhs.idString
         }
         return lhs.orderNumber < rhs.orderNumber
     }

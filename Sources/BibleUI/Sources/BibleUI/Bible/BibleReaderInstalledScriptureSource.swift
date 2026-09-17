@@ -92,6 +92,25 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
     /// Android-compatible MyBible, MySword, or e-Sword Bible in exact KJVA coordinates.
     case sqlite(BibleReaderSQLiteModuleHandle)
 
+    /**
+     Reports whether two values retain the same installed backend object.
+
+     - Parameter other: Resolved source to compare without using initials or metadata aliases.
+     - Returns: True only for identical SWORD module or SQLite handle objects.
+     - Side effects: None.
+     - Failure modes: Different backend families and replacement objects are never equivalent.
+     */
+    func hasSameOwner(as other: BibleReaderInstalledScriptureSource) -> Bool {
+        switch (self, other) {
+        case (.sword(let lhs), .sword(let rhs)):
+            return lhs === rhs
+        case (.sqlite(let lhs), .sqlite(let rhs)):
+            return lhs === rhs
+        default:
+            return false
+        }
+    }
+
     /// Installed-module metadata used by global identity and picker contracts.
     var info: ModuleInfo {
         switch self {
@@ -144,12 +163,63 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
     /**
      Resolves one exact source coordinate into its own intro-inclusive ordinal domain.
 
-     - Parameters describe a concrete one-based verse.
+     - Parameters describe a concrete verse or a canon-owned `0:0`/verse-zero introduction.
      - Returns: Exact source ordinal, or `nil` when the source cannot address the coordinate.
-     - Side effects: SWORD temporarily inspects and restores its cursor; SQLite uses static KJVA.
+     - Side effects: Normal SWORD verses temporarily inspect and restore the cursor. Introduction
+       lookup reads the source's book inventory and compiled versification table; SQLite uses its
+       static KJVA inventory and canon.
      - Failure modes: Invalid and unsupported coordinates return `nil` without normalization.
      */
     func verseOrdinal(osisBookId: String, chapter: Int, verse: Int) -> Int? {
+        verseOrdinal(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: verse,
+            ownsBook: ownsScriptureBook
+        )
+    }
+
+    /**
+     Resolves a coordinate using caller-retained exact book ownership.
+
+     The ownership callback is evaluated only for verse-zero coordinates. Operation-scoped callers
+     can therefore reuse an admitted inventory without making normal verse lookup or every interior
+     introduction traverse the module again.
+
+     - Parameters:
+       - osisBookId: Exact source OSIS book identifier.
+       - chapter: Source chapter, including zero for a book introduction.
+       - verse: Source verse, including zero for book/chapter introductions.
+       - ownsBook: Exact source-inventory membership proof evaluated only for introductions.
+     - Returns: Exact source ordinal, or `nil` when ownership or round-trip validation fails.
+     - Side effects: Normal SWORD verses may move and restore the cursor; static introduction lookup
+       reads compiled versification metadata and invokes the supplied ownership proof.
+     - Failure modes: Invalid, unowned, and unsupported coordinates return `nil` without fallback.
+     */
+    func verseOrdinal(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int,
+        ownsBook: (String) -> Bool
+    ) -> Int? {
+        if verse == 0 {
+            guard chapter >= 0,
+                  ownsBook(osisBookId),
+                  let ordinal = SwordVersification.referenceIndex(
+                    for: .init(osisBookId: osisBookId, chapter: chapter, verse: verse),
+                    versification: versificationName
+                  ),
+                  let reference = SwordVersification.reference(
+                    forIndex: ordinal,
+                    versification: versificationName
+                  ),
+                  reference.osisBookId == osisBookId,
+                  reference.chapter == chapter,
+                  reference.verse == verse else {
+                return nil
+            }
+            return ordinal
+        }
         switch self {
         case .sword(let module):
             return module.verseOrdinal(
@@ -170,25 +240,70 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
      Resolves one exact source ordinal into a concrete verse.
 
      - Parameter ordinal: Intro-inclusive ordinal owned by `versificationName`.
-     - Returns: Concrete positive-verse reference, or `nil` for introductions and invalid values.
-     - Side effects: SWORD temporarily inspects and restores its cursor; SQLite uses static KJVA.
+     - Returns: Concrete verse or canon-owned book/chapter introduction, or `nil` for structural
+       headings and invalid values.
+     - Side effects: Normal SWORD verses temporarily inspect and restore the cursor. Introduction
+       lookup reads the source's book inventory and compiled versification table; SQLite uses its
+       static KJVA inventory and canon.
      - Failure modes: No nearest-verse or cross-backend fallback is performed.
      */
     func verseReference(ordinal: Int) -> VerseKeyReference? {
+        verseReference(ordinal: ordinal, ownsBook: ownsScriptureBook)
+    }
+
+    /**
+     Resolves an ordinal using caller-retained exact book ownership.
+
+     The ownership callback is evaluated only after ordinary backend lookup fails and the static
+     coordinate is a verse-zero introduction. This lets one operation reuse one admitted inventory
+     across cross-chapter ranges without changing normal verse behavior.
+
+     - Parameters:
+       - ordinal: Intro-inclusive source ordinal.
+       - ownsBook: Exact source-inventory membership proof evaluated only for introductions.
+     - Returns: Exact source verse/introduction, or `nil` for headings and invalid ownership.
+     - Side effects: Normal SWORD lookup may move and restore the cursor; introduction lookup reads
+       compiled versification metadata and invokes the supplied ownership proof.
+     - Failure modes: Invalid, unowned, and unsupported ordinals return `nil` without fallback.
+     */
+    func verseReference(
+        ordinal: Int,
+        ownsBook: (String) -> Bool
+    ) -> VerseKeyReference? {
+        let normalReference: VerseKeyReference?
         switch self {
         case .sword(let module):
-            return module.verseReference(ordinal: ordinal)
+            normalReference = module.verseReference(ordinal: ordinal)
         case .sqlite:
-            guard let reference = JSwordKJVAVersification.verseReference(ordinal: ordinal) else {
-                return nil
+            normalReference = JSwordKJVAVersification.verseReference(ordinal: ordinal).map {
+                VerseKeyReference(
+                    osisBookId: $0.osisId,
+                    chapter: $0.chapter,
+                    verse: $0.verse,
+                    ordinal: $0.ordinal
+                )
             }
-            return VerseKeyReference(
-                osisBookId: reference.osisId,
-                chapter: reference.chapter,
-                verse: reference.verse,
-                ordinal: reference.ordinal
-            )
         }
+        if let normalReference {
+            return normalReference
+        }
+        guard let reference = SwordVersification.reference(
+            forIndex: ordinal,
+            versification: versificationName
+        ), reference.verse == 0, ownsBook(reference.osisBookId) else {
+            return nil
+        }
+        return VerseKeyReference(
+            osisBookId: reference.osisBookId,
+            chapter: reference.chapter,
+            verse: reference.verse,
+            ordinal: ordinal
+        )
+    }
+
+    /** Returns whether this exact installed source exposes one OSIS scripture book. */
+    private func ownsScriptureBook(_ osisBookId: String) -> Bool {
+        (try? bookList().contains { $0.osisId == osisBookId }) == true
     }
 
     /**
@@ -210,6 +325,31 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         verse: Int,
         from sourceVersification: String
     ) -> VerseKeyReference? {
+        mappedReference(
+            osisBookId: osisBookId,
+            chapter: chapter,
+            verse: verse,
+            from: sourceVersification,
+            ownsBook: ownsScriptureBook
+        )
+    }
+
+    /**
+     Converts one coordinate using a caller-retained exact target-book inventory.
+
+     - Parameters mirror `mappedReference`, with `ownsBook` proving target inventory membership.
+     - Returns: Exact target-owned reference after strict mapping and bidirectional identity checks.
+     - Side effects: Normal SWORD lookup may move and restore its cursor; verse-zero lookup invokes
+       the supplied ownership proof without enumerating the backend again.
+     - Failure modes: Unsupported conversion, absent ownership, and identity mismatch return nil.
+     */
+    func mappedReference(
+        osisBookId: String,
+        chapter: Int,
+        verse: Int,
+        from sourceVersification: String,
+        ownsBook: (String) -> Bool
+    ) -> VerseKeyReference? {
         guard let mapped = VersificationMapper.convertStrictly(
                   osisBookId: osisBookId,
                   chapter: chapter,
@@ -220,9 +360,10 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
               let ordinal = verseOrdinal(
                   osisBookId: mapped.osisBookId,
                   chapter: mapped.chapter,
-                  verse: mapped.verse
+                  verse: mapped.verse,
+                  ownsBook: ownsBook
               ),
-              let reference = verseReference(ordinal: ordinal),
+              let reference = verseReference(ordinal: ordinal, ownsBook: ownsBook),
               reference.osisBookId == mapped.osisBookId,
               reference.chapter == mapped.chapter,
               reference.verse == mapped.verse else {
@@ -353,6 +494,12 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         guard let end = verseReference(ordinal: endOrdinal) else {
             throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(endOrdinal)
         }
+        guard start.chapter > 0, start.verse > 0 else {
+            throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(startOrdinal)
+        }
+        guard end.chapter > 0, end.verse > 0 else {
+            throw BibleReaderInstalledScriptureSourceError.nonAddressableEndpoint(endOrdinal)
+        }
 
         let verses: [BibleReaderInstalledScriptureVerse]
         switch self {
@@ -378,7 +525,7 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         case .sqlite(let module):
             let references = (startOrdinal...endOrdinal).compactMap {
                 verseReference(ordinal: $0)
-            }
+            }.filter { $0.chapter > 0 && $0.verse > 0 }
             var captured: [BibleReaderInstalledScriptureVerse] = []
             captured.reserveCapacity(references.count)
 
@@ -440,10 +587,36 @@ enum BibleReaderInstalledScriptureSource: @unchecked Sendable {
         _ candidate: VerseKeyReference,
         after previous: VerseKeyReference
     ) -> Bool {
+        isCanonicallyAdjacent(candidate, after: previous, ownsBook: ownsScriptureBook)
+    }
+
+    /**
+     Checks adjacency while reusing a caller-retained exact book inventory for intro slots.
+
+     - Parameters:
+       - candidate: Possible next concrete target reference.
+       - previous: Earlier concrete target reference.
+       - ownsBook: Exact target-inventory membership proof used for intervening introductions.
+     - Returns: True only when the candidate is the next concrete verse after the previous value.
+     - Side effects: Performs bounded ordinal lookup; the supplied proof prevents backend inventory
+       traversal for every skipped introduction.
+     - Failure modes: Missing, reversed, duplicate, and intervening concrete verses return false.
+     */
+    func isCanonicallyAdjacent(
+        _ candidate: VerseKeyReference,
+        after previous: VerseKeyReference,
+        ownsBook: (String) -> Bool
+    ) -> Bool {
         guard candidate.ordinal > previous.ordinal else { return false }
         for ordinal in (previous.ordinal + 1)...candidate.ordinal {
-            guard let reference = verseReference(ordinal: ordinal) else { continue }
-            return reference == candidate
+            guard let reference = verseReference(ordinal: ordinal, ownsBook: ownsBook) else {
+                continue
+            }
+            if reference == candidate { return true }
+            // Introductions remain valid explicit targets, while interior introductions do not
+            // interrupt adjacency between the addressable verses on either side of a boundary.
+            if reference.verse == 0 { continue }
+            return false
         }
         return false
     }

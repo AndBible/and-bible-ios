@@ -27,7 +27,12 @@ enum SQLiteReaderMarkupProjection {
         _ text: String,
         module: BibleReaderSQLiteModuleHandle
     ) -> String {
-        guard isPlainESword(module) else { return text }
+        bibleVerseXML(text, isPlainESword: isPlainESword(module))
+    }
+
+    /** Projects copied source text using the format classification captured by its source owner. */
+    static func bibleVerseXML(_ text: String, isPlainESword: Bool) -> String {
+        guard isPlainESword else { return text }
         return SQLiteDocumentXMLCompatibility.escapedText(text)
     }
 
@@ -70,7 +75,7 @@ enum SQLiteReaderMarkupProjection {
      - Side effects: None.
      - Failure modes: Missing or different extensions return false.
      */
-    private static func isPlainESword(_ module: BibleReaderSQLiteModuleHandle) -> Bool {
+    static func isPlainESword(_ module: BibleReaderSQLiteModuleHandle) -> Bool {
         module.metadata.format == .eSword
             && module.metadata.sourceURL.pathExtension.caseInsensitiveCompare("bbli") == .orderedSame
     }

@@ -233,7 +233,9 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             let exactKey = "  exact/\(moduleName) key  "
             var validationCount = 0
             var enumerationCount = 0
+            var preparationCount = 0
             let harness = GenericModuleSwitchHarness(
+                attachWindowGraph: retainReaderWindowGraph,
                 manager: manager,
                 targetCategory: category,
                 currentKey: exactKey,
@@ -252,7 +254,8 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
                 category: category,
                 moduleName: moduleName,
                 coordinator: coordinator,
-                context: harness.makeContext()
+                context: harness.makeContext(),
+                prepareForSwitch: { preparationCount += 1 }
             )
 
             XCTAssertEqual(outcome, .switchedPreservingKey)
@@ -268,6 +271,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             XCTAssertEqual(harness.reloadCount, 1)
             XCTAssertEqual(validationCount, 1)
             XCTAssertEqual(enumerationCount, 0)
+            XCTAssertEqual(preparationCount, 1)
         }
     }
 
@@ -294,7 +298,9 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         for (category, moduleName, currentKey, expectedValidationCount) in cases {
             var validationCount = 0
             var enumerationCount = 0
+            var preparationCount = 0
             let harness = GenericModuleSwitchHarness(
+                attachWindowGraph: retainReaderWindowGraph,
                 manager: manager,
                 targetCategory: category,
                 currentKey: currentKey,
@@ -313,7 +319,8 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
                 category: category,
                 moduleName: moduleName,
                 coordinator: coordinator,
-                context: harness.makeContext()
+                context: harness.makeContext(),
+                prepareForSwitch: { preparationCount += 1 }
             )
 
             XCTAssertEqual(outcome, .switchedRequiringKeySelection)
@@ -327,6 +334,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             XCTAssertEqual(harness.reloadCount, 0)
             XCTAssertEqual(validationCount, expectedValidationCount)
             XCTAssertEqual(enumerationCount, 1)
+            XCTAssertEqual(preparationCount, 1)
         }
     }
 
@@ -345,6 +353,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         let manager = try makeGenericModuleManager()
         let coordinator = BibleReaderModuleSwitchCoordinator()
         let validationHarness = GenericModuleSwitchHarness(
+            attachWindowGraph: retainReaderWindowGraph,
             manager: manager,
             targetCategory: .dictionary,
             currentKey: "current-dictionary-key",
@@ -357,6 +366,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             }
         )
         let enumerationHarness = GenericModuleSwitchHarness(
+            attachWindowGraph: retainReaderWindowGraph,
             manager: manager,
             targetCategory: .map,
             currentKey: "missing-map-key",
@@ -369,17 +379,20 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
             }
         )
 
+        var rejectedPreparationCount = 0
         let validationOutcome = switchGenericDocument(
             category: .dictionary,
             moduleName: "UITestDict",
             coordinator: coordinator,
-            context: validationHarness.makeContext()
+            context: validationHarness.makeContext(),
+            prepareForSwitch: { rejectedPreparationCount += 1 }
         )
         let enumerationOutcome = switchGenericDocument(
             category: .map,
             moduleName: "UITestMap",
             coordinator: coordinator,
-            context: enumerationHarness.makeContext()
+            context: enumerationHarness.makeContext(),
+            prepareForSwitch: { rejectedPreparationCount += 1 }
         )
 
         XCTAssertEqual(
@@ -392,6 +405,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         )
         assertFailedSwitchDidNotMutate(validationHarness)
         assertFailedSwitchDidNotMutate(enumerationHarness)
+        XCTAssertEqual(rejectedPreparationCount, 0)
     }
 
     /**
@@ -413,6 +427,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         var keyEnumerationCount = 0
 
         let commentaryHarness = GenericModuleSwitchHarness(
+            attachWindowGraph: retainReaderWindowGraph,
             manager: manager,
             targetCategory: .dictionary,
             currentKey: "baseline-key",
@@ -434,6 +449,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
 
         for category in [DocumentCategory.dictionary, .generalBook, .map] {
             let harness = GenericModuleSwitchHarness(
+                attachWindowGraph: retainReaderWindowGraph,
                 manager: manager,
                 targetCategory: category,
                 currentKey: "baseline-key",
@@ -485,6 +501,7 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         let manager = try makeGenericModuleManager()
         var keyEnumerationCount = 0
         let harness = GenericModuleSwitchHarness(
+            attachWindowGraph: retainReaderWindowGraph,
             manager: manager,
             targetCategory: .dictionary,
             currentKey: nil,
@@ -757,15 +774,28 @@ final class ReaderModuleSwitchCoordinatorTests: BibleUISwordFixtureTestCase {
         category: DocumentCategory,
         moduleName: String,
         coordinator: BibleReaderModuleSwitchCoordinator,
-        context: BibleReaderModuleSwitchContext
+        context: BibleReaderModuleSwitchContext,
+        prepareForSwitch: (() -> Void)? = nil
     ) -> BibleReaderGenericModuleSwitchOutcome {
         switch category {
         case .dictionary:
-            return coordinator.switchDictionaryDocument(to: moduleName, context: context)
+            return coordinator.switchDictionaryDocument(
+                to: moduleName,
+                context: context,
+                prepareForSwitch: prepareForSwitch
+            )
         case .generalBook:
-            return coordinator.switchGeneralBookDocument(to: moduleName, context: context)
+            return coordinator.switchGeneralBookDocument(
+                to: moduleName,
+                context: context,
+                prepareForSwitch: prepareForSwitch
+            )
         case .map:
-            return coordinator.switchMapDocument(to: moduleName, context: context)
+            return coordinator.switchMapDocument(
+                to: moduleName,
+                context: context,
+                prepareForSwitch: prepareForSwitch
+            )
         default:
             XCTFail("Expected a generic document category, received \(category).")
             return .failed(message: "Unsupported test category.")
@@ -975,15 +1005,18 @@ private final class GenericModuleSwitchHarness {
      Creates a pane recorder with Bible visibility and category-owned generic state.
 
      - Parameters:
+       - attachWindowGraph: Registers both model nodes in the test-owned context before wiring
+         their relationship. The test case retains that context for every switch assertion.
        - manager: Manager used for real target-module resolution.
        - targetCategory: Generic category under test.
        - currentKey: Exact optional key visible before the switch.
        - containsExactKey: Injected throwing validation operation.
        - loadKeys: Injected throwing enumeration operation.
-     - Side effects: Creates and attaches an in-memory `PageManager` to a new window.
+     - Side effects: Creates and attaches a window/page graph in the existing test-owned context.
      - Failure modes: Unsupported categories retain placeholder state for test diagnostics.
      */
     init(
+        attachWindowGraph: (Window, PageManager) -> Void,
         manager: SwordManager,
         targetCategory: DocumentCategory,
         currentKey: String?,
@@ -1004,6 +1037,7 @@ private final class GenericModuleSwitchHarness {
             id: window.id,
             currentCategoryName: DocumentCategory.bible.pageManagerKey
         )
+        attachWindowGraph(window, pageManager)
         switch targetCategory {
         case .dictionary:
             pageManager.dictionaryDocument = originalModuleName
@@ -1017,7 +1051,6 @@ private final class GenericModuleSwitchHarness {
         default:
             break
         }
-        window.pageManager = pageManager
         self.window = window
         self.pageManager = pageManager
     }

@@ -1,5 +1,5 @@
 ---
-adr: ADR-0011
+adr: ADR-0013
 title: "Reader Annotation Parity Divergences"
 description: >-
   Record the intentional Android divergences kept after the My Notes /
@@ -21,7 +21,13 @@ related-adrs: [ADR-0003, ADR-0008]
 related-work-items: ["PR #382", "issue #376"]
 ---
 
-# 0011: Reader Annotation Parity Divergences
+# 0013: Reader Annotation Parity Divergences
+
+> Identity correction (2026-09-13): This accepted record was originally
+> published as ADR-0011 after that identifier had already been assigned to
+> [Transactional Module Store Mechanism](0011-transactional-module-store-mechanism.md).
+> It is now ADR-0013. The accepted decision, status, date, and substantive
+> prose are unchanged.
 
 Status: Accepted
 
@@ -96,6 +102,21 @@ time.
   always renders exactly one KJVA chapter with a fixed "Book N" heading.
   Chapter stepping also does not wrap at the canon boundary the way
   Android's `BibleTraverser` does.
+
+> **My Notes projection-order correction (2026-09-16).** The divergent-canon
+> follow-up above describes source-chapter expansion too broadly. Android's
+> explicit My Notes links, next/previous actions, and passage selections call
+> `CurrentMyNotePage.setKey`, which converts the selected verse to the fake
+> document's KJVA versification before expanding its chapter. Selecting My Notes
+> without a new key, or synchronizing through `currentBible.doSetKey`, can retain
+> the active-source chapter until page construction and then map its endpoints
+> to KJVA. For example, an explicit Vulgate Psalm 9:22 link renders KJVA Psalm 10;
+> retaining the Vulgate Psalm 9 chapter produces KJVA Psalms 9–10. Follow-up work
+> must preserve the distinction. This corrects the factual premise of a
+> follow-up; the accepted intentional divergences and historical prose remain
+> unchanged. Sources: Android `CurrentPageManager.setCurrentDocumentAndKey`,
+> `CurrentCommentaryPage.doSetKey`, `CurrentMyNotePage.currentPageContent`, and
+> `WindowSync.updateInactiveBibleKey`.
 
 ## Consequences
 

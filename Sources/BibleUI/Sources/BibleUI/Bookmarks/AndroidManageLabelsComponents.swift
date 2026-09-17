@@ -417,6 +417,7 @@ struct AndroidManageLabelRow: View {
                     identifier: "manageLabelsAutoAssign::\(label.id.uuidString)",
                     action: onToggleAutoAssign
                 )
+                .accessibilityValue(isAutoAssigned ? String(localized: "on") : String(localized: "off"))
             } else {
                 AndBibleIconView(name: "BookmarkLabel", size: 24)
                     .foregroundStyle(Color(argbInt: label.color))
@@ -456,6 +457,7 @@ struct AndroidManageLabelRow: View {
                     identifier: "manageLabelsPrimary::\(label.id.uuidString)",
                     action: onSelectPrimary
                 )
+                .accessibilityValue(isPrimary ? String(localized: "on") : String(localized: "off"))
             }
 
             Button(action: onEdit) {

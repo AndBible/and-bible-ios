@@ -69,7 +69,7 @@ public struct SyncModeChangeResult {
 @Observable
 public final class SyncService {
     /// Host callback that rebuilds SwiftData for a requested iCloud mode.
-    public typealias ModeChangeHandler = @MainActor (_ requestedEnabled: Bool) throws -> SyncModeChangeResult
+    public typealias ModeChangeHandler = @MainActor (_ requestedEnabled: Bool) async throws -> SyncModeChangeResult
 
     /// Current sync state.
     public private(set) var state: SyncState = .disabled
@@ -85,6 +85,14 @@ public final class SyncService {
 
     /// Whether the current host requires a restart because no live mode-change handler is installed.
     public private(set) var requiresRestart: Bool = false
+
+    /**
+     Whether a live runtime mode change has been admitted and has not yet settled.
+
+     This is independent of `state`: CloudKit notifications can update the user-visible status
+     while the app shell is still draining and replacing the persistence runtime.
+     */
+    public private(set) var isModeChangeInFlight: Bool = false
 
     /// The iCloud account display name, if available.
     public private(set) var accountDescription: String?
@@ -297,7 +305,9 @@ public final class SyncService {
      by previews and non-app hosts.
      */
     @MainActor
-    public func toggleSync() {
+    public func toggleSync() async {
+        guard !isModeChangeInFlight else { return }
+
         let previousMode = isEnabled
         let requestedMode = !previousMode
 
@@ -309,12 +319,14 @@ public final class SyncService {
             return
         }
 
+        isModeChangeInFlight = true
+        defer { isModeChangeInFlight = false }
         defaults.set(requestedMode, forKey: syncEnabledKey)
         requiresRestart = false
         state = .syncing
 
         do {
-            let result = try modeChangeHandler(requestedMode)
+            let result = try await modeChangeHandler(requestedMode)
             stopMonitoring()
             defaults.set(result.effectiveEnabled, forKey: syncEnabledKey)
             applyRuntimeMode(enabled: result.effectiveEnabled)

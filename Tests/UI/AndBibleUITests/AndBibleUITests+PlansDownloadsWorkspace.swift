@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Vision
 import XCTest
 #if canImport(UIKit)
 import UIKit
@@ -218,19 +219,13 @@ extension AndBibleUITests {
             return item
         }
 
-        for attempt in 0..<2 {
-            let overflowButton = unresolvedElement("moduleBrowserOverflowButton", in: app)
-            let tapTimeout = min(1, max(0.1, deadline.timeIntervalSinceNow))
-            _ = tapElementIfPossible(overflowButton, timeout: tapTimeout)
-
-            let remaining = max(0, deadline.timeIntervalSinceNow)
-            guard remaining > 0 else {
-                break
-            }
-            let waitTimeout = attempt == 0 ? min(2, remaining) : remaining
-            if let item = firstVisibleCandidate(from: itemCandidates, waitTimeout: waitTimeout) {
-                return item
-            }
+        let overflowButton = unresolvedElement("moduleBrowserOverflowButton", in: app)
+        tapElementReliably(overflowButton, timeout: timeout, file: file, line: line)
+        if let item = firstVisibleCandidate(
+            from: itemCandidates,
+            waitTimeout: max(0, deadline.timeIntervalSinceNow)
+        ) {
+            return item
         }
 
         let item = unresolvedElement(itemIdentifier, in: app)
@@ -355,34 +350,167 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies Downloads keeps Android's visible row order stable while an install row changes status.
+     Verifies the real Downloads row uses Android's remote abbreviation for display, search, and order.
 
-     Android's Downloads list updates the tapped row in place after `downloadDocument(...)` and does
-     not re-run the install-status sort until the user rebuilds the filtered document list. This smoke
-     test launches the real route with a deterministic cached catalog, cancels the first confirmation
-     to prove Android's dialog gate is honored, then confirms one installable row whose UI-test
-     install is held in progress. It asserts that only the row status changes while the visible row
-     sequence stays unchanged.
-     Failure means the app has regressed to re-sorting the visible list from transient download state.
+     The fixture's two synthetic rows have identical repository, install status, category, language,
+     and recommendation state. Their initials order is the reverse of their abbreviation order, so
+     the visible row order cannot pass by accidentally sorting installation identities. The search
+     phrase occurs only in the first row's abbreviation. Accessibility locates the exact rows, while
+     Vision verifies that the abbreviations are present in the rendered pixels.
      */
-    func testDownloadsInstallKeepsRowOrderVisibleDuringActivity() {
-        let warningRowIdentifier = "moduleBrowserRow::UITest Downloads--UITESTDLWARN"
-        let app = makeApp(heldDownloadModules: ["UITESTDLWARN"])
+    func testDownloadsUsesRemoteAbbreviationForVisibleDisplaySearchAndOrder() {
+        let source = "UITest Downloads"
+        let firstIdentifier = "moduleBrowserRow::\(source)--ZZZREMOTE"
+        let secondIdentifier = "moduleBrowserRow::\(source)--AAAREMOTE"
+        let firstAbbreviation = "Aardvark"
+        let secondAbbreviation = "Aaron"
+
+        func assertVisibleRowPixels(
+            _ row: XCUIElement,
+            contain expectedText: String,
+            in app: XCUIApplication
+        ) {
+            var observedText = ""
+            var recognitionError: String?
+            let rendered = waitForUITestCondition(
+                "Downloads row pixels contain \(expectedText)",
+                timeout: 20
+            ) {
+                guard row.exists,
+                      self.elementHasUsableFrame(row),
+                      app.frame.contains(row.frame),
+                      let pixels = row.screenshot().image.cgImage else {
+                    return false
+                }
+                let request = VNRecognizeTextRequest()
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = false
+                request.recognitionLanguages = ["en-US"]
+                do {
+                    try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
+                    observedText = (request.results ?? [])
+                        .compactMap { $0.topCandidates(1).first?.string }
+                        .joined(separator: " ")
+                    recognitionError = nil
+                    return observedText.range(of: expectedText, options: .caseInsensitive) != nil
+                } catch {
+                    recognitionError = error.localizedDescription
+                    return false
+                }
+            }
+            if !rendered {
+                XCTContext.runActivity(named: "Missing visible Downloads abbreviation") { activity in
+                    let screenshot = XCTAttachment(screenshot: app.screenshot())
+                    screenshot.lifetime = .keepAlways
+                    activity.add(screenshot)
+                    let observation = XCTAttachment(
+                        string: "Recognized row text: \(observedText)\nError: \(recognitionError ?? "none")"
+                    )
+                    observation.lifetime = .keepAlways
+                    activity.add(observation)
+                }
+            }
+            XCTAssertTrue(
+                rendered,
+                "Expected visible Downloads row pixels to contain '\(expectedText)'."
+            )
+        }
+
+        let app = makeApp()
         app.launch()
 
         XCTAssertTrue(openDownloads(in: app).exists)
-        waitForResolvedSemanticState(
-            named: "moduleBrowserStateExport",
-            timeout: 20,
-            valueProvider: { self.semanticStateExportValue("moduleBrowserStateExport", in: app) },
-            success: { value in
-                value.contains("visible=3;")
-                    && value.contains("refreshing=false;")
-                    && value.contains("order=KJV|UITESTDLREC|UITESTDLWARN;")
-                    && value.contains("UITESTDLWARN:installable")
-            },
-            failureDescription: { "Expected deterministic Downloads smoke catalog before install, got '\($0)'." }
+        let firstRow = requireElement(firstIdentifier, in: app, timeout: 20)
+        let secondRow = requireElement(secondIdentifier, in: app, timeout: 20)
+        XCTAssertEqual(firstRow.label, firstAbbreviation)
+        XCTAssertEqual(secondRow.label, secondAbbreviation)
+        assertVisibleRowPixels(firstRow, contain: firstAbbreviation, in: app)
+        assertVisibleRowPixels(secondRow, contain: secondAbbreviation, in: app)
+        XCTAssertLessThan(
+            firstRow.frame.minY,
+            secondRow.frame.minY,
+            "Equal-rank Downloads rows must be ordered by abbreviation, not initials."
         )
+
+        let searchField = requireElement("moduleBrowserSearchField", in: app, timeout: 10)
+        replaceText(in: searchField, with: firstAbbreviation, placeholderHints: ["Search"])
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+        waitForElementToDisappear(secondRow, timeout: 10)
+        XCTAssertEqual(firstRow.label, firstAbbreviation)
+        assertVisibleRowPixels(firstRow, contain: firstAbbreviation, in: app)
+    }
+
+    /**
+     Verifies Downloads keeps row order stable through real cancellation and durable installation.
+
+     Android's Downloads list updates the tapped row in place after `downloadDocument(...)` and does
+     not re-run the install-status sort until the user rebuilds the filtered document list. The host
+     fixture serves a valid SWORD package through the repository's real URLSession boundary and holds
+     each transfer until cancellation or explicit release. The journey cancels the first transfer,
+     completes the second without moving the active list, then relaunches and confirms Android's
+     rebuilt installed-before-installable order together with the durable result.
+     */
+    func testDownloadsInstallKeepsRowOrderVisibleDuringActivity() {
+        let source = "UITest Downloads"
+        let kjvRowIdentifier = "moduleBrowserRow::\(source)--KJV"
+        let recommendedRowIdentifier = "moduleBrowserRow::\(source)--UITESTDLREC"
+        let warningRowIdentifier = "moduleBrowserRow::UITest Downloads--UITESTDLWARN"
+        let progressIdentifier = "moduleBrowserInstallProgress::\(source)--UITESTDLWARN"
+        let cancelIdentifier = "moduleBrowserCancelInstallButton::\(source)--UITESTDLWARN"
+        func waitForVisiblePartialDownloadProgress(in app: XCUIApplication) {
+            var observedLabel = "<missing>"
+            let didObserve = waitForUITestCondition(
+                "Visible Downloads byte progress advances before release",
+                timeout: 10
+            ) {
+                guard let progress = self.resolvedElement(progressIdentifier, in: app) else {
+                    return false
+                }
+                observedLabel = progress.label
+                guard let percentageToken = observedLabel.split(separator: " ").last,
+                      percentageToken.hasSuffix("%"),
+                      let percent = Int(percentageToken.dropLast()) else {
+                    return false
+                }
+                return percent > 0 && percent < 100
+            }
+            XCTAssertTrue(
+                didObserve,
+                "Expected visible partial download progress before host release; last label was "
+                    + "'\(observedLabel)'."
+            )
+        }
+        func assertActiveSessionRowOrder(in app: XCUIApplication) {
+            let kjvRow = requireElement(kjvRowIdentifier, in: app, timeout: 20)
+            let recommendedRow = requireElement(recommendedRowIdentifier, in: app, timeout: 20)
+            let warningRow = requireElement(warningRowIdentifier, in: app, timeout: 20)
+            XCTAssertLessThan(kjvRow.frame.minY, recommendedRow.frame.minY)
+            XCTAssertLessThan(recommendedRow.frame.minY, warningRow.frame.minY)
+        }
+        func assertRebuiltInstalledRowOrder(in app: XCUIApplication) {
+            let kjvRow = requireElement(kjvRowIdentifier, in: app, timeout: 20)
+            let recommendedRow = requireElement(recommendedRowIdentifier, in: app, timeout: 20)
+            let warningRow = requireElement(warningRowIdentifier, in: app, timeout: 20)
+            XCTAssertLessThan(kjvRow.frame.minY, warningRow.frame.minY)
+            XCTAssertLessThan(warningRow.frame.minY, recommendedRow.frame.minY)
+        }
+        let app = makeApp()
+        app.launch()
+
+        XCTAssertTrue(openDownloads(in: app).exists)
+        assertActiveSessionRowOrder(in: app)
+        waitForElementValue(warningRowIdentifier, toEqual: "installable", in: app, timeout: 10)
+
+        requireElement(warningRowIdentifier, in: app, timeout: 10).swipeUp()
+        XCTAssertFalse(
+            app.otherElements["moduleBrowserContextActionBar"].firstMatch.exists,
+            "Scrolling an installable row must not enter contextual selection."
+        )
+        XCTAssertFalse(
+            app.buttons["androidModulePickerDecisionDialogAction::install"].firstMatch.exists,
+            "Scrolling an installable row must not dispatch its primary download action."
+        )
+        waitForElementValue(warningRowIdentifier, toEqual: "installable", in: app, timeout: 10)
 
         tapElementReliably(
             requireElement(warningRowIdentifier, in: app, timeout: 10),
@@ -396,18 +524,7 @@ extension AndBibleUITests {
             timeout: 10
         )
 
-        waitForResolvedSemanticState(
-            named: "moduleBrowserStateExport",
-            timeout: 20,
-            valueProvider: { self.semanticStateExportValue("moduleBrowserStateExport", in: app) },
-            success: { value in
-                value.contains("visible=3;")
-                    && value.contains("refreshing=false;")
-                    && value.contains("order=KJV|UITESTDLREC|UITESTDLWARN;")
-                    && value.contains("UITESTDLWARN:installable")
-            },
-            failureDescription: { "Expected cancelling Downloads confirmation to keep row installable, got '\($0)'." }
-        )
+        waitForElementValue(warningRowIdentifier, toEqual: "installable", in: app, timeout: 10)
 
         tapElementReliably(
             requireElement(warningRowIdentifier, in: app, timeout: 10),
@@ -421,17 +538,40 @@ extension AndBibleUITests {
             timeout: 10
         )
 
-        waitForResolvedSemanticState(
-            named: "moduleBrowserStateExport",
-            timeout: 20,
-            valueProvider: { self.semanticStateExportValue("moduleBrowserStateExport", in: app) },
-            success: { value in
-                value.contains("visible=3;")
-                    && value.contains("refreshing=false;")
-                    && value.contains("order=KJV|UITESTDLREC|UITESTDLWARN;")
-                    && value.contains("UITESTDLWARN:beingInstalled")
-            },
-            failureDescription: { "Expected tapped Downloads row to update in place, got '\($0)'." }
+        let firstCancel = requireButton(cancelIdentifier, in: app, timeout: 10)
+        XCTAssertTrue(requireElement(progressIdentifier, in: app, timeout: 10).exists)
+        XCTAssertEqual(awaitDownloadFixtureState(.connected), 1)
+        waitForVisiblePartialDownloadProgress(in: app)
+        waitForElementValue(warningRowIdentifier, toEqual: "beingInstalled", in: app, timeout: 10)
+        assertActiveSessionRowOrder(in: app)
+        tapElementReliably(firstCancel, timeout: 10)
+        XCTAssertEqual(awaitDownloadFixtureState(.cancelled), 1)
+        waitForElementValue(warningRowIdentifier, toEqual: "installable", in: app, timeout: 10)
+
+        tapElementReliably(
+            requireElement(warningRowIdentifier, in: app, timeout: 10),
+            timeout: 10
         )
+        tapAppOwnedDialogAction(
+            "androidModulePickerDecisionDialogAction::install",
+            dialogIdentifier: "androidModulePickerDecisionDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
+        _ = requireButton(cancelIdentifier, in: app, timeout: 10)
+        XCTAssertTrue(requireElement(progressIdentifier, in: app, timeout: 10).exists)
+        XCTAssertEqual(awaitDownloadFixtureState(.connected), 2)
+        waitForVisiblePartialDownloadProgress(in: app)
+        releaseDownloadFixture()
+        XCTAssertEqual(awaitDownloadFixtureState(.completed), 2)
+        waitForElementValue(warningRowIdentifier, toEqual: "installed", in: app, timeout: 20)
+        assertActiveSessionRowOrder(in: app)
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(openDownloads(in: app).exists)
+        waitForElementValue(warningRowIdentifier, toEqual: "installed", in: app, timeout: 20)
+        assertRebuiltInstalledRowOrder(in: app)
     }
 }

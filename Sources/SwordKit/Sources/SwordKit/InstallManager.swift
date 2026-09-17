@@ -229,6 +229,11 @@ public final class InstallManager: @unchecked Sendable {
         "FTPSource=CrossWire|ftp.crosswire.org|/pub/sword/raw",
     ]
 
+    /// Java-exact built-in names parsed once for the process instead of during SwiftUI row layout.
+    private static let defaultSourceNames = SwordJavaExactStringSet(
+        defaultSourceLines.compactMap(InstallManager.sourceName)
+    )
+
     private static let upgradeSourceLines = [
         "HTTPSource=AndBible|andbible.github.io|/data/andbible",
         "HTTPSource=AndBible Beta|andbible.github.io|/data/andbible/beta",
@@ -292,7 +297,7 @@ public final class InstallManager: @unchecked Sendable {
      - none
      */
     public static func isDefaultSourceName(_ name: String) -> Bool {
-        SwordJavaExactStringSet(defaultSourceLines.compactMap(Self.sourceName)).contains(name)
+        defaultSourceNames.contains(name)
     }
 
     /**

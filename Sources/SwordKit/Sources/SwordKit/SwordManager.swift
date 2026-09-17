@@ -15,7 +15,7 @@ import CLibSword
  classification and canonical handle resolution share one fresh inventory snapshot. This keeps
  locked modules out of content-reading paths while preserving management visibility.
  */
-public enum SwordModuleAccessState: Equatable, Sendable {
+public enum SwordModuleAccessState: Equatable, Hashable, Sendable {
     /// No supported native SWORD module currently resolves for the requested identity.
     case unavailable
 
@@ -24,6 +24,59 @@ public enum SwordModuleAccessState: Equatable, Sendable {
 
     /// The module is installed and can be activated for content reads.
     case readable
+}
+
+/** Exact readable-module authorization captured from one manager generation. */
+public struct SwordContentAuthorizationGeneration: Equatable, Hashable, Sendable {
+    /// Manager-local unlock/refresh generation.
+    public let managerGeneration: UInt64
+    /// Canonical module-root mutation generation.
+    public let moduleStoreGeneration: UInt64
+}
+
+/** Exact readable-module authorization captured from one manager generation. */
+public struct SwordContentAuthorizationSnapshot: Equatable, Hashable, Sendable {
+    /** One requested identity and the canonical native module it resolved to. */
+    public struct Module: Equatable, Hashable, Sendable {
+        /// Exact caller-supplied module identity.
+        public let requestedName: String
+        /// Canonical native initials, or nil when the request did not resolve.
+        public let canonicalName: String?
+        /// Access state observed in this generation.
+        public let accessState: SwordModuleAccessState
+
+        private let requestedIdentity: SwordJavaExactStringIdentity
+        private let canonicalIdentity: SwordJavaExactStringIdentity?
+
+        init(
+            requestedName: String,
+            canonicalName: String?,
+            accessState: SwordModuleAccessState
+        ) {
+            self.requestedName = requestedName
+            self.canonicalName = canonicalName
+            self.accessState = accessState
+            requestedIdentity = SwordJavaExactStringIdentity(requestedName)
+            canonicalIdentity = canonicalName.map(SwordJavaExactStringIdentity.init)
+        }
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.requestedIdentity == rhs.requestedIdentity
+                && lhs.canonicalIdentity == rhs.canonicalIdentity
+                && lhs.accessState == rhs.accessState
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            hasher.combine(requestedIdentity)
+            hasher.combine(canonicalIdentity)
+            hasher.combine(accessState)
+        }
+    }
+
+    /// Monotonic manager-owned generation invalidated by unlock and refresh.
+    public let generation: SwordContentAuthorizationGeneration
+    /// Requested modules in caller order after exact duplicate removal.
+    public let modules: [Module]
 }
 
 /**
@@ -77,20 +130,76 @@ public final class SwordManager: @unchecked Sendable {
     /// Android-admitted add-ons in installed TreeSet order, invalidated with installed inventory.
     private var admittedAddonModulesCache: [SwordAdmittedAddonModule]?
 
+    /// Protects the cheap publication token from unrelated main/worker queue access.
+    private let contentAuthorizationGenerationLock = NSLock()
+    private var contentAuthorizationGenerationStorage: UInt64 = 0
+
+    /// Stable root generation that surrounded construction of the immutable libsword manager.
+    private let nativeRegistryModuleStoreGeneration: UInt64?
+
     /// The filesystem path where SWORD modules are installed.
     public let modulePath: String
+
+    /// Canonical live-tree lease and mutation generation shared by every manager for this root.
+    private var moduleStoreMutationCoordinator: ModuleStoreMutationCoordinator {
+        ModuleStoreMutationCoordinator.shared(forModuleRoot: URL(fileURLWithPath: modulePath))
+    }
 
     /**
      Initialize a SwordManager with the given module path.
      - Parameter modulePath: Path to the SWORD modules directory.
        Pass nil to use the default system path.
+     - Side effects: Constructs an immutable libsword manager and samples the canonical root
+       generation immediately before and after native construction without acquiring a root lease.
+     - Failure modes: Returns nil when native construction fails. Construction that overlaps a
+       publication succeeds with unavailable registry provenance and is rejected by reader-facing
+       current-registry APIs until they create a leased replacement.
+     - Important: Mutation preparation already holding the exclusive root lease may use this
+       initializer. Reader inventory owners should use `currentRegistryManager(modulePath:)` or
+       `performCurrentRegistryRead(replacingIfNeeded:_:)`.
      */
     public init?(modulePath: String? = nil) {
         let path = modulePath ?? SwordManager.defaultModulePath()
         self.modulePath = path
-
+        let coordinator = ModuleStoreMutationCoordinator.shared(
+            forModuleRoot: URL(fileURLWithPath: path)
+        )
+        let generationBeforeConstruction = coordinator.currentMutationGeneration
         guard let h = SwordRuntime.sync({ SWMgr_new(path) }) else { return nil }
         self.handle = h
+        let generationAfterConstruction = coordinator.currentMutationGeneration
+        if generationBeforeConstruction == generationAfterConstruction,
+           generationAfterConstruction.isMultiple(of: 2) {
+            nativeRegistryModuleStoreGeneration = generationAfterConstruction
+        } else {
+            nativeRegistryModuleStoreGeneration = nil
+        }
+    }
+
+    /**
+     Constructs a reader-facing manager while publication cannot change its native registry.
+
+     The general initializer remains available to mutation preparation, including callers already
+     holding the canonical exclusive lease. Reader inventory owners use this factory so `SWMgr_new`
+     and its construction-generation witness share one stable read boundary.
+
+     - Parameter modulePath: Module root, or nil for the default application root.
+     - Returns: A current manager, or nil when libsword construction fails.
+     - Side effects: Waits behind an active or queued module-store writer, then constructs one
+       libsword manager under the canonical shared-read lease.
+     - Failure modes: Returns nil when the default directory or native manager cannot be created.
+     - Important: Do not call this factory while holding the exclusive module-store lease; mutation
+       preparation must continue using the general initializer. Do not call it from inside a
+       `SwordRuntime` operation because the root-before-runtime lock order must remain fixed.
+     */
+    public static func currentRegistryManager(modulePath: String? = nil) -> SwordManager? {
+        let path = modulePath ?? defaultModulePath()
+        let coordinator = ModuleStoreMutationCoordinator.shared(
+            forModuleRoot: URL(fileURLWithPath: path)
+        )
+        return coordinator.withSharedRead {
+            SwordManager(modulePath: path)
+        }
     }
 
     deinit {
@@ -282,6 +391,62 @@ public final class SwordManager: @unchecked Sendable {
     }
 
     /**
+     Captures exact readable-module authorization for one bounded source operation.
+
+     - Parameter requestedNames: Module identities in semantic request order.
+     - Returns: Current manager/root generations and one exact resolution record per distinct
+       Java UTF-16 request.
+     - Side effects: May populate the manager's immutable native registry cache.
+     - Failure modes: Missing, locked, ambiguous, or unsupported modules are retained with their
+       fail-closed access state and no canonical name.
+     */
+    public func contentAuthorizationSnapshot(
+        for requestedNames: [String]
+    ) -> SwordContentAuthorizationSnapshot {
+        SwordRuntime.sync {
+            var seen: Set<SwordJavaExactStringIdentity> = []
+            let modules = requestedNames.compactMap { requestedName -> SwordContentAuthorizationSnapshot.Module? in
+                let exactIdentity = SwordJavaExactStringIdentity(requestedName)
+                guard seen.insert(exactIdentity).inserted else { return nil }
+                guard !requestedName.isEmpty,
+                      let registration = nativeModuleRegistration(named: requestedName) else {
+                    return .init(
+                        requestedName: requestedName,
+                        canonicalName: nil,
+                        accessState: .unavailable
+                    )
+                }
+                let state: SwordModuleAccessState = registration.info.isEncrypted
+                    && !registration.info.isUnlocked ? .locked : .readable
+                return .init(
+                    requestedName: requestedName,
+                    canonicalName: registration.info.name,
+                    accessState: state
+                )
+            }
+            return SwordContentAuthorizationSnapshot(
+                generation: contentAuthorizationGeneration,
+                modules: modules
+            )
+        }
+    }
+
+    /**
+     Returns whether the snapshot token and live root still authorize this native manager.
+
+     A snapshot captured from an immutable manager after a later root publication remains stale:
+     observing the newer generation cannot add new native handles to the old `SWMgr`.
+     */
+    public func isContentAuthorizationCurrent(
+        _ snapshot: SwordContentAuthorizationSnapshot
+    ) -> Bool {
+        let generation = contentAuthorizationGeneration
+        return generation == snapshot.generation
+            && generation.moduleStoreGeneration == nativeRegistryModuleStoreGeneration
+            && generation.moduleStoreGeneration.isMultiple(of: 2)
+    }
+
+    /**
      Resolves an inclusive native module through Android's installed-book identity tiers.
 
      Exact initials win before exact full name. When neither exact map matches, the first
@@ -299,6 +464,30 @@ public final class SwordManager: @unchecked Sendable {
     public func module(named name: String) -> SwordModule? {
         guard !name.isEmpty else { return nil }
         return nativeModuleRegistration(named: name)?.module
+    }
+
+    /**
+     Reads the persisted cipher key owned by one unambiguous installed native module.
+
+     Android prefills and selects `Book.unlockKey` even when the user explicitly rekeys an already
+     unlocked encrypted document. BibleUI uses this narrow manager-owned accessor only to initialize
+     that app-owned credential editor; `ModuleInfo` remains secret-free inventory metadata.
+
+     - Parameter name: Exact initials/full name or unambiguous Java case-insensitive alias.
+     - Returns: The config owner's exact `CipherKey`, including an empty value, or `nil` when the
+       module/config/key owner cannot be resolved.
+     - Side effects: Resolves the native registration and reads its exact config file without mutation.
+     - Failure modes: Missing, unsupported, custom-driver, and ambiguous identities fail closed.
+     */
+    public func persistedCipherKey(named name: String) -> String? {
+        guard !name.isEmpty,
+              let registration = nativeModuleRegistration(named: name),
+              let config = SwordModuleConfig.read(url: registration.configURL),
+              SwordJavaExactStringIdentity(config.name)
+                == SwordJavaExactStringIdentity(registration.info.name) else {
+            return nil
+        }
+        return config.values["CipherKey"]?.first
     }
 
     /**
@@ -353,6 +542,7 @@ public final class SwordManager: @unchecked Sendable {
             nativeRegistrySnapshotCache = nil
             installedRegistryProjectionCache = nil
             admittedAddonModulesCache = nil
+            advanceContentAuthorizationGeneration()
             return true
         }
     }
@@ -1582,7 +1772,7 @@ public final class SwordManager: @unchecked Sendable {
     // MARK: - Global Options
 
     /// Global rendering options that can be toggled.
-    public enum GlobalOption: String, CaseIterable {
+    public enum GlobalOption: String, CaseIterable, Sendable {
         case strongsNumbers = "Strong's Numbers"
         case morphology = "Morphological Tags"
         case footnotes = "Footnotes"
@@ -1591,6 +1781,134 @@ public final class SwordManager: @unchecked Sendable {
         case redLetterWords = "Words of Christ in Red"
         case glosses = "Glosses"
         case morphSegmentation = "Morpheme Segmentation"
+    }
+
+    /**
+     One immutable global-option assignment for a serialized SWORD render operation.
+
+     - Inputs: An option identifier and the Boolean value that must own the following native read.
+     - Outputs: A copied value that can be captured before background preparation begins.
+     - Side effects: None during initialization.
+     - Failure modes: None.
+     */
+    public struct GlobalOptionSetting: Equatable, Sendable {
+        /// Process-global SWORD filter option to assign.
+        public let option: GlobalOption
+        /// Whether the filter is enabled for the serialized operation.
+        public let enabled: Bool
+
+        /** Creates one immutable option assignment. */
+        public init(_ option: GlobalOption, enabled: Bool) {
+            self.option = option
+            self.enabled = enabled
+        }
+    }
+
+    /**
+     Runs one reader registry operation with an immutable manager from the current root generation.
+
+     If `candidate` predates a completed publication or overlapped one during construction, the
+     method creates exactly one replacement inside the acquired shared-read lease. Construction,
+     installed-registry resolution, and the caller's copied result therefore describe one stable
+     root generation without treating a newer generation as authorization for an old `SWMgr`.
+
+     - Parameters:
+       - candidate: Preferred manager, commonly shared by another reader pane.
+       - operation: Bounded operation receiving the admitted manager and its exact current token.
+     - Returns: The operation result, or nil when a required replacement manager cannot be created.
+     - Throws: Rethrows errors from `operation` after admission.
+     - Side effects: Waits behind an active or queued writer; may construct a replacement manager;
+       holds the root shared-read lease until `operation` returns.
+     - Important: The closure must copy or synchronously apply all source-dependent state. Retained
+       handles must still be revalidated against the returned manager/generation before later use.
+       Do not call while holding the same root's exclusive lease or from inside `SwordRuntime`.
+     */
+    public static func performCurrentRegistryRead<T>(
+        replacingIfNeeded candidate: SwordManager,
+        _ operation: (SwordManager, SwordContentAuthorizationGeneration) throws -> T
+    ) rethrows -> T? {
+        let coordinator = candidate.moduleStoreMutationCoordinator
+        return try coordinator.withSharedRead {
+            let currentGeneration = coordinator.currentMutationGeneration
+            let manager: SwordManager
+            if candidate.nativeRegistryModuleStoreGeneration == currentGeneration,
+               currentGeneration.isMultiple(of: 2) {
+                manager = candidate
+            } else {
+                guard let replacement = SwordManager(modulePath: candidate.modulePath) else {
+                    return nil
+                }
+                manager = replacement
+            }
+            let generation = manager.contentAuthorizationGeneration
+            guard manager.nativeRegistryModuleStoreGeneration == generation.moduleStoreGeneration,
+                  generation.moduleStoreGeneration == currentGeneration,
+                  generation.moduleStoreGeneration.isMultiple(of: 2) else {
+                return nil
+            }
+            return try operation(manager, generation)
+        }
+    }
+
+    /**
+     Runs a bounded registry read only while this exact manager remains current.
+
+     - Parameter operation: Registry operation receiving the stable current authorization token.
+     - Returns: The copied operation result, or nil after any root publication or overlapping
+       construction made this manager obsolete.
+     - Throws: Rethrows errors from `operation` after admission.
+     - Side effects: Briefly holds the canonical root shared-read lease.
+     - Important: Unlike `performCurrentRegistryRead(replacingIfNeeded:_:)`, this method never
+       constructs a replacement. It is intended for controller state already bound to `self`; do
+       not call while holding the same root's exclusive lease or from inside `SwordRuntime`.
+     */
+    public func performCurrentModuleRegistryRead<T>(
+        _ operation: (SwordContentAuthorizationGeneration) throws -> T
+    ) rethrows -> T? {
+        try moduleStoreMutationCoordinator.withSharedRead {
+            let generation = contentAuthorizationGeneration
+            guard nativeRegistryModuleStoreGeneration == generation.moduleStoreGeneration,
+                  generation.moduleStoreGeneration.isMultiple(of: 2) else {
+                return nil
+            }
+            return try operation(generation)
+        }
+    }
+
+    /**
+     Applies a complete option snapshot and performs one coherent native render operation.
+
+     Nested public `SwordModule` and `SwordManager` calls execute inline because `SwordRuntime` is
+     reentrant. Their copied return values therefore describe the exact option snapshot applied at
+     this boundary, and no other manager or module can enter libsword until `operation` returns.
+
+     - Parameters:
+       - settings: Complete option assignments required by the operation.
+       - operation: Bounded synchronous work that captures copied Swift values from SWORD modules.
+     - Returns: The copied value returned by `operation`; native handles never escape this method.
+     - Side effects: Sets the supplied manager's global options and serializes the operation with
+       every other SwordKit native call. Module helpers invoked by the operation retain their own
+       cursor-restoration contracts.
+     - Throws: Rethrows errors from `operation`.
+     - Important: The closure must not wait for work that also requires SWORD. Perform projection,
+       encoding, and publication after this method returns.
+     */
+    public func performRenderOperation<T>(
+        settings: [GlobalOptionSetting],
+        _ operation: () throws -> T
+    ) rethrows -> T {
+        try moduleStoreMutationCoordinator.withSharedRead {
+            try SwordRuntime.sync {
+                for setting in settings {
+                    SWMgr_setGlobalOption(
+                        handle,
+                        setting.option.rawValue,
+                        setting.enabled ? "On" : "Off"
+                    )
+                }
+                return try operation()
+            }
+        }
     }
 
     /**
@@ -1650,8 +1968,27 @@ public final class SwordManager: @unchecked Sendable {
             installedRegistryProjectionCache = nil
             admittedAddonModulesCache = nil
             moduleAuthorizationCache.clear()
+            advanceContentAuthorizationGeneration()
         }
         // Recreate is the simplest way to refresh libsword's module list.
         // The caller should create a new SwordManager instance for a full refresh.
+    }
+
+    /** Exact manager/root token read without entering the native runtime. */
+    public var contentAuthorizationGeneration: SwordContentAuthorizationGeneration {
+        contentAuthorizationGenerationLock.lock()
+        let managerGeneration = contentAuthorizationGenerationStorage
+        contentAuthorizationGenerationLock.unlock()
+        return SwordContentAuthorizationGeneration(
+            managerGeneration: managerGeneration,
+            moduleStoreGeneration: moduleStoreMutationCoordinator.currentMutationGeneration
+        )
+    }
+
+    /** Advances manager-local authorization after unlock or explicit refresh. */
+    private func advanceContentAuthorizationGeneration() {
+        contentAuthorizationGenerationLock.lock()
+        contentAuthorizationGenerationStorage &+= 1
+        contentAuthorizationGenerationLock.unlock()
     }
 }

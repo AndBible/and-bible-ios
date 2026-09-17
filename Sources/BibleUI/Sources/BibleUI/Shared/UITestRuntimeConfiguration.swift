@@ -1,7 +1,8 @@
 import Foundation
+import BibleCore
 
 /// Shared runtime flags consumed by deterministic UI-test instrumentation.
-enum UITestRuntimeConfiguration {
+public enum UITestRuntimeConfiguration {
     private static let detailedAccessibilityExportsEnvironmentKey = "UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let detailedAccessibilityExportsArgument = "-UITEST_ENABLE_DETAILED_ACCESSIBILITY_EXPORTS"
     private static let myNotesAppendTextEnvironmentKey = "UITEST_MY_NOTES_APPEND_TEXT"
@@ -10,12 +11,36 @@ enum UITestRuntimeConfiguration {
     private static let studyPadCreatedNoteTextArgument = "-UITEST_STUDYPAD_CREATED_NOTE_TEXT"
     private static let remoteSyncBootstrapScenarioEnvironmentKey = "UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
     private static let remoteSyncBootstrapScenarioArgument = "-UITEST_REMOTE_SYNC_BOOTSTRAP_SCENARIO"
-    private static let heldDownloadModulesEnvironmentKey = "UITEST_HELD_DOWNLOAD_MODULES"
-    private static let heldDownloadModulesArgument = "-UITEST_HELD_DOWNLOAD_MODULES"
 
     /// Test-only remote sync bootstrap paths that can replace live backend transport in UI tests.
     enum RemoteSyncBootstrapScenario: String {
         case adoptExisting = "adopt-existing"
+    }
+
+    /**
+     Creates the deterministic remote transport override requested by UI automation.
+
+     The returned service shares the process-session adapter between settings-driven and lifecycle-
+     driven synchronization while retaining the caller's real `RemoteSyncSettingsStore`, device
+     identity, model contexts, and lifecycle admission. Normal launches return `nil` so callers use
+     their production synchronization factory.
+
+     - Parameter remoteSettingsStore: Real local settings owner for the active persistence runtime.
+     - Returns: A deterministic synchronization service only for the adopt-existing scenario.
+     - Side effects: May persist the stable source-device identifier on first construction.
+     - Failure modes: This factory cannot fail.
+     */
+    @MainActor
+    public static func makeRemoteSynchronizationServiceOverride(
+        using remoteSettingsStore: RemoteSyncSettingsStore
+    ) -> RemoteSyncSynchronizationService? {
+        guard remoteSyncBootstrapScenario == .adoptExisting else { return nil }
+        return RemoteSyncSynchronizationService(
+            adapter: UITestRemoteSyncAdapter.appSession,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "org.andbible.ios",
+            deviceIdentifier: remoteSettingsStore.deviceIdentifier(),
+            nowProvider: { 1_735_689_900_000 }
+        )
     }
 
     /// Upper bound for test-only row-token exports embedded into accessibility state strings.
@@ -63,70 +88,6 @@ enum UITestRuntimeConfiguration {
             return nil
         }
         return RemoteSyncBootstrapScenario(rawValue: value)
-    }
-
-    /**
-     Search autofocus is useful in production, but it forces hosted UI tests to fight the
-     software keyboard before they can reach scope and mode controls.
-     */
-    static var shouldAutofocusSearchField: Bool {
-        !enablesDetailedAccessibilityExports
-    }
-
-    /**
-     Resolves whether a UI test has requested a deterministic held Downloads install.
-
-     The downloads row-order smoke needs the row to remain in Android's `BEING_INSTALLED` state
-     long enough for accessibility polling to observe it. Production never enables this path; UI
-     automation must opt in with detailed accessibility exports and an explicit comma-delimited
-     module list.
-
-     - Parameter moduleName: Module initials for the row whose install is starting.
-     - Returns: `true` only for a named module in an explicitly opted-in UI-test launch.
-     - Side effects: reads process environment and arguments.
-     - Failure modes: malformed or empty lists are treated as no held modules.
-     */
-    static func shouldHoldDownloadInstall(for moduleName: String) -> Bool {
-        isDownloadInstallHeld(
-            for: moduleName,
-            environment: ProcessInfo.processInfo.environment,
-            arguments: ProcessInfo.processInfo.arguments
-        )
-    }
-
-    /**
-     Resolves the held-download fixture marker from a supplied process shape.
-
-     This pure variant keeps the UI-test fixture contract covered by package tests without mutating
-     the process environment. The detailed-accessibility flag is required so accidental production
-     environment values cannot hold a real install.
-
-     - Parameters:
-       - moduleName: Module initials for the row whose install is starting.
-       - environment: Process environment to inspect.
-       - arguments: Process arguments to inspect.
-     - Returns: `true` only when detailed accessibility exports and a matching module name are
-       both present.
-     - Side effects: none.
-     - Failure modes: malformed or empty lists are treated as no held modules.
-     */
-    static func isDownloadInstallHeld(
-        for moduleName: String,
-        environment: [String: String],
-        arguments: [String]
-    ) -> Bool {
-        guard environment[detailedAccessibilityExportsEnvironmentKey] == "1"
-                || arguments.contains(detailedAccessibilityExportsArgument) else {
-            return false
-        }
-        let rawValue = environment[heldDownloadModulesEnvironmentKey]
-            ?? argumentValue(after: heldDownloadModulesArgument, arguments: arguments)
-            ?? ""
-        let heldModules = rawValue
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return heldModules.contains(moduleName)
     }
 
     private static func argumentValue(after argument: String) -> String? {

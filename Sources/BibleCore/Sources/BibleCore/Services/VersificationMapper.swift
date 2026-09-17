@@ -168,8 +168,8 @@ public enum VersificationMapper {
     /**
      Projects a source-versification reference into Android's KJVA ordinal domain.
 
-     Chapter introductions mapped to verse `0` use JSword's reserved intro slot immediately before
-     verse 1. Normal verses use the source-derived KJVA canon table.
+     Book and chapter introductions mapped to verse `0` use JSword's concrete canon-owned intro
+     indexes. Normal verses use the source-derived KJVA canon table.
 
      - Parameters:
        - reference: Concrete source reference.
@@ -197,8 +197,8 @@ public enum VersificationMapper {
 
      - Parameters:
        - osisBookId: OSIS book identifier in `sourceVersification`.
-       - chapter: One-based source chapter.
-       - verse: Source verse, including `0` for a chapter introduction.
+       - chapter: Source chapter, including `0` for a book introduction.
+       - verse: Source verse, including `0` for a book or chapter introduction.
        - sourceVersification: SWORD versification name owning the source coordinates.
      - Returns: Intro-inclusive JSword KJVA ordinal, or `nil` when conversion fails.
      - Side effects: Lazily reads the pinned JSword canon and mapping resources.
@@ -221,6 +221,12 @@ public enum VersificationMapper {
         }
         let mapped = conversion.reference
         if mapped.verse == 0 {
+            if mapped.chapter == 0 {
+                return JSwordCanon.referenceIndex(
+                    for: mapped,
+                    versification: JSwordKJVAVersification.name
+                )
+            }
             return JSwordKJVAVersification.chapterIntroOrdinal(
                 osisId: mapped.osisBookId,
                 chapter: mapped.chapter

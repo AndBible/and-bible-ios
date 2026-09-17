@@ -362,7 +362,7 @@ struct ModuleBrowserModuleDetails: Identifiable {
      - Failure modes: Malformed HTML falls back to plain text.
      */
     var androidAboutAttributedMessage: AttributedString {
-        Self.attributedHTMLString(from: androidAboutHTMLMessage) ?? AttributedString(androidAboutMessage)
+        Self.attributedHTMLString(from: androidAboutHTMLMessage)
     }
 
     /**
@@ -764,29 +764,15 @@ struct ModuleBrowserModuleDetails: Identifiable {
     }
 
     /**
-     Imports Android-style HTML into a Swift attributed string.
+     Projects Android-style HTML through the shared pinned TagSoup renderer.
 
      - Parameter html: HTML message body produced by `androidAboutHTMLMessage`.
-     - Returns: Attributed text when Foundation can parse the HTML, otherwise `nil`.
+     - Returns: Purely projected attributed text.
      - Side effects: none.
-     - Failure modes: Invalid UTF-8 or malformed HTML returns `nil`.
+     - Failure modes: Malformed HTML follows Android's tolerant repair behavior.
      */
-    private static func attributedHTMLString(from html: String) -> AttributedString? {
-        guard let data = html.data(using: .utf8) else {
-            return nil
-        }
-        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-            .documentType: NSAttributedString.DocumentType.html,
-            .characterEncoding: String.Encoding.utf8.rawValue
-        ]
-        guard let attributed = try? NSAttributedString(
-            data: data,
-            options: options,
-            documentAttributes: nil
-        ) else {
-            return nil
-        }
-        return AttributedString(attributed)
+    private static func attributedHTMLString(from html: String) -> AttributedString {
+        AttributedString(htmlBody: html)
     }
 
     /**
@@ -1069,8 +1055,7 @@ struct ModuleBrowserModuleDetailsDialog: View {
     var body: some View {
         AndroidDialogScaffold(title: "") {
             AndroidAdaptiveDialogScrollView {
-                Text(details.androidAboutAttributedMessage)
-                    .font(.body)
+                AndroidHTMLText(htmlBody: details.androidAboutHTMLMessage)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("moduleDetailsDialogMessage")

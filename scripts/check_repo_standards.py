@@ -1110,17 +1110,6 @@ def find_parity_orchestrator_regressions(
     the helper performs no filesystem access or mutation.
     """
     contracts: dict[str, tuple[tuple[str, ...], tuple[re.Pattern[str], ...]]] = {
-        "Sources/BibleUI/Sources/BibleUI/Bible/BibleReaderController.swift": (
-            (
-                "BibleReaderDocumentAuthorizationService",
-                "BibleReaderBookmarkCommitPreflightService",
-                "BibleReaderRestoreDispatchService",
-            ),
-            (
-                re.compile(r"\bBibleReaderInstalledModuleResolver\s*\("),
-                re.compile(r"\bresolveDocumentOwner\s*\("),
-            ),
-        ),
         "Sources/BibleCore/Sources/BibleCore/Services/SearchIndexService.swift": (
             (
                 "SearchIndexSQLiteStoreBootstrap",
@@ -1211,9 +1200,9 @@ def validate_source_guards(repo_root: Path) -> list[SourceGuardIssue]:
     prevent production Swift sources from recreating direct EPUB/My Documents publication APIs that
     bypass Android-compatible global ownership admission, keep prompt/font/WebView/picker add-on
     discovery on SwordKit's shared installed BookSet projection, preserve Java-exact module identity
-    through settings, Search, Downloads, reader collections, and row IDs, and prevent the four
-    extracted parity orchestrators from reclaiming low-level ownership, transaction, or backend
-    responsibilities. Missing fixed-path files fail closed, and the publisher/add-on scans follow
+    through settings, Search, Downloads, reader collections, and row IDs, and prevent the remaining
+    extracted parity orchestrators from reclaiming low-level transaction or backend responsibilities.
+    Missing fixed-path files fail closed, and the publisher/add-on scans follow
     every non-test Swift file under `Sources` and `AndBible` across moves while narrowing
     infrastructure exceptions to audited functions. iOS marketing/build metadata access remains
     confined to its display-only owner so Android manifests and admission cannot reuse unrelated

@@ -578,6 +578,9 @@ final class ReadingPlanProgressParityTests: XCTestCase {
     func testSparseInt32PlanKeysAndMutationJournalSurviveRestart() throws {
         let rootDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("SparseReadingPlan-\(UUID().uuidString)", isDirectory: true)
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "sparse-reading-plan"
+        )
         let userPlanDirectory = rootDirectory
             .appendingPathComponent("jsword/readingplan", isDirectory: true)
         try FileManager.default.createDirectory(
@@ -586,7 +589,7 @@ final class ReadingPlanProgressParityTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
-        let persistentStore = try makePersistentReadingPlanRestoreStore(in: rootDirectory)
+        let persistentStore = try makePersistentReadingPlanRestoreStore(in: storeDirectory)
         let context = ModelContext(persistentStore.container)
         let settingsStore = SettingsStore(modelContext: context)
         let plan = try ReadingPlanService.importAndStartCustomPlan(
@@ -635,7 +638,7 @@ final class ReadingPlanProgressParityTests: XCTestCase {
         XCTAssertTrue(mutationTables.contains("ReadingPlan"))
         XCTAssertTrue(mutationTables.contains("ReadingPlanStatus"))
 
-        let reopenedStore = try makePersistentReadingPlanRestoreStore(in: rootDirectory)
+        let reopenedStore = try makePersistentReadingPlanRestoreStore(in: storeDirectory)
         let reopenedContext = ModelContext(reopenedStore.container)
         let reopenedSettings = SettingsStore(modelContext: reopenedContext)
         try ReadingPlanService.recoverCustomPlanDefinitionPublication(

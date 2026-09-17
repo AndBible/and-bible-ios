@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import sys
 import unittest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from build_ui_test_shards import discover_ui_test_identifiers_from_files
+from run_xcodebuild_with_test_selection import requested_test_identifiers
 
 
 def workflow_step_run_block(workflow_text: str, step_name: str) -> str:
@@ -140,6 +145,17 @@ def workflow_job_block(workflow_text: str, job_name: str) -> str:
 
 class IOSCIUIShardGuardrailsTests(unittest.TestCase):
     """Checks the workflow-level guardrail around dynamic UI shard counts."""
+
+    def test_reader_gesture_diagnostics_retain_swipe_and_action_lifecycle_records(self) -> None:
+        """Keep both established swipe traces and reader action lifecycle evidence exportable."""
+        workflow_text = (REPO_ROOT / ".github" / "workflows" / "ios-ci.yml").read_text(encoding="utf-8")
+        collect_run = workflow_step_run_block(workflow_text, "Collect reader gesture diagnostics")
+
+        self.assertIn('subsystem == "org.andbible"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "Native horizontal swipe"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "Horizontal swipe"', collect_run)
+        self.assertIn('eventMessage BEGINSWITH "reader "', collect_run)
+        self.assertIn("> .artifacts/reader-gestures.log 2>&1", collect_run)
 
     def test_ios_ci_upload_artifact_retention_matches_artifact_type(self) -> None:
         """Keep build products short-lived while retaining diagnostic result bundles."""
@@ -289,15 +305,76 @@ jobs:
             re.compile(r"--max-shard-count\s+['\"]?\$\{UI_TEST_MAX_SHARD_COUNT\}['\"]?"),
         )
 
-    def test_ios_ci_does_not_include_retired_build_product_reuse_experiment(self) -> None:
-        """Keep the retired UI build-product reuse experiment out of the active workflow."""
+    def test_ios_ci_classification_executes_the_behavioral_classifier(self) -> None:
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        classify_run = workflow_step_run_block(workflow_text, "Classify change set")
 
-        self.assertNotIn("run_ui_build_product_reuse_experiment", workflow_text)
-        self.assertNotIn("ci:ui-build-reuse", workflow_text)
-        self.assertNotIn("ios-ui-build-product-reuse-producer", workflow_text)
-        self.assertNotIn("ios-ui-build-product-reuse-consumer", workflow_text)
-        self.assertNotIn("andbible-ui-build-products", workflow_text)
+        self.assertIn("python3 scripts/classify_ci_changes.py", classify_run)
+        self.assertIn('--github-output "${GITHUB_OUTPUT}"', classify_run)
+
+    def test_ios_ci_app_host_selection_covers_every_source_discovered_method(self) -> None:
+        """Require product-reused target-wide selection to cover the genuine app-host remainder."""
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        unit_job = workflow_job_block(workflow_text, "ios-simulator-unit-tests")
+        verify_block = workflow_step_run_block(
+            unit_job,
+            "Verify reusable products for app-host execution",
+        )
+        run_block = workflow_step_run_block(
+            unit_job,
+            "Run all discovered app-host tests without rebuilding",
+        )
+        discovered = discover_ui_test_identifiers_from_files(
+            sorted((REPO_ROOT / "Tests/AppHost/AndBibleTests").glob("AndBibleTests*.swift")),
+            test_target="AndBibleTests",
+            test_case_class="AndBibleTests",
+        )
+
+        self.assertTrue(discovered)
+        self.assertEqual(
+            requested_test_identifiers("-only-testing:AndBibleTests", discovered),
+            sorted(discovered),
+        )
+        self.assertIn("--test-source Tests/AppHost/AndBibleTests/AndBibleTests*.swift", run_block)
+        self.assertIn("--test-target AndBibleTests", run_block)
+        self.assertIn("--test-case-class AndBibleTests", run_block)
+        self.assertIn("ios-ui-foundation", unit_job)
+        self.assertIn("andbible-ui-test-products-${{ github.run_id }}", unit_job)
+        self.assertIn("manage_ui_test_products.py verify", verify_block)
+        self.assertIn("--xctestrun-path", run_block)
+        self.assertIn("--action test-without-building", run_block)
+        self.assertNotIn("--action build-for-testing", unit_job)
+        self.assertNotIn("swift build", unit_job)
+        self.assertNotIn("libsword.xcframework", unit_job)
+        self.assertNotIn("--project", run_block)
+        self.assertNotIn("--scheme", run_block)
+
+    def test_ui_shards_consume_one_validated_build_without_rebuilding(self) -> None:
+        """Keep compilation in the producer and execution in every matrix consumer."""
+        workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        producer = workflow_job_block(workflow_text, "ios-ui-foundation")
+        consumer = workflow_job_block(workflow_text, "ios-simulator-ui-tests")
+        producer_build = workflow_step_run_block(producer, "Build UI tests once")
+        producer_package = workflow_step_run_block(producer, "Package validated UI test products")
+        consumer_verify = workflow_step_run_block(consumer, "Verify reusable UI test products")
+        consumer_run = workflow_step_run_block(
+            consumer,
+            "Run selected simulator tests without rebuilding",
+        )
+
+        self.assertEqual(1, producer.count("--action build-for-testing"))
+        self.assertIn("--action build-for-testing", producer_build)
+        self.assertIn("manage_ui_test_products.py package", producer_package)
+        self.assertIn("andbible-ui-test-products-${{ github.run_id }}", producer)
+        self.assertIn("ios-ui-foundation", consumer)
+        self.assertIn("manage_ui_test_products.py verify", consumer_verify)
+        self.assertIn('--expected-commit-sha "${GITHUB_SHA}"', consumer_verify)
+        self.assertIn("--xctestrun-path", consumer_run)
+        self.assertIn("--action test-without-building", consumer_run)
+        self.assertNotIn("--action build-for-testing", consumer)
+        self.assertNotIn("swift build", consumer)
+        self.assertNotIn("--project", consumer_run)
+        self.assertNotIn("--scheme", consumer_run)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,134 @@ import XCTest
 
 /** Protects the pinned Android 37 TagSoup/Html.fromHtml plain-visible projection boundary. */
 final class SwordHTMLVisibleTextProjectionTests: XCTestCase {
+    /** Verifies nested Android inline handlers emit composable UTF-16 spans over decoded text. */
+    func testFormattedProjectionPreservesNestedStylesAndUTF16Offsets() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "😀<b>bold <i>and</i></b> <u>under</u> <s>gone</s>"
+        )
+
+        XCTAssertEqual(projection.text, "😀bold and under gone")
+        XCTAssertEqual(
+            projection.spans,
+            [
+                .init(startUTF16: 7, endUTF16: 10, style: .italic),
+                .init(startUTF16: 2, endUTF16: 10, style: .bold),
+                .init(startUTF16: 11, endUTF16: 16, style: .underline),
+                .init(startUTF16: 17, endUTF16: 21, style: .strikethrough),
+            ]
+        )
+    }
+
+    /** Verifies link attributes use TagSoup entity decoding without changing visible entities. */
+    func testFormattedProjectionDecodesLinkAndVisibleEntitiesOnce() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "<a href='https://example.test/?a=1&amp;b=2'>A&amp;B</a>"
+        )
+
+        XCTAssertEqual(projection.text, "A&B")
+        XCTAssertEqual(
+            projection.spans,
+            [.init(
+                startUTF16: 0,
+                endUTF16: 3,
+                style: .link("https://example.test/?a=1&b=2")
+            )]
+        )
+    }
+
+    /** Verifies Android legacy block margins and paragraph-style ranges share one parser pass. */
+    func testFormattedProjectionPreservesLegacyBlockAndListRanges() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "<blockquote>Quote</blockquote><ul><li>One</li><li>Two</li></ul>"
+        )
+
+        XCTAssertEqual(projection.text, "Quote\n\nOne\n\nTwo\n\n")
+        XCTAssertEqual(
+            projection.spans,
+            [
+                .init(startUTF16: 0, endUTF16: 6, style: .quote),
+                .init(startUTF16: 7, endUTF16: 11, style: .bullet),
+                .init(startUTF16: 12, endUTF16: 16, style: .bullet),
+            ]
+        )
+    }
+
+    /** Verifies TagSoup's restartable inline repair closes and resumes semantic spans. */
+    func testFormattedProjectionRestartsInlineStyleAcrossRepairedBlock() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted("<b>A<p>B</p>C</b>")
+
+        XCTAssertEqual(projection.text, "A\n\nB\n\nC")
+        XCTAssertEqual(
+            projection.spans,
+            [
+                .init(startUTF16: 0, endUTF16: 1, style: .bold),
+                .init(startUTF16: 3, endUTF16: 4, style: .bold),
+                .init(startUTF16: 6, endUTF16: 7, style: .bold),
+            ]
+        )
+    }
+
+    /** Verifies Android font and CSS handlers preserve their exact nested span boundaries. */
+    func testFormattedProjectionPreservesFontColorAndParagraphCSS() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "<p style='text-align:center;color:#102030;background-color:#405060;"
+                + "text-decoration:line-through'><font face='serif' color='red'>"
+                + "<big>A</big></font></p>"
+        )
+
+        XCTAssertEqual(projection.text, "A\n\n")
+        XCTAssertEqual(
+            projection.spans,
+            [
+                .init(startUTF16: 0, endUTF16: 1, style: .relativeSize(1.25)),
+                .init(startUTF16: 0, endUTF16: 1, style: .fontFamily("serif")),
+                .init(startUTF16: 0, endUTF16: 1, style: .foregroundARGB(0xFFFF_0000)),
+                .init(startUTF16: 0, endUTF16: 1, style: .strikethrough),
+                .init(startUTF16: 0, endUTF16: 1, style: .backgroundARGB(0xFF40_5060)),
+                .init(startUTF16: 0, endUTF16: 1, style: .foregroundARGB(0xFF10_2030)),
+                .init(startUTF16: 0, endUTF16: 2, style: .textAlignment(.center)),
+            ]
+        )
+    }
+
+    /** An unstyled nested span cannot prematurely close its outer Android font color. */
+    func testFormattedProjectionKeepsOuterFontColorAcrossUnstyledNestedSpan() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "<font color='red'>A<span>B</span>C</font>"
+        )
+
+        XCTAssertEqual(projection.text, "ABC")
+        XCTAssertEqual(
+            projection.spans,
+            [.init(startUTF16: 0, endUTF16: 3, style: .foregroundARGB(0xFFFF_0000))]
+        )
+    }
+
+    /** Nested block alignment closes only the matching style marker. */
+    func testFormattedProjectionKeepsOuterAlignmentAcrossUnstyledNestedBlock() {
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(
+            "<div style='text-align:center'>A<div>B</div>C</div>"
+        )
+
+        XCTAssertEqual(projection.text, "A\n\nB\n\nC\n\n")
+        XCTAssertEqual(
+            projection.spans,
+            [.init(startUTF16: 0, endUTF16: 8, style: .textAlignment(.center))]
+        )
+    }
+
+    /** Verifies long multilingual formatting remains linear in text length and span count. */
+    func testFormattedProjectionMaintainsUTF16RangesForLongMultilingualInput() {
+        let unit = "😀e\u{0301}漢"
+        let source = Array(repeating: "<b>\(unit)</b>", count: 2_000).joined()
+        let projection = SwordHTMLVisibleTextProjection.projectFormatted(source)
+
+        XCTAssertEqual(projection.text, String(repeating: unit, count: 2_000))
+        XCTAssertEqual(projection.spans.count, 2_000)
+        XCTAssertEqual(projection.spans.last?.endUTF16, projection.text.utf16.count)
+        XCTAssertEqual(SwordHTMLVisibleTextProjection.project(source), projection.text)
+    }
+
     /**
      Verifies every generated compatibility resource loads and pins Android's Unicode domain.
 

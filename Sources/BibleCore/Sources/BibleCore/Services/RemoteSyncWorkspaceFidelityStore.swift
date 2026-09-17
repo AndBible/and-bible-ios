@@ -442,7 +442,7 @@ public final class RemoteSyncWorkspaceFidelityStore {
      - Failure modes:
        - malformed UUID suffixes or empty payloads return `nil`
      */
-    private func decodeWorkspaceEntry(_ entry: Setting) -> WorkspaceEntry? {
+    private func decodeWorkspaceEntry(_ entry: SettingEntry) -> WorkspaceEntry? {
         let prefix = "\(Keys.workspacePrefix)."
         guard entry.key.hasPrefix(prefix),
               !entry.value.isEmpty,
@@ -461,7 +461,7 @@ public final class RemoteSyncWorkspaceFidelityStore {
      - Failure modes:
        - malformed UUID suffixes or invalid JSON payloads return `nil`
      */
-    private func decodePageManagerEntry(_ entry: Setting) -> PageManagerEntry? {
+    private func decodePageManagerEntry(_ entry: SettingEntry) -> PageManagerEntry? {
         let prefix = "\(Keys.pageManagerPrefix)."
         guard entry.key.hasPrefix(prefix),
               let windowID = UUID(uuidString: String(entry.key.dropFirst(prefix.count))),
@@ -489,7 +489,7 @@ public final class RemoteSyncWorkspaceFidelityStore {
      - Failure modes:
        - malformed integer suffixes or malformed UUID payloads return `nil`
      */
-    private func decodeHistoryAlias(_ entry: Setting) -> HistoryItemAlias? {
+    private func decodeHistoryAlias(_ entry: SettingEntry) -> HistoryItemAlias? {
         let prefix = "\(Keys.historyAliasPrefix)."
         guard entry.key.hasPrefix(prefix),
               let remoteHistoryItemID = Int64(String(entry.key.dropFirst(prefix.count))),

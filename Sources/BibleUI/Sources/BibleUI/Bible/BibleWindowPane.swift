@@ -142,7 +142,7 @@ struct BibleWindowPane: View {
         if let controller {
             return controller.webViewSession
         }
-        if let registeredController = windowManager.controllers[window.id] as? BibleReaderController {
+        if let registeredController = windowManager.registeredController(for: window) as? BibleReaderController {
             return registeredController.webViewSession
         }
         return renderSeed.webViewSession
@@ -286,6 +286,8 @@ struct BibleWindowPane: View {
                 windowMenuButton
                     .padding(AndroidWindowButtonMetrics.paneOverlayInset)
                     .opacity(isWindowButtonRevealed || isWindowMenuPresented ? 1 : (nightMode ? 0.5 : 0.2))
+                    // Fading changes appearance; the pane control remains interactive.
+                    .allowsHitTesting(true)
                     .animation(.easeInOut(duration: 0.3), value: isWindowButtonRevealed)
                     .onAppear { scheduleWindowButtonFade() }
                     .onReceive(NotificationCenter.default.publisher(for: .andBiblePaneButtonsRevealed)) { _ in
@@ -342,24 +344,29 @@ struct BibleWindowPane: View {
             selectionBookmarkPopup
         }
         .onAppear {
-            if controller == nil {
+            guard windowManager.managesWindow(window) else {
+                discardRejectedPaneController(controller)
+                return
+            }
+            guard let controller else {
                 initializeController()
-            } else {
-                let workspaceStore = WorkspaceStore(modelContext: modelContext)
-                let settingsStore = SettingsStore(modelContext: modelContext)
-                // Display settings can change while this pane is unmounted (minimized window,
-                // covered destination); .onChange cannot observe that, and configureController's
-                // plain assignment never re-renders. Detect drift first and push it through the
-                // full update path so restored panes match the current settings.
-                let displaySettingsDrifted = controller!.displaySettings != displaySettings
-                    || controller!.nightMode != nightMode
-        configureController(
-          controller!, workspaceStore: workspaceStore, settingsStore: settingsStore)
-        configureAICoordinator(for: controller!)
-                registerController(controller!)
-                if displaySettingsDrifted {
-                    controller!.updateDisplaySettings(displaySettings, nightMode: nightMode)
-                }
+                return
+            }
+            let workspaceStore = WorkspaceStore(modelContext: modelContext)
+            let settingsStore = SettingsStore(modelContext: modelContext)
+            // Display settings can change while this pane is unmounted (minimized window,
+            // covered destination); .onChange cannot observe that, and configureController's
+            // plain assignment never re-renders. Detect drift first and push it through the
+            // full update path so restored panes match the current settings.
+            let displaySettingsDrifted = controller.displaySettings != displaySettings
+                || controller.nightMode != nightMode
+            configureController(
+                controller, workspaceStore: workspaceStore, settingsStore: settingsStore
+            )
+            configureAICoordinator(for: controller)
+            guard registerController(controller) else { return }
+            if displaySettingsDrifted {
+                controller.updateDisplaySettings(displaySettings, nightMode: nightMode)
             }
         }
         .onChange(of: nightMode) { _, newValue in
@@ -377,7 +384,12 @@ struct BibleWindowPane: View {
 
     /**
      Hamburger menu overlay providing pane-scoped content, layout, and sync actions.
-     Opening the menu also marks this pane active, matching Android's pane menu behavior.
+
+     One real `Button` owns semantic activation and the mutually exclusive tap/hold sequence. The
+     outer simultaneous drag recognizes only translations beyond the pane swipe threshold. Its
+     twelve-point admission occurs after the long press's explicit ten-point movement limit;
+     SwiftUI owns ordinary Button tap cancellation. Opening the menu also marks this pane active,
+     matching Android's pane menu behavior.
     */
     private var windowMenuButton: some View {
         let buttonPalette = AndroidWindowButtonPalette.resolved(
@@ -386,52 +398,57 @@ struct BibleWindowPane: View {
         )
         let isActive = windowManager.activeWindow?.id == window.id
 
-        return ZStack(alignment: .topTrailing) {
-            Text(AndroidWindowButtonMetrics.paneMenuGlyph)
-                .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
-                .foregroundStyle(buttonPalette.paneButtonTextColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        return AndroidTapLongPressButton(
+            minimumDuration: 0.5,
+            onTap: { performPaneWindowButtonAction(.openMenu) },
+            onLongPress: { performPaneWindowButtonAction(.minimize) }
+        ) {
+            ZStack(alignment: .topTrailing) {
+                Text(AndroidWindowButtonMetrics.paneMenuGlyph)
+                    .font(.system(size: AndroidWindowButtonMetrics.paneMenuTextSize, weight: .bold))
+                    .foregroundStyle(buttonPalette.paneButtonTextColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if window.isLinksWindow {
-                ToolbarAssetIcon(
-                    name: AndroidWindowButtonMetrics.paneLinksIconName,
-                    size: AndroidWindowButtonMetrics.paneLinksIconSize
-                )
-                .foregroundStyle(buttonPalette.paneLinksIconColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(.top, 2)
-                .padding(.trailing, 2)
-            }
-
-            if isPaneWindowSyncable && window.isSynchronized {
-                HStack(alignment: .top, spacing: AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding) {
+                if window.isLinksWindow {
                     ToolbarAssetIcon(
-                        name: AndroidWindowButtonMetrics.paneSyncIconName,
+                        name: AndroidWindowButtonMetrics.paneLinksIconName,
+                        size: AndroidWindowButtonMetrics.paneLinksIconSize
+                    )
+                    .foregroundStyle(buttonPalette.paneLinksIconColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 2)
+                    .padding(.trailing, 2)
+                }
+
+                if isPaneWindowSyncable && window.isSynchronized {
+                    HStack(alignment: .top, spacing: AndroidWindowButtonMetrics.paneSyncGroupLeadingPadding) {
+                        ToolbarAssetIcon(
+                            name: AndroidWindowButtonMetrics.paneSyncIconName,
+                            size: AndroidWindowButtonMetrics.paneStatusIconSize
+                        )
+                        .foregroundStyle(buttonPalette.statusIconColor)
+
+                        Text("\(window.syncGroup + 1)")
+                            .font(.system(size: AndroidWindowButtonMetrics.paneSyncGroupTextSize))
+                            .foregroundStyle(buttonPalette.paneButtonTextColor)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, AndroidWindowButtonMetrics.paneStatusIconInset)
+                    .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
+                }
+
+                if paneShowsPinOverlay {
+                    ToolbarAssetIcon(
+                        name: AndroidWindowButtonMetrics.panePinIconName,
                         size: AndroidWindowButtonMetrics.paneStatusIconSize
                     )
                     .foregroundStyle(buttonPalette.statusIconColor)
-
-                    Text("\(window.syncGroup + 1)")
-                        .font(.system(size: AndroidWindowButtonMetrics.paneSyncGroupTextSize))
-                        .foregroundStyle(buttonPalette.paneButtonTextColor)
-                        .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, AndroidWindowButtonMetrics.panePinIconTopInset)
+                    .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, AndroidWindowButtonMetrics.paneStatusIconInset)
-                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
             }
-
-            if paneShowsPinOverlay {
-                ToolbarAssetIcon(
-                    name: AndroidWindowButtonMetrics.panePinIconName,
-                    size: AndroidWindowButtonMetrics.paneStatusIconSize
-                )
-                .foregroundStyle(buttonPalette.statusIconColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, AndroidWindowButtonMetrics.panePinIconTopInset)
-                .padding(.leading, AndroidWindowButtonMetrics.paneStatusIconInset)
-            }
-        }
             .frame(
                 width: AndroidWindowButtonMetrics.buttonSize,
                 height: AndroidWindowButtonMetrics.buttonSize
@@ -448,20 +465,15 @@ struct BibleWindowPane: View {
                     )
             )
             .contentShape(Rectangle())
-            .gesture(windowMenuTapOrLongPressGesture)
-            .simultaneousGesture(windowMenuDragGesture)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
-            .accessibilityLabel(
-                String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
-            )
-            .accessibilityHint(
-                String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
-            )
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                performPaneWindowButtonAction(.openMenu)
-            }
+        }
+        .simultaneousGesture(windowMenuDragGesture)
+        .accessibilityIdentifier("windowPaneMenuButton::\(window.orderNumber)")
+        .accessibilityLabel(
+            String(localized: "window_menu_accessibility_label", defaultValue: "Window menu")
+        )
+        .accessibilityHint(
+            String(localized: "window_menu_accessibility_hint", defaultValue: "Opens window actions")
+        )
     }
 
     /**
@@ -509,26 +521,6 @@ struct BibleWindowPane: View {
     }
 
     /**
-     Builds Android's mutually exclusive tap/long-press pane-button gesture.
-
-     - Returns: A gesture that opens the pane menu on tap and minimizes on long press.
-     - Side effects: Invokes the same window-state mutations as Android's `WindowButtonWidget`.
-     - Failure modes: Cancelled long presses do not mutate window state.
-     */
-    private var windowMenuTapOrLongPressGesture: some Gesture {
-        LongPressGesture().exclusively(before: TapGesture()).onEnded { value in
-            switch value {
-            case .first(true):
-                performPaneWindowButtonAction(.minimize)
-            case .second:
-                performPaneWindowButtonAction(.openMenu)
-            case .first(false):
-                break
-            }
-        }
-    }
-
-    /**
      Builds Android's vertical swipe pane-button gesture.
 
      - Returns: A drag gesture that maps upward swipes to maximize and downward swipes to minimize.
@@ -564,14 +556,8 @@ struct BibleWindowPane: View {
         scheduleWindowButtonFade()
     }
 
-    /**
-     Schedules Android's two-second window-button fade unless the pane menu holds it visible.
-
-     The fade is disabled under the deterministic UI-test harness because XCUITest workflows tap
-     the button at arbitrary times and Android's timing behavior would make them flaky.
-     */
+    /// Schedules Android's production two-second window-button fade unless its menu is visible.
     private func scheduleWindowButtonFade() {
-        guard !UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else { return }
         let token = UUID()
         windowButtonFadeToken = token
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -754,7 +740,7 @@ struct BibleWindowPane: View {
 
     /// Controller currently registered for this immutable pane target.
     private var resolvedWindowMenuController: BibleReaderController? {
-        controller ?? windowManager.controllers[window.id] as? BibleReaderController
+        controller ?? windowManager.registeredController(for: window) as? BibleReaderController
     }
 
     /// Copies the pane's typed Android-compatible reference and URL.
@@ -810,11 +796,16 @@ struct BibleWindowPane: View {
      */
     private func initializeController() {
         guard controller == nil else { return }
+        guard windowManager.managesWindow(window) else {
+            discardRejectedPaneController(controller)
+            return
+        }
 
         let workspaceStore = WorkspaceStore(modelContext: modelContext)
         let store = SettingsStore(modelContext: modelContext)
 
-        if let existingController = windowManager.controllers[window.id] as? BibleReaderController {
+        if let existingController = windowManager.registeredController(for: window)
+            as? BibleReaderController {
             controller = existingController
             configureController(existingController, workspaceStore: workspaceStore, settingsStore: store)
       configureAICoordinator(for: existingController)
@@ -903,10 +894,15 @@ struct BibleWindowPane: View {
         // Focus-on-interaction: bridge messages and native web-view gestures from this pane set it
         // active. The native callback covers plain taps that do not emit JavaScript messages,
         // matching Android's onTouchEvent -> activeWindow = window behavior.
-        let focusHandler: () -> Void = { [weak windowManager] in
-            guard let wm = windowManager else { return }
-            if wm.activeWindow?.id != window.id {
-                wm.activateWindow(window)
+        let paneWindowID = window.id
+        let focusHandler: () -> Void = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let wm = windowManager else { return }
+            BibleReaderPaneInteractionOwnership.focus(
+                controller: ctrl,
+                paneWindow: window,
+                paneWindowID: paneWindowID,
+                windowManager: wm
+            ) {
                 // Notify all controllers to update their active state in Vue.js
                 for (_, controllerObj) in wm.controllers {
                     if let controller = controllerObj as? BibleReaderController {
@@ -916,20 +912,36 @@ struct BibleWindowPane: View {
             }
         }
         ctrl.onInteraction = focusHandler
-        ctrl.bridge.onAnyMessage = { [weak ctrl] in
-            ctrl?.handleUserInteraction()
+        ctrl.bridge.onAnyMessage = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let windowManager,
+                  ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl else { return }
+            ctrl.handleUserInteraction()
         }
-        ctrl.bridge.onNativeUserInteraction = { [weak ctrl] in
-            ctrl?.handleUserInteraction()
+        ctrl.bridge.onNativeUserInteraction = { [weak ctrl, weak windowManager] in
+            guard let ctrl, let windowManager,
+                  ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl else { return }
+            ctrl.handleUserInteraction()
+            guard ctrl.activeWindow === window,
+                  ctrl.bridge.delegate === ctrl,
+                  windowManager.controllers[paneWindowID] === ctrl,
+                  windowManager.activeWindow === window else { return }
             NotificationCenter.default.post(name: .andBiblePaneButtonsRevealed, object: nil)
         }
         ctrl.bridge.onNativeScrollDeltaY = { [weak ctrl, weak windowManager] deltaY in
-            guard let ctrl else { return }
-            guard ctrl.shouldTreatNativeScrollDeltaAsUserInteraction() else { return }
-            if windowManager?.activeWindow?.id != window.id {
-                ctrl.handleUserInteraction()
+            guard let ctrl, let windowManager else { return }
+            BibleReaderPaneInteractionOwnership.forwardNativeScrollDelta(
+                deltaY,
+                controller: ctrl,
+                paneWindow: window,
+                paneWindowID: paneWindowID,
+                windowManager: windowManager
+            ) { deltaY in
+                onUserScrollDeltaY?(deltaY)
             }
-            onUserScrollDeltaY?(deltaY)
         }
         ctrl.bridge.onNativeHorizontalSwipe = { direction in
             onUserHorizontalSwipe?(direction)
@@ -1068,11 +1080,11 @@ struct BibleWindowPane: View {
         }
 
     ctrl.onOpenMultiReferenceDocumentInLinksWindow = {
-      [weak ctrl, weak windowManager] documentJSON in
+      [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.loadMultiReferenceDocument(documentJSON)
+                ctrl.loadMultiReferenceDocument(request)
                 return
             }
 
@@ -1083,17 +1095,17 @@ struct BibleWindowPane: View {
             withLinksController(
                 for: linksWindow,
                 using: wm,
-                fallback: { ctrl.loadMultiReferenceDocument(documentJSON) }
+                fallback: { ctrl.loadMultiReferenceDocument(request) }
             ) { targetController in
-                targetController.loadMultiReferenceDocument(documentJSON)
+                targetController.loadMultiReferenceDocument(request)
             }
         }
 
-        ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] emission in
+        ctrl.onOpenMemorizeDocumentInLinksWindow = { [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.renderMemorizeDocument(emission)
+                ctrl.renderMemorizeDocument(request)
                 return
             }
 
@@ -1104,22 +1116,18 @@ struct BibleWindowPane: View {
             withLinksController(
                 for: linksWindow,
                 using: wm,
-                fallback: { ctrl.renderMemorizeDocument(emission) }
+                fallback: { ctrl.renderMemorizeDocument(request) }
             ) { targetController in
-                targetController.renderMemorizeDocument(emission)
+                targetController.renderMemorizeDocument(request)
             }
         }
 
         ctrl.onOpenDefinitionDocumentInLinksWindow = {
-            [weak ctrl, weak windowManager] documentJSON, renderedBook, renderedKey in
+            [weak ctrl, weak windowManager] request in
             guard let ctrl else { return }
             let useLinksWindow = openLinksInDedicatedWindow(using: windowManager)
             guard useLinksWindow else {
-                ctrl.loadDefinitionDocument(
-                    documentJSON,
-                    renderedBook: renderedBook,
-                    renderedKey: renderedKey
-                )
+                ctrl.loadDefinitionDocument(request)
                 return
             }
 
@@ -1131,18 +1139,10 @@ struct BibleWindowPane: View {
                 for: linksWindow,
                 using: wm,
                 fallback: {
-                    ctrl.loadDefinitionDocument(
-                        documentJSON,
-                        renderedBook: renderedBook,
-                        renderedKey: renderedKey
-                    )
+                    ctrl.loadDefinitionDocument(request)
                 }
             ) { targetController in
-                targetController.loadDefinitionDocument(
-                    documentJSON,
-                    renderedBook: renderedBook,
-                    renderedKey: renderedKey
-                )
+                targetController.loadDefinitionDocument(request)
             }
         }
 
@@ -1587,23 +1587,45 @@ struct BibleWindowPane: View {
     )
   }
 
-    /// Registers the pane controller and nudges SwiftUI to re-evaluate registry-backed UI.
-    private func registerController(_ ctrl: BibleReaderController) {
+    /**
+     Registers this controller against the pane's exact managed `Window` object.
+
+     Registration publishes the controller and clears pending readiness synchronously. A rejected
+     claim means this pane belongs to a deleted or replaced graph; the pane detaches its local
+     reference and retires it only when no registry slot owns that object.
+
+     - Returns: `true` when exact-window admission succeeds; `false` after rejected pane cleanup.
+     */
+    @discardableResult
+    private func registerController(_ ctrl: BibleReaderController) -> Bool {
         // Register controller with WindowManager — the single source of truth.
         // BibleReaderView reads from windowManager.controllers via focusedController,
         // and controllerVersion ensures SwiftUI re-evaluates the toolbar.
-        windowManager.registerController(ctrl, for: window.id)
-
-        // Re-register asynchronously to guarantee a re-render.  The synchronous
-        // registration above runs during onAppear, which SwiftUI may coalesce with
-        // the current layout pass — preventing controllerVersion from triggering a
-        // toolbar update.  The async call bumps controllerVersion in a new run-loop
-        // iteration where SwiftUI reliably picks up the change.
-        let wm = windowManager
-        let wid = window.id
-        Task { @MainActor in
-            wm.registerController(ctrl, for: wid)
+        guard windowManager.registerController(ctrl, for: window) else {
+            discardRejectedPaneController(ctrl)
+            return false
         }
+        return true
+    }
+
+    /**
+     Detaches a controller rejected by exact-window admission without retiring another pane's owner.
+
+     - Parameter ctrl: Controller currently retained by this pane, if one exists.
+     - Side Effects: Retires only an unowned local controller and clears this pane's local references.
+     - Failure Modes: A controller still present anywhere in the registry is detached locally but not
+       retired because `WindowManager` owns its lifecycle.
+     - Concurrency: Call synchronously on the main-actor pane lifecycle path.
+     */
+    private func discardRejectedPaneController(_ ctrl: BibleReaderController?) {
+        if let ctrl,
+           !windowManager.controllers.values.contains(where: { $0 === ctrl }) {
+            ctrl.windowControllerWillUnregister()
+        }
+        if controller === ctrl {
+            controller = nil
+        }
+        aiRunCoordinator = nil
     }
 
     /**

@@ -791,21 +791,21 @@ struct AndroidDocumentContextActionBar: View {
  Shared row interaction for Android document-selection contextual action mode.
 
  `DocumentSelectionBase` enters single-choice contextual mode only for manageable document rows.
- This modifier centralizes the selected highlight, 450ms long press, and accessibility Select action
- so Choose Document and Downloads cannot drift into different gestures. Rows without a contextual
- callback receive none of those affordances; in particular, accessibility never exposes a no-op
- Select action for non-manageable pseudo-document rows. Imported EPUB rows provide the callback
- because Android owns them as deletable General Book documents.
+ This modifier centralizes the selected highlight and accessibility Select action while the row's
+ primary control owns tap and completed-hold dispatch. Rows without a contextual callback receive
+ none of those contextual affordances; in particular, accessibility never exposes a no-op Select
+ action for non-manageable pseudo-document rows. Imported EPUB rows provide the callback because
+ Android owns them as deletable General Book documents.
 
  Inputs:
  - whether the row is the active contextual selection
- - optional callback that enters contextual mode
+ - optional callback exposed to accessibility for entering contextual mode
 
  Output: the original row with Android-equivalent contextual interaction when supported
 
- Side effects: invokes `onLongPress` after a pointer/touch hold or explicit accessibility action
+ Side effects: invokes `onLongPress` after the explicit accessibility Select action
 
- Failure modes: none; a nil callback renders an ordinary row without contextual semantics
+ Failure modes: a nil callback renders an ordinary row without contextual semantics
  */
 private struct AndroidDocumentContextSelectionModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
@@ -821,7 +821,6 @@ private struct AndroidDocumentContextSelectionModifier: ViewModifier {
         if let onLongPress {
             content
                 .background(selectionBackground)
-                .onLongPressGesture(minimumDuration: 0.45, perform: onLongPress)
                 .accessibilityAction(
                     named: Text(String(localized: "select", defaultValue: "Select")),
                     onLongPress

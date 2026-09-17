@@ -74,13 +74,13 @@ extension Color {
  The view converts between SwiftUI `Color` values and the signed ARGB integer format expected by the
  Vue-based reader configuration. It mirrors Android's `color_settings.xml`: day/night text colors,
  day/night background colors, day/night noise controls, and the workspace accent color for Android
- workspace scope. Global and workspace callers bind that row to active workspace metadata; only
- window-level callers omit it, matching Android's `isWindow` visibility rule.
+ workspace scope. Workspace callers bind that row to Workspace metadata; accepted ADR 0005 keeps
+ true global and window routes outside that owner.
 
  Data dependencies:
  - `settings` is the shared display-settings model whose color fields are being edited
  - `workspaceColor`, when supplied, is the workspace metadata accent color edited by Android's
-   non-window color screens
+   workspace-owned color screen
  - `onChange` lets the parent re-emit updated settings to the reader after any color mutation
 
  Side effects:
@@ -93,7 +93,7 @@ public struct ColorSettingsView: View {
     /// Shared display settings whose theme colors are being edited.
     @Binding var settings: TextDisplaySettings
 
-    /// Optional workspace accent color binding; absence means the window-owned row is hidden.
+    /// Optional workspace accent binding; absence hides the workspace-owned row.
     private var workspaceColor: Binding<Int?>?
 
     /// Callback invoked after any theme-color mutation.
@@ -133,9 +133,8 @@ public struct ColorSettingsView: View {
 
      - Parameters:
        - settings: Shared display settings value whose color fields should be edited.
-       - workspaceColor: Optional workspace accent-color binding. Supplying it exposes Android's
-         `workspace_color` row for global/workspace scope; window routes omit it because Android
-         hides the row when `isWindow` is true.
+       - workspaceColor: Optional workspace accent-color binding. Workspace routes supply it to
+         expose Android's durable `workspace_color` owner; true global and window routes omit it.
        - onChange: Optional callback invoked after any color mutation.
      */
     public init(
@@ -196,8 +195,8 @@ public struct ColorSettingsView: View {
      Android preference-key inventory expected for a caller's color-settings scope.
 
      Runtime row rendering is controlled by whether the caller supplies `workspaceColor`; this
-     helper maps Android text-display scope to that binding policy for tests and call sites. Android
-     inflates `workspace_color` for every non-window route and hides it only when `isWindow` is true.
+     helper maps text-display scope to the accepted durable-owner policy. Accepted ADR 0005 reserves
+     `workspace_color` for workspace settings, while true global and window routes omit it.
 
      - Parameter scope: Android text-display settings scope that would launch the color editor.
      - Returns: Android `color_settings.xml` keys in visible order for the iOS binding policy.
@@ -205,7 +204,7 @@ public struct ColorSettingsView: View {
      - Failure modes: none; the inventory is static and test-audited against Android source.
      */
     static func visibleAndroidKeys(scope: TextDisplaySettingsScope) -> [String] {
-        visibleAndroidKeys(includesWorkspaceColor: scope != .window)
+        visibleAndroidKeys(includesWorkspaceColor: scope == .workspace)
     }
 
     /**

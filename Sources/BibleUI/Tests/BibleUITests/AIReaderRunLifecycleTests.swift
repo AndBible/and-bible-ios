@@ -1,4 +1,5 @@
 import BibleCore
+import SwiftData
 import XCTest
 
 @testable import BibleUI
@@ -137,10 +138,17 @@ final class AIReaderRunLifecycleTests: XCTestCase {
      main-actor provider.
    - Expected result: The provider runs once and all four identities appear in the system message.
    - Failure meaning: Tool defaults and prompt instructions could select different installed modules.
-   - Side effects: Records one synchronous provider invocation in memory.
+   - Side effects: Registers the prompt model in an isolated in-memory container and records one
+     synchronous provider invocation. No durable store or sync journal is used.
    */
   @MainActor
-  func testRunMessagesIncludeEveryResolvedReferenceEnvironmentField() {
+  func testRunMessagesIncludeEveryResolvedReferenceEnvironmentField() throws {
+    let container = try ModelContainer(
+      for: AgentPrompt.self,
+      configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    let modelContext = ModelContext(container)
+    defer { withExtendedLifetime(modelContext) {} }
     var invocationCount = 0
     let prompt = AgentPrompt(
       id: UUID(),
@@ -148,6 +156,7 @@ final class AIReaderRunLifecycleTests: XCTestCase {
       promptTemplate: "Explain",
       showIn: [.verseSelection]
     )
+    modelContext.insert(prompt)
     let context = AgentExecutionContext(promptId: prompt.id)
 
     let messages = AIReaderRunMessageAssembler.messages(

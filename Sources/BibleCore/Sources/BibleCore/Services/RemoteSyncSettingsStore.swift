@@ -578,14 +578,30 @@ public final class RemoteSyncSettingsStore {
      - Failure modes: Missing or whitespace-only server URL or username fields return `nil`.
      */
     public func loadWebDAVConfiguration() -> WebDAVSyncConfiguration? {
+        let configuration = loadWebDAVConfigurationForEditing()
+        guard !configuration.serverURL.isEmpty, !configuration.username.isEmpty else {
+            return nil
+        }
+        return configuration
+    }
+
+    /**
+     Reads independently saved WebDAV preferences, including an incomplete account setup.
+
+     Android edits each credential preference separately. The editor must therefore restore a
+     saved address even before a username exists, and vice versa. Transport callers should use
+     `loadWebDAVConfiguration()` or `makeWebDAVClient(session:)` to enforce their required fields.
+
+     - Returns: Non-secret saved values; missing address/name values are empty and an empty folder
+       is `nil`. Existing whitespace normalization is preserved.
+     - Side effects: Reads local settings without accessing the network or secret store.
+     - Failure modes: Missing preferences produce empty fields without hiding other saved values.
+     */
+    public func loadWebDAVConfigurationForEditing() -> WebDAVSyncConfiguration {
         let serverURL = settingsStore.getString(Keys.webDAVServerURL)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let username = settingsStore.getString(Keys.webDAVUsername)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !serverURL.isEmpty, !username.isEmpty else {
-            return nil
-        }
-
         let folderPath = settingsStore.getString(Keys.webDAVFolderPath)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return WebDAVSyncConfiguration(
@@ -646,19 +662,63 @@ public final class RemoteSyncSettingsStore {
         _ configuration: WebDAVSyncConfiguration,
         password: String?
     ) throws {
+        setWebDAVServerURL(configuration.serverURL)
+        setWebDAVUsername(configuration.username)
+        setWebDAVFolderPath(configuration.folderPath)
+        try setWebDAVPassword(password)
+    }
+
+    /**
+     Saves only the server preference, preserving all other fields and secrets.
+
+     - Parameter value: Address accepted by the caller; outer whitespace is trimmed.
+     - Side effects: Writes the Android-compatible server key through `SettingsStore`.
+     - Failure modes: Retains the settings store's best-effort save policy; URL validation belongs
+       to the editor or transport boundary. No network or Keychain operation is performed.
+     */
+    public func setWebDAVServerURL(_ value: String) {
         settingsStore.setString(
             Keys.webDAVServerURL,
-            value: configuration.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            value: value.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    /**
+     Saves only the username preference, including clearing it during incomplete setup.
+
+     - Parameter value: Username whose outer whitespace is trimmed.
+     - Side effects: Writes the Android-compatible username key without touching other fields.
+     - Failure modes: Retains the settings store's best-effort save policy; no Keychain access.
+     */
+    public func setWebDAVUsername(_ value: String) {
         settingsStore.setString(
             Keys.webDAVUsername,
-            value: configuration.username.trimmingCharacters(in: .whitespacesAndNewlines)
+            value: value.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+    }
+
+    /**
+     Saves only the optional folder preference, preserving credentials.
+
+     - Parameter value: Folder path; nil or whitespace-only values select the server root.
+     - Side effects: Writes the Android-compatible folder key without network or Keychain access.
+     - Failure modes: Retains the settings store's best-effort save policy.
+     */
+    public func setWebDAVFolderPath(_ value: String?) {
         settingsStore.setString(
             Keys.webDAVFolderPath,
-            value: configuration.folderPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            value: value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         )
+    }
 
+    /**
+     Applies an explicit password edit without modifying non-secret preferences.
+
+     - Parameter password: Exact secret bytes; nil or empty explicitly clears the password.
+     - Side effects: Writes or deletes one secret-store entry. Whitespace is preserved.
+     - Throws: The secret backend's write or removal error; unrelated settings are untouched.
+     */
+    public func setWebDAVPassword(_ password: String?) throws {
         guard let password, !password.isEmpty else {
             try secretStore.removeSecret(forKey: Keys.webDAVPassword)
             return

@@ -109,7 +109,6 @@ const char *SWModule_getCurrentOSISRef(void *module);
 /// Invalid references and non-VerseKey modules return an empty string. The returned pointer is
 /// thread-local and remains valid until the next call on that thread.
 const char *SWModule_resolveOSISReference(void *module, const char *reference);
-
 /// Read one physical RawLD-family index record through its backend/decode boundary.
 /// RawLD/RawLD4 callers provide fixed-record bytes; zLD reads/decompresses by index. Every source
 /// family returns backend-extracted, decoded source without libsword option/source conversion for
@@ -210,16 +209,18 @@ int SWVersification_mapVerseFromKJVA(const char *targetVersification,
                                      int *targetChapterOut,
                                      int *targetVerseOut);
 
-/// Resolve a valid verse reference to its intro-inclusive index in the named versification.
-/// Verse 0 is accepted for chapter introductions. Empty versification names mean KJV; unknown
-/// names and out-of-range references are rejected. Returns 0 on success and nonzero on failure.
+/// Resolve a valid reference to its intro-inclusive index in the named versification.
+/// Chapter 0/verse 0 identifies a book introduction; verse 0 identifies a chapter introduction.
+/// Empty versification names mean KJV; unknown names and out-of-range references are rejected.
+/// Returns 0 on success and nonzero on failure.
 int SWVersification_getReferenceIndex(const char *versification,
                                       const char *osisBookName,
                                       int chapter,
                                       int verse,
                                       long *indexOut);
 
-/// Resolve an intro-inclusive index to a chapter or verse reference in the named versification.
+/// Resolve an intro-inclusive index to a book introduction, chapter introduction, or verse in the
+/// named versification.
 /// Module, testament, and book heading indexes are rejected. The returned book string is owned by
 /// the callee and remains valid until the next call on the same thread. Returns 0 on success and
 /// nonzero on failure.

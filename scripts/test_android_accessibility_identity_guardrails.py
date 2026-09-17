@@ -428,8 +428,7 @@ class AndroidAccessibilityIdentityGuardrailTests(unittest.TestCase):
         self.assertNotIn('"labelAssignmentDoneButton"', element_support)
 
     def test_bookmark_rows_reuse_release_aware_android_click_owner(self) -> None:
-        """Bookmark click and long-click must stay real, mutually exclusive app interactions."""
-        interaction = source(BIBLE_UI / "Shared" / "AndroidTapLongPressButton.swift")
+        """Check shared row ownership; real UI journeys establish tap/hold behavior."""
         bookmark_list = source(BIBLE_UI / "Bookmarks" / "BookmarkListView.swift")
         bookmark_row = source_between(
             bookmark_list,
@@ -442,15 +441,7 @@ class AndroidAccessibilityIdentityGuardrailTests(unittest.TestCase):
             "Converts bookmark ordinals into a human-readable verse reference string.",
         )
 
-        self.assertIn("Button(action: activateTap)", interaction)
-        self.assertIn(".simultaneousGesture(", interaction)
-        self.assertIn(".onEnded { _ in recognizeLongPress() }", interaction)
-        self.assertIn(".onDisappear(perform: resetRecognition)", interaction)
-        self.assertIn(".onChange(of: isLongPressActionActive)", interaction)
-        self.assertIn("guard !didRecognizeLongPress else {", interaction)
-        self.assertIn("didRecognizeLongPress = false\n            return", interaction)
         self.assertIn("AndroidTapLongPressButton(", bookmark_row)
-        self.assertIn("isLongPressActionActive: isSelected", bookmark_row)
         self.assertNotIn(".highPriorityGesture(", bookmark_row)
         self.assertNotIn(".accessibilityElement(children: .combine)", bookmark_row)
         self.assertIn("closeBookmarkList()", bookmark_navigation)

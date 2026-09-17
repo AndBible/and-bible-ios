@@ -13,6 +13,43 @@ import XCTest
  */
 final class SwordSourceFormatParityTests: XCTestCase {
     /**
+     Verifies current-entry capture copies source values without moving the native VerseKey cursor.
+
+     - Setup: Opens one physical OSIS RawCom verse, selects its exact key, and captures the source
+       entry used by the canonical projector.
+     - Expected result: Reference, converted OSIS, and fallback text describe the selected verse,
+       while both key text and VerseKey index remain unchanged after capture.
+     - Side effects: Creates, opens, and removes one temporary SWORD module tree.
+     - Failure meaning: Memorize preparation can mix cursor identities or retain native work across
+       its pure canonical-text projection boundary.
+     */
+    func testCurrentVerseSourceEntryCopiesValuesWithoutMovingCursor() throws {
+        let root = try makeRawComFixture(
+            initials: "FORMATCURRENT",
+            sourceType: "OSIS",
+            source: "<title>Hidden heading</title><q marker=\"“\">Body</q>"
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixture = try openedModule(named: "FORMATCURRENT", in: root)
+        fixture.module.setKey("=Matt.1.1")
+        let keyBefore = fixture.module.currentKey()
+        let indexBefore = try XCTUnwrap(fixture.module.currentVerseKeyIndex())
+
+        let entry = try XCTUnwrap(fixture.module.currentVerseSourceEntry())
+
+        XCTAssertEqual(entry.reference.osisRef, "Matt.1.1")
+        XCTAssertEqual(entry.reference.ordinal, indexBefore)
+        XCTAssertTrue(entry.osisFragment?.contains("Hidden heading") == true)
+        XCTAssertNotNil(entry.canonicalText)
+        XCTAssertEqual(fixture.module.currentKey(), keyBefore)
+        XCTAssertEqual(fixture.module.currentVerseKeyIndex(), indexBefore)
+        XCTAssertEqual(
+            SwordBibleCanonicalTextProjection.project([entry]),
+            "“Body "
+        )
+    }
+
+    /**
      Verifies JSword plain text retains literal markup and expresses every LF as structural OSIS.
 
      - Setup: Converts leading space, XML-looking text, an empty line, CRLF, and a trailing LF.

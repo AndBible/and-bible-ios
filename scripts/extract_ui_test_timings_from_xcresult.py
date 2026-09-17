@@ -1,163 +1,197 @@
 #!/usr/bin/env python3
-"""Extract per-test UI durations from an xcresult bundle."""
+"""Extract complete, provenance-backed UI timings from xcresult bundles."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
+from datetime import date
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
-
-def typed_value(node: Any) -> Any:
-    """Unwrap one xcresult typed value node."""
-    if isinstance(node, dict) and "_value" in node:
-        value = node["_value"]
-        type_name = node.get("_type", {}).get("_name")
-        if type_name == "Double":
-            return float(value)
-        if type_name == "Int":
-            return int(value)
-        if type_name == "Bool":
-            return value.lower() == "true"
-        return value
-    return node
-
-
-def typed_array(node: Any) -> list[Any]:
-    """Unwrap one xcresult typed array node."""
-    if isinstance(node, dict) and "_values" in node:
-        values = node["_values"]
-        if isinstance(values, list):
-            return values
-    return []
-
-
-def find_tests_ref_id(invocation_payload: dict[str, Any]) -> str | None:
-    """Extract the first `testsRef` identifier from an invocation record payload."""
-    for action in typed_array(invocation_payload.get("actions")):
-        action_result = action.get("actionResult") if isinstance(action, dict) else None
-        tests_ref = action_result.get("testsRef") if isinstance(action_result, dict) else None
-        tests_ref_id = typed_value(tests_ref.get("id")) if isinstance(tests_ref, dict) else None
-        if isinstance(tests_ref_id, str) and tests_ref_id:
-            return tests_ref_id
-    return None
-
-
-def normalize_test_identifier(
-    raw_identifier: str,
-    *,
-    test_target: str,
-    test_case_class: str,
-) -> str | None:
-    """Normalize one xcresult test identifier to `target/class/method` form."""
-    normalized = raw_identifier.strip().rstrip("()")
-    if normalized.count("/") == 2:
-        return normalized
-    if normalized.count("/") == 1:
-        target, method = normalized.split("/", 1)
-        if target == test_target and method.startswith("test"):
-            return f"{test_target}/{test_case_class}/{method}"
-    return None
+from build_ui_test_shards import discover_ui_test_identifiers_from_files
+from run_xcodebuild_with_test_selection import (
+    PASSING_TEST_RESULTS,
+    test_cases_from_xcresult_nodes,
+)
 
 
 def extract_ui_test_timings(
-    xcresult_payload: dict[str, Any],
+    xcresult_payload: Mapping[str, object],
     *,
     test_target: str,
     test_case_class: str,
 ) -> dict[str, float]:
-    """Extract per-test durations from one legacy xcresult JSON payload."""
+    """Extract one successful duration for each matching structured test node."""
     timings: dict[str, float] = {}
-
-    def visit(summary: dict[str, Any]) -> None:
-        subtests = typed_array(summary.get("subtests"))
-        if subtests:
-            for subtest in subtests:
-                if isinstance(subtest, dict):
-                    visit(subtest)
-            return
-
-        identifier = typed_value(summary.get("identifier"))
-        duration = typed_value(summary.get("duration"))
-        if not isinstance(identifier, str) or not isinstance(duration, (int, float)):
-            return
-        normalized = normalize_test_identifier(
-            identifier,
-            test_target=test_target,
-            test_case_class=test_case_class,
-        )
-        if normalized is not None:
-            timings[normalized] = float(duration)
-
-    for plan_summary in typed_array(xcresult_payload.get("summaries")):
-        for testable_summary in typed_array(plan_summary.get("testableSummaries")):
-            if typed_value(testable_summary.get("testKind")) != "UI":
-                continue
-            for top_level_summary in typed_array(testable_summary.get("tests")):
-                if isinstance(top_level_summary, dict):
-                    visit(top_level_summary)
-
+    identifier_prefix = f"{test_target}/{test_case_class}/"
+    for test_case in test_cases_from_xcresult_nodes(xcresult_payload):
+        if not test_case.identifier.startswith(identifier_prefix):
+            continue
+        if test_case.identifier in timings:
+            raise ValueError(
+                f"{test_case.identifier} appears more than once; "
+                "retry/restart attempts cannot provide one authoritative duration."
+            )
+        if test_case.result not in PASSING_TEST_RESULTS:
+            raise ValueError(
+                f"{test_case.identifier} reported {test_case.result}; "
+                "only passing executions can update the timing manifest."
+            )
+        if test_case.duration_seconds is None or test_case.duration_seconds < 0:
+            raise ValueError(
+                f"{test_case.identifier} has no valid durationInSeconds value."
+            )
+        timings[test_case.identifier] = test_case.duration_seconds
     return dict(sorted(timings.items()))
 
 
-def run_xcresulttool_get_object(xcresult_path: Path, *, object_id: str | None = None) -> dict[str, Any]:
-    """Load one xcresult object as legacy JSON."""
+def merge_ui_test_timings(
+    xcresult_payloads: Sequence[Mapping[str, object]],
+    *,
+    test_target: str,
+    test_case_class: str,
+) -> dict[str, float]:
+    """Merge disjoint shard reports without hiding duplicate executions."""
+    merged: dict[str, float] = {}
+    for payload in xcresult_payloads:
+        for identifier, duration in extract_ui_test_timings(
+            payload,
+            test_target=test_target,
+            test_case_class=test_case_class,
+        ).items():
+            if identifier in merged:
+                raise ValueError(
+                    f"{identifier} appears in more than one xcresult bundle; "
+                    "the shard set is not disjoint."
+                )
+            merged[identifier] = duration
+    return dict(sorted(merged.items()))
+
+
+def reconcile_discovered_timings(
+    timings: Mapping[str, float],
+    discovered_identifiers: Sequence[str],
+) -> None:
+    """Require timing output to match the current source-discovered inventory."""
+    if len(discovered_identifiers) != len(set(discovered_identifiers)):
+        raise ValueError("Source discovery returned duplicate UI test identifiers.")
+    expected = set(discovered_identifiers)
+    actual = set(timings)
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    errors: list[str] = []
+    if missing:
+        errors.append(f"missing discovered tests: {', '.join(missing)}")
+    if unexpected:
+        errors.append(f"unexpected reported tests: {', '.join(unexpected)}")
+    if errors:
+        raise ValueError("Timing extraction was incomplete: " + "; ".join(errors))
+
+
+def build_timing_manifest(
+    timings: Mapping[str, float],
+    *,
+    source_kind: str,
+    source_identifier: str,
+    collected_on: str,
+    limitations: str | None = None,
+) -> dict[str, Any]:
+    """Build the versioned timing document consumed by the shard planner."""
+    try:
+        date.fromisoformat(collected_on)
+    except ValueError as error:
+        raise ValueError("--collected-on must be an ISO date in YYYY-MM-DD form.") from error
+    provenance: dict[str, object] = {
+        "status": "measured",
+        "collected_through": collected_on,
+        "sources": [
+            {
+                "kind": source_kind,
+                "identifier": source_identifier,
+                "collected_on": collected_on,
+            }
+        ],
+    }
+    if limitations:
+        provenance["limitations"] = limitations
+    return {
+        "schema_version": 1,
+        "provenance": provenance,
+        "timings": dict(sorted(timings.items())),
+    }
+
+
+def load_xcresult_payload(xcresult_path: Path) -> dict[str, Any]:
+    """Load Apple's structured test-results node report from one bundle."""
     command = [
         "xcrun",
         "xcresulttool",
         "get",
-        "object",
-        "--legacy",
+        "test-results",
+        "tests",
         "--path",
         str(xcresult_path),
-        "--format",
-        "json",
+        "--compact",
     ]
-    if object_id is not None:
-        command.extend(["--id", object_id])
     completed = subprocess.run(command, check=True, capture_output=True, text=True)
     payload = json.loads(completed.stdout)
     if not isinstance(payload, dict):
-        raise ValueError("xcresult payload root must be a JSON object.")
+        raise ValueError("xcresult test-results payload root must be a JSON object.")
     return payload
-
-
-def load_xcresult_payload(xcresult_path: Path) -> dict[str, Any]:
-    """Load the xcresult tests payload, following `testsRef` from the invocation record."""
-    root_payload = run_xcresulttool_get_object(xcresult_path)
-    if "summaries" in root_payload:
-        return root_payload
-
-    tests_ref_id = find_tests_ref_id(root_payload)
-    if tests_ref_id is None:
-        raise ValueError("Unable to locate testsRef in the xcresult invocation record.")
-    return run_xcresulttool_get_object(xcresult_path, object_id=tests_ref_id)
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create the CLI parser."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--xcresult-path", required=True, type=Path)
+    parser.add_argument(
+        "--xcresult-path",
+        required=True,
+        action="append",
+        type=Path,
+        help="One shard result bundle; repeat for every shard in the run.",
+    )
+    parser.add_argument("--test-source", required=True, nargs="+", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--test-target", default="AndBibleUITests")
     parser.add_argument("--test-case-class", default="AndBibleUITests")
+    parser.add_argument(
+        "--source-kind",
+        required=True,
+        choices=("github-actions-run", "local-run"),
+    )
+    parser.add_argument("--source-identifier", required=True)
+    parser.add_argument("--collected-on", required=True)
+    parser.add_argument("--limitations")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Extract and print per-test UI timings."""
+    """Extract, reconcile, and print a versioned UI timing manifest."""
     parser = create_argument_parser()
     args = parser.parse_args(argv)
 
-    payload = load_xcresult_payload(args.xcresult_path)
-    timings = extract_ui_test_timings(
-        payload,
+    payloads = [load_xcresult_payload(path) for path in args.xcresult_path]
+    timings = merge_ui_test_timings(
+        payloads,
         test_target=args.test_target,
         test_case_class=args.test_case_class,
     )
-    output = json.dumps(timings, indent=2, sort_keys=True)
+    discovered_identifiers = discover_ui_test_identifiers_from_files(
+        args.test_source,
+        test_target=args.test_target,
+        test_case_class=args.test_case_class,
+    )
+    reconcile_discovered_timings(timings, discovered_identifiers)
+    manifest = build_timing_manifest(
+        timings,
+        source_kind=args.source_kind,
+        source_identifier=args.source_identifier,
+        collected_on=args.collected_on,
+        limitations=args.limitations,
+    )
+    output = json.dumps(manifest, indent=2, sort_keys=True)
 
     if args.output is not None:
         args.output.write_text(output + "\n")

@@ -7,40 +7,6 @@ import SwiftUI
 import BibleCore
 import SwordKit
 
-/// One-shot UI-test launch query consumed by Search regardless of which presenter opens it.
-enum UITestSearchQuerySeed {
-    private static var didConsume = false
-
-    static func consume() -> String? {
-        guard !didConsume,
-              let query = resolveLaunchQuery()?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !query.isEmpty else {
-            return nil
-        }
-        didConsume = true
-        return query
-    }
-
-    private static func resolveLaunchQuery() -> String? {
-        if let environmentQuery = ProcessInfo.processInfo.environment["UITEST_SEARCH_QUERY"] {
-            return environmentQuery
-        }
-
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let flagIndex = arguments.firstIndex(of: "-UITEST_SEARCH_QUERY") else {
-            return nil
-        }
-
-        let valueIndex = arguments.index(after: flagIndex)
-        guard valueIndex < arguments.endIndex else {
-            return nil
-        }
-
-        return arguments[valueIndex]
-    }
-}
-
 /**
  Retains a freshly opened native SWORD manager for one authorized Search indexing source.
 
@@ -473,8 +439,7 @@ public struct SearchView: View {
         }
         .onAppear {
             restoreSelectedModules()
-            let seededInitialQuery = initialQuery.isEmpty ? (UITestSearchQuerySeed.consume() ?? "") : initialQuery
-            let didApplySeed = applyInitialQueryIfNeeded(seededInitialQuery)
+            let didApplySeed = applyInitialQueryIfNeeded(initialQuery)
             checkIndex(autoSearchWhenReady: didApplySeed)
         }
         .onChange(of: initialQuery) { _, newValue in
@@ -698,7 +663,7 @@ public struct SearchView: View {
         guard UITestRuntimeConfiguration.enablesDetailedAccessibilityExports else {
             return baseState
         }
-        return "\(baseState);\(searchAccessibilitySelectionToken);\(searchAccessibilityGroupToken);rows=\(searchAccessibilityRowsToken)"
+        return "\(baseState);\(searchAccessibilitySelectionToken);\(searchAccessibilityGroupToken)"
     }
 
     /// Stable selected-translation token exported for UI automation.
@@ -814,21 +779,6 @@ public struct SearchView: View {
                 .accessibilityLabel("searchStateExport")
                 .accessibilityValue(searchAccessibilityValue)
         }
-    }
-
-    /// Stable selectable search-result row tokens exported for UI automation.
-    private var searchAccessibilityRowsToken: String {
-        (groupedResults?.groups ?? [])
-            .prefix(UITestRuntimeConfiguration.detailedAccessibilityRowTokenLimit)
-            .flatMap { group in
-                group.matches.enumerated().map { index, hit in
-                    let identifier = index == 0
-                        ? searchResultIdentifier(for: group)
-                        : searchModuleResultIdentifier(for: hit)
-                    return "|\(identifier)|"
-                }
-            }
-            .joined(separator: ",")
     }
 
     // MARK: - Index Prompt
@@ -1036,10 +986,8 @@ public struct SearchView: View {
             }
         )
         .onAppear {
-            if UITestRuntimeConfiguration.shouldAutofocusSearchField {
-                DispatchQueue.main.async {
-                    isSearchFieldFocused = true
-                }
+            DispatchQueue.main.async {
+                isSearchFieldFocused = true
             }
         }
     }

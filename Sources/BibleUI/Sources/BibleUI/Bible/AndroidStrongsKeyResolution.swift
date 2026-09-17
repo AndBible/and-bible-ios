@@ -1,4 +1,5 @@
 import Foundation
+import SwordKit
 
 /**
  Identifies one behaviorally distinct `LinkControl.KeyType` Strong's lookup family.
@@ -9,7 +10,7 @@ import Foundation
  - Side effects: None; cases are immutable lookup identities.
  - Failure modes: None; malformed external keys are represented by candidates, not new cases.
  */
-enum AndroidStrongsKeyFamily: Equatable {
+enum AndroidStrongsKeyFamily: Hashable, Sendable {
     /// The decoded external key exactly as Android receives it.
     case key
 
@@ -165,7 +166,9 @@ final class AndroidStrongsKeyPreferenceCache: @unchecked Sendable {
     private let lock = NSLock()
 
     /// Last exact family accepted by each case-sensitive canonical module initials value.
-    private var preferredFamilyByModuleInitials: [String: AndroidStrongsKeyFamily] = [:]
+    private var preferredFamilyByModuleInitials: [
+        SwordJavaExactStringIdentity: AndroidStrongsKeyFamily
+    ] = [:]
 
     /**
      Creates an empty per-module preferred-family cache.
@@ -191,7 +194,9 @@ final class AndroidStrongsKeyPreferenceCache: @unchecked Sendable {
         moduleInitials: String
     ) -> [AndroidStrongsKeyCandidate] {
         lock.lock()
-        let preferred = preferredFamilyByModuleInitials[moduleInitials]
+        let preferred = preferredFamilyByModuleInitials[
+            SwordJavaExactStringIdentity(moduleInitials)
+        ]
         lock.unlock()
         guard let preferred else { return candidates }
         return candidates.filter { $0.family == preferred }
@@ -212,7 +217,7 @@ final class AndroidStrongsKeyPreferenceCache: @unchecked Sendable {
         moduleInitials: String
     ) {
         lock.lock()
-        preferredFamilyByModuleInitials[moduleInitials] = family
+        preferredFamilyByModuleInitials[SwordJavaExactStringIdentity(moduleInitials)] = family
         lock.unlock()
     }
 }

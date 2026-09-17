@@ -26,7 +26,7 @@ public struct AndroidActivityAccessibilityMarker: View {
     /// Stable route identity used by UI automation.
     let accessibilityIdentifier: String
 
-    /// Optional compact semantic state exported by the route owner.
+    /// Optional diagnostic state, evaluated only when detailed exports are enabled.
     let accessibilityValue: String?
 
     /// Owner surface color used to keep the marker visually indistinguishable from its activity.
@@ -38,7 +38,7 @@ public struct AndroidActivityAccessibilityMarker: View {
      - Parameters:
        - label: Localized route name.
        - accessibilityIdentifier: Stable route identity.
-       - accessibilityValue: Optional compact semantic state for automation.
+       - accessibilityValue: Deferred diagnostic state; disabled exports never evaluate it.
        - surfaceColor: Owner activity background color.
      - Side effects: none.
      - Failure modes: none.
@@ -46,12 +46,40 @@ public struct AndroidActivityAccessibilityMarker: View {
     public init(
         label: String,
         accessibilityIdentifier: String,
-        accessibilityValue: String? = nil,
+        accessibilityValue: @autoclosure () -> String? = nil,
+        surfaceColor: Color
+    ) {
+        self.init(
+            label: label,
+            accessibilityIdentifier: accessibilityIdentifier,
+            diagnosticStateProvider: accessibilityValue,
+            includesDiagnosticState: UITestRuntimeConfiguration.enablesDetailedAccessibilityExports,
+            surfaceColor: surfaceColor
+        )
+    }
+
+    /**
+     Captures diagnostic state under an explicit export policy before building the marker.
+
+     The provider stays on the caller's owner and runs at most once; it never escapes into a
+     worker or a later SwiftUI update. Component tests can exercise both policies without changing
+     process environment. Route labels and identifiers remain available under either policy.
+
+     - Inputs: Route identity, deferred state provider, export policy, and surface palette.
+     - Output: A marker with copied diagnostic text or no diagnostic value.
+     - Side effects: Evaluates the provider once only when exports are enabled.
+     - Failure modes: A nil provider result produces an empty accessibility value.
+     */
+    init(
+        label: String,
+        accessibilityIdentifier: String,
+        diagnosticStateProvider: () -> String?,
+        includesDiagnosticState: Bool,
         surfaceColor: Color
     ) {
         self.label = label
         self.accessibilityIdentifier = accessibilityIdentifier
-        self.accessibilityValue = accessibilityValue
+        self.accessibilityValue = includesDiagnosticState ? diagnosticStateProvider() : nil
         self.surfaceColor = surfaceColor
     }
 
@@ -74,7 +102,7 @@ extension View {
      - Parameters:
        - label: Localized semantic name announced for the owning surface.
        - accessibilityIdentifier: Stable route or dialog identity used by UI automation.
-       - accessibilityValue: Optional compact owner state.
+       - accessibilityValue: Deferred diagnostic state, evaluated only for detailed exports.
        - surfaceColor: Owner-resolved color used by the visually negligible marker.
      - Returns: The original view with one noninteractive accessibility sibling.
      - Side effects: none; the marker never participates in hit testing.
@@ -83,14 +111,16 @@ extension View {
     func androidAccessibilityIdentityMarker(
         label: String,
         accessibilityIdentifier: String,
-        accessibilityValue: String? = nil,
+        accessibilityValue: @autoclosure () -> String? = nil,
         surfaceColor: Color
     ) -> some View {
-        overlay(alignment: .topLeading) {
+        let diagnosticValue = UITestRuntimeConfiguration.enablesDetailedAccessibilityExports
+            ? accessibilityValue() : nil
+        return overlay(alignment: .topLeading) {
             AndroidActivityAccessibilityMarker(
                 label: label,
                 accessibilityIdentifier: accessibilityIdentifier,
-                accessibilityValue: accessibilityValue,
+                accessibilityValue: diagnosticValue,
                 surfaceColor: surfaceColor
             )
         }
@@ -102,7 +132,7 @@ extension View {
      - Parameters:
        - label: Optional localized semantic name for the dialog.
        - accessibilityIdentifier: Stable dialog identity used by UI automation.
-       - accessibilityValue: Optional compact dialog state.
+       - accessibilityValue: Deferred diagnostic state, evaluated only for detailed exports.
      - Returns: The original dialog content with a sibling marker using the global dialog palette.
      - Side effects: none; the marker never receives input.
      - Failure modes: none; missing labels and values export as empty strings.
@@ -110,13 +140,15 @@ extension View {
     func androidDialogAccessibilityIdentity(
         label: String = "",
         accessibilityIdentifier: String,
-        accessibilityValue: String? = nil
+        accessibilityValue: @autoclosure () -> String? = nil
     ) -> some View {
-        modifier(
+        let diagnosticValue = UITestRuntimeConfiguration.enablesDetailedAccessibilityExports
+            ? accessibilityValue() : nil
+        return modifier(
             AndroidDialogAccessibilityIdentityModifier(
                 label: label,
                 accessibilityIdentifier: accessibilityIdentifier,
-                accessibilityValue: accessibilityValue
+                accessibilityValue: diagnosticValue
             )
         )
     }

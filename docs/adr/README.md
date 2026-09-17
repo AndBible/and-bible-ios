@@ -26,33 +26,75 @@ decision, update the issue, PR, source, or test instead.
 
 ## Format
 
-Use a numbered Markdown file:
+Create each new ADR from the [authoring template](../templates/adr.md) and give it an
+unused four-digit identifier:
 
 ```text
 NNNN-short-kebab-case-title.md
 ```
 
-New ADRs should include YAML front matter when practical, following this
-metadata shape:
+New ADRs use YAML front matter with this metadata:
 
 - `adr`: stable ADR identifier, such as `ADR-0008`
 - `title`: short decision title
 - `description`: one-sentence decision summary
 - `date`: `YYYY-MM-DD`
-- `status`: `proposed`, `accepted`, `rejected`, `deprecated`, or `superseded`
-- `supersedes` / `superseded-by`: replacement relationships
+- `status`: `proposed`, `accepted`, `rejected`, or `superseded`
+- `review-status`: `pending_review` or `reviewed`
+- `extends` / `extended-by`, `amends` / `amended-by`, and `supersedes` /
+  `superseded-by`: decision relationships
 - `decision-owner`, `deciders`, `consulted`, `informed`
 - `tags`, `related-adrs`, `related-work-items`
 
-Older ADRs may use the legacy body-only format. Either way, include these
-sections or their front-matter equivalents:
+Use these authored sections in this order:
 
-- `Status`: Proposed, Accepted, Superseded, or Rejected
-- `Date`: YYYY-MM-DD
-- `Context`: why the decision is needed
-- `Decision`: the rule being adopted
-- `Consequences`: what this enables, requires, or rules out
-- `Related`: issues, PRs, and docs that carry live status
+- `Decision`
+- `Why this came up`
+- `Alternatives considered`
+- `Consequences`
+- `When to revisit this`
+- `References`
+
+Older ADRs may use the legacy body-only format. They remain historical inputs;
+do not copy or normalize them as the template for new decisions.
+
+## Lifecycle And Relationships
+
+New ADRs start with `status: proposed` and
+`review-status: pending_review`. Only a human can accept a decision. Acceptance
+requires a human to manually review the proposal and manually commit the
+accepted status through the pull-request process. Agent review, pull-request
+approval, merge, and successful checks do not accept an ADR.
+
+Keep accepted decision prose and rationale intact. Use a new ADR when a later
+decision extends, amends, or supersedes an accepted record. A proposed
+successor records its forward relationship, but does not change the accepted
+record. After a human accepts the successor, update the older record's reverse
+relationship and status where appropriate. Only full supersession changes an
+older accepted record to `superseded`; extension and amendment leave it
+accepted.
+
+Keep each ADR decision in its own branch and pull request, separate from its
+dependent implementation. The ADR index and factual relationship maintenance
+may accompany that decision. Implementation status and validation evidence
+remain in issues, pull requests, code, tests, or machine-readable guardrails.
+
+Investigation remains open regardless of decision status. Pause affected
+implementation for human alignment when a significant architectural choice
+remains unresolved. Once a compatible direction is agreed, implementation may
+proceed while its ADR is proposed. Implementation that contradicts an accepted
+provision waits for human acceptance of its amendment or supersession; that
+does not block independent compatible work. Accepted decisions preserve the
+chosen contract and rationale, not every implementation that once served them.
+
+Before review, run:
+
+```bash
+python3 scripts/check_adr_structure.py
+```
+
+The checker verifies stable unique identities, index coverage, and resolvable
+relationships. It does not judge prose or accept decisions.
 
 ## Current ADRs
 
@@ -68,3 +110,4 @@ sections or their front-matter equivalents:
 - [0010: Unrecognized Module Versification Handling](0010-unrecognized-module-versification-handling.md)
 - [0011: Transactional Module Store Mechanism](0011-transactional-module-store-mechanism.md)
 - [0012: Install Validation Follows Observed SWORD Packaging](0012-install-validation-follows-observed-sword-packaging.md)
+- [0013: Reader Annotation Parity Divergences](0013-reader-annotation-parity-divergences.md)

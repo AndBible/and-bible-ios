@@ -135,14 +135,8 @@ struct BibleReaderModulePicker: View {
     /// User-visible completion or failure feedback for import/export routes.
     @State private var externalDocumentImportMessage: String?
 
-    /// Locked module whose cipher-key prompt is visible.
-    @State private var pendingUnlockModule: ModuleInfo?
-
-    /// Cipher key entered for the pending locked module.
-    @State private var unlockCipherKey = ""
-
-    /// Failed unlock feedback shown when Android's passphrase prompt is retried.
-    @State private var unlockFailureMessage: String?
+    /// Exact-module credential flow retained through passphrase and retry decisions.
+    @State private var unlockSession: ModuleUnlockSession?
 
     /// Generic module retained for retry after exact-key validation fails.
     @State private var pendingGenericSwitchRetry: ModuleInfo?
@@ -444,9 +438,18 @@ struct BibleReaderModulePicker: View {
     private var moduleAccessPresentedScreen: some View {
         importFeedbackPresentedScreen
         .overlay {
-            if let module = pendingUnlockModule {
-                ModulePickerUnlockDialog(title: Self.unlockPromptTitle(for: module), message: unlockFailureMessage ?? String(localized: "enter_module_passphrase", defaultValue: "Enter the module passphrase."), cipherKey: $unlockCipherKey, showUnlockInfo: !module.aboutMetadata.unlockInfo.isEmpty, onUnlock: { attemptUnlock(module) }, onShowUnlockInfo: { showUnlockInformation(for: module) }, onCancel: clearUnlockPrompt)
-            } else if let module = pendingGenericSwitchRetry {
+            ModuleUnlockFlowView(
+                    session: $unlockSession,
+                    unlockModule: { moduleName, submittedKey in
+                        controller.swordManager?.unlockModule(
+                            named: moduleName,
+                            withCipherKey: submittedKey
+                        ) ?? false
+                    },
+                    onAccepted: completeAcceptedUnlock,
+                    onDeclined: { _ in clearUnlockPrompt() }
+                )
+            if unlockSession == nil, let module = pendingGenericSwitchRetry {
                 ModulePickerDecisionDialog(title: String(localized: "error_occurred"), message: genericSwitchFailureMessage ?? String(localized: "error_occurred"), actions: [
                     .init(id: "retry", title: String(localized: "retry"), role: nil) { pendingGenericSwitchRetry = nil; genericSwitchFailureMessage = nil; selectUnlockedModule(module) },
                     .init(id: "cancel", title: String(localized: "cancel"), role: nil) { pendingGenericSwitchRetry = nil; genericSwitchFailureMessage = nil }
@@ -670,7 +673,7 @@ struct BibleReaderModulePicker: View {
                 },
                 onUnlock: {
                     clearContextualModuleSelection()
-                    beginUnlock(contextualModule)
+                    presentUnlockSession(contextualModule)
                 },
                 onDeleteIndex: {
                     clearContextualModuleSelection()
@@ -1094,24 +1097,37 @@ struct BibleReaderModulePicker: View {
         @ViewBuilder trailing: () -> Trailing,
         selection: @escaping () -> Void
     ) -> some View {
-        VStack(spacing: 0) {
+        let primaryContent = HStack(alignment: .top, spacing: 12) {
+            leading()
+            center()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear
+                .frame(width: 48, height: 44)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+
+        return VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                Button(action: selection) {
-                    HStack(alignment: .top, spacing: 12) {
-                        leading()
-                        center()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Color.clear
-                            .frame(width: 48, height: 44)
-                            .accessibilityHidden(true)
+                if let onLongPress {
+                    AndroidTapLongPressButton(
+                        onTap: selection,
+                        onLongPress: onLongPress
+                    ) {
+                        primaryContent
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+                    .accessibilityIdentifier(accessibilityIdentifier)
+                    .accessibilityValue(isSelected ? "selected" : "")
+                } else {
+                    Button(action: selection) {
+                        primaryContent
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(accessibilityIdentifier)
+                    .accessibilityValue(isSelected ? "selected" : "")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(accessibilityIdentifier)
-                .accessibilityValue(isSelected ? "selected" : "")
 
                 trailing()
                     .padding(.top, 12)
@@ -1344,7 +1360,7 @@ struct BibleReaderModulePicker: View {
             return
         }
         if Self.requiresUnlock(module) {
-            beginUnlock(module)
+            presentUnlockSession(module)
             return
         }
         selectUnlockedModule(module)
@@ -1375,7 +1391,7 @@ struct BibleReaderModulePicker: View {
                 controller: controller,
                 onDismiss: onDismiss,
                 onBeginAuthoritativeUnlock: {
-                    beginUnlock($0, authoritativeAccessState: true)
+                    presentUnlockSession($0)
                 }
             )
         case .dictionary:
@@ -1401,7 +1417,7 @@ struct BibleReaderModulePicker: View {
             case .switched:
                 onDismiss()
             case .requiresUnlock:
-                beginUnlock(module, authoritativeAccessState: true)
+                presentUnlockSession(module)
             case .unavailable:
                 break
             }
@@ -1479,82 +1495,37 @@ struct BibleReaderModulePicker: View {
     }
 
     /**
-     Starts Android's passphrase prompt for an encrypted locked module.
+     Presents Android's passphrase session after an owning action authorizes that exact intent.
 
-     - Parameters:
-       - module: Locked chooser row selected directly or through its context action.
-       - authoritativeAccessState: Whether the shared controller preflight freshly classified the
-         module locked, even if the chooser's older metadata snapshot says otherwise.
+     Direct row selection calls this only after a locked snapshot or authoritative controller result.
+     Contextual Unlock calls it explicitly for encrypted modules even when already readable, matching
+     Android's reachable rekey prompt and preserving the manager-owned persisted-key prefill.
+
+     - Parameter module: Exact encrypted module selected by the authorized owner action.
      - Side effects: Clears stale key/error state and presents the module-scoped unlock alert.
-     - Failure modes: Without an authoritative locked result, already-unlocked and unencrypted
-       modules bypass the prompt and select normally. The authoritative path prevents a stale-row
-       recursion between selection and preflight.
+     - Failure modes: Callers must authorize the action; this renderer does not reinterpret a
+       contextual rekey as ordinary document selection.
      */
-    private func beginUnlock(
-        _ module: ModuleInfo,
-        authoritativeAccessState: Bool = false
-    ) {
-        guard authoritativeAccessState || Self.requiresUnlock(module) else {
-            selectUnlockedModule(module)
-            return
-        }
-        unlockCipherKey = ""
-        unlockFailureMessage = nil
-        pendingUnlockModule = module
-    }
-
-    /**
-     Applies the entered cipher key through `SwordManager` and verifies refreshed metadata.
-
-     - Parameter module: Locked module associated with the visible prompt.
-     - Side Effects: Updates SWORD cipher configuration, refreshes controller module caches, selects
-       the document on success, or reopens the passphrase prompt with retry feedback on failure.
-     - Failure Modes: Missing managers, empty/rejected keys, and modules that remain locked all use
-       the same retry path without dismissing the chooser.
-     */
-    private func attemptUnlock(_ module: ModuleInfo) {
-        let cipherKey = unlockCipherKey
-        if ModuleUnlockActionCoordinator.submit(
+    private func presentUnlockSession(_ module: ModuleInfo) {
+        unlockSession = ModuleUnlockSession(
             module: module,
-            cipherKey: cipherKey,
-            unlockModule: { moduleName, submittedKey in
-                controller.swordManager?.unlockModule(
-                    named: moduleName,
-                    withCipherKey: submittedKey
-                ) ?? false
-            },
-            onAccepted: {
-                clearUnlockPrompt()
-                controller.refreshInstalledModules()
-                selectUnlockedModule(module)
-            }
-        ) {
-            return
-        }
-
-        pendingUnlockModule = nil
-        unlockCipherKey = ""
-        let failureMessage = ModuleUnlockActionCoordinator.failureMessage
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + ModuleUnlockActionCoordinator.retryPresentationDelay
-        ) {
-            unlockFailureMessage = failureMessage
-            pendingUnlockModule = module
-        }
+            initialCipherKey: controller.swordManager?.persistedCipherKey(named: module.name) ?? ""
+        )
     }
 
     /**
-     Opens the existing module details dialog at Android's unlock-information action.
+     Applies picker-owned work after the shared credential flow records manager acceptance.
 
-     - Parameter module: Locked module whose provider instructions should be shown.
-     - Side Effects: Dismisses the passphrase prompt and presents module About metadata.
-     - Failure Modes: Modules without unlock information do not expose this action.
+     - Parameter module: Exact installed module accepted by `ModuleUnlockFlowView`.
+     - Side effects: Clears the credential session, refreshes installed metadata, and routes the
+       module through the existing authoritative selection outcome.
+     - Failure modes: If fresh selection still fails, the picker remains owned by its existing
+       category-specific failure path; rejected and declined credentials never invoke this function.
      */
-    private func showUnlockInformation(for module: ModuleInfo) {
+    private func completeAcceptedUnlock(_ module: ModuleInfo) {
         clearUnlockPrompt()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            selectedModuleDetails = moduleDetails(for: module)
-        }
+        controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
+        selectUnlockedModule(module)
     }
 
     /**
@@ -1564,9 +1535,7 @@ struct BibleReaderModulePicker: View {
      - Failure Modes: None.
      */
     private func clearUnlockPrompt() {
-        pendingUnlockModule = nil
-        unlockCipherKey = ""
-        unlockFailureMessage = nil
+        unlockSession = nil
     }
 
     /**
@@ -2005,7 +1974,7 @@ struct BibleReaderModulePicker: View {
             isImportingExternalDocument = false
             externalDocumentImportProgress = nil
             externalDocumentImportMessage = importResult.feedbackMessage
-            controller.refreshInstalledModules()
+            controller.refreshInstalledSourceInventoryForAuthoritativeSelection()
         }
     }
 

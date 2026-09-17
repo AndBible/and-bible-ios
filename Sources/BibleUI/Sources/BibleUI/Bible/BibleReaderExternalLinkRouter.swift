@@ -8,7 +8,7 @@ import BibleCore
  Keeping the definition kind attached to each value lets iOS preserve that list's fragment order
  instead of regrouping every Strong's definition ahead of every morphology definition.
  */
-enum BibleReaderDefinitionItem: Equatable {
+enum BibleReaderDefinitionItem: Hashable, Sendable {
     /// Resolve one Greek or Hebrew Strong's value.
     case strong(String)
     /// Resolve one Robinson morphology value.

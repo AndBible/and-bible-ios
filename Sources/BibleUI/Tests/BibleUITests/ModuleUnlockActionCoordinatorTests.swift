@@ -67,7 +67,7 @@ final class ModuleUnlockActionCoordinatorTests: XCTestCase {
      A failure would let either consumer refresh after an invalid key or lose Android's visible
      invalid-passphrase response.
      */
-    func testRejectedPassphraseDoesNotRunSuccessWorkAndProvidesRetryMessage() {
+    func testRejectedPassphraseDoesNotRunSuccessWork() {
         var managerCalls = 0
         var successCalls = 0
 
@@ -84,7 +84,175 @@ final class ModuleUnlockActionCoordinatorTests: XCTestCase {
         XCTAssertFalse(accepted)
         XCTAssertEqual(managerCalls, 1)
         XCTAssertEqual(successCalls, 0)
-        XCTAssertFalse(ModuleUnlockActionCoordinator.failureMessage.isEmpty)
+    }
+
+    /** Rejection and cancellation retain the same module until the explicit retry decision. */
+    func testSessionRetainsExactModuleAcrossRejectedCancelledAndRetryPhases() {
+        var submitted: [(String, String)] = []
+        var session = ModuleUnlockSession(module: lockedModule)
+
+        XCTAssertNil(
+            session.submit { _, _ in
+                XCTFail("Empty input must not reach the manager")
+                return true
+            }
+        )
+        XCTAssertEqual(session.presentation, .retryConfirmation)
+        session.retry()
+        XCTAssertEqual(session.presentation, .passphrase)
+
+        session.cipherKey = "wrong"
+        XCTAssertNil(session.submit { module, key in
+            submitted.append((module, key))
+            return false
+        })
+        XCTAssertEqual(submitted.map(\.0), ["LOCKED"])
+        XCTAssertEqual(submitted.map(\.1), ["wrong"])
+        XCTAssertEqual(session.presentation, .retryConfirmation)
+        XCTAssertEqual(session.module.name, "LOCKED")
+        XCTAssertTrue(session.cipherKey.isEmpty)
+
+        XCTAssertNil(
+            session.submit { _, _ in
+                XCTFail("A stale submit must not run")
+                return true
+            }
+        )
+        session.retry()
+        XCTAssertEqual(session.presentation, .passphrase)
+        session.cipherKey = "discarded"
+        session.cancelPassphrase()
+        XCTAssertEqual(session.presentation, .retryConfirmation)
+        XCTAssertTrue(session.cipherKey.isEmpty)
+        session.retry()
+        XCTAssertEqual(session.presentation, .passphrase)
+        XCTAssertEqual(submitted.count, 1)
+    }
+
+    /** Acceptance and decline are terminal, so stale actions cannot repeat manager or owner work. */
+    func testSessionTerminalOutcomesSettleOnce() {
+        var managerCalls = 0
+        var accepted = ModuleUnlockSession(module: lockedModule)
+        accepted.cipherKey = "secret"
+        XCTAssertEqual(
+            accepted.submit { _, _ in
+                managerCalls += 1
+                return true
+            },
+            .accepted
+        )
+        XCTAssertEqual(accepted.presentation, .completed(.accepted))
+        accepted.cipherKey = "later"
+        XCTAssertNil(
+            accepted.submit { _, _ in
+                managerCalls += 1
+                return true
+            }
+        )
+        accepted.cancelPassphrase()
+        XCTAssertEqual(managerCalls, 1)
+        XCTAssertEqual(accepted.presentation, .completed(.accepted))
+
+        var declined = ModuleUnlockSession(module: lockedModule)
+        declined.cancelPassphrase()
+        XCTAssertEqual(declined.decline(), .declined)
+        XCTAssertEqual(declined.presentation, .completed(.declined))
+        XCTAssertNil(declined.decline())
+    }
+
+    /** About covers the editor without validation and then returns to the same session. */
+    func testSessionInformationPresentationKeepsPassphraseOwnership() {
+        var session = ModuleUnlockSession(
+            module: lockedModule,
+            initialCipherKey: "persisted-key"
+        )
+        XCTAssertEqual(session.cipherKey, "persisted-key")
+        session.prepareForInformation()
+
+        XCTAssertEqual(session.presentation, .information)
+        XCTAssertEqual(session.module.name, "LOCKED")
+        XCTAssertTrue(session.cipherKey.isEmpty)
+        session.resumeAfterInformation()
+        XCTAssertEqual(session.presentation, .passphrase)
+        XCTAssertEqual(session.cipherKey, "persisted-key")
+    }
+
+    /** Explicit rekey retry restores Android's persisted `book.unlockKey` prompt value. */
+    func testSessionRetryRestoresPersistedPromptKey() {
+        var session = ModuleUnlockSession(
+            module: lockedModule,
+            initialCipherKey: "persisted-key"
+        )
+        session.cipherKey = "wrong-replacement"
+        XCTAssertNil(session.submit { _, _ in false })
+        XCTAssertEqual(session.presentation, .retryConfirmation)
+        XCTAssertTrue(session.cipherKey.isEmpty)
+
+        session.retry()
+        XCTAssertEqual(session.presentation, .passphrase)
+        XCTAssertEqual(session.cipherKey, "persisted-key")
+    }
+
+    /** Accepted, Cancel, and About commands captured by an old presenter cannot cross owners. */
+    func testOwnedSessionBoundaryRejectsStaleCommandsAfterReplacementAndDismissal() {
+        var first = ModuleUnlockSession(module: lockedModule)
+        let staleID = first.id
+        first.cipherKey = "old"
+
+        let replacementModule = ModuleInfo(
+            name: "REPLACEMENT",
+            description: "Replacement Bible",
+            category: .bible,
+            language: "en",
+            moduleDriver: "RawText",
+            isEncrypted: true,
+            isUnlocked: false
+        )
+        var owner: ModuleUnlockSession? = ModuleUnlockSession(
+            module: replacementModule,
+            initialCipherKey: "current"
+        )
+        var managerCalls = 0
+        XCTAssertFalse(
+            ModuleUnlockSession.mutateOwnedSession(&owner, expectedID: staleID) { stale in
+                _ = stale.submit { _, _ in
+                    managerCalls += 1
+                    return true
+                }
+            }
+        )
+        XCTAssertEqual(owner?.module.name, "REPLACEMENT")
+        XCTAssertEqual(owner?.cipherKey, "current")
+        XCTAssertEqual(owner?.presentation, .passphrase)
+        XCTAssertEqual(managerCalls, 0)
+
+        XCTAssertFalse(
+            ModuleUnlockSession.mutateOwnedSession(&owner, expectedID: staleID) { stale in
+                stale.cancelPassphrase()
+            }
+        )
+        XCTAssertFalse(
+            ModuleUnlockSession.mutateOwnedSession(&owner, expectedID: staleID) { stale in
+                stale.prepareForInformation()
+            }
+        )
+        XCTAssertEqual(owner?.module.name, "REPLACEMENT")
+        XCTAssertEqual(owner?.cipherKey, "current")
+        XCTAssertEqual(owner?.presentation, .passphrase)
+
+        let replacementID = owner?.id
+        owner = nil
+        if let replacementID {
+            XCTAssertFalse(
+                ModuleUnlockSession.mutateOwnedSession(&owner, expectedID: replacementID) { stale in
+                    stale.cancelPassphrase()
+                    stale.prepareForInformation()
+                }
+            )
+        } else {
+            XCTFail("Expected replacement session identity")
+        }
+        XCTAssertNil(owner)
     }
 
     /**

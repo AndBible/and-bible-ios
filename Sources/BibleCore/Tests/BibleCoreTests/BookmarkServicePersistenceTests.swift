@@ -15,6 +15,71 @@ import XCTest
 final class BookmarkServicePersistenceTests: XCTestCase {
 
     /**
+     Verifies exact generic-bookmark lookup stays scoped to Android's compound document/key query.
+
+     The fixture persists 1,000 unrelated rows, a canonically equivalent Java-distinct sibling,
+     and three exact matches. It then stages one exact-identity mutation and one deletion without a
+     save. The store boundary must return only the two visible exact rows in deterministic order.
+
+     Failure means the scoped store result collapses Java-distinct identities, includes unrelated
+     rows, changes deterministic order, or ignores caller-visible staged changes. Query-plan and
+     materialization-cost evidence is measured separately from this behavioral contract.
+     */
+    func testGenericBookmarkLookupScopesExactRowsAndMergesPendingChanges() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let store = BookmarkStore(modelContext: context)
+        let composedInitials = "Caf\u{00E9}"
+        let decomposedInitials = "Cafe\u{0301}"
+        let key = "entry"
+        XCTAssertNotEqual(Array(composedInitials.utf16), Array(decomposedInitials.utf16))
+
+        for index in 0..<1_000 {
+            context.insert(GenericBookmark(
+                key: "unrelated-\(index)",
+                bookInitials: "OTHER-\(index)",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index))
+            ))
+        }
+
+        let first = GenericBookmark(
+            id: try XCTUnwrap(UUID(uuidString: "10101010-1010-1010-1010-101010101010")),
+            key: key,
+            bookInitials: composedInitials,
+            createdAt: Date(timeIntervalSince1970: 20)
+        )
+        let deleted = GenericBookmark(
+            id: try XCTUnwrap(UUID(uuidString: "20202020-2020-2020-2020-202020202020")),
+            key: key,
+            bookInitials: composedInitials,
+            createdAt: Date(timeIntervalSince1970: 30)
+        )
+        let pendingMatch = GenericBookmark(
+            id: try XCTUnwrap(UUID(uuidString: "30303030-3030-3030-3030-303030303030")),
+            key: "before-mutation",
+            bookInitials: "BEFORE",
+            createdAt: Date(timeIntervalSince1970: 10)
+        )
+        let canonicalSibling = GenericBookmark(
+            id: try XCTUnwrap(UUID(uuidString: "40404040-4040-4040-4040-404040404040")),
+            key: key,
+            bookInitials: decomposedInitials,
+            createdAt: Date(timeIntervalSince1970: 5)
+        )
+        [first, deleted, pendingMatch, canonicalSibling].forEach(context.insert)
+        try context.save()
+
+        pendingMatch.bookInitials = composedInitials
+        pendingMatch.key = key
+        context.delete(deleted)
+
+        let matches = store.genericBookmarks(bookInitials: composedInitials, key: key)
+        XCTAssertEqual(matches.map(\.id), [pendingMatch.id, first.id])
+        XCTAssertTrue(context.hasChanges)
+    }
+
+    /**
      Verifies the Android note-content default for bookmark notes saved below the bridge layer.
      Android persists `HTML` when no explicit note content type exists, so iOS service saves must
      produce an explicit `contentType` row instead of leaving notes format implicit forever.
@@ -253,6 +318,7 @@ final class BookmarkServicePersistenceTests: XCTestCase {
         let bookmarkService = BookmarkService(store: bookmarkStore)
 
         let label = Label(name: "Prayer")
+        modelContext.insert(label)
 
         let bibleBookmark = BibleBookmark(
             kjvOrdinalStart: 1,
@@ -263,24 +329,23 @@ final class BookmarkServicePersistenceTests: XCTestCase {
             bookInitials: "KJVA",
             ordinalTrustMetadata: trustedAndroidMetadata(sourceOrdinal: 1, kjvaOrdinal: 1)
         )
+        modelContext.insert(bibleBookmark)
         bibleBookmark.primaryLabelId = label.id
         let bibleLink = BibleBookmarkToLabel(orderNumber: 0, indentLevel: 0, expandContent: false)
+        modelContext.insert(bibleLink)
         bibleLink.bookmark = bibleBookmark
         bibleLink.label = label
-        bibleBookmark.bookmarkToLabels = [bibleLink]
 
         let genericBookmark = GenericBookmark(key: "entry", bookInitials: "DICT")
+        modelContext.insert(genericBookmark)
         genericBookmark.primaryLabelId = label.id
         let genericLink = GenericBookmarkToLabel(orderNumber: 1, indentLevel: 0, expandContent: true)
+        modelContext.insert(genericLink)
         genericLink.bookmark = genericBookmark
         genericLink.label = label
-        genericBookmark.bookmarkToLabels = [genericLink]
 
-        modelContext.insert(label)
-        modelContext.insert(bibleBookmark)
-        modelContext.insert(bibleLink)
-        modelContext.insert(genericBookmark)
-        modelContext.insert(genericLink)
+        // Every disconnected model is registered before wiring each relationship through one
+        // authoritative junction edge. Assigning the inverse arrays again traps on iOS 17.
         try modelContext.save()
 
         bookmarkService.deleteLabel(id: label.id)
@@ -402,6 +467,21 @@ final class BookmarkServicePersistenceTests: XCTestCase {
             kjvaOrdinalStart: kjvaOrdinal,
             kjvaOrdinalEnd: kjvaOrdinal
         )
+    }
+
+    /** Builds a trusted Android-identity bookmark for relationship-query fixtures. */
+    private func makeTrustedBibleBookmark(id: UUID) -> BibleBookmark {
+        let bookmark = BibleBookmark(
+            kjvOrdinalStart: 4,
+            kjvOrdinalEnd: 4,
+            ordinalStart: 4,
+            ordinalEnd: 4,
+            v11n: "KJVA",
+            bookInitials: "KJVA",
+            ordinalTrustMetadata: trustedAndroidMetadata(sourceOrdinal: 4, kjvaOrdinal: 4)
+        )
+        bookmark.id = id
+        return bookmark
     }
 
     /**
@@ -648,7 +728,6 @@ final class BookmarkServicePersistenceTests: XCTestCase {
      */
     func testBookmarkScalarMutationsPersistBeforeReturningWithAutosaveDisabled() throws {
         let directory = try makeTemporaryBookmarkStoreDirectory(prefix: "BookmarkScalarMutations")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let action = EditAction(mode: .append, content: "Persisted action")
 
         let bibleWholeVerseURL = directory.appendingPathComponent("BibleWholeVerse.store")
@@ -728,7 +807,6 @@ final class BookmarkServicePersistenceTests: XCTestCase {
      */
     func testStudyPadMetadataAndRelationshipMutationsPersistWithAutosaveDisabled() throws {
         let directory = try makeTemporaryBookmarkStoreDirectory(prefix: "StudyPadMetadataMutations")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let storeURL = directory.appendingPathComponent("Bookmarks.store")
         let fixture = try seedStudyPadFixture(at: storeURL)
 
@@ -802,7 +880,6 @@ final class BookmarkServicePersistenceTests: XCTestCase {
      */
     func testStudyPadMixedReorderPersistsAsOneExplicitBatch() throws {
         let directory = try makeTemporaryBookmarkStoreDirectory(prefix: "StudyPadMixedReorder")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let storeURL = directory.appendingPathComponent("Bookmarks.store")
         let fixture = try seedStudyPadFixture(at: storeURL)
 
@@ -839,42 +916,31 @@ final class BookmarkServicePersistenceTests: XCTestCase {
     }
 
     /**
-     Verifies deleting a StudyPad text row and normalizing the remaining mixed order is one durable
-     store operation.
+     Verifies deleting a StudyPad text row and normalizing the remaining mixed order is durable
+     after the store operation returns successfully.
 
      The fixture deliberately contains sparse order numbers and a detached text payload. After an
-     autosave-disabled delete call, a fresh container must see the target and payload removed and
-     the Bible, generic, and surviving text rows renumbered to `0...2`. Failure means a process exit
-     can persist Android's delete while losing the required contiguous-order repair.
+     autosave-disabled delete call, the context must have no pending changes and a fresh container
+     must see the target and payload removed and the Bible, generic, and surviving text rows
+     renumbered to `0...2`. Failure means the successful operation returned before its complete
+     durable outcome was visible to a new store owner.
      */
     func testStudyPadDeleteAndOrderNormalizationPersistTogether() throws {
         let directory = try makeTemporaryBookmarkStoreDirectory(prefix: "StudyPadDeleteNormalization")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let storeURL = directory.appendingPathComponent("Bookmarks.store")
         let fixture = try seedStudyPadFixture(at: storeURL)
 
         try withPersistentBookmarkContext(at: storeURL) { context, service in
-            let saveExpectation = expectation(
-                description: "StudyPad deletion and normalization share one save"
-            )
-            saveExpectation.expectedFulfillmentCount = 1
-            saveExpectation.assertForOverFulfill = true
-            let saveObserver = NotificationCenter.default.addObserver(
-                forName: ModelContext.willSave,
-                object: context,
-                queue: nil
-            ) { _ in
-                saveExpectation.fulfill()
-            }
-            defer { NotificationCenter.default.removeObserver(saveObserver) }
-
             let result = try XCTUnwrap(service.deleteStudyPadEntry(id: fixture.deletedEntryID))
             XCTAssertEqual(result.0, fixture.deletedEntryID)
             XCTAssertEqual(result.1, fixture.labelID)
             XCTAssertEqual(result.2.map(\.orderNumber), [0])
             XCTAssertEqual(result.3.map(\.orderNumber), [1])
             XCTAssertEqual(result.4.map(\.orderNumber), [2])
-            wait(for: [saveExpectation], timeout: 1)
+            XCTAssertFalse(
+                context.hasChanges,
+                "StudyPad deletion and mixed-order normalization must commit before returning."
+            )
         }
 
         try withPersistentBookmarkContext(at: storeURL) { context, service in
@@ -902,6 +968,174 @@ final class BookmarkServicePersistenceTests: XCTestCase {
         }
     }
 
+    /**
+     Verifies label-scoped StudyPad and junction queries retain live-context semantics and payloads.
+
+     Saved rows for another label must never escape the database predicate. A matching saved entry
+     is deleted and replacements are inserted without saving so the test also pins the iOS 17
+     pending-change contract used by reader annotation, AI, count, and reorder callers.
+     */
+    func testLabelScopedQueriesPreservePendingChangesOrderingAndModelFidelity() throws {
+        let context = ModelContext(try makeBookmarkRestoreModelContainer())
+        context.autosaveEnabled = false
+        let store = BookmarkStore(modelContext: context)
+        let target = Label(name: "Target")
+        let other = Label(name: "Other")
+        let deletedUserLabel = Label(name: "Alpha")
+        let systemLabel = Label(id: Label.speakLabelId, name: Label.speakLabelName)
+        context.insert(target)
+        context.insert(other)
+        context.insert(deletedUserLabel)
+        context.insert(systemLabel)
+
+        let deletedEntry = StudyPadTextEntry(orderNumber: 8, indentLevel: 1, contentType: "HTML")
+        deletedEntry.label = target
+        let survivingEntry = StudyPadTextEntry(orderNumber: 12, indentLevel: 2, contentType: "HTML")
+        survivingEntry.label = target
+        let otherEntry = StudyPadTextEntry(orderNumber: 0, indentLevel: 9, contentType: "HTML")
+        otherEntry.label = other
+
+        let deletedBible = makeTrustedBibleBookmark(id: UUID())
+        let survivingBible = makeTrustedBibleBookmark(id: UUID())
+        let otherBible = makeTrustedBibleBookmark(id: UUID())
+        [deletedBible, survivingBible, otherBible].forEach(context.insert)
+        let deletedBibleLink = BibleBookmarkToLabel(orderNumber: 8, indentLevel: 1, expandContent: false)
+        deletedBibleLink.bookmark = deletedBible
+        deletedBibleLink.label = target
+        let survivingBibleLink = BibleBookmarkToLabel(orderNumber: 12, indentLevel: 2, expandContent: true)
+        survivingBibleLink.bookmark = survivingBible
+        survivingBibleLink.label = target
+        let otherBibleLink = BibleBookmarkToLabel(orderNumber: 0, indentLevel: 9, expandContent: false)
+        otherBibleLink.bookmark = otherBible
+        otherBibleLink.label = other
+
+        let deletedGeneric = GenericBookmark(key: "deleted", bookInitials: "DICT")
+        let survivingGeneric = GenericBookmark(key: "surviving", bookInitials: "DICT")
+        let otherGeneric = GenericBookmark(key: "other", bookInitials: "DICT")
+        [deletedGeneric, survivingGeneric, otherGeneric].forEach(context.insert)
+        let deletedGenericLink = GenericBookmarkToLabel(orderNumber: 8, indentLevel: 1, expandContent: false)
+        deletedGenericLink.bookmark = deletedGeneric
+        deletedGenericLink.label = target
+        let survivingGenericLink = GenericBookmarkToLabel(orderNumber: 12, indentLevel: 2, expandContent: true)
+        survivingGenericLink.bookmark = survivingGeneric
+        survivingGenericLink.label = target
+        let otherGenericLink = GenericBookmarkToLabel(orderNumber: 0, indentLevel: 9, expandContent: false)
+        otherGenericLink.bookmark = otherGeneric
+        otherGenericLink.label = other
+
+        [deletedEntry, survivingEntry, otherEntry].forEach(context.insert)
+        [deletedBibleLink, survivingBibleLink, otherBibleLink].forEach(context.insert)
+        [deletedGenericLink, survivingGenericLink, otherGenericLink].forEach(context.insert)
+        try context.save()
+
+        context.delete(deletedUserLabel)
+        context.delete(deletedEntry)
+        context.delete(deletedBibleLink)
+        context.delete(deletedGenericLink)
+
+        let pendingUserLabel = Label(name: "Beta")
+        context.insert(pendingUserLabel)
+
+        let promptID = UUID()
+        let pendingEntry = StudyPadTextEntry(orderNumber: 4, indentLevel: 3, contentType: "MARKDOWN")
+        pendingEntry.sourcePromptId = promptID
+        pendingEntry.label = target
+        let pendingText = StudyPadTextEntryText(
+            studyPadTextEntryId: pendingEntry.id,
+            text: "Pending complete payload"
+        )
+        pendingEntry.textEntry = pendingText
+        pendingText.entry = pendingEntry
+        context.insert(pendingEntry)
+        context.insert(pendingText)
+
+        let pendingBible = makeTrustedBibleBookmark(id: UUID())
+        context.insert(pendingBible)
+        let pendingBibleLink = BibleBookmarkToLabel(orderNumber: 4, indentLevel: 3, expandContent: false)
+        pendingBibleLink.bookmark = pendingBible
+        pendingBibleLink.label = target
+        context.insert(pendingBibleLink)
+
+        let pendingGeneric = GenericBookmark(key: "pending", bookInitials: "DICT")
+        context.insert(pendingGeneric)
+        let pendingGenericLink = GenericBookmarkToLabel(orderNumber: 5, indentLevel: 4, expandContent: false)
+        pendingGenericLink.bookmark = pendingGeneric
+        pendingGenericLink.label = target
+        context.insert(pendingGenericLink)
+
+        XCTAssertTrue(store.label(id: pendingUserLabel.id) === pendingUserLabel)
+        XCTAssertEqual(store.labels().map(\.name), ["Beta", "Other", "Target"])
+        XCTAssertEqual(Set(store.labels(includeSystem: true).map(\.id)), [
+            target.id,
+            other.id,
+            systemLabel.id,
+            pendingUserLabel.id,
+        ])
+
+        let entries = store.studyPadEntries(labelId: target.id)
+        XCTAssertEqual(entries.map(\.id), [pendingEntry.id, survivingEntry.id])
+        XCTAssertEqual(entries.first?.indentLevel, 3)
+        XCTAssertEqual(entries.first?.contentType, "MARKDOWN")
+        XCTAssertEqual(entries.first?.sourcePromptId, promptID)
+        XCTAssertEqual(entries.first?.textEntry?.text, "Pending complete payload")
+
+        XCTAssertTrue(store.bibleBookmarkToLabel(
+            bookmarkId: pendingBible.id,
+            labelId: target.id
+        ) === pendingBibleLink)
+        XCTAssertNil(store.bibleBookmarkToLabel(
+            bookmarkId: deletedBible.id,
+            labelId: target.id
+        ))
+        let bibleLinks = store.bibleBookmarkToLabels(labelId: target.id)
+        XCTAssertEqual(Set(bibleLinks.compactMap(\.bookmark?.id)), [pendingBible.id, survivingBible.id])
+        XCTAssertEqual(pendingBibleLink.orderNumber, 4)
+        XCTAssertEqual(pendingBibleLink.indentLevel, 3)
+        XCTAssertFalse(pendingBibleLink.expandContent)
+
+        XCTAssertTrue(store.genericBookmarkToLabel(
+            bookmarkId: pendingGeneric.id,
+            labelId: target.id
+        ) === pendingGenericLink)
+        XCTAssertNil(store.genericBookmarkToLabel(
+            bookmarkId: deletedGeneric.id,
+            labelId: target.id
+        ))
+        let genericLinks = store.genericBookmarkToLabels(labelId: target.id)
+        XCTAssertEqual(Set(genericLinks.compactMap(\.bookmark?.id)), [pendingGeneric.id, survivingGeneric.id])
+        XCTAssertEqual(pendingGenericLink.orderNumber, 5)
+        XCTAssertEqual(pendingGenericLink.indentLevel, 4)
+        XCTAssertFalse(pendingGenericLink.expandContent)
+        XCTAssertTrue(context.hasChanges)
+    }
+
+    /**
+     Verifies system-label bootstrap is inert after canonical rows already exist.
+
+     An unrelated user-label insert is intentionally pending. Bootstrap must query only reserved
+     candidates and avoid a save when there is no repair, leaving the caller's unrelated mutation
+     pending instead of publishing it as a side effect.
+     */
+    func testEnsureSystemLabelsNoOpDoesNotSaveUnrelatedPendingChanges() throws {
+        let context = ModelContext(try makeBookmarkRestoreModelContainer())
+        context.autosaveEnabled = false
+        [
+            Label(id: Label.speakLabelId, name: Label.speakLabelName),
+            Label(id: Label.unlabeledId, name: Label.unlabeledName),
+            Label(id: Label.paragraphBreakLabelId, name: Label.paragraphBreakLabelName),
+        ].forEach(context.insert)
+        try context.save()
+
+        let pendingUserLabel = Label(name: "Unsaved user work")
+        context.insert(pendingUserLabel)
+        XCTAssertTrue(context.hasChanges)
+
+        BookmarkService(store: BookmarkStore(modelContext: context)).ensureSystemLabels()
+
+        XCTAssertTrue(context.hasChanges)
+        XCTAssertTrue(context.insertedModelsArray.contains { $0 === pendingUserLabel })
+    }
+
     /// Old timestamp used to prove mutation methods persist their `lastUpdatedOn` changes.
     private static let persistenceBaselineDate = Date(timeIntervalSince1970: 1)
 
@@ -913,6 +1147,9 @@ final class BookmarkServicePersistenceTests: XCTestCase {
      - Side effects: Creates one directory; the calling test removes it with `defer`.
      - Failure modes: Rethrows filesystem directory-creation errors.
      */
+    // Retain these files in the runner temporary sandbox until process cleanup. SwiftData may
+    // retain SQLite handles after the last test-owned context leaves scope; unlinking an active
+    // WAL/store during teardown causes database-integrity warnings in subsequent tests.
     private func makeTemporaryBookmarkStoreDirectory(prefix: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
@@ -1038,6 +1275,7 @@ final class BookmarkServicePersistenceTests: XCTestCase {
         var fixture: PersistentStudyPadFixtureIDs?
         try withPersistentBookmarkContext(at: storeURL) { context, _ in
             let label = Label(name: "Durable StudyPad")
+            context.insert(label)
             let bibleBookmark = BibleBookmark(
                 kjvOrdinalStart: 4,
                 kjvOrdinalEnd: 4,
@@ -1047,57 +1285,51 @@ final class BookmarkServicePersistenceTests: XCTestCase {
                 bookInitials: "KJV",
                 ordinalTrustMetadata: trustedAndroidMetadata(sourceOrdinal: 4, kjvaOrdinal: 4)
             )
+            context.insert(bibleBookmark)
             bibleBookmark.lastUpdatedOn = Self.persistenceBaselineDate
             let bibleLink = BibleBookmarkToLabel(
                 orderNumber: 4,
                 indentLevel: 0,
                 expandContent: true
             )
+            context.insert(bibleLink)
             bibleLink.bookmark = bibleBookmark
             bibleLink.label = label
-            bibleBookmark.bookmarkToLabels = [bibleLink]
 
             let genericBookmark = GenericBookmark(key: "durable-entry", bookInitials: "DICT")
+            context.insert(genericBookmark)
             genericBookmark.lastUpdatedOn = Self.persistenceBaselineDate
             let genericLink = GenericBookmarkToLabel(
                 orderNumber: 8,
                 indentLevel: 0,
                 expandContent: false
             )
+            context.insert(genericLink)
             genericLink.bookmark = genericBookmark
             genericLink.label = label
-            genericBookmark.bookmarkToLabels = [genericLink]
 
             let deletedEntry = StudyPadTextEntry(orderNumber: 2, indentLevel: 0, contentType: "HTML")
+            context.insert(deletedEntry)
             deletedEntry.label = label
             let deletedText = StudyPadTextEntryText(
                 studyPadTextEntryId: deletedEntry.id,
                 text: "Delete me"
             )
-            deletedEntry.textEntry = deletedText
+            context.insert(deletedText)
             deletedText.entry = deletedEntry
 
             let survivingEntry = StudyPadTextEntry(orderNumber: 12, indentLevel: 1, contentType: "HTML")
+            context.insert(survivingEntry)
             survivingEntry.label = label
             let survivingText = StudyPadTextEntryText(
                 studyPadTextEntryId: survivingEntry.id,
                 text: "Keep me"
             )
-            survivingEntry.textEntry = survivingText
+            context.insert(survivingText)
             survivingText.entry = survivingEntry
 
-            label.bibleBookmarkToLabels = [bibleLink]
-            label.genericBookmarkToLabels = [genericLink]
-            label.studyPadEntries = [deletedEntry, survivingEntry]
-            context.insert(label)
-            context.insert(bibleBookmark)
-            context.insert(bibleLink)
-            context.insert(genericBookmark)
-            context.insert(genericLink)
-            context.insert(deletedEntry)
-            context.insert(deletedText)
-            context.insert(survivingEntry)
-            context.insert(survivingText)
+            // Register every disconnected model before assigning each relationship through one
+            // authoritative child edge. Writing both sides of an inverse traps on iOS 17.
             try context.save()
 
             fixture = PersistentStudyPadFixtureIDs(

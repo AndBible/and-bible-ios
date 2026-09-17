@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import SwordKit
 
@@ -10,6 +11,99 @@ import SwordKit
  testable so the SwiftUI overlay cannot drift back toward the full document picker sheet.
  */
 struct BibleReaderQuickModuleSelectorPresentation {
+    /** Exact installed or local document selected by Android's shared toolbar popup. */
+    enum Selection {
+        /** Exact immutable owner identity used by SwiftUI and presentation equality. */
+        enum Identity: Hashable {
+            /// Java-exact installed initials.
+            case installed(SwordJavaExactStringIdentity)
+
+            /// Exact EPUB package, generation, and registered initials.
+            case epub(
+                identifier: SwordJavaExactStringIdentity,
+                generationIdentifier: SwordJavaExactStringIdentity,
+                initials: SwordJavaExactStringIdentity
+            )
+
+            /// Exact persisted My Documents owner and its registered initials.
+            case myDocument(id: UUID, initials: SwordJavaExactStringIdentity)
+        }
+
+        /// Native or SQLite installed module.
+        case installed(ModuleInfo)
+
+        /// Imported EPUB registered as an Android general book.
+        case epub(
+            identifier: String,
+            generationIdentifier: String,
+            initials: String,
+            title: String,
+            language: String
+        )
+
+        /// Persisted My Documents collection registered as an Android general book.
+        case myDocument(id: UUID, initials: String, name: String, language: String)
+
+        /// Canonical registered identity used for row state and authoritative dispatch.
+        var name: String {
+            switch self {
+            case .installed(let module): return module.name
+            case .epub(_, _, let initials, _, _): return initials
+            case .myDocument(_, let initials, _, _): return initials
+            }
+        }
+
+        /// Typed Java-exact identity for row diffing and authorization-significant equality.
+        var identity: Identity {
+            switch self {
+            case .installed(let module):
+                return .installed(SwordJavaExactStringIdentity(module.name))
+            case .epub(let identifier, let generationIdentifier, let initials, _, _):
+                return .epub(
+                    identifier: SwordJavaExactStringIdentity(identifier),
+                    generationIdentifier: SwordJavaExactStringIdentity(generationIdentifier),
+                    initials: SwordJavaExactStringIdentity(initials)
+                )
+            case .myDocument(let id, let initials, _, _):
+                return .myDocument(
+                    id: id,
+                    initials: SwordJavaExactStringIdentity(initials)
+                )
+            }
+        }
+
+        /// Immutable Android book metadata used by the common row renderer and ordering contract.
+        var presentationModule: ModuleInfo {
+            switch self {
+            case .installed(let module):
+                return module
+            case .epub(_, _, let initials, let title, let language):
+                return ModuleInfo(
+                    name: initials,
+                    description: title,
+                    category: .generalBook,
+                    language: language
+                )
+            case .myDocument(_, let initials, let name, let language):
+                return ModuleInfo(
+                    name: initials,
+                    description: name,
+                    category: .generalBook,
+                    language: language
+                )
+            }
+        }
+
+        /// Android popup abbreviation for the compact visible row.
+        var abbreviation: String {
+            switch self {
+            case .installed(let module): return module.name
+            case .epub(_, _, _, let title, _): return title
+            case .myDocument(_, let initials, _, _): return initials
+            }
+        }
+    }
+
     /**
      One rendered row in the quick selector popup.
 
@@ -18,7 +112,10 @@ struct BibleReaderQuickModuleSelectorPresentation {
      behavior and visible output.
      */
     struct Row: Identifiable, Equatable {
-        /// Installed SWORD module represented by this row.
+        /// Exact document selection reauthorized by the owning reader controller.
+        let selection: Selection
+
+        /// Installed metadata or equivalent local general-book presentation metadata.
         let module: ModuleInfo
 
         /// Compact Android-parity title, formatted as abbreviation plus language code.
@@ -27,8 +124,26 @@ struct BibleReaderQuickModuleSelectorPresentation {
         /// Whether the row can be selected. The current document is visible but disabled.
         let isEnabled: Bool
 
-        /// Stable row identity derived from the module abbreviation.
-        var id: String { module.name }
+        /// Stable exact owner identity retained across SwiftUI row diffing.
+        var id: Selection.Identity { selection.identity }
+
+        /** Creates the existing installed-module row without changing Bible callers. */
+        init(module: ModuleInfo, title: String, isEnabled: Bool) {
+            self.init(
+                selection: .installed(module),
+                module: module,
+                title: title,
+                isEnabled: isEnabled
+            )
+        }
+
+        /** Creates one common installed/local document row. */
+        init(selection: Selection, module: ModuleInfo, title: String, isEnabled: Bool) {
+            self.selection = selection
+            self.module = module
+            self.title = title
+            self.isEnabled = isEnabled
+        }
 
         /**
          Compares rows by selector-visible identity and behavior.
@@ -41,7 +156,7 @@ struct BibleReaderQuickModuleSelectorPresentation {
          - Failure modes: none.
          */
         static func == (lhs: Row, rhs: Row) -> Bool {
-            lhs.module.name == rhs.module.name &&
+            lhs.selection.identity == rhs.selection.identity &&
                 lhs.title == rhs.title &&
                 lhs.isEnabled == rhs.isEnabled
         }
@@ -76,18 +191,40 @@ struct BibleReaderQuickModuleSelectorPresentation {
      - Failure modes: none; an empty input returns an empty row list.
      */
     static func rows(for modules: [ModuleInfo], activeModuleName: String?) -> [Row] {
-        modules
+        rows(
+            for: modules.map(Selection.installed),
+            activeModuleName: activeModuleName
+        )
+    }
+
+    /** Builds common Android rows for installed, EPUB, and My Documents selections. */
+    static func rows(for selections: [Selection], activeModuleName: String?) -> [Row] {
+        selections
             .sorted { lhs, rhs in
-                if lhs.language != rhs.language {
-                    return lhs.language < rhs.language
+                let left = lhs.presentationModule
+                let right = rhs.presentationModule
+                let leftLanguage = SwordJavaExactStringIdentity(left.language)
+                let rightLanguage = SwordJavaExactStringIdentity(right.language)
+                if leftLanguage != rightLanguage {
+                    return leftLanguage.utf16CodeUnits.lexicographicallyPrecedes(
+                        rightLanguage.utf16CodeUnits
+                    )
                 }
-                return lhs.name < rhs.name
+                return SwordJavaExactStringIdentity(lhs.abbreviation)
+                    .utf16CodeUnits.lexicographicallyPrecedes(
+                        SwordJavaExactStringIdentity(rhs.abbreviation).utf16CodeUnits
+                    )
             }
-            .map { module in
-                Row(
+            .map { selection in
+                let module = selection.presentationModule
+                return Row(
+                    selection: selection,
                     module: module,
-                    title: "\(module.name) (\(module.language))",
-                    isEnabled: module.name != activeModuleName
+                    title: "\(selection.abbreviation) (\(module.language))",
+                    isEnabled: activeModuleName.map {
+                        SwordJavaExactStringIdentity(selection.name)
+                            != SwordJavaExactStringIdentity($0)
+                    } ?? true
                 )
             }
     }
@@ -105,17 +242,111 @@ struct BibleReaderQuickModuleSelectorPresentation {
        for the two-document shortcut.
      */
     static func action(for modules: [ModuleInfo], activeModuleName: String?) -> Action {
-        let rows = rows(for: modules, activeModuleName: activeModuleName)
+        action(
+            for: modules.map(Selection.installed),
+            activeModuleName: activeModuleName
+        )
+    }
+
+    /** Resolves the shared Android action over installed and local registered books. */
+    static func action(for selections: [Selection], activeModuleName: String?) -> Action {
+        let rows = rows(for: selections, activeModuleName: activeModuleName)
         guard !rows.isEmpty else {
             return .none
         }
         if rows.count == 2 {
-            guard let directRow = rows.first(where: { $0.module.name != activeModuleName }) ?? rows.first else {
+            guard let directRow = rows.first(where: \.isEnabled) ?? rows.first else {
                 return .none
             }
             return .switchDirectly(directRow)
         }
         return .showPopup(rows)
+    }
+}
+
+/**
+ Resolves Android's retained suggested-Bible identity without substituting another installed Bible.
+
+ Android's `DocumentControl.suggestedBible` returns the active window's retained Bible when a
+ non-Bible document is visible. Its source inventory is inclusive, so an installed locked identity
+ remains the target. The reader owns the subsequent access preflight and any explicit iOS unlock
+ adaptation.
+
+ This policy performs no I/O or state mutation. Missing, non-Bible, and non-exact identities return
+ `nil`; callers must leave the visible document unchanged in those cases.
+ */
+struct BibleReaderSuggestedBibleSelectionPolicy {
+    /**
+     Resolves the exact retained Bible from one inclusive installed snapshot.
+
+     - Parameters:
+       - retainedModuleName: Pane-scoped Bible initials retained while another category is visible.
+       - installedModules: Inclusive installed inventory, including locked Bible rows.
+     - Returns: The exact installed Bible row, or `nil` without a fallback substitution.
+     - Side effects: None.
+     - Failure modes: Missing, case-different, canonically equivalent, non-Bible, and uninstalled
+       identities return `nil`.
+     */
+    static func module(
+        retainedModuleName: String?,
+        installedModules: [ModuleInfo]
+    ) -> ModuleInfo? {
+        guard let retainedModuleName else { return nil }
+        return installedModules.first {
+            $0.category == .bible
+                && SwordJavaStringIdentity.equals($0.name, retainedModuleName)
+        }
+    }
+}
+
+/**
+ Binds one suggested-Bible unlock action to its captured pane, controller, module, and credential
+ session.
+
+ The value is an authorization check around the existing `ModuleUnlockSession`; it introduces no
+ additional dialog states. Reader callbacks re-evaluate it immediately before manager key mutation
+ and again before the accepted switch, preventing a delayed action from targeting a replacement
+ controller or a newly retained Bible.
+ */
+struct BibleReaderSuggestedBibleUnlockAuthorization {
+    /// Window that owned the non-Bible toolbar action.
+    let windowID: UUID
+
+    /// Exact controller instance registered when the action began.
+    let controllerID: ObjectIdentifier
+
+    /// Exact UTF-16 module identity retained by the pane and credential session.
+    let moduleIdentity: SwordJavaExactStringIdentity
+
+    /// Existing credential-session identity captured when the prompt was created.
+    let sessionID: ModuleUnlockSession.ID
+
+    /**
+     Checks whether a rendered credential action still belongs to its original reader intent.
+
+     - Parameters:
+       - activeWindowID: Window currently accepting reader toolbar actions.
+       - registeredControllerID: Controller currently registered for `windowID`.
+       - retainedModuleName: Bible identity currently retained by that window's `PageManager`.
+       - sessionModuleName: Module carried by the currently bound `ModuleUnlockSession`.
+       - presentedSessionID: Identity of the currently bound credential session.
+     - Returns: `true` only when every captured owner and exact module boundary still matches.
+     - Side effects: None.
+     - Failure modes: Missing or replaced owners and any exact UTF-16 identity mismatch return
+       `false` before a caller performs manager or pane mutation.
+     */
+    func authorizes(
+        activeWindowID: UUID?,
+        registeredControllerID: ObjectIdentifier?,
+        retainedModuleName: String?,
+        sessionModuleName: String,
+        presentedSessionID: ModuleUnlockSession.ID
+    ) -> Bool {
+        activeWindowID == windowID
+            && registeredControllerID == controllerID
+            && retainedModuleName.map(SwordJavaExactStringIdentity.init) == moduleIdentity
+            && SwordJavaExactStringIdentity(sessionModuleName) == moduleIdentity
+            && presentedSessionID == sessionID
     }
 }
 
@@ -136,8 +367,8 @@ struct BibleReaderQuickModuleSelector: View {
     /**
      Sorted rows to render in Android quick-selector order.
 
-     The parent computes these rows from installed Bible modules so the view remains a stateless
-     renderer. Empty arrays render no buttons.
+     The parent computes these rows from authorized installed or local documents so the view remains
+     a stateless renderer. Empty arrays render no buttons.
      */
     let rows: [BibleReaderQuickModuleSelectorPresentation.Row]
 
@@ -164,10 +395,10 @@ struct BibleReaderQuickModuleSelector: View {
     /**
      Selection callback for enabled rows.
 
-     - Side effects: The parent is expected to dismiss the popup and switch the pane's Bible module.
+     - Side effects: The parent is expected to dismiss the popup and switch the exact document.
      - Failure modes: Disabled rows never call this closure.
      */
-    let onSelect: (ModuleInfo) -> Void
+    let onSelect: (BibleReaderQuickModuleSelectorPresentation.Selection) -> Void
 
     /**
      Creates a stateless quick-selector popup renderer.
@@ -177,7 +408,8 @@ struct BibleReaderQuickModuleSelector: View {
        - colorScheme: Current app color scheme used for the shared popup elevation treatment.
        - surfacePalette: Reader/workspace colors inherited from the toolbar's owning pane.
        - maximumHeight: Visible viewport for the popup; long lists scroll within this height.
-       - accessibilityIdentifier: Stable identifier for the popup container.
+       - accessibilityIdentifier: Stable identifier for the popup container; the real scroll
+         surface appends `ScrollView` for semantic accessibility actions.
        - rowAccessibilityIdentifierPrefix: Stable identifier prefix for row controls.
        - onSelect: Callback invoked only for enabled module rows.
      - Side effects: none at initialization; row taps later invoke `onSelect`.
@@ -190,7 +422,7 @@ struct BibleReaderQuickModuleSelector: View {
         maximumHeight: CGFloat = .infinity,
         accessibilityIdentifier: String = "readerBibleQuickSelector",
         rowAccessibilityIdentifierPrefix: String = "readerBibleQuickSelectorRow",
-        onSelect: @escaping (ModuleInfo) -> Void
+        onSelect: @escaping (BibleReaderQuickModuleSelectorPresentation.Selection) -> Void
     ) {
         self.rows = rows
         self.colorScheme = colorScheme
@@ -229,6 +461,8 @@ struct BibleReaderQuickModuleSelector: View {
                 }
             }
             .frame(height: popupHeight)
+            .accessibilityIdentifier("\(accessibilityIdentifier)ScrollView")
+            .accessibilityElement(children: .contain)
         }
     }
 
@@ -252,7 +486,7 @@ struct BibleReaderQuickModuleSelector: View {
             isEnabled: row.isEnabled
         ) {
             guard row.isEnabled else { return }
-            onSelect(row.module)
+            onSelect(row.selection)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: Self.rowHeight, alignment: .center)

@@ -116,7 +116,9 @@ struct BibleReaderSplitContent<Pane: View>: View {
                 : AnyLayout(VStackLayout(spacing: 0))
 
             // A shared AnyLayout/ForEach identity lets legitimate rotations change axis without
-            // reconstructing pane representables or their focused WebView sessions.
+            // reconstructing pane representables or their focused WebView sessions. The nested
+            // object identity reconstructs only when a refreshed graph replaces the Window object
+            // while preserving its stable persisted UUID.
             stack {
                 ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
                     let weightedExtent = windows.count > 1
@@ -125,6 +127,7 @@ struct BibleReaderSplitContent<Pane: View>: View {
                         )
                         : nil
                     pane(window)
+                        .id(ObjectIdentifier(window))
                         .frame(
                             width: isHorizontal ? weightedExtent : nil,
                             height: isHorizontal ? nil : weightedExtent

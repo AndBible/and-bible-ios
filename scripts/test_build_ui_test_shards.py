@@ -82,8 +82,12 @@ class BuildUITestShardsTests(unittest.TestCase):
             manifest_path.write_text(
                 json.dumps(
                     {
-                        "AndBibleUITests/testAlpha()": 12.5,
-                        "testBeta()": 4.0,
+                        "schema_version": 1,
+                        "provenance": {"sources": [{"kind": "fixture"}]},
+                        "timings": {
+                            "AndBibleUITests/testAlpha()": 12.5,
+                            "testBeta()": 4.0,
+                        },
                     }
                 )
             )
@@ -105,9 +109,29 @@ class BuildUITestShardsTests(unittest.TestCase):
     def test_load_timing_manifest_rejects_unknown_identifier_formats(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             manifest_path = Path(temp_dir) / "timings.json"
-            manifest_path.write_text(json.dumps({"not-a-test-id": 12.5}))
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "provenance": {"sources": [{"kind": "fixture"}]},
+                        "timings": {"not-a-test-id": 12.5},
+                    }
+                )
+            )
 
             with self.assertRaisesRegex(ValueError, "Invalid timing manifest key 'not-a-test-id'"):
+                load_timing_manifest(
+                    manifest_path,
+                    test_target="AndBibleUITests",
+                    test_case_class="AndBibleUITests",
+                )
+
+    def test_load_timing_manifest_rejects_unprovenanced_legacy_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "timings.json"
+            manifest_path.write_text(json.dumps({"testAlpha": 12.5}))
+
+            with self.assertRaisesRegex(ValueError, "schema_version 1"):
                 load_timing_manifest(
                     manifest_path,
                     test_target="AndBibleUITests",

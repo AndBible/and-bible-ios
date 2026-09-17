@@ -16,7 +16,7 @@ import UniformTypeIdentifiers
 
  Data dependencies:
  - queried Android label models and localized presentation names
- - `WorkspaceLabelConfigurationService` for atomic bookmark/workspace persistence
+ - `WorkspaceLabelConfigurationService` for one isolated journaled save
  - owner-provided reader/workspace palette
 
  Side effects:
@@ -42,6 +42,9 @@ struct LabelAssignmentView: View {
 
     /// Bible and generic bookmark identities receiving the exact selected-label set.
     private let bookmarkIDs: [UUID]
+
+    /// Explicit Android caller contract; bookmark count cannot distinguish reader from list.
+    private let assignmentIntent: BookmarkLabelAssignmentIntent
 
     /// Active workspace whose auto-assignment state is edited with this route.
     private let workspace: Workspace?
@@ -96,6 +99,7 @@ struct LabelAssignmentView: View {
         onDismiss: (() -> Void)? = nil
     ) {
         bookmarkIDs = [bookmarkId]
+        assignmentIntent = .reader
         self.workspace = workspace
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
@@ -119,6 +123,7 @@ struct LabelAssignmentView: View {
         onDismiss: (() -> Void)? = nil
     ) {
         self.bookmarkIDs = bookmarkIDs
+        assignmentIntent = .bookmarkList
         self.workspace = workspace
         self.surfacePalette = surfacePalette
         self.onDismiss = onDismiss
@@ -427,7 +432,8 @@ struct LabelAssignmentView: View {
             let service = WorkspaceLabelConfigurationService(modelContext: modelContext)
             let snapshot = try service.bookmarkLabelAssignmentSnapshot(
                 bookmarkIDs: bookmarkIDs,
-                workspaceID: workspace?.id
+                workspaceID: workspace?.id,
+                intent: assignmentIntent
             )
             selectedLabelIDs = snapshot.selectedLabelIDs
             primaryLabelID = snapshot.primaryLabelID
@@ -585,7 +591,8 @@ struct LabelAssignmentView: View {
                     favouriteValues: favouriteValues,
                     autoAssignLabelIDs: autoAssignLabelIDs,
                     autoAssignPrimaryLabelID: autoAssignPrimaryLabelID,
-                    workspaceID: workspace?.id
+                    workspaceID: workspace?.id,
+                    intent: assignmentIntent
                 )
             isCommitting = false
             close()

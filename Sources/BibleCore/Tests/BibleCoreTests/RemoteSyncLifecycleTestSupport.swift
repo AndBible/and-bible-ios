@@ -128,6 +128,164 @@ final class MockRemoteSyncLifecycleSynchronizer: RemoteSyncCategorySynchronizing
     }
 }
 
+/**
+ Suspends the first lifecycle category operation until a test explicitly releases it.
+
+ The main-actor fake exposes continuation-driven observation so retirement tests can prove a drain
+ boundary without sleeps or polling. It records every attempted category and returns successful
+ reports or a configured deterministic error after release; interactive entry points are unsupported
+ because these tests exercise the shared admission boundary through the lifecycle sweep.
+ */
+@MainActor
+final class SuspendedRemoteSyncLifecycleSynchronizer: RemoteSyncCategorySynchronizing {
+    /// Deterministic failure available for exercising retirement after a suspended throw.
+    enum TestError: Error {
+        /// The held category fails after its continuation is released.
+        case failureAfterRelease
+    }
+
+    /// Categories admitted by the lifecycle service, in execution order.
+    private(set) var synchronizeCalls: [RemoteSyncCategory] = []
+
+    /// When true, the first held category throws after explicit release.
+    var failsAfterRelease = false
+
+    private var shouldSuspendNextCall = true
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /**
+     Waits until the synchronizer has entered its suspended category operation.
+
+     - Side effects: Retains the caller continuation until synchronization starts.
+     - Failure modes: This helper does not time out; a missing production call leaves the test pending.
+     */
+    func waitUntilStarted() async {
+        if releaseContinuation != nil {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startedWaiters.append(continuation)
+        }
+    }
+
+    /**
+     Releases the suspended category operation exactly once.
+
+     - Side effects: Resumes and clears the retained synchronization continuation.
+     - Failure modes: Calling before suspension or after release is a no-op.
+     */
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    /**
+     Records a category, suspends the first call, and returns a deterministic success report.
+
+     - Parameters:
+       - category: Category admitted by the lifecycle service.
+       - modelContext: Unused context whose lifetime is intentionally held across suspension.
+       - settingsStore: Unused store whose lifetime is intentionally held across suspension.
+     - Returns: A successful synchronization outcome after explicit release.
+     - Side effects: Records the category and retains a continuation for the first call.
+     - Failure modes: Throws ``TestError.failureAfterRelease`` when configured. Task cancellation does
+       not release the continuation, matching the noncooperative-I/O boundary under test.
+     */
+    func synchronize(
+        _ category: RemoteSyncCategory,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncSynchronizationOutcome {
+        synchronizeCalls.append(category)
+        if shouldSuspendNextCall {
+            shouldSuspendNextCall = false
+            await withCheckedContinuation { continuation in
+                releaseContinuation = continuation
+                let waiters = startedWaiters
+                startedWaiters.removeAll()
+                for waiter in waiters {
+                    waiter.resume()
+                }
+            }
+            if failsAfterRelease {
+                throw TestError.failureAfterRelease
+            }
+        }
+        return .synchronized(makeLifecycleSyncReport(for: category))
+    }
+
+    /** Unsupported interactive path for lifecycle retirement tests. */
+    func adoptRemoteFolderAndSynchronize(
+        for category: RemoteSyncCategory,
+        remoteFolderID: String,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
+        preconditionFailure("Interactive adoption is outside this fake's contract")
+    }
+
+    /** Unsupported interactive path for lifecycle retirement tests. */
+    func createRemoteFolderAndSynchronize(
+        for category: RemoteSyncCategory,
+        replacingRemoteFolderID: String?,
+        modelContext: ModelContext,
+        settingsStore: SettingsStore
+    ) async throws -> RemoteSyncCategorySynchronizationReport {
+        preconditionFailure("Interactive creation is outside this fake's contract")
+    }
+}
+
+/**
+ Continuation-controlled manual operation used to verify lifecycle admission and draining.
+
+ The helper is main-actor isolated like the production closure. It records invocation, signals exact
+ entry without polling, and ignores cancellation until explicitly released to model noncooperative
+ remote or persistence work.
+ */
+@MainActor
+final class SuspendedManualRemoteSyncOperation {
+    /// Number of times the operation closure entered.
+    private(set) var invocationCount = 0
+
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    /**
+     Runs and suspends the manual operation until explicit release.
+
+     - Side effects: Increments ``invocationCount`` and retains a continuation.
+     - Failure modes: Cancellation does not release the operation; the test must call ``release()``.
+     */
+    func run() async {
+        invocationCount += 1
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+            let waiters = startedWaiters
+            startedWaiters.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+    }
+
+    /** Waits until ``run()`` has retained its continuation, without polling or wall-clock delay. */
+    func waitUntilStarted() async {
+        if releaseContinuation != nil {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startedWaiters.append(continuation)
+        }
+    }
+
+    /** Releases the admitted manual operation exactly once; other calls are no-ops. */
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
 #if os(iOS)
 /**
  In-memory scheduler double for `RemoteSyncBackgroundRefreshCoordinator` tests.

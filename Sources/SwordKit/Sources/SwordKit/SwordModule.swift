@@ -68,7 +68,8 @@ public struct VerseKeyReference: Sendable, Equatable {
 }
 
 /**
- One exact Bible verse captured from SWORD's source-neutral OSIS and canonical-text filters.
+ One exact Bible verse or introduction captured from SWORD's source-neutral OSIS and
+ canonical-text filters.
 
  The copied strings never retain native pointers. Either content projection may be absent while the
  verse identity remains valid, matching Android's independent canonical-text and OSIS extraction.
@@ -143,7 +144,7 @@ struct SwordModuleCursorSnapshot: Equatable, Sendable {
 }
 
 /** Projects one complete Bible source capture through Android's canonical-text state machine. */
-private enum SwordBibleCanonicalTextProjection {
+public enum SwordBibleCanonicalTextProjection {
     /** Internal control-flow failure that selects the independent strip-text projection. */
     private enum ProjectionError: Error {
         case incompleteConvertedOSIS
@@ -175,13 +176,14 @@ private enum SwordBibleCanonicalTextProjection {
             guard let value, !value.isEmpty else { return }
             let decoded = SwordHTML4EntityDecoder.decode(value)
             guard !decoded.isEmpty else { return }
-            if decoded.allSatisfy(\.isWhitespace) {
+            let units = decoded.utf16
+            if units.allSatisfy(SwordJavaTextCompatibility.isWhitespace) {
                 guard !spaceJustWritten else { return }
                 output.append(" ")
                 spaceJustWritten = true
             } else {
                 output.append(decoded)
-                spaceJustWritten = decoded.last?.isWhitespace == true
+                spaceJustWritten = units.last.map(SwordJavaTextCompatibility.isWhitespace) == true
             }
         }
     }
@@ -190,16 +192,17 @@ private enum SwordBibleCanonicalTextProjection {
      Projects all converted verse fragments in one structured pass, with an independent strip-text
      fallback when converted OSIS is absent or malformed.
 
-     - Parameter entries: Addressable source verses in exact passage order.
-     - Returns: Android-compatible canonical text, including its final verse separator, or `nil`
-       when neither complete source projection can produce text.
+     - Parameter entries: Addressable source verses or introductions in exact passage order.
+     - Returns: Android-compatible canonical text, including its final verse separator. A valid
+       source tree whose canonical nodes are all excluded returns an empty string; `nil` means
+       neither complete source projection was available.
      - Side effects: Parses copied XML in memory; no SWORD cursor or native pointer is retained.
      - Failure modes: Malformed or partial OSIS selects the complete strip-text fallback. Missing
        values in both projections return `nil` without affecting structured OSIS publication.
      */
-    static func project(_ entries: [SwordVerseSourceEntry]) -> String? {
+    public static func project(_ entries: [SwordVerseSourceEntry]) -> String? {
         guard !entries.isEmpty else { return nil }
-        if let sourceProjection = try? projectConvertedOSIS(entries), !sourceProjection.isEmpty {
+        if let sourceProjection = try? projectConvertedOSIS(entries) {
             return sourceProjection
         }
 
@@ -233,12 +236,19 @@ private enum SwordBibleCanonicalTextProjection {
             let parserRoot = try SwordXMLTreeParser.parse(
                 xml: "<andbible-canonical-root>\(fragment)</andbible-canonical-root>"
             )
-            let verse = SwordXMLNode.element(
-                name: "verse",
-                attributes: ["osisID": entry.reference.osisRef]
-            )
-            verse.children = parserRoot.children
-            passage.children.append(verse)
+            if entry.reference.chapter > 0, entry.reference.verse > 0 {
+                let verse = SwordXMLNode.element(
+                    name: "verse",
+                    attributes: ["osisID": entry.reference.osisRef]
+                )
+                verse.children = parserRoot.children
+                passage.children.append(verse)
+            } else {
+                // JSword leaves book/chapter-introduction source outside a synthetic verse. This
+                // preserves the handler's title exclusion and canonical=true override instead of
+                // inventing a verse separator or falling back to SWORD's rendered heading text.
+                passage.children.append(contentsOf: parserRoot.children)
+            }
         }
 
         var writer = Writer()
@@ -1276,6 +1286,38 @@ public final class SwordModule: @unchecked Sendable {
     public func stripText() -> String {
         SwordRuntime.sync {
             String(cString: SWModule_getStripText(handle))
+        }
+    }
+
+    /**
+     Copies the source values needed to project canonical text for the exact current VerseKey.
+
+     The method performs only native source conversion and immediate string copying. Callers project
+     the returned value after their manager render operation releases `SwordRuntime`, keeping XML
+     parsing outside the native critical section.
+
+     - Returns: Current VerseKey identity, converted source OSIS when available, and independent
+       stripped-text fallback; `nil` when the module is not positioned on a VerseKey.
+     - Side effects: Reads the current native entry without moving its cursor. The work is serialized
+       by `SwordRuntime` and is reentrant inside a manager render operation.
+     - Failure modes: Missing VerseKey metadata returns `nil`. Missing/irreparable source and empty
+       stripped text remain independent `nil` fields so the pure projector can fail closed.
+     */
+    public func currentVerseSourceEntry() -> SwordVerseSourceEntry? {
+        SwordRuntime.sync {
+            guard let verseKey = Self.currentVerseKeyChildren(handle: handle) else { return nil }
+            let fragment = SwordSourceFormatOSISConverter.fragment(handle: handle)
+            let stripped = SWModule_getStripText(handle).map(String.init(cString:))
+            return SwordVerseSourceEntry(
+                reference: VerseKeyReference(
+                    osisBookId: verseKey.osisBookName,
+                    chapter: verseKey.chapter,
+                    verse: verseKey.verse,
+                    ordinal: verseKey.index
+                ),
+                osisFragment: fragment.isEmpty ? nil : fragment,
+                canonicalText: stripped.flatMap { $0.isEmpty ? nil : $0 }
+            )
         }
     }
 

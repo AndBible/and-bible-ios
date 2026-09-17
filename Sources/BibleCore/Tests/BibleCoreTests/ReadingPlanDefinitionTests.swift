@@ -551,9 +551,10 @@ final class ReadingPlanDefinitionTests: XCTestCase {
     func testCustomDefinitionEditRestoresCompleteGenerationWhenSettingsCommitFails() throws {
         let rootDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let storeDirectory = rootDirectory.appendingPathComponent("stores", isDirectory: true)
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "reading-plan-definition-edit"
+        )
         let userPlanDirectory = rootDirectory.appendingPathComponent("readingplan", isDirectory: true)
-        try FileManager.default.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let persistentStore = try makePersistentReadingPlanRestoreStore(in: storeDirectory)
@@ -1000,12 +1001,10 @@ final class ReadingPlanDefinitionTests: XCTestCase {
         for (boundary, label, graphCommitted) in cases {
             let rootDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            let storeDirectory = rootDirectory.appendingPathComponent("stores", isDirectory: true)
-            let directory = rootDirectory.appendingPathComponent("readingplan", isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: storeDirectory,
-                withIntermediateDirectories: true
+            let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+                label: "reading-plan-definition-recovery-\(label)"
             )
+            let directory = rootDirectory.appendingPathComponent("readingplan", isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try oldBytes.write(to: directory.appendingPathComponent(fileName))
 

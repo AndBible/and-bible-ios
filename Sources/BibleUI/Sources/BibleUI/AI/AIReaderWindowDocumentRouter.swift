@@ -7,9 +7,10 @@ import SwordKit
 /**
  Routes Android's set-window-document tool through the owning live reader controller.
 
- A successful result is built from state observed after the controller mutation. Missing panes,
- unknown documents, invalid exact keys, and failed module preflights throw instead of allowing the
- agent to report a navigation that the UI did not perform.
+ A successful result is built from selected native state observed after the controller mutation,
+ matching Android's page-manager boundary. Missing panes, unknown documents, invalid exact keys,
+ and failed selection work throw instead of allowing the agent to report a navigation that the UI
+ did not select. WebView replacement remains an asynchronous reader concern.
  */
 @MainActor
 final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
@@ -31,7 +32,9 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
        - key: Optional OSIS reference or exact generic page key.
      - Returns: Document and key state read back from the target controller.
      - Side effects: Preflights source authorization and the optional exact key/reference before
-       mutating; success then persists the target pane and emits its replacement content.
+       mutating, then persists the target pane's selected document and key. Entry families wait for
+       their asynchronous selected-key transaction before state is read back, but do not treat local
+       bridge acceptance as a Vue-render acknowledgment.
      - Failure modes: Throws a stable domain error for a missing pane, unknown local
        document, failed module switch, or key the selected document cannot render exactly. Locked
        installed owners never fall through to colliding My Documents or EPUB content.
@@ -51,7 +54,6 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
         let installedInfo = controller.registeredInstalledModuleInfo(named: initials)
         var resolvedInitials = installedInfo?.name ?? initials
         var resolvedName = installedInfo?.description ?? initials
-        var expectedEpubKey: String?
 
         if let installedInfo {
             let preflight = controller.preflightInstalledWindowDocument(
@@ -85,30 +87,40 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
 
         case .dictionary, .glossary:
             try requireSuccessfulSwitch(controller.switchDictionaryDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadDictionaryEntry(key: authorizedKey)
+            if let authorizedKey,
+               controller.currentDictionaryKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                try requireCommittedSelection(
+                    await controller.loadDictionaryEntryAwaitingCommittedSelection(key: authorizedKey),
+                    expectedKey: authorizedKey
+                )
             }
 
         case .generalBook:
             try requireSuccessfulSwitch(controller.switchGeneralBookDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadGeneralBookEntry(key: authorizedKey)
-                guard controller.currentGeneralBookKey.map({
-                    SwordJavaStringIdentity.equals($0, authorizedKey)
-                }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested document key is not available.")
-                }
+            if let authorizedKey,
+               controller.currentGeneralBookKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                try requireCommittedSelection(
+                    await controller.loadInstalledGeneralBookEntryAwaitingCommittedSelection(
+                        key: authorizedKey
+                    ),
+                    expectedKey: authorizedKey
+                )
             }
 
         case .map:
             try requireSuccessfulSwitch(controller.switchMapDocument(to: resolvedInitials))
-            if let authorizedKey {
-                controller.loadMapEntry(key: authorizedKey)
-                guard controller.currentMapKey.map({
-                    SwordJavaStringIdentity.equals($0, authorizedKey)
-                }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested map key is not available.")
-                }
+            if let authorizedKey,
+               controller.currentMapKey.map({
+                   SwordJavaStringIdentity.equals($0, authorizedKey)
+               }) != true {
+                try requireCommittedSelection(
+                    await controller.loadMapEntryAwaitingCommittedSelection(key: authorizedKey),
+                    expectedKey: authorizedKey
+                )
             }
 
         case .dailyDevotion, .questionable, .essays, .images, .addon, .unknown:
@@ -121,39 +133,46 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
             let pageKey = normalizedKey.flatMap { $0.isEmpty ? nil : $0 }
                 ?? (document.pages ?? []).sorted(by: Self.pageOrder).first?.pageKey
             guard let pageKey,
-                  myDocumentStore.page(bookInitials: resolvedInitials, pageKey: pageKey) != nil,
-                  controller.loadMyDocumentPage(
-                      bookInitials: resolvedInitials,
-                      pageKey: pageKey
-                  ) else {
+                  myDocumentStore.page(bookInitials: resolvedInitials, pageKey: pageKey) != nil else {
                 throw failure("KEY_NOT_FOUND", "The requested My Documents page is not available.")
             }
+            try requireCommittedSelection(
+                await controller.loadMyDocumentPageAwaitingCommittedSelection(
+                    bookInitials: resolvedInitials,
+                    pageKey: pageKey
+                ),
+                expectedKey: pageKey
+            )
 
             resolvedName = SwordJavaStringIdentity.trim(document.name)
 
         case .epub(let reader):
             resolvedInitials = reader.initials
-            if let normalizedKey, !normalizedKey.isEmpty {
-                guard controller.registeredInstalledModuleInfo(named: resolvedInitials) == nil,
-                      let content = reader.content(forKey: normalizedKey) else {
+            let epubSettlement = await controller.switchEpubAwaitingSelection(
+                identifier: reader.identifier,
+                key: normalizedKey.flatMap { $0.isEmpty ? nil : $0 }
+            )
+            guard let selectedEpubKey = epubSettlement.committedKey else {
+                if normalizedKey.map({ !$0.isEmpty }) == true,
+                   case .failed = epubSettlement.publicationDisposition {
                     throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
                 }
-                expectedEpubKey = content.persistedKey
+                throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
             }
-            controller.switchEpub(identifier: reader.identifier)
+            try requireCommittedSelection(
+                epubSettlement,
+                expectedKey: selectedEpubKey
+            )
             guard controller.activeModuleName(for: .generalBook).map({
                 SwordJavaStringIdentity.equals($0, resolvedInitials)
             }) == true else {
                 throw failure("NAVIGATION_FAILED", "The requested document could not be opened.")
             }
-            if let normalizedKey, !normalizedKey.isEmpty {
-                controller.loadEpubEntry(key: normalizedKey)
-                guard let expectedEpubKey,
-                      controller.currentGeneralBookKey.map({
-                          SwordJavaStringIdentity.equals($0, expectedEpubKey)
-                      }) == true else {
-                    throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
-                }
+            guard
+                  controller.currentGeneralBookKey.map({
+                      SwordJavaStringIdentity.equals($0, selectedEpubKey)
+                  }) == true else {
+                throw failure("KEY_NOT_FOUND", "The requested EPUB key is not available.")
             }
             resolvedName = SwordJavaStringIdentity.trim(reader.title)
             }
@@ -181,6 +200,37 @@ final class AIReaderWindowDocumentRouter: BibleUIAgentWindowDocumentRouting {
             currentKey: observedKey,
             currentKeyName: observedKey
         )
+    }
+
+    /**
+     Requires a request-owned native selection receipt without imposing a WebView acknowledgment.
+
+     Android's window-document tool returns the page-manager selection immediately after its
+     synchronous mutation; its later document load is asynchronous. Matching that boundary allows
+     a bridge-rejected selection to succeed and remain replayable, while failed, cancelled, and
+     stale work cannot borrow matching state from an earlier request.
+
+     - Parameters:
+       - settlement: Terminal preparation result plus the key committed by this exact request.
+       - expectedKey: Exact canonical key authorized for the requested owner.
+     - Side effects: None; the receipt is checked without reading unrelated prior state.
+     - Throws: `NAVIGATION_FAILED` when no exact current selection was committed by this request.
+     */
+    private func requireCommittedSelection(
+        _ settlement: BibleReaderPreparationSelectionSettlement,
+        expectedKey: String
+    ) throws {
+        guard settlement.committedKey.map({
+            SwordJavaStringIdentity.equals($0, expectedKey)
+        }) == true else {
+            throw failure("NAVIGATION_FAILED", "The requested document could not be displayed.")
+        }
+        switch settlement.publicationDisposition {
+        case .accepted, .bridgeRejected:
+            return
+        case .failed, .stale, .cancelled, .dispatchedStale:
+            throw failure("NAVIGATION_FAILED", "The requested document could not be displayed.")
+        }
     }
 
     /** Converts retryable generic preflight outcomes into the tool's fail-closed contract. */

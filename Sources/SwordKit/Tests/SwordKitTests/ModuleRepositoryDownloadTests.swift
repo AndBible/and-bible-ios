@@ -940,7 +940,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let newData = Data("new-data".utf8)
         let archiveURL = tempDir.appendingPathComponent("FinRK.zip")
         try makeModuleRepositoryZip([
-            ("mods.d/finrk.conf", newConf),
+            ("mods.d/provider-finnish-rk.conf", newConf),
             ("modules/texts/rawtext/finrk/ot", newData),
         ]).write(to: archiveURL)
         let repository = ModuleRepository(basePath: tempDir.path, swordPath: swordDir.path)
@@ -977,10 +977,66 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: confPath), newConf)
         XCTAssertEqual(try Data(contentsOf: dataPath), newData)
         XCTAssertEqual(try Data(contentsOf: obsoleteDataPath), Data("obsolete-data".utf8))
+        XCTAssertFalse(fileManager.fileExists(
+            atPath: swordDir.appendingPathComponent("mods.d/provider-finnish-rk.conf").path
+        ))
         XCTAssertEqual(progress.first?.phase, .queued)
         XCTAssertTrue(progress.contains { $0.phase == .extracting })
         XCTAssertTrue(progress.contains { $0.phase == .committing })
         XCTAssertEqual(progress.last, ModuleInstallProgress(phase: .complete, fraction: 1))
+    }
+
+    /**
+     Verifies a local Android-supported package publishes its config under parsed module initials.
+
+     Android constructs module identity from the config section and accepts a direct `mods.d` file
+     whose provider filename differs. iOS canonicalizes that activation marker before conflict
+     inspection, staging, and publication so installed registration has one stable path.
+
+     Failure means an unconventional but valid local SWORD package is rejected solely because its
+     provider filename differs, or its noncanonical filename leaks into the installed module store.
+     */
+    func testModuleRepositoryLocalZipCanonicalizesConfigFileNameFromParsedInitials() throws {
+        let fileManager = FileManager.default
+        let tempDir = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let swordDir = tempDir.appendingPathComponent("sword", isDirectory: true)
+        try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDir) }
+
+        let configuration = Data(
+            """
+            [EPIPHANYMAPS]
+            Description=Epiphany Maps
+            ModDrv=RawGenBook
+            DataPath=./modules/genbook/epiphanymaps/
+            """.utf8
+        )
+        let archiveURL = tempDir.appendingPathComponent("EpiphanyMaps.zip")
+        try makeModuleRepositoryZip([
+            ("mods.d/provider-release-name.conf", configuration),
+            ("modules/genbook/epiphanymaps/content.dat", Data("map-data".utf8)),
+        ]).write(to: archiveURL)
+
+        let repository = ModuleRepository(basePath: tempDir.path, swordPath: swordDir.path)
+        let inspection = try repository.inspectLocalSwordZip(at: archiveURL)
+
+        XCTAssertEqual(inspection.moduleNames, ["EPIPHANYMAPS"])
+        XCTAssertEqual(inspection.conflictingPaths, [])
+        XCTAssertEqual(try repository.installFromZip(at: archiveURL), "EPIPHANYMAPS")
+        XCTAssertEqual(
+            try Data(contentsOf: swordDir.appendingPathComponent("mods.d/epiphanymaps.conf")),
+            configuration
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: swordDir.appendingPathComponent(
+                "modules/genbook/epiphanymaps/content.dat"
+            )),
+            Data("map-data".utf8)
+        )
+        XCTAssertFalse(fileManager.fileExists(
+            atPath: swordDir.appendingPathComponent("mods.d/provider-release-name.conf").path
+        ))
     }
 
     /**
@@ -1110,7 +1166,7 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         let archiveURL = tempDir.appendingPathComponent("FinRK.zip")
         try makeModuleRepositoryZip([
             (
-                "mods.d/finrk.conf",
+                "mods.d/provider-finnish-rk.conf",
                 Data(
                     """
                     [FINRK]
@@ -1143,6 +1199,9 @@ final class ModuleRepositoryDownloadTests: XCTestCase {
         }
         XCTAssertEqual(try Data(contentsOf: confPath), oldConf)
         XCTAssertEqual(try Data(contentsOf: dataPath), oldData)
+        XCTAssertFalse(fileManager.fileExists(
+            atPath: swordDir.appendingPathComponent("mods.d/provider-finnish-rk.conf").path
+        ))
     }
 
     /**

@@ -11,6 +11,281 @@ import XCTest
  */
 final class GenericSwordDocumentParityTests: XCTestCase {
     /**
+     Verifies the RawFiles driver supplies decoded structural source through the admitted adapter.
+
+     - Setup: Writes a real sparse KJV RawFiles commentary whose Genesis 1:1 index points to one
+       standalone OSIS file.
+     - Expected result: Exact source text, commentary metadata, BVA projection, and key identity
+       survive; the adjacent empty verse remains an exact empty fragment instead of reusing the
+       prior file.
+     - Failure meaning: R2's generic source capture silently falls back to rendered HTML or omits an
+       Android-supported physical driver while metadata still reports the module as installed.
+     - Side effects: Creates and removes one isolated SWORD root.
+     */
+    func testRawFilesCommentaryLoadsExactDecodedSourceAndKeepsEmptyAdjacentVerseDistinct() throws {
+        XCTAssertEqual(try pinnedAndroidKJVReferenceIndex(book: "Gen", chapter: 1, verse: 1), 4)
+        let fixture = try makeRawFilesFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let manager = try XCTUnwrap(SwordManager(modulePath: fixture.root.path))
+        let module = try XCTUnwrap(manager.module(named: "RAWFILES"))
+        let fragment = try module.rawOSISFragment(forKey: "Gen.1.1")
+
+        XCTAssertEqual(module.info.moduleDriver, "RawFiles")
+        XCTAssertEqual(fragment.source.category, .commentary)
+        XCTAssertEqual(fragment.key, "Gen.1.1")
+        XCTAssertEqual(fragment.osisRef, "Gen.1.1")
+        XCTAssertTrue(fragment.originalXML.contains("Synthetic RawFiles commentary."))
+        XCTAssertTrue(fragment.xml.contains("<BVA"))
+        let empty = try module.rawOSISFragment(forKey: "Gen.1.2")
+        XCTAssertEqual(empty.key, "Gen.1.2")
+        XCTAssertEqual(empty.osisRef, "Gen.1.2")
+        assertStructurallyEmptyXML(empty.originalXML)
+        assertStructurallyEmptyXML(empty.xml)
+        XCTAssertFalse(empty.hasRenderableContent)
+        XCTAssertTrue(empty.anchorTexts.isEmpty)
+        XCTAssertNil(empty.comparablePlainText)
+        XCTAssertEqual(empty.contentOrdinalRange, 0...0)
+        XCTAssertFalse(empty.xml.contains("Synthetic RawFiles commentary."))
+    }
+
+    /**
+     Verifies source annotation metadata is typed like Android before it becomes document identity.
+
+     `Bible:Gen...` is an unknown JSword book name and therefore falls back to the selected key;
+     a valid verse range remains canonical and retains exact start/end coordinates. Raw XML keeps
+     the source spelling in both cases so rendering and diagnostics do not rewrite module bytes.
+     */
+    func testRawFilesAnnotationRangeNormalizationMatchesAndroidFallbackAndRangeSemantics() throws {
+        let invalid = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div annotateRef="Bible:Gen.1.1"><p>Calvin marker.</p></div></verse>"#,
+            rows: [4]
+        )
+        defer { try? FileManager.default.removeItem(at: invalid.root) }
+        let invalidManager = try XCTUnwrap(SwordManager(modulePath: invalid.root.path))
+        let invalidModule = try XCTUnwrap(invalidManager.module(named: "RAWFILES"))
+        let invalidFragment = try invalidModule.rawOSISFragment(forKey: "Gen.1.1")
+
+        XCTAssertNil(invalidFragment.annotateRef)
+        XCTAssertNil(invalidFragment.annotationVerseRange)
+        XCTAssertTrue(invalidFragment.originalXML.contains(#"annotateRef="Bible:Gen.1.1""#))
+        XCTAssertEqual(invalidFragment.key, "Gen.1.1")
+
+        let laterSibling = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div><p>First direct block.</p></div><div annotateRef="Gen.1.2"><p>Later block.</p></div></verse>"#
+        )
+        defer { try? FileManager.default.removeItem(at: laterSibling.root) }
+        let laterSiblingManager = try XCTUnwrap(SwordManager(modulePath: laterSibling.root.path))
+        let laterSiblingModule = try XCTUnwrap(laterSiblingManager.module(named: "RAWFILES"))
+        let laterSiblingFragment = try laterSiblingModule.rawOSISFragment(forKey: "Gen.1.1")
+        XCTAssertNil(laterSiblingFragment.annotateRef)
+        XCTAssertNil(laterSiblingFragment.annotationVerseRange)
+        XCTAssertTrue(laterSiblingFragment.originalXML.contains(#"annotateRef="Gen.1.2""#))
+        XCTAssertEqual(laterSiblingFragment.key, "Gen.1.1")
+
+        let oracle: [(String, String?, String?, String?)] = [
+            ("Bible:Gen.1.22", nil, nil, nil),
+            ("Bible Gen.1.22", nil, nil, nil),
+            ("Dict:Strongs_G1234", nil, nil, nil),
+            ("Gen.1.22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen.1.1!a", "Gen.1.1!a", "Gen.1.1", "Gen.1.1"),
+            ("Gen.1.1!", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen.1.22-Gen.1.24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.1.22-24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen 1:22-24", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.1.24-Gen.1.22", "Gen.1.22-Gen.1.24", "Gen.1.22", "Gen.1.24"),
+            ("Gen.50.26-Exod.1.2", "Gen.50.26-Exod.1.2", "Gen.50.26", "Exod.1.2"),
+            ("Gen.1.0-Gen.1.31", "Gen.1", "Gen.1.0", "Gen.1.31"),
+            ("Gen.1.1-Gen.1.$", "Gen.1", "Gen.1.1", "Gen.1.31"),
+            ("Gen.1.1-Gen.1.ff", "Gen.1", "Gen.1.1", "Gen.1.31"),
+            ("Gen.1.1ff", nil, nil, nil),
+            ("Gen.1.$", "Gen.1.31", "Gen.1.31", "Gen.1.31"),
+            ("Gen.$", "Gen.50", "Gen.50.0", "Gen.50.26"),
+            ("Gen.$.$", "Gen.50.26", "Gen.50.26", "Gen.50.26"),
+            ("Gen.1.0-Gen.2.25", "Gen.1-Gen.2", "Gen.1.0", "Gen.2.25"),
+            ("Gen.0.0-Gen.50.26", "Gen", "Gen.0.0", "Gen.50.26"),
+            ("Gen.1", "Gen.1", "Gen.1.0", "Gen.1.31"),
+            ("Gen", "Gen", "Gen.0.0", "Gen.50.26"),
+            ("Gen.1.0", "Gen.1.0", "Gen.1.0", "Gen.1.0"),
+            ("Gen.0", "Gen.0", "Gen.0.0", "Gen.0.0"),
+            ("Gen.0.0", "Gen.0", "Gen.0.0", "Gen.0.0"),
+            ("1:2", nil, nil, nil),
+            ("22-24", nil, nil, nil),
+            ("22", nil, nil, nil),
+            ("Gen.1.x", nil, nil, nil),
+            ("Gen.1.1-Gen.1.2-Gen.1.3", nil, nil, nil),
+            ("Bogus.1.1", nil, nil, nil),
+            ("Gen.1.99", nil, nil, nil),
+            ("Gen.99.1", nil, nil, nil),
+            ("Genesis 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen1:1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen 1 1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("Gen,1,1", "Gen.1.1", "Gen.1.1", "Gen.1.1"),
+            ("genesis 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Genes 1:22", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Ex 1:1", "Exod.1.1", "Exod.1.1", "Exod.1.1"),
+            ("1. Pet 1:1", "1Pet.1.1", "1Pet.1.1", "1Pet.1.1"),
+            ("Jud 1:1", "Judg.1.1", "Judg.1.1", "Judg.1.1"),
+            ("Jude 1", "Jude.1.1", "Jude.1.1", "Jude.1.1"),
+            ("Jude 2", "Jude.1.2", "Jude.1.2", "Jude.1.2"),
+            ("Génesis 1:22", nil, nil, nil),
+            ("  GEN 1 : 22  ", "Gen.1.22", "Gen.1.22", "Gen.1.22"),
+            ("Gen.1.1,Gen.1.2", nil, nil, nil),
+            ("Gen.1.1 Gen.1.2", nil, nil, nil),
+            ("Tob.1.1-Tob.1.2", nil, nil, nil),
+            ("Dan.3.52-Dan.3.53", nil, nil, nil),
+        ]
+        for (input, osisRef, start, end) in oracle {
+            let resolved = invalidModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, osisRef, input)
+            XCTAssertEqual(resolved?.start.osisRef, start, input)
+            XCTAssertEqual(resolved?.end.osisRef, end, input)
+        }
+
+        for (input, expected) in [
+            ("Gen.1.22-Gen.1.24", "Gen.1.22-Gen.1.24"),
+            ("Gen.1.1!a", "Gen.1.1!a"),
+            ("Gen.1.22-24", "Gen.1.22-Gen.1.24"),
+            ("Gen.1.24-Gen.1.22", "Gen.1.22-Gen.1.24"),
+            ("Gen.50.26-Exod.1.2", "Gen.50.26-Exod.1.2"),
+            ("Gen.1.0-Gen.1.31", "Gen.1"),
+            ("Gen.1.1-Gen.1.$", "Gen.1"),
+            ("Gen.1.1-Gen.1.ff", "Gen.1"),
+            ("Gen.1.$", "Gen.1.31"),
+            ("Gen.$", "Gen.50"),
+            ("Gen.$.$", "Gen.50.26"),
+            ("Gen.1.0-Gen.2.25", "Gen.1-Gen.2"),
+            ("Gen.0.0-Gen.50.26", "Gen"),
+            ("Gen.1", "Gen.1"),
+            ("Gen", "Gen"),
+            ("Gen.1.0", "Gen.1.0"),
+            ("Gen.0", "Gen.0"),
+            ("Gen.0.0", "Gen.0"),
+        ] {
+            let productionFixture = try makeRawFilesFixture(
+                source: "<verse osisID=\"Gen.1.1\"><div annotateRef=\"\(input)\"><p>Range.</p></div></verse>"
+            )
+            defer { try? FileManager.default.removeItem(at: productionFixture.root) }
+            let productionManager = try XCTUnwrap(
+                SwordManager(modulePath: productionFixture.root.path)
+            )
+            let productionModule = try XCTUnwrap(productionManager.module(named: "RAWFILES"))
+            let productionFragment = try productionModule.rawOSISFragment(forKey: "Gen.1.1")
+            XCTAssertEqual(productionFragment.annotateRef, expected, input)
+            if input == "Gen.1" {
+                XCTAssertEqual(productionFragment.annotationVerseRange?.start.osisRef, "Gen.1.0")
+            } else if input == "Gen" {
+                XCTAssertEqual(productionFragment.annotationVerseRange?.start.osisRef, "Gen.0.0")
+            }
+        }
+
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "1. Mose 1:22",
+                locale: Locale(identifier: "de")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Genesis 1:22",
+                locale: Locale(identifier: "de")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Gen.١.٢٢",
+                locale: Locale(identifier: "ar")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "Gen.۱.۲۲",
+            locale: Locale(identifier: "ar")
+        ))
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Gen.۱.۲۲",
+                locale: Locale(identifier: "fa")
+            )?.osisRef,
+            "Gen.1.22"
+        )
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Mga Taga-Roma 1:1",
+                locale: Locale(identifier: "fil")
+            )?.osisRef,
+            "Rom.0-Rom.1.1"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "1-Shomuil 1:1",
+            locale: Locale(identifier: "uz")
+        ))
+        XCTAssertEqual(
+            invalidModule.resolveOSISAnnotationReference(
+                "Nehemias' Bog 1:1",
+                locale: Locale(identifier: "da")
+            )?.osisRef,
+            "Neh.1.1"
+        )
+        XCTAssertNil(invalidModule.resolveOSISAnnotationReference(
+            "Süleyman'ın Özdeyişleri 1:1",
+            locale: Locale(identifier: "tr")
+        ))
+
+        let ranged = try makeRawFilesFixture(
+            source: #"<verse osisID="Gen.1.1"><div annotateRef="Gen.1.1-Gen.1.2"><p>Covering marker.</p></div></verse>"#,
+            rows: [4, 5]
+        )
+        defer { try? FileManager.default.removeItem(at: ranged.root) }
+        let rangedManager = try XCTUnwrap(SwordManager(modulePath: ranged.root.path))
+        let rangedModule = try XCTUnwrap(rangedManager.module(named: "RAWFILES"))
+        let rangedFragment = try rangedModule.rawOSISFragment(forKey: "Gen.1.2")
+
+        XCTAssertEqual(rangedFragment.annotateRef, "Gen.1.1-Gen.1.2")
+        XCTAssertEqual(rangedFragment.annotationVerseRange?.start.osisRef, "Gen.1.1")
+        XCTAssertEqual(rangedFragment.annotationVerseRange?.end.osisRef, "Gen.1.2")
+        XCTAssertTrue(rangedFragment.originalXML.contains(#"annotateRef="Gen.1.1-Gen.1.2""#))
+        XCTAssertEqual(rangedFragment.key, "Gen.1.2")
+
+        let catholic = try makeRawFilesFixture(versification: "Catholic2")
+        defer { try? FileManager.default.removeItem(at: catholic.root) }
+        let catholicManager = try XCTUnwrap(SwordManager(modulePath: catholic.root.path))
+        let catholicModule = try XCTUnwrap(catholicManager.module(named: "RAWFILES"))
+        for (input, kjvOSIS, kjvStart, kjvEnd) in oracle {
+            let expected: (String?, String?, String?)
+            switch input {
+            case "Tob.1.1-Tob.1.2":
+                expected = ("Tob.1.1-Tob.1.2", "Tob.1.1", "Tob.1.2")
+            case "Dan.3.52-Dan.3.53":
+                expected = ("Dan.3.52-Dan.3.53", "Dan.3.52", "Dan.3.53")
+            default:
+                expected = (kjvOSIS, kjvStart, kjvEnd)
+            }
+            let resolved = catholicModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, expected.0, "Catholic2: \(input)")
+            XCTAssertEqual(resolved?.start.osisRef, expected.1, "Catholic2: \(input)")
+            XCTAssertEqual(resolved?.end.osisRef, expected.2, "Catholic2: \(input)")
+        }
+
+
+        let kjva = try makeRawFilesFixture(versification: "KJVA")
+        defer { try? FileManager.default.removeItem(at: kjva.root) }
+        let kjvaManager = try XCTUnwrap(SwordManager(modulePath: kjva.root.path))
+        let kjvaModule = try XCTUnwrap(kjvaManager.module(named: "RAWFILES"))
+        for (input, kjvOSIS, kjvStart, kjvEnd) in oracle {
+            let expected: (String?, String?, String?) = input == "Tob.1.1-Tob.1.2"
+                ? ("Tob.1.1-Tob.1.2", "Tob.1.1", "Tob.1.2")
+                : (kjvOSIS, kjvStart, kjvEnd)
+            let resolved = kjvaModule.resolveOSISAnnotationReference(input)
+            XCTAssertEqual(resolved?.osisRef, expected.0, "KJVA: \(input)")
+            XCTAssertEqual(resolved?.start.osisRef, expected.1, "KJVA: \(input)")
+            XCTAssertEqual(resolved?.end.osisRef, expected.2, "KJVA: \(input)")
+        }
+    }
+
+    /**
      Verifies the native RawLD path preserves exact OSIS, dictionary metadata, and source identity.
 
      - Setup: Writes a real two-entry RawLD module using SWORD's documented `.dat`/`.idx` format.
@@ -385,6 +660,55 @@ final class GenericSwordDocumentParityTests: XCTestCase {
     }
 
     /**
+     Verifies fixed XML-declaration and sentence-boundary expressions remain deterministic when
+     processor calls overlap.
+
+     - Setup: Concurrently processes the same BOM-prefixed, mixed-case XML declaration and
+       two-sentence text node through independent fragment trees.
+     - Expected result: Every call removes the declaration and returns the same exact sentence text
+       and ordinal ordering.
+     - Failure meaning: Sharing immutable compiled expressions changed Android-compatible anchor
+       bytes, introduced cross-call match state, or made concurrent processor output nondeterministic.
+     - Side effects: Creates only task-local XML trees; no files or shared model state are changed.
+     */
+    func testProcessorSharedFixedExpressionsRemainDeterministicAcrossConcurrentCalls() async throws {
+        let sourceXML = "\u{FEFF}  <?XML version=\"1.0\"?><p>First sentence. Second sentence.</p>"
+        let expected = ["declaration-absent", "First sentence. ", "Second sentence."]
+
+        let snapshots = try await withThrowingTaskGroup(
+            of: [String].self,
+            returning: [[String]].self
+        ) { group in
+            for _ in 0..<16 {
+                group.addTask {
+                    let processed = try SwordOSISFragmentProcessor.process(
+                        sourceXML: sourceXML,
+                        category: .generalBook
+                    )
+                    let declarationState = processed.originalXML.localizedCaseInsensitiveContains("<?xml")
+                        ? "declaration-present"
+                        : "declaration-absent"
+                    let anchors = processed.anchorTexts.keys.sorted().compactMap {
+                        processed.anchorTexts[$0]
+                    }
+                    return [declarationState] + anchors
+                }
+            }
+
+            var results: [[String]] = []
+            for try await snapshot in group {
+                results.append(snapshot)
+            }
+            return results
+        }
+
+        XCTAssertEqual(snapshots.count, 16)
+        for snapshot in snapshots {
+            XCTAssertEqual(snapshot, expected)
+        }
+    }
+
+    /**
      Verifies commentary processing unwraps a direct verse while retaining its semantic children.
 
      A regression here would make equal linked commentary entries compare differently from Android
@@ -667,6 +991,7 @@ final class GenericSwordDocumentParityTests: XCTestCase {
             contentOrdinalRange: processed.contentOrdinalRange,
             keyOrdinalRange: nil,
             annotateRef: processed.annotateRef,
+            annotationVerseRange: nil,
             anchorTexts: processed.anchorTexts,
             comparablePlainText: processed.comparablePlainText,
             hasRenderableContent: processed.hasRenderableContent
@@ -770,6 +1095,149 @@ final class GenericSwordDocumentParityTests: XCTestCase {
         )
         return RawLDFixture(root: root)
     }
+
+    /** Builds one real RawFiles verse-to-file index with a single KJV source entry. */
+    private func makeRawFilesFixture(
+        source: String = #"<verse osisID="Gen.1.1">Synthetic RawFiles commentary.</verse>"#,
+        rows: [Int] = [4],
+        versification: String = "KJV"
+    ) throws -> RawFilesFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let modsDirectory = root.appendingPathComponent("mods.d", isDirectory: true)
+        let dataDirectory = root.appendingPathComponent(
+            "modules/comments/rawfiles/rawfiles",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: modsDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+
+        let fileName = "0000000"
+        try Data(source.utf8).write(
+            to: dataDirectory.appendingPathComponent(fileName, isDirectory: false)
+        )
+        var oldTestamentIndex = [UInt8](repeating: 0, count: 24_115 * 6)
+        for row in rows {
+            let rowOffset = row * 6
+            oldTestamentIndex[rowOffset + 4] = UInt8(fileName.utf8.count)
+        }
+        try Data(fileName.utf8).write(
+            to: dataDirectory.appendingPathComponent("ot", isDirectory: false)
+        )
+        try Data(oldTestamentIndex).write(
+            to: dataDirectory.appendingPathComponent("ot.vss", isDirectory: false)
+        )
+        try Data().write(to: dataDirectory.appendingPathComponent("nt", isDirectory: false))
+        try Data().write(to: dataDirectory.appendingPathComponent("nt.vss", isDirectory: false))
+        try Data(repeating: 0, count: 4).write(
+            to: dataDirectory.appendingPathComponent("incfile", isDirectory: false)
+        )
+        try """
+        [RAWFILES]
+        Description=RawFiles Commentary Fixture
+        Abbreviation=RFC
+        Category=Commentaries
+        DataPath=./modules/comments/rawfiles/rawfiles/
+        ModDrv=RawFiles
+        SourceType=OSIS
+        Encoding=UTF-8
+        Lang=en
+        Versification=\(versification)
+        """.write(
+            to: modsDirectory.appendingPathComponent("rawfiles.conf", isDirectory: false),
+            atomically: true,
+            encoding: .utf8
+        )
+        return RawFilesFixture(root: root)
+    }
+
+    /**
+     Derives a reference index directly from the pinned Android/JSword canon resource.
+
+     This intentionally does not call `SwordVersification.referenceIndex`, so the physical
+     RawFiles row asserted by the test is not produced and consumed by the same converter.
+     */
+    private func pinnedAndroidKJVReferenceIndex(
+        book requestedBook: String,
+        chapter requestedChapter: Int,
+        verse requestedVerse: Int
+    ) throws -> Int {
+        let data = try XCTUnwrap(JSwordVersificationRegistry.canonFixtureData())
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let systems = try XCTUnwrap(root["systems"] as? [String: Any])
+        let kjv = try XCTUnwrap(systems["KJV"] as? [String: Any])
+        let books = try XCTUnwrap(kjv["books"] as? [[String: Any]])
+
+        var index = 0
+        for book in books {
+            let osis = try XCTUnwrap(book["osis"] as? String)
+            let chapters = try XCTUnwrap(book["chapters"] as? [Int])
+            if osis != requestedBook {
+                index += chapters.reduce(0) { $0 + $1 + 1 }
+                continue
+            }
+            guard chapters.indices.contains(requestedChapter),
+                  (0...chapters[requestedChapter]).contains(requestedVerse) else {
+                throw RawLDFixtureError.invalidReference
+            }
+            index += chapters[..<requestedChapter].reduce(0) { $0 + $1 + 1 }
+            return index + requestedVerse
+        }
+        throw RawLDFixtureError.invalidReference
+    }
+
+    /** Verifies semantic empty XML without locking the processor's serializer spelling. */
+    private func assertStructurallyEmptyXML(
+        _ xml: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let observer = EmptyXMLStructureObserver()
+        let parser = XMLParser(data: Data(xml.utf8))
+        parser.delegate = observer
+        XCTAssertTrue(parser.parse(), file: file, line: line)
+        XCTAssertEqual(observer.rootElementCount, 1, file: file, line: line)
+        XCTAssertEqual(observer.nestedElementCount, 0, file: file, line: line)
+        XCTAssertFalse(observer.hasNonWhitespaceText, file: file, line: line)
+    }
+}
+
+/** Independent XMLParser observer for semantic empty-fragment assertions. */
+private final class EmptyXMLStructureObserver: NSObject, XMLParserDelegate {
+    private var depth = 0
+    private(set) var rootElementCount = 0
+    private(set) var nestedElementCount = 0
+    private(set) var hasNonWhitespaceText = false
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        if depth == 0 {
+            rootElementCount += 1
+        } else {
+            nestedElementCount += 1
+        }
+        depth += 1
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        depth -= 1
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hasNonWhitespaceText = true
+        }
+    }
 }
 
 /** Temporary real-module fixture returned to one test. */
@@ -778,8 +1246,15 @@ private struct RawLDFixture {
     let root: URL
 }
 
+/** Temporary real RawFiles module returned to one test. */
+private struct RawFilesFixture {
+    /// SWORD root containing the config, sparse verse index, and standalone entry file.
+    let root: URL
+}
+
 /** Deterministic fixture-construction failures. */
 private enum RawLDFixtureError: Error {
+    case invalidReference
     case recordTooLarge
     case unsupportedDriver
 }

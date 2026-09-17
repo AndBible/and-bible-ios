@@ -1502,12 +1502,19 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
      Verifies the atomic settings API rejects mismatched and already-dirty model contexts.
 
      Both constraints prevent a restore rollback from affecting unrelated pending state or a second
-     persistence store. A failure means callers can believe settings joined a graph commit when they
-     actually used a different context, or can lose pre-existing unsaved changes during rollback.
+     persistence store. The app-shaped disk fixture disables autosave so the test owns the pending
+     edit and its rollback; default autosave can commit that edit independently on iOS 17. Rejection
+     must leave the caller's pending value intact while independent contexts see no durable write.
+     A failure means settings crossed contexts, rejection changed caller-owned state, or writes
+     escaped before the caller explicitly saved them. Store files remain until the test process exits.
      */
     func testSettingsStoreAtomicBatchRequiresExactCleanContext() throws {
-        let container = try makeReadingPlanRestoreModelContainer()
+        let directory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "settings-atomic-admission"
+        )
+        let container = try makePersistentReadingPlanRestoreStore(in: directory).container
         let modelContext = ModelContext(container)
+        modelContext.autosaveEnabled = false
         let settingsStore = SettingsStore(modelContext: modelContext)
         let differentContext = ModelContext(container)
 
@@ -1528,6 +1535,12 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? SettingsStoreAtomicBatchError, .pendingModelChanges)
         }
+        XCTAssertEqual(settingsStore.getString("atomic.pending"), "unsaved")
+        XCTAssertNil(settingsStore.getString("atomic.new"))
+        let beforeCallerRollback = SettingsStore(modelContext: ModelContext(container))
+        XCTAssertNil(beforeCallerRollback.getString("atomic.pending"))
+        XCTAssertNil(beforeCallerRollback.getString("atomic.new"))
+
         modelContext.rollback()
         let reopenedStore = SettingsStore(modelContext: ModelContext(container))
         XCTAssertNil(reopenedStore.getString("atomic.pending"))
@@ -1543,13 +1556,9 @@ final class RemoteSyncReadingPlanTests: XCTestCase {
      absent after reopening the file-backed stores.
      */
     func testSettingsStoreAtomicBatchUnwindsNestedDurableRecoveriesInReverseOrder() throws {
-        let temporaryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("SettingsAtomicRecoveryOrder-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: true
+        let temporaryDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "settings-atomic-recovery-order"
         )
-        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
 
         let persistentStore = try makePersistentReadingPlanRestoreStore(in: temporaryDirectory)
         let modelContext = ModelContext(persistentStore.container)
@@ -1892,8 +1901,8 @@ private extension RemoteSyncReadingPlanTests {
      Forces one configured store's final write to fail and verifies both stores retain old data.
 
      - Parameter failingStore: Graph or settings store whose SQLite write fails at final commit.
-     - Side Effects: Creates two temporary SQLite stores, observes one final save attempt, installs
-       an operational failure in one store, reopens both configurations, and removes the temporary directory.
+     - Side Effects: Creates two process-lifetime SQLite stores, observes one final save attempt,
+       installs an operational failure in one store, and reopens both configurations.
      - Failure modes: Rethrows file-system, container, SQLite-fixture, or fetch failures; XCTest assertions
        distinguish missing final-save execution from cross-store atomicity drift.
      - Determinism: Failure triggers are installed after all old rows are durable and the `willSave`
@@ -1902,13 +1911,9 @@ private extension RemoteSyncReadingPlanTests {
     func assertFinalSaveFailurePreservesLegacyReadingPlans(
         failingStore: ReadingPlanRestoreFailingStore
     ) throws {
-        let temporaryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ReadingPlanAtomicRestore-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: true
+        let temporaryDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "reading-plan-atomic-restore"
         )
-        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
 
         let persistentStore = try makePersistentReadingPlanRestoreStore(in: temporaryDirectory)
         let fixture = try makeAtomicReadingPlanRestoreFixture(container: persistentStore.container)
@@ -1961,7 +1966,7 @@ private extension RemoteSyncReadingPlanTests {
        - failingStore: Optional graph or settings configuration that rejects the final transaction.
        - patchService: Patch service whose production fetch path or test-injected read behavior runs.
        - expectedInjectedError: Expected behavior-seam error when no physical store is selected.
-     - Side Effects: Creates two temporary file-backed stores and one temporary Android patch archive.
+     - Side Effects: Creates two process-lifetime file-backed stores and one temporary Android patch archive.
      - Failure modes: Rethrows fixture, archive, SQLite-fixture, or fetch failures; XCTest assertions
        report any partial graph or settings publication.
      - Determinism: SQLite raises an operational error at the real final save without timing or lock
@@ -1972,13 +1977,9 @@ private extension RemoteSyncReadingPlanTests {
         patchService: RemoteSyncReadingPlanPatchApplyService = RemoteSyncReadingPlanPatchApplyService(),
         expectedInjectedError: SimulatedReadingPlanPatchReadError? = nil
     ) throws {
-        let temporaryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ReadingPlanPatchAtomicPublish-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: true
+        let temporaryDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "reading-plan-patch-atomic-publish"
         )
-        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
 
         let persistentStore = try makePersistentReadingPlanRestoreStore(in: temporaryDirectory)
         let modelContext = ModelContext(persistentStore.container)

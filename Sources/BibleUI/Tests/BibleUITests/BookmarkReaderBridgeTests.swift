@@ -16,6 +16,131 @@ import XCTest
  */
 final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
 
+    /** A My Notes source failure retries once, then settles without publishing stale content. */
+    @MainActor
+    func testMyNotesSourcePhaseFailureRetriesOnceThenSettles() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let worker = DispatchQueue(label: "BookmarkReaderBridgeTests-my-notes-phase-failure")
+        let attemptCount = BookmarkReaderBridgeLockedCounter()
+        let enrichmentAttempts = expectation(description: "two My Notes enrichment attempts")
+        enrichmentAttempts.expectedFulfillmentCount = 2
+        enrichmentAttempts.assertForOverFulfill = true
+        let publications = expectation(description: "two My Notes failed publications")
+        publications.expectedFulfillmentCount = 2
+        publications.assertForOverFulfill = true
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard key.family.rawValue == "my-notes" else { return }
+                if phase == .sourceEnrichment {
+                    attemptCount.increment()
+                    manager.refresh()
+                    enrichmentAttempts.fulfill()
+                } else if phase == .publication {
+                    publications.fulfill()
+                }
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEvent(scripts, event: "add_documents")
+        let baseline = scripts().count
+        let renderedBefore = controller.committedRenderState
+
+        controller.loadMyNotesDocument()
+        await fulfillment(of: [enrichmentAttempts, publications], timeout: 4)
+        let quiesced = expectation(description: "My Notes preparation worker quiesced")
+        worker.async { quiesced.fulfill() }
+        await fulfillment(of: [quiesced], timeout: 2)
+        coordinator.cancelAll()
+
+        XCTAssertEqual(attemptCount.value, 2)
+        XCTAssertEqual(
+            scripts().dropFirst(baseline).filter { $0.contains("emit('add_documents'") }.count,
+            0
+        )
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(controller.committedRenderState.identity, renderedBefore.identity)
+        XCTAssertEqual(
+            controller.committedRenderState.sourceProvenance,
+            renderedBefore.sourceProvenance
+        )
+    }
+
+    /** A StudyPad source failure retries once, then settles without publishing stale content. */
+    @MainActor
+    func testStudyPadSourcePhaseFailureRetriesOnceThenSettles() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let worker = DispatchQueue(label: "BookmarkReaderBridgeTests-study-pad-phase-failure")
+        let attemptCount = BookmarkReaderBridgeLockedCounter()
+        let enrichmentAttempts = expectation(description: "two StudyPad enrichment attempts")
+        enrichmentAttempts.expectedFulfillmentCount = 2
+        enrichmentAttempts.assertForOverFulfill = true
+        let publications = expectation(description: "two StudyPad failed publications")
+        publications.expectedFulfillmentCount = 2
+        publications.assertForOverFulfill = true
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: worker,
+            phaseObserver: { phase, _, key in
+                guard key.family.rawValue == "study-pad" else { return }
+                if phase == .sourceEnrichment {
+                    attemptCount.increment()
+                    manager.refresh()
+                    enrichmentAttempts.fulfill()
+                } else if phase == .publication {
+                    publications.fulfill()
+                }
+            }
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
+        let label = bookmarkService.createLabel(name: "Bounded retry", color: Label.defaultColor)
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.bookmarkService = bookmarkService
+
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEvent(scripts, event: "add_documents")
+        let baseline = scripts().count
+        let renderedBefore = controller.committedRenderState
+
+        controller.loadStudyPadDocument(labelId: label.id)
+        await fulfillment(of: [enrichmentAttempts, publications], timeout: 4)
+        let quiesced = expectation(description: "StudyPad preparation worker quiesced")
+        worker.async { quiesced.fulfill() }
+        await fulfillment(of: [quiesced], timeout: 2)
+        coordinator.cancelAll()
+
+        XCTAssertEqual(attemptCount.value, 2)
+        XCTAssertEqual(
+            scripts().dropFirst(baseline).filter { $0.contains("emit('add_documents'") }.count,
+            0
+        )
+        XCTAssertFalse(controller.showingMyNotes)
+        XCTAssertFalse(controller.showingStudyPad)
+        XCTAssertNil(controller.activeStudyPadLabelId)
+        XCTAssertEqual(controller.committedRenderState.identity, renderedBefore.identity)
+        XCTAssertEqual(
+            controller.committedRenderState.sourceProvenance,
+            renderedBefore.sourceProvenance
+        )
+    }
+
     /**
      Verifies that bridge hash-code normalization preserves the existing non-negative StudyPad DOM
      key contract without trapping on Swift's one unrepresentable absolute value.
@@ -57,6 +182,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
        Android-compatible nullable tuple.
      */
     func testGenericBookmarkPayloadPreservesNullOrdinalRangeElements() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let bookmark = GenericBookmark(
             key: "whole-page",
             bookInitials: "DICT",
@@ -116,13 +244,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         bookmark.primaryLabelId = label.id
 
         let link = BibleBookmarkToLabel(orderNumber: 3, indentLevel: 1, expandContent: true)
-        link.bookmark = bookmark
-        link.label = label
-        bookmark.bookmarkToLabels = [link]
-
         modelContext.insert(label)
         modelContext.insert(bookmark)
         modelContext.insert(link)
+        link.bookmark = bookmark
+        link.label = label
         try modelContext.save()
 
         modelContext.delete(label)
@@ -154,6 +280,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      list should not expand the repeated chapter or collapse a real multi-verse range.
      */
     func testBookmarkListVerseReferenceFormatsSameChapterRangeLikeJSword() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let startOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 5)
         )
@@ -169,7 +298,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         )
         bookmark.book = "Genesis"
 
-        let reference = BookmarkListView.verseReference(for: bookmark)
+        let reference = BookmarkListReferenceProjection.verseReference(for: bookmark)
 
         XCTAssertEqual(reference, "Genesis 1:5-7")
     }
@@ -183,6 +312,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      `Genesis 1:5` can be rendered ambiguously or collapsed in the iOS bookmark list.
      */
     func testBookmarkListVerseReferenceKeepsCrossChapterEndChapterLikeJSword() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let startOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Gen", chapter: 1, verse: 31)
         )
@@ -198,7 +330,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         )
         bookmark.book = "Genesis"
 
-        let reference = BookmarkListView.verseReference(for: bookmark)
+        let reference = BookmarkListReferenceProjection.verseReference(for: bookmark)
 
         XCTAssertEqual(reference, "Genesis 1:31-2:5")
     }
@@ -219,6 +351,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      *   initials or navigate to a bogus arithmetic chapter.
      */
     func testBookmarkListReferenceAndNavigationUseKJVAOrdinalsForRestoredAndroidBookValues() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let john316 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -233,7 +368,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             )
             bookmark.book = storedBook
 
-            XCTAssertEqual(BookmarkListView.verseReference(for: bookmark), "John 3:16")
+            XCTAssertEqual(BookmarkListReferenceProjection.verseReference(for: bookmark), "John 3:16")
             let row = BookmarkListItem(bibleBookmark: bookmark)
             XCTAssertEqual(row.navigationTarget?.bookName, "John")
             XCTAssertEqual(row.navigationTarget?.chapter, 3)
@@ -260,6 +395,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      *   module initials as Bible book names.
      */
     func testBookmarkPayloadUsesKJVAOrdinalsForRestoredAndroidBookmark() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let john316 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -303,11 +441,20 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - restored divergent-canon bookmarks highlight or display the wrong verse
      */
     func testBookmarkPayloadProjectsKJVAOrdinalIntoActiveVulgateModule() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "VulgTest",
             description: "Vulgate bookmark projection fixture",
             versification: "Vulg",
+            entries: [
+                (
+                    "Ps", 10, 1,
+                    #"<verse osisID="Ps.10.1">Synthetic Vulgate bookmark source.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -317,6 +464,14 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         )
         let renderedOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Ps", chapter: 10, verse: 1)
+        )
+        let source = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: renderedOrdinal,
+            endOrdinal: renderedOrdinal
+        )
+        XCTAssertTrue(
+            source.entries.compactMap(\.osisFragment).joined()
+                .contains("Synthetic Vulgate bookmark source.")
         )
         let bookmark = BibleBookmark(
             kjvOrdinalStart: kjvaOrdinal,
@@ -359,16 +514,30 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     @MainActor
     func testBookmarkChapterQueryNeverFallsBackToSourceOrdinalRange() throws {
         let modulePath = try makeTemporarySwordFixturePath()
-        try seedBibleAliasModule(
+        try seedSyntheticRawTextBibleModule(
             named: "SynodalTest",
             description: "Synodal bookmark query fixture",
             versification: "Synodal",
+            entries: [
+                (
+                    "Ps", 151, 1,
+                    #"<verse osisID="Ps.151.1">Synthetic Synodal Psalm one hundred fifty-one.</verse>"#
+                ),
+            ],
             in: modulePath
         )
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "SynodalTest"))
         let sourceOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Ps", chapter: 151, verse: 1)
+        )
+        let source = try module.inspectVerseSourceRangeRestoringPrevious(
+            startOrdinal: sourceOrdinal,
+            endOrdinal: sourceOrdinal
+        )
+        XCTAssertTrue(
+            source.entries.compactMap(\.osisFragment).joined()
+                .contains("Synthetic Synodal Psalm one hundred fifty-one.")
         )
         XCTAssertNil(
             VersificationMapper.convertStrictly(
@@ -417,6 +586,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      *   or non-KJVA bridge metadata that Android deliberately omits.
      */
     func testBookmarkPayloadTreatsMissingSourceBookLikeAndroidNullBook() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let john316 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -461,9 +633,14 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      * versification ordinal used by modal links, and every display string plus `osisRef` derives
      * from the bookmark's own versification (`bookmark.verseRange`). A failure here means the iOS
      * My Notes document can drift back to active-module ordinals or emit an `osisRef` that
-     * mismatches the emitted `v11n`, breaking link/scroll parity with Android.
+     * mismatches the emitted `v11n`, breaking link/scroll parity with Android. The bookmark belongs
+     * to a retained in-memory bookmark context so iOS 17 can resolve its relationship-backed fields
+     * independently of which other tests ran before it.
      */
     func testMyNotesBookmarkPayloadUsesKJVAOrdinalRangeAndSourceOriginalOrdinals() throws {
+        let container = try makeBookmarkRestoreModelContainer()
+        let modelContext = ModelContext(container)
+        defer { withExtendedLifetime(modelContext) {} }
         let john316 = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -490,6 +667,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             v11n: "NRSV",
             bookInitials: "NRSV"
         )
+        modelContext.insert(bookmark)
         bookmark.book = "John"
         let factory = BibleReaderAnnotationPayloadFactory(
             currentBook: "Genesis",
@@ -618,7 +796,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      able to receive bridge events.
      */
     @MainActor
-    func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+    func testReaderMyNotesDocumentRequestedBeforeClientReadyReplaysAfterClientReady() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -627,6 +805,8 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         controller.bookmarkService = bookmarkService
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         let module = try XCTUnwrap(manager.module(named: controller.activeModuleName))
         let startOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
 
@@ -653,6 +833,10 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(controller.myNotesAccessibilityState.contains("myNotesVisible=true"))
 
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents"
+        )
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
@@ -677,12 +861,12 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      * KJV bookmarks scroll to the wrong row because KJVA includes the apocrypha span before
      * Matthew.
      *
-     * The document `ordinalRange` lower bound is the chapter introduction (KJVA verse 0), matching
-     * Android's whole-chapter query start `Verse(v11n, book, chapter, 0)`, while `jumpToOrdinal`
-     * stays on verse 1 — the document covers the superscription slot but scrolls to the verse.
+     * Android calls `getWholeChapter(..., false)` for My Notes. JSword therefore resolves the
+     * chapter's verse-zero constructor to verse 1, excluding the introduction ordinal, while
+     * `jumpToOrdinal` stays on that same requested verse.
      */
     @MainActor
-    func testReaderOpenMyNotesConvertsSourceOrdinalToKJVAJumpTarget() throws {
+    func testReaderOpenMyNotesConvertsSourceOrdinalToKJVAJumpTarget() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -692,19 +876,27 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let kjvaOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 1)
         )
-        let kjvaIntroOrdinal = try XCTUnwrap(
-            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Matt", chapter: 1)
-        )
         let kjvaEndOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 25)
         )
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: 0
+        )
         controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
         let baselineCount = recordedScripts().count
 
         controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
 
-        let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let myNotesScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: baselineCount
+        )
         let setupPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: myNotesScripts, event: "setup_content") as? [String: Any]
         )
@@ -713,7 +905,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(documentPayload["ordinalRange"] as? [Int], [
-            kjvaIntroOrdinal,
+            kjvaOrdinal,
             kjvaEndOrdinal,
         ])
     }
@@ -751,16 +943,25 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - Side effects: Sends one unsupported My Notes bridge request to an initialized reader fixture.
      - Failure modes: Any `add_documents` or `setup_content` emission means an unresolved source
        ordinal can still open unrelated notes or cross ordinal domains.
-     */
+    */
     @MainActor
-    func testReaderOpenMyNotesRejectsUnresolvableSourceOrdinal() throws {
+    func testReaderOpenMyNotesRejectsUnresolvableSourceOrdinal() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.bridgeDidSetClientReady(bridge)
-        controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: 0
+        )
         let baselineCount = recordedScripts().count
+        let baselineBook = controller.currentBook
+        let baselineChapter = controller.currentChapter
+        let baselineVerse = controller.currentVerse
 
         controller.bridge(bridge, openMyNotes: "Vulg", ordinal: 10_000_000)
 
@@ -768,6 +969,9 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertFalse(myNotesScripts.contains { $0.contains("emit('add_documents'") })
         XCTAssertFalse(myNotesScripts.contains { $0.contains("emit('setup_content'") })
         XCTAssertFalse(controller.showingMyNotes)
+        XCTAssertEqual(controller.currentBook, baselineBook)
+        XCTAssertEqual(controller.currentChapter, baselineChapter)
+        XCTAssertEqual(controller.currentVerse, baselineVerse)
     }
 
     /**
@@ -867,6 +1071,148 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
     }
 
     /**
+     Verifies an installed-document switch exits a pre-ready StudyPad only after authorization.
+
+     - Setup: Selects a real StudyPad while the bridge is not ready, rejects one missing Bible, then
+       selects a readable temporary Bible through the visible-document controller path.
+     - Expected result: Rejection preserves the StudyPad; acceptance clears its replay identity and
+       persists the Bible category even though no immediate WebView reload can run.
+     - Failure meaning: Direct document actions exposed on contextual headers can either dismiss a
+       special page for an invalid target or replay the old StudyPad after accepting a new source.
+     - Side effects: Creates isolated bookmark/SWORD fixtures and mutates one in-memory pane.
+    */
+    @MainActor
+    func testAcceptedPreReadyBibleSwitchLeavesStudyPadOnlyAfterTargetAuthorization() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "WEB",
+            description: "StudyPad switch Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let container = try makeBookmarkRestoreModelContainer()
+        let bookmarkService = BookmarkService(
+            store: BookmarkStore(modelContext: ModelContext(container))
+        )
+        let label = bookmarkService.createLabel(
+            name: "Pre-ready StudyPad",
+            color: Label.defaultColor
+        )
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(
+            id: window.id,
+            currentCategoryName: DocumentCategory.generalBook.pageManagerKey
+        )
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bookmarkService = bookmarkService
+
+        controller.loadStudyPadDocument(labelId: label.id)
+        XCTAssertTrue(controller.showingStudyPad)
+        XCTAssertEqual(controller.activeStudyPadLabelId, label.id)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: "MissingBible"), .unavailable)
+        XCTAssertTrue(controller.showingStudyPad)
+        XCTAssertEqual(controller.activeStudyPadLabelId, label.id)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: "WEB"), .switched)
+        XCTAssertFalse(controller.showingStudyPad)
+        XCTAssertNil(controller.activeStudyPadLabelId)
+        XCTAssertEqual(controller.currentCategory, .bible)
+        XCTAssertEqual(pageManager.bibleDocument, "WEB")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+
+        let replayBoundary = recordedScripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        let scripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: replayBoundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "bible")
+        XCTAssertEqual(document["bookInitials"] as? String, "WEB")
+        XCTAssertTrue(scripts.joined().contains("In the beginning"))
+        let publishedDocumentTypes = try scripts
+            .filter { $0.contains("bibleView.emit('add_documents', ") }
+            .map {
+                let payload = try XCTUnwrap(
+                    bridgeEmissionPayload(from: [$0], event: "add_documents") as? [String: Any]
+                )
+                return payload["type"] as? String
+            }
+        XCTAssertEqual(publishedDocumentTypes.count, 1)
+        XCTAssertFalse(publishedDocumentTypes.contains("journal"))
+        XCTAssertEqual(try XCTUnwrap(controller.committedRenderState.identity).moduleName, "WEB")
+    }
+
+    /**
+     Verifies an accepted installed source supersedes pre-ready My Notes replay.
+
+     - Setup: Selects My Notes before client readiness, rejects one missing Bible, then selects a
+       readable temporary Bible and starts the real bridge lifecycle.
+     - Expected result: Rejection retains My Notes; acceptance clears it and client-ready publishes
+       the selected Bible rather than the deferred notes document.
+     - Failure meaning: The document actions newly reachable from My Notes can persist a source that
+       is overwritten by stale notes replay when the WebView becomes ready.
+     - Side effects: Creates isolated bookmark/SWORD fixtures and mutates one in-memory pane.
+     */
+    @MainActor
+    func testAcceptedPreReadyBibleSwitchSupersedesMyNotesReplay() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedBibleAliasModule(
+            named: "WEB",
+            description: "My Notes switch Bible",
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let bookmarkService = BookmarkService(
+            store: BookmarkStore(modelContext: ModelContext(try makeBookmarkRestoreModelContainer()))
+        )
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        let window = try XCTUnwrap(controller.activeWindow)
+        let pageManager = try XCTUnwrap(window.pageManager)
+        pageManager.currentCategoryName = BibleReaderController.myNotesPageManagerCategoryName
+        pageManager.bibleDocument = "KJV"
+        controller.bookmarkService = bookmarkService
+
+        controller.loadMyNotesDocument()
+        XCTAssertTrue(controller.showingMyNotes)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: "MissingBible"), .unavailable)
+        XCTAssertTrue(controller.showingMyNotes)
+
+        XCTAssertEqual(controller.switchBibleDocument(to: "WEB"), .switched)
+        XCTAssertFalse(controller.showingMyNotes)
+        XCTAssertEqual(controller.currentCategory, .bible)
+        XCTAssertEqual(pageManager.bibleDocument, "WEB")
+        XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+
+        controller.bridgeDidSetClientReady(bridge)
+        let scripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: 0
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "bible")
+        XCTAssertEqual(document["bookInitials"] as? String, "WEB")
+        XCTAssertTrue(scripts.joined().contains("In the beginning"))
+        XCTAssertFalse(scripts.joined().contains("\"type\":\"notes\""))
+        XCTAssertEqual(try XCTUnwrap(controller.committedRenderState.identity).moduleName, "WEB")
+    }
+
+    /**
      Verifies the My Notes bridge action hands the raw source coordinate to pane-owned routing.
 
      Android's `LinkControl.openMyNotes` routes the notes document through `showLink`, so the
@@ -915,7 +1261,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - Side effects: Persists two bookmarks in an in-memory store and records bridge emissions.
      */
     @MainActor
-    func testReaderMyNotesDocumentIncludesNotelessChapterBookmarks() throws {
+    func testReaderMyNotesDocumentIncludesNotelessChapterBookmarks() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -924,6 +1270,8 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let modelContext = ModelContext(container)
         let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
         controller.bookmarkService = bookmarkService
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
 
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let notelessOrdinal = try XCTUnwrap(
@@ -957,7 +1305,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
 
         controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
 
-        let myNotesScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let myNotesScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: baselineCount
+        )
         let documentPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: myNotesScripts, event: "add_documents") as? [String: Any]
         )
@@ -998,7 +1350,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - Side effects: Persists one bookmark in an in-memory store and records bridge emissions.
      */
     @MainActor
-    func testWhitespaceOnlyNoteSerializesAsAbsentLikeAndroid() throws {
+    func testWhitespaceOnlyNoteSerializesAsAbsentLikeAndroid() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -1007,6 +1359,8 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let modelContext = ModelContext(container)
         let bookmarkService = BookmarkService(store: BookmarkStore(modelContext: modelContext))
         controller.bookmarkService = bookmarkService
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let ordinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 2))
         let bookmark = bookmarkService.addBibleBookmark(
@@ -1019,11 +1373,20 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         bookmarkService.saveBibleBookmarkNote(bookmarkId: bookmark.id, note: " \n\t ")
 
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: 0
+        )
         controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
         let baselineCount = recordedScripts().count
         controller.bridge(bridge, openMyNotes: "KJV", ordinal: ordinal)
 
-        let scripts = Array(recordedScripts().dropFirst(baselineCount))
+        let scripts = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: baselineCount
+        )
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: scripts, event: "add_documents") as? [String: Any]
         )
@@ -1049,18 +1412,17 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - Side effects: Emits bridge documents against an in-memory recording bridge only.
      */
     @MainActor
-    func testRestoreSavedPositionReopensPersistedMyNotesPage() throws {
+    func testRestoreSavedPositionReopensPersistedMyNotesPage() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
-        let window = Window(isSynchronized: false, isLinksWindow: true)
-        let pageManager = PageManager(
-            id: window.id,
-            currentCategoryName: BibleReaderController.myNotesPageManagerCategoryName
-        )
-        window.pageManager = pageManager
-        controller.activeWindow = window
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        let window = try XCTUnwrap(controller.activeWindow)
+        window.isLinksWindow = true
+        let pageManager = try XCTUnwrap(window.pageManager)
+        pageManager.currentCategoryName = BibleReaderController.myNotesPageManagerCategoryName
 
         controller.restoreSavedPosition()
 
@@ -1071,6 +1433,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         )
 
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEvent(recordedScripts, event: "add_documents")
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
         )
@@ -1080,6 +1443,862 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
 
         XCTAssertFalse(controller.showingMyNotes)
         XCTAssertEqual(pageManager.currentCategoryName, DocumentCategory.bible.pageManagerKey)
+    }
+
+    /**
+     Verifies an explicitly routed My Notes chapter owns subsequent navigation and reloads.
+
+     Android installs the routed source verse into `CurrentMyNotePage`'s current Bible key. Its
+     `next()` and `previous()` methods advance that key, and `currentPageContent` renders the
+     resulting whole chapter in KJVA. The destination pane's older Bible cursor must not retake
+     ownership after the explicit My Notes document has rendered.
+
+     - Setup: Leaves the destination Bible cursor at Genesis 1, routes Matthew 1 through the real
+       My Notes bridge entry point, then invokes next, reload, and previous on the controller.
+     - Expected result: The notes payloads are Matthew 1, Matthew 2, Matthew 2, and Matthew 1;
+       `showingMyNotes` remains true throughout.
+     - Failure meaning: A generic Bible cursor rather than the accepted My Notes target owns
+       navigation or reload, so the first next action renders Genesis 2 or reload returns to
+       Genesis 1.
+     */
+    @MainActor
+    func testExplicitMyNotesTargetOwnsNextPreviousAndReloadWhenBibleCursorDiffers() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        // PageManager stores the zero-based index in this active module's admitted book list.
+        // It does not store JSword BibleBook.ordinal (Matthew is 42 in that different domain).
+        let matthewBookIndex = try XCTUnwrap(
+            module.getBookList().firstIndex(where: { $0.osisId == "Matt" })
+        )
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "Explicit My Notes cursor")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let pageManager = try XCTUnwrap(window.pageManager)
+        controller.activeWindow = window
+        controller.workspaceStore = workspaceStore
+
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        var emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        var payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["type"] as? String, "notes")
+        XCTAssertEqual(payload["verseRange"] as? String, "Matthew 1")
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(controller.currentBook, "Matthew")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleBibleBook, matthewBookIndex)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        var history = workspaceStore.history(windowId: window.id)
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history[0].document, "KJV")
+        XCTAssertEqual(history[0].key, "Gen.1.1")
+
+        boundary = recordedScripts().count
+        controller.navigateNext()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["verseRange"] as? String, "Matthew 2")
+        XCTAssertTrue(controller.showingMyNotes)
+        history = workspaceStore.history(windowId: window.id)
+        XCTAssertEqual(history.map(\.key), ["Matt.1.1", "Gen.1.1"])
+        XCTAssertEqual(history.map(\.document), ["MyNote", "KJV"])
+
+        boundary = recordedScripts().count
+        controller.loadCurrentContent()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["verseRange"] as? String, "Matthew 2")
+        XCTAssertTrue(controller.showingMyNotes)
+        history = workspaceStore.history(windowId: window.id)
+        XCTAssertEqual(history.map(\.key), ["Matt.1.1", "Gen.1.1"])
+        XCTAssertEqual(history.map(\.document), ["MyNote", "KJV"])
+
+        boundary = recordedScripts().count
+        controller.navigatePrevious()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["verseRange"] as? String, "Matthew 1")
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(
+            workspaceStore.history(windowId: window.id).map(\.key),
+            ["Matt.2.1", "Matt.1.1", "Gen.1.1"]
+        )
+        XCTAssertEqual(
+            workspaceStore.history(windowId: window.id).map(\.document),
+            ["MyNote", "MyNote", "KJV"]
+        )
+        withExtendedLifetime(container) {}
+    }
+
+    /** Passage selection replaces the accepted My Notes cursor while keeping the fake document. */
+    @MainActor
+    func testPassageNavigationReplacesExplicitMyNotesCursorAndKeepsNotesVisible() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        // Assert the fixture's local storage contract rather than JSword's BibleBook ordinal.
+        let markBookIndex = try XCTUnwrap(
+            module.getBookList().firstIndex(where: { $0.osisId == "Mark" })
+        )
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "My Notes passage selection")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let pageManager = try XCTUnwrap(window.pageManager)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.activeWindow = window
+        controller.workspaceStore = workspaceStore
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        boundary = recordedScripts().count
+        controller.navigateTo(book: "Mark", chapter: 1, verse: 7)
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        )
+        let markSeven = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Mark", chapter: 1, verse: 7)
+        )
+
+        XCTAssertEqual(document["type"] as? String, "notes")
+        XCTAssertEqual(document["verseRange"] as? String, "Mark 1")
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, markSeven)
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(controller.currentBook, "Mark")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 7)
+        XCTAssertEqual(pageManager.bibleBibleBook, markBookIndex)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 7)
+        let history = workspaceStore.history(windowId: window.id)
+        XCTAssertEqual(history.count, 2)
+        XCTAssertEqual(history.map(\.document), ["MyNote", "KJV"])
+        XCTAssertEqual(history.map(\.key), ["Matt.1.1", "Gen.1.1"])
+        withExtendedLifetime(container) {}
+    }
+
+    /**
+     Synchronized same- and cross-chapter movement uses KJVA My Notes rows and stays passive.
+
+     The target pane remains inactive while it consumes sync-origin movement. A same-chapter move
+     emits a KJVA row scroll; a cross-chapter move replaces the notes document and jumps to the
+     corresponding KJVA row. Neither resulting visible-position callback may focus or rebroadcast.
+     */
+    @MainActor
+    func testMyNotesSynchronizedMovementUsesKJVARowsWithoutReverseBroadcast() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "My Notes sync target")
+        let sourceWindow = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let targetWindow = try XCTUnwrap(windowManager.addWindow(from: sourceWindow))
+        sourceWindow.isSynchronized = true
+        sourceWindow.syncGroup = 0
+        targetWindow.isSynchronized = true
+        targetWindow.syncGroup = 0
+        windowManager.activeWindow = sourceWindow
+        retainReaderWindowGraph(targetWindow)
+
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.activeWindow = targetWindow
+        controller.windowManagerRef = windowManager
+        controller.workspaceStore = workspaceStore
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        let reverseBroadcast = expectation(description: "My Notes sync target stays passive")
+        reverseBroadcast.isInverted = true
+        windowManager.onSyncVerseChanged = { _, _ in reverseBroadcast.fulfill() }
+
+        var caughtError: Error?
+        do {
+            let matthewOneFive = try XCTUnwrap(
+                JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 5)
+            )
+            boundary = recordedScripts().count
+            controller.applyWindowSynchronizationPosition(.init(
+                sourceVersification: "KJV", osisBookId: "Matt", chapter: 1, verse: 5
+            ))
+            let sameChapterScripts = Array(recordedScripts().dropFirst(boundary))
+            XCTAssertEqual(
+                sameChapterScripts.filter { $0.contains("emit('add_documents'") }.count,
+                0
+            )
+            XCTAssertEqual(
+                sameChapterScripts.filter { $0.contains("emit('scroll_to_verse'") }.count,
+                1
+            )
+            let scroll = try XCTUnwrap(
+                bridgeEmissionPayload(from: sameChapterScripts, event: "scroll_to_verse")
+                    as? [String: Any]
+            )
+            XCTAssertEqual(scroll["ordinal"] as? Int, matthewOneFive)
+            controller.bridge(
+                bridge,
+                didScrollToOrdinal: matthewOneFive,
+                key: "Matt.1.5",
+                atChapterTop: false
+            )
+            XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
+            XCTAssertEqual(controller.currentBook, "Matthew")
+            XCTAssertEqual(controller.currentChapter, 1)
+            XCTAssertEqual(controller.currentVerse, 5)
+            XCTAssertEqual(targetWindow.pageManager?.bibleChapterNo, 1)
+            XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+            XCTAssertEqual(
+                targetWindow.pageManager?.currentCategoryName,
+                BibleReaderController.myNotesPageManagerCategoryName
+            )
+            XCTAssertEqual(workspaceStore.history(windowId: targetWindow.id).map(\.key), ["Gen.1.1"])
+
+            let matthewTwoFive = try XCTUnwrap(
+                JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 2, verse: 5)
+            )
+            boundary = recordedScripts().count
+            controller.applyWindowSynchronizationPosition(.init(
+                sourceVersification: "KJV", osisBookId: "Matt", chapter: 2, verse: 5
+            ))
+            let crossChapterScripts = try await awaitBridgeEmission(
+                from: recordedScripts,
+                event: "add_documents",
+                after: boundary
+            )
+            let document = try XCTUnwrap(
+                bridgeEmissionPayload(from: crossChapterScripts, event: "add_documents")
+                    as? [String: Any]
+            )
+            let setup = try XCTUnwrap(
+                bridgeEmissionPayload(from: crossChapterScripts, event: "setup_content")
+                    as? [String: Any]
+            )
+            XCTAssertEqual(
+                crossChapterScripts.filter { $0.contains("emit('add_documents'") }.count,
+                1
+            )
+            XCTAssertEqual(document["type"] as? String, "notes")
+            XCTAssertEqual(document["verseRange"] as? String, "Matthew 2")
+            XCTAssertEqual(setup["jumpToOrdinal"] as? Int, matthewTwoFive)
+            controller.bridge(
+                bridge,
+                didScrollToOrdinal: matthewTwoFive,
+                key: "Matt.2.5",
+                atChapterTop: false
+            )
+            XCTAssertEqual(windowManager.activeWindow?.id, sourceWindow.id)
+            XCTAssertEqual(controller.currentBook, "Matthew")
+            XCTAssertEqual(controller.currentChapter, 2)
+            XCTAssertEqual(controller.currentVerse, 5)
+            XCTAssertEqual(targetWindow.pageManager?.bibleChapterNo, 2)
+            XCTAssertEqual(targetWindow.pageManager?.bibleVerseNo, 5)
+            XCTAssertEqual(
+                targetWindow.pageManager?.currentCategoryName,
+                BibleReaderController.myNotesPageManagerCategoryName
+            )
+            XCTAssertEqual(workspaceStore.history(windowId: targetWindow.id).map(\.key), ["Gen.1.1"])
+        } catch {
+            caughtError = error
+        }
+        await fulfillment(of: [reverseBroadcast], timeout: 0.35)
+        if let caughtError { throw caughtError }
+        withExtendedLifetime(container) {}
+    }
+
+    /**
+     Verifies a source-canon route traverses the active Bible canon after KJVA My Notes mapping.
+
+     Android resolves a `my-notes://` source coordinate in its declared versification and maps it
+     into the KJVA fake document/shared verse. Its next/previous implementation then delegates to
+     the active Bible page's admitted-book traversal. With active KJV, previous from routed Vulgate
+     Matthew 1 therefore reaches KJVA Malachi 4; retaining Vulgate as a navigation canon is wrong.
+     */
+    @MainActor
+    func testVulgateRouteThenPreviousUsesActiveBibleCanonAcrossMatthewMalachiBoundary() async throws {
+        let sourceReference = SwordVersification.Reference(
+            osisBookId: "Matt",
+            chapter: 1,
+            verse: 1
+        )
+        let sourceOrdinal = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: sourceReference, versification: "Vulg")
+        )
+        let kjvaMatthewOne = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 1)
+        )
+        XCTAssertNotEqual(sourceOrdinal, kjvaMatthewOne)
+
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "Vulg", ordinal: sourceOrdinal)
+        var emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        var payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["verseRange"] as? String, "Matthew 1")
+
+        boundary = recordedScripts().count
+        controller.navigatePrevious()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let malachiStart = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Mal", chapter: 4, verse: 1)
+        )
+        let malachiEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Mal", chapter: 4, verse: 6)
+        )
+        XCTAssertEqual(payload["verseRange"] as? String, "Malachi 4")
+        XCTAssertEqual(payload["ordinalRange"] as? [Int], [malachiStart, malachiEnd])
+        XCTAssertTrue(controller.showingMyNotes)
+    }
+
+    /**
+     Verifies pre-ready navigation replaces the retained My Notes target before first publication.
+
+     Android mutates one current My Notes page key even while the view is not ready. When the
+     client becomes ready, only the latest chapter is rendered; the initially routed chapter must
+     not publish first and must not be recomputed from the destination's older Bible cursor.
+     */
+    @MainActor
+    func testPreReadyMyNotesNavigationPublishesOnlyLatestExplicitTarget() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertFalse(recordedScripts().contains { $0.contains("emit('add_documents'") })
+
+        controller.navigateNext()
+        let boundary = recordedScripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let notesPayloads = try bridgeEmissionPayloads(from: emissions, event: "add_documents")
+            .compactMap { $0 as? [String: Any] }
+            .filter { $0["type"] as? String == "notes" }
+
+        XCTAssertEqual(notesPayloads.count, 1)
+        XCTAssertEqual(notesPayloads.first?["verseRange"] as? String, "Matthew 2")
+        XCTAssertTrue(controller.showingMyNotes)
+    }
+
+    /** An explicit chapter-introduction row remains verse zero across My Notes reload. */
+    @MainActor
+    func testExplicitMyNotesChapterIntroductionRetainsVerseZeroAcrossReload() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        let window = try XCTUnwrap(controller.activeWindow)
+        let pageManager = try XCTUnwrap(window.pageManager)
+        let matthewIntroduction = try XCTUnwrap(
+            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Matt", chapter: 1)
+        )
+
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJVA", ordinal: matthewIntroduction)
+        var emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        var document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        var setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(document["verseRange"] as? String, "Matthew 1")
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, matthewIntroduction)
+        XCTAssertEqual(controller.currentBook, "Matthew")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertEqual(pageManager.bibleChapterNo, 1)
+        XCTAssertEqual(pageManager.bibleVerseNo, 0)
+
+        boundary = recordedScripts().count
+        controller.loadCurrentContent()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(document["verseRange"] as? String, "Matthew 1")
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, matthewIntroduction)
+        XCTAssertEqual(controller.currentVerse, 0)
+        XCTAssertEqual(pageManager.bibleVerseNo, 0)
+        XCTAssertTrue(controller.showingMyNotes)
+    }
+
+    /**
+     Verifies pseudo-document My Notes telemetry separates shared state from sync-source identity.
+
+     Android's fake My Notes document renders KJVA rows, but its shared current verse is normalized
+     through the active Bible page. Its synchronized source key remains the visible fake-document
+     KJVA key so each target pane can perform its own conversion. With active Vulgate, selecting
+     the pseudo document for Psalm 10 retains the source whole-chapter mapping to KJVA Psalm 11.
+     */
+    @MainActor
+    func testPseudoDocumentMyNotesScrollNormalizesActiveCursorButBroadcastsRenderedKJVA() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seedSyntheticRawTextBibleModule(
+            named: "VulgTest",
+            description: "Vulgate My Notes visible-row fixture",
+            versification: "Vulg",
+            entries: [
+                // Android admits a Bible book only when 1:1 or 1:2 contains source content.
+                ("Ps", 1, 1, #"<verse osisID="Ps.1.1">Vulgate Psalms book admission.</verse>"#),
+                (
+                    "Ps", 10, 1,
+                    #"<verse osisID="Ps.10.1">Synthetic Vulgate My Notes source.</verse>"#
+                ),
+            ],
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "VulgTest"))
+        let sourceOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Ps", chapter: 10, verse: 1)
+        )
+        let sourceWholeChapter = try XCTUnwrap(
+            MyNotesChapterReference(
+                sourceVersification: "Vulg",
+                sourceOSISBookId: "Ps",
+                sourceChapter: 10
+            )
+        )
+        // Pinned Android JSword maps KJVA Ps11:2 (14571) to Vulg Ps10:3 (15362).
+        // Scroll to a different visible row; reporting the initial Ps11:0 row is a no-op.
+        let renderedKJVAOrdinal = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 11, verse: 2)
+        )
+        let renderedKJVAReference = try XCTUnwrap(
+            JSwordKJVAVersification.referenceIncludingIntroductions(
+                ordinal: renderedKJVAOrdinal
+            )
+        )
+        XCTAssertEqual(renderedKJVAReference.osisId, "Ps")
+        XCTAssertEqual(renderedKJVAReference.chapter, 11)
+        XCTAssertNotEqual(sourceOrdinal, renderedKJVAOrdinal)
+        let psalmsBookIndex = try XCTUnwrap(
+            module.getBookList().firstIndex(where: { $0.osisId == "Ps" })
+        )
+
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "My Notes Vulgate scroll")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        window.isSynchronized = true
+        let windowManager = WindowManager(workspaceStore: workspaceStore)
+        windowManager.setActiveWorkspace(workspace)
+        let peer = try XCTUnwrap(windowManager.addWindow(from: window))
+        peer.isSynchronized = true
+        peer.syncGroup = window.syncGroup
+        windowManager.activeWindow = window
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.settingsStore = try makeInMemorySettingsStore()
+        controller.activeWindow = window
+        controller.windowManagerRef = windowManager
+        controller.workspaceStore = workspaceStore
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        XCTAssertEqual(controller.switchModule(to: "VulgTest"), .switched)
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 10, verse: 1))
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+
+        let historyBeforeNotes = workspaceStore.history(windowId: window.id).map(\.id)
+        let boundary = recordedScripts().count
+        controller.loadMyNotesDocument()
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "notes")
+        XCTAssertEqual(document["verseRange"] as? String, sourceWholeChapter.displayHeading)
+        XCTAssertEqual(
+            document["ordinalRange"] as? [Int],
+            [sourceWholeChapter.kjvaOrdinalStart, sourceWholeChapter.kjvaOrdinalEnd]
+        )
+
+        let broadcast = expectation(description: "My Notes broadcasts rendered KJVA identity")
+        var observedBroadcast: (windowID: UUID, position: WindowSynchronizationPosition)?
+        windowManager.onSyncVerseChanged = { sourceWindow, delivery in
+            XCTAssertEqual(delivery.targets.map(\.id), [peer.id])
+            observedBroadcast = (sourceWindow.id, delivery.position)
+            broadcast.fulfill()
+        }
+        controller.handleUserInteraction()
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: renderedKJVAOrdinal,
+            key: "Ps.11",
+            atChapterTop: true
+        )
+        await fulfillment(of: [broadcast], timeout: 1)
+
+        XCTAssertEqual(controller.currentBook, "Psalms")
+        XCTAssertEqual(controller.currentChapter, 10)
+        XCTAssertEqual(controller.currentVerse, 3)
+        XCTAssertEqual(window.pageManager?.bibleBibleBook, psalmsBookIndex)
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, 10)
+        XCTAssertEqual(window.pageManager?.bibleVerseNo, 3)
+        let history = workspaceStore.history(windowId: window.id)
+        XCTAssertEqual(history.count, historyBeforeNotes.count + 1)
+        XCTAssertEqual(Array(history.dropFirst().map(\.id)), historyBeforeNotes)
+        XCTAssertEqual(history[0].document, "VulgTest")
+        XCTAssertEqual(history[0].key, "Ps.10.1")
+        XCTAssertEqual(observedBroadcast?.windowID, window.id)
+        XCTAssertEqual(observedBroadcast?.position.sourceVersification, "KJVA")
+        XCTAssertEqual(observedBroadcast?.position.osisBookId, "Ps")
+        XCTAssertEqual(observedBroadcast?.position.chapter, 11)
+        XCTAssertEqual(observedBroadcast?.position.verse, 2)
+        XCTAssertEqual(observedBroadcast?.position.sourceOrdinal, renderedKJVAOrdinal)
+        XCTAssertEqual(observedBroadcast?.position.sourceKey, "Ps.11.2")
+        withExtendedLifetime(container) {}
+    }
+
+    /** Explicit Vulgate links map one verse first, then expand only its containing KJVA chapter. */
+    @MainActor
+    func testExplicitVulgateMyNotesLinkMapsSingleVerseThenAdvancesInKJVA() async throws {
+        let sourceReference = SwordVersification.Reference(
+            osisBookId: "Ps",
+            chapter: 9,
+            verse: 22
+        )
+        let sourceOrdinal = try XCTUnwrap(
+            SwordVersification.referenceIndex(for: sourceReference, versification: "Vulg")
+        )
+        let mappedOrdinal = try XCTUnwrap(
+            VersificationMapper.kjvaOrdinal(
+                osisBookId: sourceReference.osisBookId,
+                chapter: sourceReference.chapter,
+                verse: sourceReference.verse,
+                sourceVersification: "Vulg"
+            )
+        )
+        let mappedReference = try XCTUnwrap(
+            JSwordKJVAVersification.referenceIncludingIntroductions(ordinal: mappedOrdinal)
+        )
+        XCTAssertEqual(mappedReference.osisId, "Ps")
+        XCTAssertEqual(mappedReference.chapter, 10)
+        XCTAssertEqual(mappedReference.verse, 1)
+        let psalmTenStart = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 10, verse: 1)
+        )
+        let psalmTenEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 10, verse: 18)
+        )
+
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        var boundary = recordedScripts().count
+
+        controller.bridge(bridge, openMyNotes: "Vulg", ordinal: sourceOrdinal)
+
+        var emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        var document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        var setup = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "setup_content") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "notes")
+        XCTAssertEqual(document["verseRange"] as? String, "Psalms 10")
+        XCTAssertEqual(document["ordinalRange"] as? [Int], [psalmTenStart, psalmTenEnd])
+        XCTAssertEqual(setup["jumpToOrdinal"] as? Int, mappedOrdinal)
+
+        boundary = recordedScripts().count
+        controller.navigateNext()
+        emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let psalmElevenStart = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 11, verse: 1)
+        )
+        let psalmElevenEnd = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Ps", chapter: 11, verse: 7)
+        )
+        XCTAssertEqual(document["verseRange"] as? String, "Psalms 11")
+        XCTAssertEqual(document["ordinalRange"] as? [Int], [psalmElevenStart, psalmElevenEnd])
+        XCTAssertEqual(controller.currentBook, "Psalms")
+        XCTAssertEqual(controller.currentChapter, 11)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertTrue(controller.showingMyNotes)
+    }
+
+    /** An invalid route cannot replace an accepted My Notes cursor or add navigation history. */
+    @MainActor
+    func testInvalidMyNotesRoutePreservesAcceptedCursorPayloadAndHistory() async throws {
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "Invalid My Notes route")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        controller.activeWindow = window
+        controller.workspaceStore = workspaceStore
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let acceptedPosition = (controller.currentBook, controller.currentChapter, controller.currentVerse)
+        let acceptedPagePosition = (
+            window.pageManager?.bibleBibleBook,
+            window.pageManager?.bibleChapterNo,
+            window.pageManager?.bibleVerseNo
+        )
+        boundary = recordedScripts().count
+
+        controller.loadMyNotesDocument(v11nName: "Vulg", sourceOrdinal: 10_000_000)
+
+        XCTAssertEqual(recordedScripts().count, boundary)
+        XCTAssertEqual(controller.currentBook, acceptedPosition.0)
+        XCTAssertEqual(controller.currentChapter, acceptedPosition.1)
+        XCTAssertEqual(controller.currentVerse, acceptedPosition.2)
+        XCTAssertEqual(window.pageManager?.bibleBibleBook, acceptedPagePosition.0)
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, acceptedPagePosition.1)
+        XCTAssertEqual(window.pageManager?.bibleVerseNo, acceptedPagePosition.2)
+        XCTAssertTrue(controller.showingMyNotes)
+        XCTAssertEqual(workspaceStore.history(windowId: window.id).map(\.key), ["Gen.1.1"])
+
+        controller.loadCurrentContent()
+        let replay = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: replay, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(document["type"] as? String, "notes")
+        XCTAssertEqual(document["verseRange"] as? String, "Matthew 1")
+        XCTAssertEqual(workspaceStore.history(windowId: window.id).map(\.key), ["Gen.1.1"])
+        withExtendedLifetime(container) {}
+    }
+
+    /** Rapid adjacent input publishes only the latest chapter and records each position left. */
+    @MainActor
+    func testRapidMyNotesAdjacentNavigationPublishesLatestAndOrdersHistory() async throws {
+        let worker = DispatchQueue(label: "BookmarkReaderBridgeTests-rapid-my-notes")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let (bridge, recordedScripts) = makeRecordingBridge()
+        let manager = try XCTUnwrap(
+            SwordManager(modulePath: makeTemporarySwordFixturePath())
+        )
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let matthewOne = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
+        )
+        let container = try makeWorkspaceModelContainer()
+        let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
+        let workspace = workspaceStore.createWorkspace(name: "Rapid My Notes navigation")
+        let window = try XCTUnwrap(workspaceStore.windows(workspaceId: workspace.id).first)
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.activeWindow = window
+        controller.workspaceStore = workspaceStore
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: recordedScripts, event: "add_documents", after: 0)
+        var boundary = recordedScripts().count
+        controller.bridge(bridge, openMyNotes: "KJV", ordinal: matthewOne)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        worker.suspend()
+        boundary = recordedScripts().count
+        controller.navigateNext()
+        controller.navigateNext()
+        XCTAssertEqual(controller.currentBook, "Matthew")
+        XCTAssertEqual(controller.currentChapter, 3)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(
+            workspaceStore.history(windowId: window.id).map(\.key),
+            ["Matt.2.1", "Matt.1.1", "Gen.1.1"]
+        )
+        XCTAssertEqual(
+            workspaceStore.history(windowId: window.id).map(\.document),
+            ["MyNote", "MyNote", "KJV"]
+        )
+        worker.resume()
+
+        let emissions = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let notesDocuments = try bridgeEmissionPayloads(from: emissions, event: "add_documents")
+            .compactMap { $0 as? [String: Any] }
+            .filter { $0["type"] as? String == "notes" }
+        XCTAssertEqual(notesDocuments.count, 1)
+        XCTAssertEqual(notesDocuments.first?["verseRange"] as? String, "Matthew 3")
+        XCTAssertTrue(controller.showingMyNotes)
+        coordinator.cancelAll()
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -1099,7 +2318,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      - Side effects: Emits bridge documents against an in-memory recording bridge only.
      */
     @MainActor
-    func testReaderMyNotesChapterSteppingStaysInMyNotesLikeAndroid() throws {
+    func testReaderMyNotesChapterSteppingStaysInMyNotesLikeAndroid() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -1108,31 +2327,52 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let sourceOrdinal = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
         )
+        let paneOwner = try registerMyNotesPaneOwner(controller)
+        defer { withExtendedLifetime(paneOwner) {} }
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: 0
+        )
         controller.navigateTo(book: "Matthew", chapter: 1, verse: 1)
+        let myNotesBoundary = recordedScripts().count
         controller.bridge(bridge, openMyNotes: "KJV", ordinal: sourceOrdinal)
+        _ = try await awaitBridgeEmission(
+            from: recordedScripts,
+            event: "add_documents",
+            after: myNotesBoundary
+        )
         XCTAssertTrue(controller.showingMyNotes)
         let baselineCount = recordedScripts().count
 
         controller.navigateNext()
 
         XCTAssertTrue(controller.showingMyNotes)
-        let nextScripts = Array(recordedScripts().dropFirst(baselineCount))
+        let nextScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: baselineCount
+        )
         let nextPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: nextScripts, event: "add_documents") as? [String: Any]
         )
         XCTAssertEqual(nextPayload["type"] as? String, "notes")
         XCTAssertEqual(nextPayload["verseRange"] as? String, "Matthew 2")
-        let chapterTwoIntro = try XCTUnwrap(
-            JSwordKJVAVersification.chapterIntroOrdinal(osisId: "Matt", chapter: 2)
+        let chapterTwoFirstVerse = try XCTUnwrap(
+            JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 2, verse: 1)
         )
-        XCTAssertEqual((nextPayload["ordinalRange"] as? [Int])?.first, chapterTwoIntro)
+        XCTAssertEqual((nextPayload["ordinalRange"] as? [Int])?.first, chapterTwoFirstVerse)
 
         let previousBaseline = recordedScripts().count
         controller.navigatePrevious()
 
         XCTAssertTrue(controller.showingMyNotes)
-        let previousScripts = Array(recordedScripts().dropFirst(previousBaseline))
+        let previousScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: previousBaseline
+        )
         let previousPayload = try XCTUnwrap(
             bridgeEmissionPayload(from: previousScripts, event: "add_documents") as? [String: Any]
         )
@@ -1226,7 +2466,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      simulator launch, leaving the reader visible without the requested journal document.
      */
     @MainActor
-    func testReaderStudyPadDocumentRequestedBeforeClientReadyReplaysAfterClientReady() throws {
+    func testReaderStudyPadDocumentRequestedBeforeClientReadyReplaysAfterClientReady() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -1254,6 +2494,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertTrue(controller.studyPadAccessibilityState.contains("studyPadLabel=Study Replay"))
 
         controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEvent(recordedScripts, event: "add_documents")
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: recordedScripts(), event: "add_documents") as? [String: Any]
@@ -1533,7 +2774,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      update events. A failure means iOS has reintroduced drift between equivalent bridge payloads.
      */
     @MainActor
-    func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() throws {
+    func testReaderStudyPadDocumentBridgeEmissionUsesJSwordCrossChapterRangePayload() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
@@ -1576,7 +2817,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         controller.bridgeDidSetClientReady(bridge)
         let scriptCount = recordedScripts().count
         controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
-        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+        let studyPadScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: scriptCount
+        )
 
         let payload = try XCTUnwrap(
             bridgeEmissionPayload(from: studyPadScripts, event: "add_documents") as? [String: Any]
@@ -1612,7 +2857,7 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
      *   the Android-compatible object graph expected by the shared web client.
      */
     @MainActor
-    func testReaderStudyPadDocumentBridgeEmissionUsesTypedNestedPayloads() throws {
+    func testReaderStudyPadDocumentBridgeEmissionUsesTypedNestedPayloads() async throws {
         let (bridge, recordedScripts) = makeRecordingBridge()
         let container = try makeBookmarkRestoreModelContainer()
         let modelContext = ModelContext(container)
@@ -1647,7 +2892,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         controller.bridgeDidSetClientReady(bridge)
         let scriptCount = recordedScripts().count
         controller.loadStudyPadDocument(labelId: label.id, bookmarkId: bookmark.id)
-        let studyPadScripts = Array(recordedScripts().dropFirst(scriptCount))
+        let studyPadScripts = try await awaitBridgeEvent(
+            recordedScripts,
+            event: "add_documents",
+            after: scriptCount
+        )
 
         let payloadJSON = try bridgeEmissionPayloadJSON(
             from: studyPadScripts,
@@ -2820,6 +4069,31 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(studyPadSnapshot.textTokens.map(\.encodedValue), ["|0=Entry_One_Two|"])
     }
 
+    /** Waits passively for one asynchronously prepared bridge event after a known script boundary. */
+    @MainActor
+    private func awaitBridgeEvent(
+        _ recordedScripts: () -> [String],
+        event: String,
+        after boundary: Int = 0,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> [String] {
+        for _ in 0..<300 {
+            let scripts = Array(recordedScripts().dropFirst(boundary))
+            if scripts.contains(where: { $0.contains("emit('\(event)'") }) {
+                return scripts
+            }
+            try await Task<Never, Never>.sleep(nanoseconds: 10_000_000)
+        }
+        let scripts = Array(recordedScripts().dropFirst(boundary))
+        XCTFail(
+            "Expected asynchronously prepared bridge event '\(event)' after script \(boundary)",
+            file: file,
+            line: line
+        )
+        return scripts
+    }
+
     /**
      Creates an in-memory bookmark schema for BibleUI reader bridge tests.
 
@@ -2884,5 +4158,23 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
             file: file,
             line: line
         )
+    }
+}
+
+/** Thread-safe attempt counter used by worker-phase retry contracts. */
+private final class BookmarkReaderBridgeLockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
     }
 }

@@ -12,7 +12,10 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      - bookmark selection can collapse to a chapter, substitute the active module's numbering, or
        discard the module/versification needed for authoritative parent mapping.
      */
+    @MainActor
     func testBibleRowEmitsExactTypedRangeWithSourceIdentity() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let start = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "John", chapter: 3, verse: 16)
         )
@@ -23,6 +26,8 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
             ordinalRange: start...end,
             moduleInitials: "NASB"
         )
+        context.insert(bookmark)
+        try context.save()
 
         let item = BookmarkListItem(bibleBookmark: bookmark)
         guard case .bible(let target)? = item.exactNavigationTarget else {
@@ -35,6 +40,7 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
         XCTAssertEqual(target.kjvaOrdinalRange, start...end)
         XCTAssertEqual(target.kjvaOSISReference, "John.3.16-John.3.18")
         XCTAssertNil(item.navigationError)
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -44,13 +50,18 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      - non-Bible bookmark rows remain inert or navigate using a key that is meaningless outside
        their owning module.
      */
-    func testGenericRowEmitsExactTypedModuleKeyAndOrdinals() {
+    @MainActor
+    func testGenericRowEmitsExactTypedModuleKeyAndOrdinals() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let bookmark = GenericBookmark(
             key: " ἀγάπη ",
             bookInitials: "StrongsGreek ",
             ordinalStart: 26,
             ordinalEnd: 28
         )
+        context.insert(bookmark)
+        try context.save()
 
         let item = BookmarkListItem(genericBookmark: bookmark)
         XCTAssertEqual(
@@ -62,6 +73,7 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
             ))
         )
         XCTAssertNil(item.navigationError)
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -71,7 +83,10 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      - the list can fabricate Genesis/chapter arithmetic or treat plausible legacy numbers as
        authoritative, navigating to a passage unrelated to the bookmark.
      */
-    func testCorruptAndUntrustedBibleRowsFailClosedWithoutFallbackTarget() {
+    @MainActor
+    func testCorruptAndUntrustedBibleRowsFailClosedWithoutFallbackTarget() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let corrupt = BibleBookmark(
             kjvOrdinalStart: 999_999,
             kjvOrdinalEnd: 999_999,
@@ -80,14 +95,6 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
             v11n: "KJVA",
             bookInitials: "KJV"
         )
-        let corruptItem = BookmarkListItem(bibleBookmark: corrupt)
-        XCTAssertNil(corruptItem.exactNavigationTarget)
-        XCTAssertEqual(corruptItem.navigationError, .untrustedBibleOrdinals)
-        XCTAssertEqual(
-            corruptItem.reference,
-            String(localized: "error_occurred", defaultValue: "An error has occurred")
-        )
-
         let validButUntrusted = BibleBookmark(
             kjvOrdinalStart: 4,
             kjvOrdinalEnd: 4,
@@ -96,9 +103,21 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
             v11n: "KJVA",
             bookInitials: "KJV"
         )
+        context.insert(corrupt)
+        context.insert(validButUntrusted)
+        try context.save()
+
+        let corruptItem = BookmarkListItem(bibleBookmark: corrupt)
+        XCTAssertNil(corruptItem.exactNavigationTarget)
+        XCTAssertEqual(corruptItem.navigationError, .untrustedBibleOrdinals)
+        XCTAssertEqual(
+            corruptItem.reference,
+            String(localized: "error_occurred", defaultValue: "An error has occurred")
+        )
         let untrustedItem = BookmarkListItem(bibleBookmark: validButUntrusted)
         XCTAssertNil(untrustedItem.exactNavigationTarget)
         XCTAssertEqual(untrustedItem.navigationError, .untrustedBibleOrdinals)
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -108,8 +127,14 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      - a row with valid KJVA coordinates but damaged source ordinals can emit a typed target whose
        module/versification identity points at a different passage.
      */
-    func testTrustedBibleRowWithInconsistentSourceMetadataFailsClosed() {
+    @MainActor
+    func testTrustedBibleRowWithInconsistentSourceMetadataFailsClosed() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let bookmark = verifiedBibleBookmark(ordinalRange: 4...4, moduleInitials: "KJV")
+        context.insert(bookmark)
+        try context.save()
+
         bookmark.ordinalStart = 5
         bookmark.ordinalEnd = 5
         XCTAssertTrue(bookmark.hasTrustedPersistedOrdinals)
@@ -118,6 +143,7 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
 
         XCTAssertNil(item.exactNavigationTarget)
         XCTAssertEqual(item.navigationError, .invalidSourceOrdinals(start: 5, end: 5))
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -127,15 +153,24 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      - hiding previews deletes rows from the effective list, or note text continues matching after
        Android's persisted `bookmark_show_notes` option is disabled.
      */
-    func testShowNotesControlsNoteSearchWithoutRemovingNoteBearingRows() {
+    @MainActor
+    func testShowNotesControlsNoteSearchWithoutRemovingNoteBearingRows() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let bible = verifiedBibleBookmark(ordinalRange: 4...4, moduleInitials: "KJV")
         let bibleNote = BibleBookmarkNotes(bookmarkId: bible.id, notes: "private phrase")
-        bibleNote.bookmark = bible
-        bible.notes = bibleNote
         let generic = GenericBookmark(key: "Entry", bookInitials: "Dictionary")
         let genericNote = GenericBookmarkNotes(bookmarkId: generic.id, notes: "private phrase")
+        context.insert(bible)
+        context.insert(bibleNote)
+        context.insert(generic)
+        context.insert(genericNote)
+        bibleNote.bookmark = bible
+        bible.notes = bibleNote
         genericNote.bookmark = generic
         generic.notes = genericNote
+        try context.save()
+
         let items = [
             BookmarkListItem(bibleBookmark: bible),
             BookmarkListItem(genericBookmark: generic),
@@ -182,6 +217,7 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
             ).isEmpty,
             "Android bookmark search matches note content, not rendered references"
         )
+        withExtendedLifetime(container) {}
     }
 
     /**
@@ -190,29 +226,39 @@ final class BookmarkNavigationAndNotesTests: XCTestCase {
      Failure meaning:
      - one persisted enum value aliases another direction or disappears from list projection.
      */
+    @MainActor
     func testProjectionSupportsAllFourAndroidSortDirections() throws {
+        let container = try makeBookmarkListModelContainer()
+        let context = ModelContext(container)
         let exodusOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Exod", chapter: 1, verse: 1)
         )
         let matthewOrdinal = try XCTUnwrap(
             JSwordKJVAVersification.verseOrdinal(osisId: "Matt", chapter: 1, verse: 1)
         )
-        let exodus = BookmarkListItem(bibleBookmark: verifiedBibleBookmark(
+        let exodusBookmark = verifiedBibleBookmark(
             ordinalRange: exodusOrdinal...exodusOrdinal,
             moduleInitials: "KJV",
             createdAt: Date(timeIntervalSince1970: 200)
-        ))
-        let matthew = BookmarkListItem(bibleBookmark: verifiedBibleBookmark(
+        )
+        let matthewBookmark = verifiedBibleBookmark(
             ordinalRange: matthewOrdinal...matthewOrdinal,
             moduleInitials: "KJV",
             createdAt: Date(timeIntervalSince1970: 100)
-        ))
+        )
+        context.insert(exodusBookmark)
+        context.insert(matthewBookmark)
+        try context.save()
+
+        let exodus = BookmarkListItem(bibleBookmark: exodusBookmark)
+        let matthew = BookmarkListItem(bibleBookmark: matthewBookmark)
         let items = [matthew, exodus]
 
         XCTAssertEqual(references(items, sortOrder: .bibleOrder), ["Exodus 1:1", "Matthew 1:1"])
         XCTAssertEqual(references(items, sortOrder: .bibleOrderDesc), ["Matthew 1:1", "Exodus 1:1"])
         XCTAssertEqual(references(items, sortOrder: .createdAt), ["Matthew 1:1", "Exodus 1:1"])
         XCTAssertEqual(references(items, sortOrder: .createdAtDesc), ["Exodus 1:1", "Matthew 1:1"])
+        withExtendedLifetime(container) {}
     }
 
     /**

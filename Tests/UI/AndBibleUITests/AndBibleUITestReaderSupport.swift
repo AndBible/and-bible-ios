@@ -279,18 +279,11 @@ extension AndBibleUITests {
     }
 
     /**
-     Attempts to open the reader overflow menu without recording an XCTest failure on timeout.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to spend trying to open the overflow menu.
-     *   - file: Source file used for nested helper attribution.
-     *   - line: Source line used for nested helper attribution.
-     * - Returns: `true` when the production overflow menu becomes visible.
-     * - Side effects:
-     *   - taps the production more-menu chrome control and waits for the menu surface to appear
-     * - Failure modes:
-     *   - returns `false` when the menu never appears before the local retry budget expires
+     Opens the overflow menu with one activation of its actual production control.
+
+     Waits passively for a hittable button and the visible menu. Returns false on timeout; it does
+     not repeat an activation or substitute a guessed header coordinate. An already visible menu
+     needs no additional action. File/line are retained for callers that share this helper signature.
      */
     func tryTapReaderMoreMenuButton(
         in app: XCUIApplication,
@@ -298,36 +291,19 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            if tapReaderMoreMenuChromeCoordinate(in: app),
-               waitForReaderOverflowMenu(in: app, timeout: min(2, max(1, deadline.timeIntervalSinceNow))) {
-                return true
-            }
-            if waitForReaderOverflowMenu(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return false
+        if waitForReaderOverflowMenu(in: app, timeout: 0) { return true }
+        let button = app.buttons["readerMoreMenuButton"].firstMatch
+        guard waitForElementToBecomeHittable(button, timeout: timeout) else { return false }
+        button.tap()
+        return waitForReaderOverflowMenu(in: app, timeout: timeout)
     }
 
     /**
-     Dismisses the reader overflow menu and waits until the reader shell is visible again.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to spend dismissing the overflow menu.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - taps the explicit dismiss area when available and falls back to dragging the overflow
-     *     panel down when the overlay ignores the first tap
-     * - Failure modes:
-     *   - records an XCTest failure when the overflow menu never disappears before timeout
+     Dismisses a visible overflow menu through one tap on its production backdrop.
+
+     The sampled backdrop point avoids the menu panel. A dropped interaction fails the passive
+     wait; no second tap, toolbar toggle or dragging gesture conceals the failure. If the menu is
+     already absent, this is a no-op. Records a failure when the backdrop or dismissal is missing.
      */
     func dismissReaderOverflowMenu(
         in app: XCUIApplication,
@@ -335,102 +311,38 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        repeat {
-            guard let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                  !overflowMenu.frame.isEmpty else {
-                if waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                    return
-                }
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
-            }
-
-            let dismissArea = unresolvedElement("readerOverflowMenuDismissArea", in: app)
-            if dismissArea.exists && !dismissArea.frame.isEmpty {
-                let backdropTapPoint = dismissArea.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2))
-                backdropTapPoint.tap()
-                if !waitForReaderOverflowMenu(in: app, timeout: 1) &&
-                    waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                    return
-                }
-            }
-
-            let overflowButton = unresolvedElement("readerMoreMenuButton", in: app)
-            if overflowButton.exists &&
-                waitForElementToBecomeHittable(
-                    overflowButton,
-                    timeout: min(1, max(0.25, deadline.timeIntervalSinceNow))
-                )
-            {
-                overflowButton.tap()
-                if !waitForReaderOverflowMenu(in: app, timeout: 1) &&
-                    waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                    return
-                }
-            }
-
-            dismissSheetByDraggingDown(overflowMenu, file: file, line: line)
-            if !waitForReaderOverflowMenu(in: app, timeout: 1) &&
-                waitForReaderShellReady(in: app, timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))) {
-                return
-            }
-        } while Date() < deadline
-
-        XCTAssertFalse(
-            waitForReaderOverflowMenu(in: app, timeout: 1),
-            "Expected the reader overflow menu to dismiss within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        guard waitForReaderOverflowMenu(in: app, timeout: 0) else { return }
+        let dismissArea = unresolvedElement("readerOverflowMenuDismissArea", in: app)
+        guard waitForUITestCondition("Wait for overflow backdrop", timeout: timeout, condition: {
+            self.elementHasUsableFrame(dismissArea) && app.frame.intersects(dismissArea.frame)
+        }) else {
+            XCTFail("Expected the overflow dismiss backdrop", file: file, line: line)
+            return
+        }
+        dismissArea.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2)).tap()
+        XCTAssertTrue(waitForUITestCondition("Wait for overflow dismissal", timeout: timeout) {
+            !self.waitForReaderOverflowMenu(in: app, timeout: 0)
+        }, "Expected one backdrop tap to dismiss the overflow menu", file: file, line: line)
     }
 
     /**
-     Waits for the custom reader overflow sheet to appear.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the overflow sheet.
-     * - Returns: `true` when the production `readerOverflowMenu` scroll view appears.
-     * - Side effects:
-     *   - polls the explicit overflow-sheet accessibility identifier instead of scanning the full
-     *     app hierarchy for guessed menu containers.
-     * - Failure modes:
-     *   - returns `false` when the overflow sheet never appears before timeout.
+     Passively observes visible production overflow controls within the app viewport.
+
+     Native model exports cannot satisfy this boundary. Returns false when no actual menu surface
+     or overflow-only action has usable on-screen geometry before timeout; it performs no actions.
      */
     func waitForReaderOverflowMenu(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        let menuCandidates = [
-            app.otherElements["readerOverflowMenu"].firstMatch,
-            app.scrollViews["readerOverflowMenu"].firstMatch,
-        ]
-        let actionCandidates = [
-            app.buttons["readerOpenWorkspacesAction"].firstMatch,
-            app.buttons["readerOverflowNightModeToggle"].firstMatch,
-            app.buttons["readerOverflowSectionTitlesToggle"].firstMatch,
-        ]
-        repeat {
-            if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
-                if overflowVisible {
-                    return true
-                }
-            } else if menuCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
-                actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
-            return overflowVisible
+        waitForUITestCondition("Wait for visible reader overflow", timeout: timeout) {
+            let candidates = [
+                app.otherElements["readerOverflowMenu"].firstMatch,
+                app.scrollViews["readerOverflowMenu"].firstMatch,
+                app.buttons["readerOverflowNightModeToggle"].firstMatch,
+            ]
+            return candidates.contains { self.elementHasUsableFrame($0) && app.frame.intersects($0.frame) }
         }
-
-        return menuCandidates.contains(where: { $0.exists }) ||
-            actionCandidates.contains(where: { $0.exists })
     }
 
     /**
@@ -465,23 +377,11 @@ extension AndBibleUITests {
     }
 
     /**
-     Attempts to open the reader navigation drawer without recording an XCTest failure on timeout.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to spend trying to open the drawer.
-     *   - file: Source file used for nested helper attribution.
-     *   - line: Source line used for nested helper attribution.
-     * - Returns: `true` when the production drawer becomes visible.
-     * - Side effects:
-     *   - prefers the sampled production chrome coordinate before querying hittability because
-     *     hosted SwiftUI header buttons can expose an invalid XCTest activation point while the
-     *     actual reader chrome is already tappable
-     *   - falls back to XCTest's native tap path for the production navigation-drawer button when
-     *     coordinate sampling does not open the drawer
-     *   - waits for drawer affordances to appear after each activation attempt
-     * - Failure modes:
-     *   - returns `false` when the drawer never appears before the local retry budget expires
+     Opens the navigation drawer with one activation of its actual production button.
+
+     Waits passively for a hittable button and visible drawer. Returns false on timeout without
+     repeating the action. An already visible drawer is retained. File/line are accepted for caller
+     compatibility and do not change the interaction.
      */
     func tryTapReaderNavigationDrawerButton(
         in app: XCUIApplication,
@@ -489,259 +389,38 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> Bool {
-        _ = waitForReaderShellReady(in: app, timeout: min(10, timeout))
-        let deadline = Date().addingTimeInterval(timeout)
-        let drawerButton = unresolvedElement("readerNavigationDrawerButton", in: app)
-
-        repeat {
-            if tapReaderNavigationDrawerChromeCoordinate(in: app),
-               waitForReaderNavigationDrawer(
-                   in: app,
-                   timeout: min(2, max(1, deadline.timeIntervalSinceNow))
-               ) {
-                return true
-            }
-
-            if waitForElementToBecomeHittable(drawerButton, timeout: 0.5) {
-                drawerButton.tap()
-                if waitForReaderNavigationDrawer(
-                    in: app,
-                    timeout: min(2, max(1, deadline.timeIntervalSinceNow))
-                ) {
-                    return true
-                }
-            }
-            if waitForReaderNavigationDrawer(
-                in: app,
-                timeout: min(5, max(2, deadline.timeIntervalSinceNow))
-            ) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return false
+        if waitForReaderNavigationDrawer(in: app, timeout: 0) { return true }
+        let button = app.buttons["readerNavigationDrawerButton"].firstMatch
+        guard waitForElementToBecomeHittable(button, timeout: timeout) else { return false }
+        button.tap()
+        return waitForReaderNavigationDrawer(in: app, timeout: timeout)
     }
 
     /**
-     Attempts the reader drawer chrome-coordinate tap without polling the hosted button's existence.
+     Passively observes the actual drawer surface in the visible app viewport.
 
-     The coordinate tap preserves coverage for hosted reader chrome that may not expose a stable
-     accessibility button immediately after launch. It first samples the production control through
-     XCTest's throwing snapshot path, then falls back to the document-header frame so sharded CI does
-     not tap the status-bar region or enter a fragile toolbar-button existence retry.
-
-     - Parameter app: The launched AndBible application under test.
-     - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
-       explicit drawer button fallback.
-     */
-    @discardableResult
-    func tapReaderNavigationDrawerChromeCoordinate(in app: XCUIApplication) -> Bool {
-        tapReaderHeaderChromeCoordinate(
-            in: app,
-            controlIdentifier: "readerNavigationDrawerButton",
-            horizontalInset: 28,
-            usesTrailingEdge: false,
-            fallbackNormalizedOffset: CGVector(dx: 0.06, dy: 0.06)
-        )
-    }
-
-    /**
-     Attempts the reader overflow chrome-coordinate tap without polling the hosted button's
-     existence.
-
-     The coordinate tap avoids forcing an early snapshot of hosted reader chrome before the overflow
-     button has stabilized. It first samples the production control through XCTest's throwing
-     snapshot path, then falls back to the document-header frame so sharded CI does not tap the
-     status-bar region or enter a fragile toolbar-button existence retry.
-
-     - Parameter app: The launched AndBible application under test.
-     - Returns: `true` when the chrome coordinate was tapped, or `false` when callers should use the
-       explicit overflow button fallback.
-     */
-    @discardableResult
-    func tapReaderMoreMenuChromeCoordinate(in app: XCUIApplication) -> Bool {
-        tapReaderHeaderChromeCoordinate(
-            in: app,
-            controlIdentifier: "readerMoreMenuButton",
-            horizontalInset: 28,
-            usesTrailingEdge: true,
-            fallbackNormalizedOffset: CGVector(dx: 0.94, dy: 0.06)
-        )
-    }
-
-    /**
-     Taps a leading or trailing reader-header chrome control without polling `.exists`.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - controlIdentifier: Accessibility identifier for the production header control.
-     *   - horizontalInset: Distance from the sampled header edge to the intended control center.
-     *   - usesTrailingEdge: Whether to anchor the tap from the trailing header edge.
-     *   - fallbackNormalizedOffset: Legacy app-relative coordinate used when the header cannot be
-     *     sampled.
-     * - Returns: `true` when a finite coordinate was tapped.
-     * - Side effects:
-     *   - samples the app, optional header-control, and document-header snapshots
-     *   - taps the computed screen coordinate
-     * - Failure modes:
-     *   - returns `false` when the app frame is unavailable or non-finite.
-     */
-    private func tapReaderHeaderChromeCoordinate(
-        in app: XCUIApplication,
-        controlIdentifier: String,
-        horizontalInset: CGFloat,
-        usesTrailingEdge: Bool,
-        fallbackNormalizedOffset: CGVector
-    ) -> Bool {
-        guard let appSnapshot = try? app.snapshot(),
-              elementFrameIsUsable(appSnapshot.frame)
-        else {
-            return false
-        }
-
-        if let controlFrame = snapshotFrame(of: unresolvedElement(controlIdentifier, in: app)) {
-            let offsetX = controlFrame.midX - appSnapshot.frame.minX
-            let offsetY = controlFrame.midY - appSnapshot.frame.minY
-            guard offsetX.isFinite, offsetY.isFinite else {
-                return false
-            }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: offsetX, dy: offsetY)
-            ).tap()
-            return true
-        }
-
-        if let headerFrame = readerDocumentHeaderFrame(in: app) {
-            let tapX = usesTrailingEdge
-                ? headerFrame.maxX - horizontalInset
-                : headerFrame.minX + horizontalInset
-            let tapY = headerFrame.midY
-            guard tapX.isFinite, tapY.isFinite else {
-                return false
-            }
-            let offsetX = tapX - appSnapshot.frame.minX
-            let offsetY = tapY - appSnapshot.frame.minY
-            guard offsetX.isFinite, offsetY.isFinite else {
-                return false
-            }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: offsetX, dy: offsetY)
-            ).tap()
-            return true
-        }
-
-        app.coordinate(withNormalizedOffset: fallbackNormalizedOffset).tap()
-        return true
-    }
-
-    /**
-     Samples the compact reader document-header frame without forcing a broad toolbar lookup.
-     *
-     * - Parameter app: Running application under test.
-     * - Returns: A finite document-header frame when XCTest can snapshot one of the narrow header
-     *   candidates.
-     * - Side effects: none.
-     * - Failure modes:
-     *   - returns `nil` when the header is not currently exposed or cannot be snapshotted.
-     */
-    private func readerDocumentHeaderFrame(in app: XCUIApplication) -> CGRect? {
-        let headerCandidates = [
-            app.otherElements["readerDocumentHeader"].firstMatch,
-            app.staticTexts["readerDocumentHeader"].firstMatch,
-        ]
-
-        for header in headerCandidates {
-            guard let snapshot = try? header.snapshot() else {
-                continue
-            }
-            let frame = snapshot.frame
-            if elementFrameIsUsable(frame) {
-                return frame
-            }
-        }
-
-        return nil
-    }
-
-    /**
-     Samples one element's frame through XCTest's throwing snapshot path.
-     *
-     * - Parameter element: Narrow element query whose current frame should be sampled.
-     * - Returns: A finite frame when the element can be snapshotted.
-     * - Side effects: none.
-     * - Failure modes:
-     *   - returns `nil` when the element is absent, unstable, or exposes a non-finite frame.
-     */
-    private func snapshotFrame(of element: XCUIElement) -> CGRect? {
-        guard let snapshot = try? element.snapshot() else {
-            return nil
-        }
-        let frame = snapshot.frame
-        return elementFrameIsUsable(frame) ? frame : nil
-    }
-
-    /**
-     Waits for the Android-style reader navigation drawer to appear.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum time to wait for the drawer.
-     * - Returns: `true` when the production `readerNavigationDrawer` surface appears.
-     * - Side effects:
-     *   - polls the explicit drawer accessibility identifier.
-     * - Failure modes:
-     *   - returns `false` when the drawer never appears before timeout.
+     This observation never opens or repairs the drawer and does not accept a hidden model flag.
+     Returns false if usable drawer geometry does not appear within the requested timeout.
      */
     func waitForReaderNavigationDrawer(
         in app: XCUIApplication,
         timeout: TimeInterval
     ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        let drawerCandidates = [
-            app.scrollViews["readerNavigationDrawer"].firstMatch,
-            app.otherElements["readerNavigationDrawer"].firstMatch,
-        ]
-        let actionCandidates = [
-            app.buttons["readerOpenBookmarksAction"].firstMatch,
-            app.buttons["readerOpenSettingsAction"].firstMatch,
-            app.buttons["readerOpenSearchAction"].firstMatch,
-        ]
-        repeat {
-            if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
-                if drawerVisible {
-                    return true
-                }
-            } else if drawerCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) ||
-                actionCandidates.contains(where: { $0.exists && !$0.frame.isEmpty }) {
-                return true
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
-            return drawerVisible
+        waitForUITestCondition("Wait for visible reader drawer", timeout: timeout) {
+            let candidates = [
+                app.otherElements["readerNavigationDrawer"].firstMatch,
+                app.scrollViews["readerNavigationDrawer"].firstMatch,
+            ]
+            return candidates.contains { self.elementHasUsableFrame($0) && app.frame.intersects($0.frame) }
         }
-
-        return drawerCandidates.contains(where: { $0.exists }) ||
-            actionCandidates.contains(where: { $0.exists })
     }
 
     /**
-     Taps one reader-shell action after the stable action surface has been resolved.
-     *
-     * - Parameters:
-     *   - identifier: Accessibility identifier of the reader action to invoke.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to wait for the action to appear and become hittable.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - waits for the requested reader action button to appear
-     *   - taps the resolved button through the shared reliable-tap helper
-     * - Failure modes:
-     *   - records an XCTest failure if the requested reader action never appears or never becomes
-     *     hittable within the allotted timeout
+     Resolves one reader action on its production menu and activates it once.
+
+     Menu opening and scrolling reveal prerequisites; the requested action is never retried.
+     The caller must observe its specific destination or outcome. Failure to resolve a hittable
+     control fails here, rather than tapping other coordinates until native state reports success.
      */
     func tapReaderAction(
         _ identifier: String,
@@ -750,147 +429,21 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        let usesNavigationDrawer = readerActionUsesNavigationDrawer(identifier)
-
-        repeat {
-            guard let button = tryResolveReaderActionControl(
-                identifier,
-                in: app,
-                timeout: min(3, max(1, deadline.timeIntervalSinceNow))
-            ) else {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                continue
-            }
-            if waitForElementToBecomeHittable(button, timeout: min(1.5, max(0.5, deadline.timeIntervalSinceNow))) {
-                button.tap()
-            } else {
-                let preferredSurfaceIdentifier = usesNavigationDrawer
-                    ? "readerNavigationDrawer"
-                    : "readerOverflowMenu"
-                let fallbackSurfaceIdentifier = usesNavigationDrawer
-                    ? "readerOverflowMenu"
-                    : "readerNavigationDrawer"
-                let actionSurface = resolvedElement(preferredSurfaceIdentifier, in: app)
-                    ?? resolvedElement(fallbackSurfaceIdentifier, in: app)
-
-                if let actionSurface,
-                   isElementVisible(button, within: actionSurface)
-                {
-                    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                } else {
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                    continue
-                }
-            }
-
-            if waitForReaderActionActivationToSettle(
-                identifier,
-                usesNavigationDrawer: usesNavigationDrawer,
-                in: app,
-                timeout: min(2, max(0.5, deadline.timeIntervalSinceNow))
-            ) {
-                return
-            }
-        } while Date() < deadline
-
-        let button = requireReaderActionControl(
-            identifier,
-            in: app,
-            timeout: min(5, timeout),
-            file: file,
-            line: line
-        )
-        if let actionSurface = ensureReaderActionSurface(
-            for: identifier,
-            in: app,
-            timeout: min(5, timeout),
-            file: file,
-            line: line
-        ) {
-            if waitForElementToBecomeHittable(button, timeout: min(1, timeout)) {
-                button.tap()
-                _ = waitForReaderActionActivationToSettle(
-                    identifier,
-                    usesNavigationDrawer: usesNavigationDrawer,
-                    in: app,
-                    timeout: min(2, timeout)
-                )
-                return
-            }
-
-            if isElementVisible(button, within: actionSurface) {
-                button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                _ = waitForReaderActionActivationToSettle(
-                    identifier,
-                    usesNavigationDrawer: usesNavigationDrawer,
-                    in: app,
-                    timeout: min(2, timeout)
-                )
-                return
-            }
-
-            XCTFail(
-                "Expected element '\(identifier)' to become tappable within \(timeout) seconds.",
-                file: file,
-                line: line
-            )
+        guard let button = tryResolveReaderActionControl(identifier, in: app, timeout: timeout),
+              waitForElementToBecomeHittable(button, timeout: timeout) else {
+            XCTFail("Expected a hittable reader action '\(identifier)'", file: file, line: line)
             return
         }
-
-        XCTFail(
-            "Expected the reader action surface to remain available while activating '\(identifier)' within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        button.tap()
     }
 
-    /**
-     Waits briefly for a tapped reader menu action to either dismiss its source surface or disappear.
-     */
-    func waitForReaderActionActivationToSettle(
-        _ identifier: String,
-        usesNavigationDrawer: Bool,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if usesNavigationDrawer {
-                if !isReaderNavigationDrawerLikelyVisible(in: app) {
-                    return true
-                }
-            } else if !isReaderOverflowMenuLikelyVisible(in: app) {
-                return true
-            }
 
-            let refreshedButton = unresolvedElement(identifier, in: app)
-            if !refreshedButton.exists {
-                return true
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        return false
-    }
 
     /**
-     Opens About from the reader overflow menu with one bounded retry when the first tap does not
-     transition away from the live menu.
-     *
-     * - Parameters:
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to spend across menu discovery, action tapping, and
-     *     destination confirmation.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Side effects:
-     *   - opens the reader overflow menu
-     *   - taps the About action up to two times when the first tap leaves the menu open
-     * - Failure modes:
-     *   - records an XCTest failure if the About destination never appears within the allotted
-     *     timeout
+     Opens About through one menu action and passively observes the destination.
+
+     Records a failure if the production menu action cannot be activated or About never appears.
+     The source action is not repeated when its first activation is dropped.
      */
     func openAboutFromReaderMenu(
         in app: XCUIApplication,
@@ -898,34 +451,9 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        for attempt in 1...2 {
-            let remaining = max(1, deadline.timeIntervalSinceNow)
-            tapReaderAction(
-                "readerOpenAboutAction",
-                in: app,
-                timeout: min(10, remaining),
-                file: file,
-                line: line
-            )
-            if waitForAboutScreenVisible(in: app, timeout: min(8, max(1, deadline.timeIntervalSinceNow))) {
-                return
-            }
-
-            if attempt == 1 {
-                if resolvedElement("readerNavigationDrawer", in: app) != nil {
-                    continue
-                }
-            }
-        }
-
-        XCTAssertTrue(
-            waitForAboutScreenVisible(in: app, timeout: min(5, max(1, deadline.timeIntervalSinceNow))),
-            "Expected the About destination to surface within \(timeout) seconds.",
-            file: file,
-            line: line
-        )
+        tapReaderAction("readerOpenAboutAction", in: app, timeout: timeout, file: file, line: line)
+        XCTAssertTrue(waitForAboutScreenVisible(in: app, timeout: timeout, file: file, line: line),
+                      "Expected About after one menu action", file: file, line: line)
     }
 
     /**
@@ -1077,22 +605,11 @@ extension AndBibleUITests {
     }
 
     /**
-     Ensures the correct production reader action surface is open for one action identifier.
-     *
-     * - Parameters:
-     *   - identifier: Accessibility identifier of the requested reader action.
-     *   - app: Running application under test.
-     *   - timeout: Maximum number of seconds to spend dismissing conflicting surfaces and opening
-     *     the required one.
-     *   - file: Source file used for XCTest failure attribution.
-     *   - line: Source line used for XCTest failure attribution.
-     * - Returns: The currently visible action surface, or `nil` when it never becomes available
-     *   inside the local retry budget.
-     * - Side effects:
-     *   - dismisses the wrong menu surface when it is currently visible
-     *   - opens either the left navigation drawer or the overflow/options sheet
-     * - Failure modes:
-     *   - returns `nil` when the required action surface never becomes available before timeout
+     Ensures the policy-selected drawer or overflow surface is visible once.
+
+     A visible opposite surface is dismissed once before the requested surface is opened once.
+     Returns nil on any missing transition; callers must not loop over this helper to retry menu
+     opening. Existing menu state is observed from production controls, not diagnostic exports.
      */
     func ensureReaderActionSurface(
         for identifier: String,
@@ -1101,119 +618,36 @@ extension AndBibleUITests {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(timeout)
         let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-
-        repeat {
-            if prefersDrawer {
-                let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app)
-                if drawerVisible == true {
-                    return unresolvedElement("readerNavigationDrawer", in: app)
-                } else if drawerVisible == nil,
-                          let drawer = resolvedElement("readerNavigationDrawer", in: app),
-                          !drawer.frame.isEmpty {
-                    return drawer
-                }
-                if isReaderOverflowMenuLikelyVisible(in: app) {
-                    dismissReaderOverflowMenu(
-                        in: app,
-                        timeout: min(8, max(5, deadline.timeIntervalSinceNow)),
-                        file: file,
-                        line: line
-                    )
-                } else {
-                    _ = tryTapReaderNavigationDrawerButton(
-                        in: app,
-                        timeout: min(12, max(5, deadline.timeIntervalSinceNow)),
-                        file: file,
-                        line: line
-                    )
-                }
-            } else {
-                let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app)
-                if overflowVisible == true {
-                    return unresolvedElement("readerOverflowMenu", in: app)
-                } else if overflowVisible == nil,
-                          let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-                          !overflowMenu.frame.isEmpty {
-                    return overflowMenu
-                }
-                if isReaderNavigationDrawerLikelyVisible(in: app) {
-                    let dismissArea = unresolvedElement("readerNavigationDrawerDismissArea", in: app)
-                    if dismissArea.exists {
-                        tapElementReliably(dismissArea, timeout: 5, file: file, line: line)
-                    }
-                } else {
-                    _ = tryTapReaderMoreMenuButton(
-                        in: app,
-                        timeout: min(12, max(5, deadline.timeIntervalSinceNow)),
-                        file: file,
-                        line: line
-                    )
-                }
-            }
-
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
         if prefersDrawer {
-            if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
-                return drawerVisible ? unresolvedElement("readerNavigationDrawer", in: app) : nil
+            if waitForReaderNavigationDrawer(in: app, timeout: 0) {
+                return unresolvedElement("readerNavigationDrawer", in: app)
             }
-            return resolvedElement("readerNavigationDrawer", in: app)
+            if waitForReaderOverflowMenu(in: app, timeout: 0) {
+                dismissReaderOverflowMenu(in: app, timeout: timeout, file: file, line: line)
+                guard !waitForReaderOverflowMenu(in: app, timeout: 0) else { return nil }
+            }
+            guard tryTapReaderNavigationDrawerButton(in: app, timeout: timeout) else { return nil }
+            return unresolvedElement("readerNavigationDrawer", in: app)
         }
-
-        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
-            return overflowVisible ? unresolvedElement("readerOverflowMenu", in: app) : nil
+        if waitForReaderOverflowMenu(in: app, timeout: 0) {
+            return unresolvedElement("readerOverflowMenu", in: app)
         }
-        return resolvedElement("readerOverflowMenu", in: app)
+        if waitForReaderNavigationDrawer(in: app, timeout: 0) {
+            let dismissArea = unresolvedElement("readerNavigationDrawerDismissArea", in: app)
+            guard waitForElementToBecomeHittable(dismissArea, timeout: timeout) else { return nil }
+            dismissArea.tap()
+            guard waitForUITestCondition("Wait for drawer dismissal", timeout: timeout, condition: {
+                !self.waitForReaderNavigationDrawer(in: app, timeout: 0)
+            }) else { return nil }
+        }
+        guard tryTapReaderMoreMenuButton(in: app, timeout: timeout) else { return nil }
+        return unresolvedElement("readerOverflowMenu", in: app)
     }
 
-    /**
-     Returns `true` when drawer-only controls indicate that the left navigation drawer is exposed.
-     */
-    func isReaderNavigationDrawerLikelyVisible(in app: XCUIApplication) -> Bool {
-        if let drawerVisible = readerRenderedContentStateFlag("drawerVisible", in: app) {
-            return drawerVisible
-        }
 
-        if let drawer = resolvedElement("readerNavigationDrawer", in: app),
-           !drawer.frame.isEmpty
-        {
-            return true
-        }
 
-        if let dismissArea = resolvedElement("readerNavigationDrawerDismissArea", in: app),
-           !dismissArea.frame.isEmpty
-        {
-            return true
-        }
 
-        return false
-    }
-
-    /**
-     Returns `true` when overflow-only controls indicate that the reader overflow menu is exposed.
-     */
-    func isReaderOverflowMenuLikelyVisible(in app: XCUIApplication) -> Bool {
-        if let overflowVisible = readerRenderedContentStateFlag("overflowVisible", in: app) {
-            return overflowVisible
-        }
-
-        if let overflowMenu = resolvedElement("readerOverflowMenu", in: app),
-           !overflowMenu.frame.isEmpty
-        {
-            return true
-        }
-
-        if let dismissArea = resolvedElement("readerOverflowMenuDismissArea", in: app),
-           !dismissArea.frame.isEmpty
-        {
-            return true
-        }
-
-        return false
-    }
 
     /**
      Returns whether an identifier is one of the compact semantic state exports emitted for UI tests.
@@ -1231,7 +665,6 @@ extension AndBibleUITests {
             "readingPlanListStateExport",
             "availablePlansStateExport",
             "labelManagerStateExport",
-            "moduleBrowserStateExport",
             "myDocumentsListStateExport",
             "myDocumentPagesStateExport",
             "syncSettingsState":
@@ -1290,16 +723,17 @@ extension AndBibleUITests {
     }
 
     /**
-     Returns the semantic accessibility text exported for one resolved element.
+     Returns semantic accessibility text from one immutable exact-identifier snapshot.
      *
      * - Parameters:
      *   - identifier: Accessibility identifier under test.
      *   - app: Running application whose live hierarchy should be sampled.
      * - Returns: The exported accessibility value when present, otherwise a conservative label
-     *   fallback for simple text-bearing controls. Compact state exports are sampled directly from
-     *   `accessibilityValue` without a separate existence query.
-     * - Side effects: none.
-     * - Failure modes: returns `nil` when the element is absent or has no safe semantic text.
+     *   fallback for simple text-bearing controls. Compact state exports retain their dedicated
+     *   snapshot path.
+     * - Side effects: Requests one exact-identifier XCTest snapshot for ordinary elements.
+     * - Failure modes: returns `nil` when the element is absent, changes during the snapshot, or
+     *   has no safe semantic text. Snapshot absence does not record a hard query failure.
      */
     func resolvedElementSemanticText(
         _ identifier: String,
@@ -1311,17 +745,24 @@ extension AndBibleUITests {
             return value
         }
 
-        guard let element = resolvedElement(identifier, in: app) else {
+        if identifier == "readerRenderedContentState" {
+            return readerRenderedContentStateValue(in: app)
+        }
+
+        let element = app.descendants(matching: .any)
+            .matching(identifier: identifier)
+            .firstMatch
+        guard let snapshot = try? element.snapshot() else {
             return nil
         }
 
-        if let value = element.value as? String {
+        if let value = snapshot.value as? String {
             return value
         }
 
-        switch element.elementType {
+        switch snapshot.elementType {
         case .staticText, .button, .link:
-            return element.label
+            return snapshot.label
         default:
             return nil
         }
@@ -1421,65 +862,37 @@ extension AndBibleUITests {
     }
 
     /**
-     Attempts to resolve one reader-shell action without recording an XCTest failure on transient
-     drawer/overflow misses.
+     Finds a menu action after one menu-opening sequence, scrolling only to reveal it.
+
+     At most four upward swipes search a long menu. These are prerequisite reveal gestures;
+     the requested action is never activated here and the menu is never reopened on failure.
+     Returns nil if the live control cannot become hittable within the timeout.
      */
     func tryResolveReaderActionControl(
         _ identifier: String,
         in app: XCUIApplication,
         timeout: TimeInterval = 10
     ) -> XCUIElement? {
+        guard let surface = ensureReaderActionSurface(for: identifier, in: app, timeout: timeout) else {
+            return nil
+        }
         let deadline = Date().addingTimeInterval(timeout)
-        let prefersDrawer = readerActionUsesNavigationDrawer(identifier)
-        let directActionCandidates = readerDirectActionCandidates(identifier, in: app)
-        repeat {
-            if let actionSurface = ensureReaderActionSurface(
-                for: identifier,
-                in: app,
-                timeout: min(10, max(3, deadline.timeIntervalSinceNow))
-            ) {
-                for _ in 0..<4 {
-                    let action = resolveReaderActionElement(identifier, in: app, actionSurface: actionSurface)
-                    if action.exists, waitForElementToBecomeHittable(action, timeout: 0.5) {
-                        return action
-                    }
-                    if isElementVisible(action, within: actionSurface) {
-                        return action
-                    }
-                    if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
-                        return directAction
-                    }
-                    if elementHasUsableFrame(actionSurface) {
-                        actionSurface.swipeUp()
-                        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-                    }
-                }
-            }
-
-            if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
+        let directCandidates = readerDirectActionCandidates(identifier, in: app)
+        for scrollCount in 0...4 {
+            // Popup identity markers are accessibility siblings of their visible rows, so an
+            // exact app-level action query is the authoritative lookup for those surfaces.
+            if let directAction = directCandidates.first(where: { isElementHittable($0) }) {
                 return directAction
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        } while Date() < deadline
-
-        if let finalSurface = prefersDrawer
-            ? resolvedElement("readerNavigationDrawer", in: app)
-            : resolvedElement("readerOverflowMenu", in: app)
-        {
-            let finalAction = resolveReaderActionElement(identifier, in: app, actionSurface: finalSurface)
-            if finalAction.exists {
-                return finalAction
+            let action = resolveReaderActionElement(identifier, in: app, actionSurface: surface)
+            if waitForElementToBecomeHittable(action, timeout: min(1, max(0, deadline.timeIntervalSinceNow))) {
+                return action
             }
-        }
-
-        if let directAction = directActionCandidates.first(where: { isElementHittable($0) }) {
-            return directAction
+            guard scrollCount < 4, Date() < deadline, elementHasUsableFrame(surface) else { return nil }
+            surface.swipeUp()
         }
         return nil
     }
 
-    /**
-     Returns true when XCTest has a finite, non-empty frame it can use for activation-point work.
-     */
 }

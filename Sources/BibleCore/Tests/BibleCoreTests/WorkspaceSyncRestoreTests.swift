@@ -440,21 +440,27 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
-     Verifies a successful Android workspace restore publishes the complete graph and fidelity state
-     through exactly one durable model-context save.
+     Verifies a successful Android workspace restore commits the complete graph and fidelity state.
 
      The fixture includes two windows, page managers, history aliases, raw Android fidelity fields,
-     and active-workspace metadata. A `ModelContext.didSave` expectation rejects the former sequence
-     of graph deletion, graph insertion, and per-setting commits, while post-save values prove the one
-     accepted save contains every required relationship and metadata value.
+     and active-workspace metadata in the production-shaped graph/settings store split. Every result
+     is fetched through a fresh context after the operation returns, proving the expected final graph
+     and metadata values are durable without depending on SwiftData save-notification behavior. This
+     does not assert intermediate visibility or a physical save count.
 
-     - Side effects: Mutates an isolated in-memory SwiftData container and installs a scoped save
-       notification observer that is removed when the test returns.
-     - Failure meaning: A failure indicates workspace restore can expose an incomplete graph or
-       metadata generation instead of Android's category-wide replacement behavior.
+     - Side effects: Mutates isolated file-backed SwiftData graph and settings stores retained for the
+       test process lifetime.
+     - Failure meaning: A failure indicates workspace restore did not commit the complete Android
+       category replacement or left pending mutations in its owner context.
      */
     func testRemoteSyncWorkspaceRestoreReplacesLocalWorkspacesAndPreservesAndroidFidelity() throws {
-        let container = try makeWorkspaceRestoreModelContainer()
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "workspace-sync-restore-committed-generation"
+        )
+        let persistentStore = try makePersistentWorkspaceRestoreModelContainer(
+            in: storeDirectory
+        )
+        let container = persistentStore.container
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
         let service = RemoteSyncWorkspaceRestoreService()
@@ -606,24 +612,14 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: databaseURL) }
 
         let snapshot = try service.readSnapshot(from: databaseURL)
-        let saveExpectation = expectation(description: "Workspace restore performs one durable save")
-        saveExpectation.expectedFulfillmentCount = 1
-        saveExpectation.assertForOverFulfill = true
-        let saveObserver = NotificationCenter.default.addObserver(
-            forName: ModelContext.didSave,
-            object: modelContext,
-            queue: nil
-        ) { _ in
-            saveExpectation.fulfill()
-        }
-        defer { NotificationCenter.default.removeObserver(saveObserver) }
-
         let report = try service.replaceLocalWorkspaces(
             from: snapshot,
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-        wait(for: [saveExpectation], timeout: 1)
+        XCTAssertFalse(modelContext.hasChanges)
+        let committedContext = ModelContext(container)
+        let committedSettingsStore = SettingsStore(modelContext: committedContext)
 
         XCTAssertEqual(
             report,
@@ -637,7 +633,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             )
         )
 
-        let workspaces = try modelContext.fetch(FetchDescriptor<Workspace>())
+        let workspaces = try committedContext.fetch(FetchDescriptor<Workspace>())
         XCTAssertEqual(workspaces.count, 1)
         XCTAssertEqual(workspaces[0].id, restoredWorkspaceID)
         XCTAssertEqual(workspaces[0].name, "Restored Workspace")
@@ -658,12 +654,12 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(workspaces[0].workspaceSettings?.hideCompareDocuments, ["ESV"])
         XCTAssertEqual(workspaces[0].textDisplaySettings?.bookmarksHideLabels, [hiddenLabelID])
 
-        let windows = try modelContext.fetch(FetchDescriptor<Window>()).sorted { $0.orderNumber < $1.orderNumber }
+        let windows = try committedContext.fetch(FetchDescriptor<Window>()).sorted { $0.orderNumber < $1.orderNumber }
         XCTAssertEqual(windows.map(\.id), [firstWindowID, secondWindowID])
         XCTAssertEqual(windows[0].targetLinksWindowId, secondWindowID)
         XCTAssertEqual(windows[1].layoutState, "minimized")
 
-        let pageManagers = try modelContext.fetch(FetchDescriptor<PageManager>()).sorted { $0.id.uuidString < $1.id.uuidString }
+        let pageManagers = try committedContext.fetch(FetchDescriptor<PageManager>()).sorted { $0.id.uuidString < $1.id.uuidString }
         XCTAssertEqual(pageManagers.count, 2)
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.currentCategoryName, "general_book")
         // Android MYNOTE windows restore into iOS's `mynote` page-manager key so the reader
@@ -672,12 +668,12 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.generalBookDocument, "Josephus")
         XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.commentaryDocument, "TSK")
 
-        let historyItems = try modelContext.fetch(FetchDescriptor<HistoryItem>()).sorted { $0.createdAt < $1.createdAt }
+        let historyItems = try committedContext.fetch(FetchDescriptor<HistoryItem>()).sorted { $0.createdAt < $1.createdAt }
         XCTAssertEqual(historyItems.count, 2)
         XCTAssertEqual(historyItems.map(\.document), ["KJV", "ESV"])
         XCTAssertEqual(historyItems.map(\.key), ["Exod.2.3", "Matt.5.3"])
 
-        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: committedSettingsStore)
         XCTAssertEqual(
             fidelityStore.allWorkspaceEntries(),
             [
@@ -711,7 +707,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         let historyAliases = fidelityStore.allHistoryItemAliases()
         XCTAssertEqual(historyAliases.map(\.remoteHistoryItemID), [101, 102])
         XCTAssertEqual(Set(historyAliases.map(\.localHistoryItemID)), Set(historyItems.map(\.id)))
-        XCTAssertEqual(settingsStore.activeWorkspaceId, restoredWorkspaceID)
+        XCTAssertEqual(committedSettingsStore.activeWorkspaceId, restoredWorkspaceID)
     }
 
     /**
@@ -764,9 +760,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 layoutWeight: 1,
                 layoutState: "split"
             )
-            oldWindow.workspace = oldWorkspace
             let oldPageManager = PageManager(id: oldWindowID, currentCategoryName: "commentary")
-            oldPageManager.window = oldWindow
             oldPageManager.commentaryDocument = "MHC"
             oldPageManager.commentaryAnchorOrdinal = 123
             let oldHistory = HistoryItem(
@@ -775,12 +769,14 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 document: "KJV",
                 key: "Gen.1.1"
             )
-            oldHistory.window = oldWindow
             oldHistory.anchorOrdinal = 4
             modelContext.insert(oldWorkspace)
             modelContext.insert(oldWindow)
             modelContext.insert(oldPageManager)
             modelContext.insert(oldHistory)
+            oldWindow.workspace = oldWorkspace
+            oldPageManager.window = oldWindow
+            oldHistory.window = oldWindow
             try modelContext.save()
 
             settingsStore.activeWorkspaceId = oldWorkspaceID
@@ -946,9 +942,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 layoutWeight: 1,
                 layoutState: "split"
             )
-            window.workspace = workspace
             let pageManager = PageManager(id: windowID, currentCategoryName: "bible")
-            pageManager.window = window
             pageManager.bibleDocument = "KJV"
             pageManager.bibleVersification = "KJVA"
             pageManager.bibleChapterNo = 1
@@ -959,12 +953,14 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
                 document: "KJV",
                 key: "Gen.1.1"
             )
-            history.window = window
             history.anchorOrdinal = 4
             modelContext.insert(workspace)
             modelContext.insert(window)
             modelContext.insert(pageManager)
             modelContext.insert(history)
+            window.workspace = workspace
+            pageManager.window = window
+            history.window = window
             try modelContext.save()
 
             settingsStore.activeWorkspaceId = workspaceID
@@ -1356,18 +1352,27 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
     }
 
     /**
-     Verifies newer Android workspace patches publish graph and replay bookkeeping with one save.
+     Verifies newer Android workspace patches leave graph and replay bookkeeping durable on return.
 
      The replay updates workspace/window/page-manager rows, preserves local history, replaces conflict
-     log entries, records patch status, and refreshes fingerprints. One `didSave` notification pins the
-     outer atomic boundary across the nested centralized workspace restore and all metadata writes.
+     log entries, records patch status, and refreshes fingerprints. The production-shaped graph and
+     settings stores are read through a fresh context after replay, so every assertion observes the
+     expected final durable values instead of an implementation-specific save notification. This
+     does not assert intermediate visibility or a physical save count.
 
-     - Side effects: Builds temporary Android SQLite fixtures and mutates an isolated in-memory store.
+     - Side effects: Builds temporary Android SQLite fixtures and mutates isolated file-backed SwiftData
+       stores retained for the test process lifetime.
      - Failure modes: Rethrows fixture, archive, restore, or fetch errors. Assertions describe replay
-       fidelity, bookkeeping drift, or more than one durable publish.
+       fidelity, pending mutations, or missing/stale final graph and bookkeeping values.
      */
     func testRemoteSyncWorkspacePatchApplyReplaysNewerRowsAndPreservesHistoryAndFidelity() throws {
-        let container = try makeWorkspaceRestoreModelContainer()
+        let storeDirectory = try makeProcessLifetimePersistentStoreDirectory(
+            label: "workspace-sync-patch-committed-generation"
+        )
+        let persistentStore = try makePersistentWorkspaceRestoreModelContainer(
+            in: storeDirectory
+        )
+        let container = persistentStore.container
         let modelContext = ModelContext(container)
         let settingsStore = SettingsStore(modelContext: modelContext)
         let restoreService = RemoteSyncWorkspaceRestoreService()
@@ -1597,24 +1602,20 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: stagedArchive.archiveFileURL) }
 
-        let saveExpectation = expectation(description: "Workspace patch publishes graph and bookkeeping once")
-        saveExpectation.expectedFulfillmentCount = 1
-        saveExpectation.assertForOverFulfill = true
-        let saveObserver = NotificationCenter.default.addObserver(
-            forName: ModelContext.didSave,
-            object: modelContext,
-            queue: nil
-        ) { _ in
-            saveExpectation.fulfill()
-        }
-        defer { NotificationCenter.default.removeObserver(saveObserver) }
-
         let report = try patchService.applyPatchArchives(
             [stagedArchive],
             modelContext: modelContext,
             settingsStore: settingsStore
         )
-        wait(for: [saveExpectation], timeout: 1)
+        XCTAssertFalse(modelContext.hasChanges)
+        let committedContext = ModelContext(container)
+        let committedSettingsStore = SettingsStore(modelContext: committedContext)
+        let committedLogEntryStore = RemoteSyncLogEntryStore(
+            settingsStore: committedSettingsStore
+        )
+        let committedPatchStatusStore = RemoteSyncPatchStatusStore(
+            settingsStore: committedSettingsStore
+        )
 
         XCTAssertEqual(report.appliedPatchCount, 1)
         XCTAssertEqual(report.appliedLogEntryCount, 5)
@@ -1631,7 +1632,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             )
         )
 
-        let workspaces = try modelContext.fetch(FetchDescriptor<Workspace>())
+        let workspaces = try committedContext.fetch(FetchDescriptor<Workspace>())
         XCTAssertEqual(workspaces.count, 1)
         XCTAssertEqual(workspaces[0].name, "Patched Workspace")
         XCTAssertEqual(workspaces[0].contentsText, "Updated content")
@@ -1639,9 +1640,9 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(workspaces[0].maximizedWindowId, secondWindowID)
         XCTAssertEqual(workspaces[0].primaryTargetLinksWindowId, secondWindowID)
         XCTAssertTrue(workspaces[0].workspaceSettings?.enableReverseSplitMode ?? false)
-        XCTAssertEqual(settingsStore.activeWorkspaceId, workspaceID)
+        XCTAssertEqual(committedSettingsStore.activeWorkspaceId, workspaceID)
 
-        let windows = try modelContext.fetch(FetchDescriptor<Window>()).sorted { lhs, rhs in
+        let windows = try committedContext.fetch(FetchDescriptor<Window>()).sorted { lhs, rhs in
             if lhs.orderNumber == rhs.orderNumber {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
@@ -1651,7 +1652,7 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(windows.first(where: { $0.id == firstWindowID })?.targetLinksWindowId, secondWindowID)
         XCTAssertEqual(windows.first(where: { $0.id == firstWindowID })?.layoutState, "minimized")
 
-        let pageManagers = try modelContext.fetch(FetchDescriptor<PageManager>())
+        let pageManagers = try committedContext.fetch(FetchDescriptor<PageManager>())
         XCTAssertEqual(pageManagers.count, 2)
         XCTAssertEqual(pageManagers.first(where: { $0.id == firstWindowID })?.currentCategoryName, "general_book")
         // Android MYNOTE windows restore into iOS's `mynote` page-manager key so the reader
@@ -1659,12 +1660,12 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.currentCategoryName, "mynote")
         XCTAssertEqual(pageManagers.first(where: { $0.id == secondWindowID })?.dictionaryDocument, "Easton")
 
-        let historyItems = try modelContext.fetch(FetchDescriptor<HistoryItem>())
+        let historyItems = try committedContext.fetch(FetchDescriptor<HistoryItem>())
         XCTAssertEqual(historyItems.count, 1)
         XCTAssertEqual(historyItems.first?.document, "KJV")
         XCTAssertEqual(historyItems.first?.key, "Gen.1.1")
 
-        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: settingsStore)
+        let fidelityStore = RemoteSyncWorkspaceFidelityStore(settingsStore: committedSettingsStore)
         XCTAssertEqual(
             fidelityStore.speakSettingsJSON(for: workspaceID),
             #"{"sleepTimer":30,"queue":true}"#
@@ -1692,11 +1693,11 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
         )
         XCTAssertNotNil(fidelityStore.localHistoryItemID(for: 501))
         XCTAssertEqual(
-            patchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 7),
+            committedPatchStatusStore.status(for: .workspaces, sourceDevice: "pixel", patchNumber: 7),
             .init(sourceDevice: "pixel", patchNumber: 7, sizeBytes: Int64((try Data(contentsOf: stagedArchive.archiveFileURL)).count), appliedDate: 3_000)
         )
         XCTAssertEqual(
-            logEntryStore.entry(
+            committedLogEntryStore.entry(
                 for: .workspaces,
                 tableName: "PageManager",
                 entityID1: .blob(uuidBlob(secondWindowID)),
@@ -1705,10 +1706,10 @@ final class WorkspaceSyncRestoreTests: XCTestCase {
             2_400
         )
         let currentSnapshot = RemoteSyncWorkspaceSnapshotService().snapshotCurrentState(
-            modelContext: modelContext,
-            settingsStore: settingsStore
+            modelContext: committedContext,
+            settingsStore: committedSettingsStore
         )
-        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: settingsStore)
+        let fingerprintStore = RemoteSyncRowFingerprintStore(settingsStore: committedSettingsStore)
         for (logKey, expectedFingerprint) in currentSnapshot.fingerprintsByKey {
             XCTAssertEqual(
                 fingerprintStore.fingerprint(forLogKey: logKey, category: .workspaces),

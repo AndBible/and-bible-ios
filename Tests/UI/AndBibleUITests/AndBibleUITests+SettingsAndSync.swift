@@ -306,13 +306,144 @@ extension AndBibleUITests {
     }
 
     /**
+     Verifies manual NextCloud sync uses the prepared runtime owner after an in-route iCloud mode
+     change.
+     *
+     * - Side effects:
+     *   - launches the deterministic adopt-existing fixture with the local iCloud runtime substitute
+     *   - changes iCloud mode while keeping the app-owned Sync Settings route visible
+     *   - returns to NextCloud and completes the My Documents reset-cloud confirmation workflow
+     *   - dismisses and reopens Sync Settings to verify category enablement was persisted by the
+     *     prepared runtime rather than rejected by the retired owner
+     * - Failure modes:
+     *   - fails if the iCloud mode change dismisses the existing app-owned route
+     *   - fails if manual synchronization remains bound to the retired lifecycle service
+     *   - fails if the reset-cloud result is not durable after direct route dismissal and reopen
+     */
+    func testSyncSettingsPreparedRuntimeOwnsManualSyncWithoutRecreatingRoute() {
+        let app = makeApp(remoteSyncBootstrapScenario: "adopt-existing")
+        app.launchEnvironment["UITEST_LOCAL_ICLOUD_RUNTIME_CONTAINER"] = "1"
+        app.launch()
+
+        _ = openSyncSettingsFromReaderAction(in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+
+        tapSyncBackend("ICLOUD", in: app)
+        waitForSyncState(
+            ["backend": "ICLOUD", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+        let iCloudToggle = requireElement("syncICloudEnabledToggle", in: app, timeout: 10)
+        let initialState = resolvedElementSemanticText("syncSettingsState", in: app) ?? ""
+        XCTAssertEqual(
+            syncStateToken(named: "icloudEnabled", in: initialState), "false",
+            "The baseline must start with iCloud disabled so this test actually prepares a new runtime."
+        )
+        tapElementReliably(iCloudToggle, timeout: 10)
+
+        waitForICloudSyncRuntimeApplyToSettle(in: app, timeout: 30)
+        waitForSyncState(
+            ["backend": "ICLOUD", "icloudEnabled": "true", "restartRequired": "false"],
+            in: app,
+            timeout: 10
+        )
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].exists,
+            "Preparing the replacement runtime must keep the existing Sync Settings route visible."
+        )
+
+        tapSyncBackend("NEXT_CLOUD", in: app)
+        waitForSyncState(["backend": "NEXT_CLOUD", "enabled": "none"], in: app, timeout: 10)
+        toggleSyncCategory(
+            "syncCategoryToggle::mydocuments",
+            in: app,
+            expectedTokens: [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "adoptOrCreate:mydocuments",
+            ],
+            timeout: 15
+        )
+        chooseSyncBootstrapPromptOption(
+            "Copy from this device to Cloud",
+            actionIdentifier: "syncBootstrapDialogAction::create",
+            expecting: ["pendingConfirmation": "resetCloud:mydocuments"],
+            in: app,
+            timeout: 10
+        )
+        tapAppOwnedDialogAction(
+            "syncConfirmationDialogAction::confirm",
+            dialogIdentifier: "syncConfirmationDialog",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
+        waitForSyncState(
+            [
+                "backend": "NEXT_CLOUD",
+                "enabled": "mydocuments",
+                "bootstrapPrompt": "none",
+                "pendingConfirmation": "none",
+                "lastConfirmation": "resetCloud:mydocuments",
+            ],
+            in: app,
+            timeout: 20
+        )
+
+        dismissSyncSettingsThroughExactRoles(in: app)
+        openSyncSettingsThroughExactRoles(in: app)
+        waitForSyncState(
+            ["backend": "NEXT_CLOUD", "enabled": "mydocuments"],
+            in: app,
+            timeout: 20
+        )
+        dismissSyncSettingsThroughExactRoles(in: app)
+    }
+
+    /**
+     Saves a username independently before a server URL exists, as Android preferences permit.
+
+     The fixture starts with empty credentials. Entering one username and recreating Settings
+     must retain that value without requiring a connectable account or performing network I/O.
+     One editor submission is followed by a read-only value check after route reconstruction.
+     */
+    func testSyncSettingsUsernamePersistsBeforeServerURLIsConfigured() {
+        let app = makeApp()
+        app.launch()
+        _ = openSyncSettingsFromReaderAction(in: app)
+        tapElementReliably(requireElement("syncNextCloudUsernameRow", in: app, timeout: 10), timeout: 5)
+        let usernameField = app.textFields["syncNextCloudUsernameField"]
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 10))
+        replaceKnownText(in: usernameField, existingCharacterCount: 0, with: "partial-account", app: app)
+        tapAppOwnedDialogAction(
+            "syncNextCloudUsernameAction::confirm",
+            dialogIdentifier: "syncNextCloudUsername",
+            expectedTitle: "OK",
+            in: app
+        )
+        dismissSyncSettings(in: app)
+        _ = openSyncSettingsFromReaderAction(in: app)
+        tapElementReliably(requireElement("syncNextCloudUsernameRow", in: app, timeout: 10), timeout: 5)
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 10))
+        XCTAssertEqual(usernameField.value as? String, "partial-account")
+        tapAppOwnedDialogAction(
+            "syncNextCloudUsernameAction::cancel",
+            dialogIdentifier: "syncNextCloudUsername",
+            expectedTitle: "Cancel",
+            in: app
+        )
+        dismissSyncSettings(in: app)
+    }
+
+    /**
      Verifies NextCloud invalid URL validation, category disabling, and backend switching.
      *
      * - Side effects:
      *   - launches the app on the reader shell with persisted NextCloud settings and bookmarks
      *     already enabled through host-side fixture seeding
-     *   - opens Android's server `EditTextPreference`, enters one invalid URL, and presses its
-     *     app-owned OK action
+     *   - saves a valid server URL through Android's `EditTextPreference`, rejects an invalid
+     *     replacement with the visible error dialog, and verifies the accepted value after reopen
      *   - disables the bookmarks category through the production toggle and observes the immediate
      *     exported `enabled=none` state
      *   - dismisses the Sync screen, reopens it from the reader action, and rehydrates from
@@ -321,8 +452,8 @@ extension AndBibleUITests {
      *     reopens again so the iCloud section is rehydrated from persisted settings
      * - Failure modes:
      *   - fails if the seeded Sync screen does not start with `backend=NEXT_CLOUD;enabled=bookmarks`
-     *   - fails if the NextCloud server field is missing or if the exported connection-test state
-     *     never reaches `failureInvalidURL`
+     *   - fails if the server editor does not accept a valid URL, show the invalid-URL message,
+     *     dismiss before the error dialog, or preserve the accepted URL after rejection and reopen
      *   - fails if disabling the category does not update the exported Sync screen state to
      *     `backend=NEXT_CLOUD;enabled=none`
      *   - fails if the direct dismiss or reopen controls never appear
@@ -346,8 +477,10 @@ extension AndBibleUITests {
             requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
             timeout: 5
         )
-        let serverField = requireElement("syncNextCloudServerURLField", in: app, timeout: 10)
-        replaceText(in: serverField, with: "not-a-url")
+        let serverField = app.textFields["syncNextCloudServerURLField"]
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        let acceptedServerURL = "https://example.invalid/nextcloud"
+        replaceKnownText(in: serverField, existingCharacterCount: 0, with: acceptedServerURL, app: app)
         tapAppOwnedDialogAction(
             "syncNextCloudServerURLAction::confirm",
             dialogIdentifier: "syncNextCloudServerURL",
@@ -355,7 +488,31 @@ extension AndBibleUITests {
             in: app,
             timeout: 10
         )
-        waitForElementValue("syncSettingsState", toContain: "remoteStatus=failureInvalidURL", in: app, timeout: 10)
+        tapElementReliably(
+            requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
+            timeout: 5
+        )
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        XCTAssertEqual(serverField.value as? String, acceptedServerURL)
+        replaceKnownText(
+            in: serverField,
+            existingCharacterCount: acceptedServerURL.count,
+            with: "not-a-url",
+            app: app
+        )
+        tapAppOwnedDialogAction(
+            "syncNextCloudServerURLAction::confirm",
+            dialogIdentifier: "syncNextCloudServerURL",
+            expectedTitle: "OK",
+            in: app,
+            timeout: 10
+        )
+        let invalidURLMessage = app.alerts.staticTexts[
+            "The URL you entered is invalid. Please enter a valid URL (e.g., https://nextcloud.example.com)"
+        ]
+        XCTAssertTrue(invalidURLMessage.waitForExistence(timeout: 10))
+        XCTAssertTrue(isElementVisible(invalidURLMessage, within: app))
+        XCTAssertFalse(serverField.exists, "Android closes the editor before presenting the error.")
         tapAppOwnedDialogAction(
             "syncErrorDialogAction::okay",
             dialogIdentifier: "syncErrorDialog",
@@ -378,6 +535,23 @@ extension AndBibleUITests {
             reopenedSyncState.value as? String,
             backend: "NEXT_CLOUD",
             enabled: "none"
+        )
+        tapElementReliably(
+            requireElement("syncNextCloudServerURLRow", in: app, timeout: 10),
+            timeout: 5
+        )
+        XCTAssertTrue(serverField.waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            serverField.value as? String,
+            acceptedServerURL,
+            "Rejecting a malformed edit must preserve the accepted URL after Settings is recreated."
+        )
+        tapAppOwnedDialogAction(
+            "syncNextCloudServerURLAction::cancel",
+            dialogIdentifier: "syncNextCloudServerURL",
+            expectedTitle: "Cancel",
+            in: app,
+            timeout: 10
         )
 
         tapSyncBackend("ICLOUD", in: app)
@@ -413,8 +587,10 @@ extension AndBibleUITests {
      service contracts. Unprovisioned simulator apps cannot launch with CloudKit entitlements, so
      this test explicitly substitutes a local SwiftData container only at that unavailable boundary.
      It still exercises the production toggle, mode-change handler, runtime construction, deferred
-     shell swap, persistence, state transition, and app-owned route-survival wiring. After dismissing
-     Settings, one real chapter swipe must render Genesis 2 without crashing the rebuilt reader.
+     shell swap, persistence, state transition, app-owned route-survival wiring, and the deferred
+     activation boundary that runs when the route is dismissed. After dismissal, one real chapter
+     swipe must render Genesis 2 without crashing the rebuilt reader; the route must then reopen
+     directly with the accepted iCloud state.
      */
     func testSyncSettingsICloudToggleDoesNotRequireRestart() {
         let app = makeApp()
@@ -450,7 +626,7 @@ extension AndBibleUITests {
             "The live runtime apply must preserve the app-owned Sync Settings activity."
         )
 
-        dismissSyncSettings(in: app)
+        dismissSyncSettingsThroughExactRoles(in: app)
         waitForElementValue("bookChooserButton", toContain: "Genesis 1", in: app)
         app.webViews.firstMatch.swipeLeft()
         waitForElementValue("bookChooserButton", toContain: "Genesis 2", in: app)
@@ -463,6 +639,66 @@ extension AndBibleUITests {
             "Expected visible Genesis 2 after navigating with the rebuilt runtime."
         )
         XCTAssertEqual(app.state, .runningForeground)
+
+        openSyncSettingsThroughExactRoles(in: app)
+        waitForSyncState(
+            [
+                "backend": "ICLOUD",
+                "icloudEnabled": "true",
+                "restartRequired": "false",
+            ],
+            in: app,
+            timeout: 20
+        )
+        XCTAssertTrue(
+            app.otherElements["appOwnedSyncSettingsRoute"].exists,
+            "Sync Settings must reopen directly after the deferred runtime replacement."
+        )
+        dismissSyncSettingsThroughExactRoles(in: app)
+    }
+
+    /**
+     Dismisses Sync Settings through its retained accessibility roles.
+
+     - Parameter app: Running application whose app-owned Sync Settings route is visible.
+     - Side effects: Activates the exact Android Up button once.
+     - Failure modes: Records a failure if the exact Up button does not become actionable and then
+       disappear, or the reader drawer button does not become actionable after dismissal.
+     */
+    private func dismissSyncSettingsThroughExactRoles(in app: XCUIApplication) {
+        let backButton = app.buttons["syncSettingsTopAppBarBackButton"].firstMatch
+        XCTAssertTrue(waitForElementToBecomeHittable(backButton, timeout: 10))
+        backButton.tap()
+        waitForElementToDisappear(backButton, timeout: 10)
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(
+                app.buttons["readerNavigationDrawerButton"].firstMatch,
+                timeout: 20
+            ),
+            "The deferred runtime replacement must restore the reader action surface."
+        )
+    }
+
+    /**
+     Reopens Sync Settings from the restored reader through exact production roles.
+
+     - Parameter app: Running application whose reader action surface is ready.
+     - Side effects: Uses the shared reader-action resolver to open the drawer, perform at most
+       four reveal swipes, and activate Device synchronization once. The action is never retried.
+     - Failure modes: Records a failure if the exact drawer, Sync action, screen, or backend row does
+       not become actionable.
+     */
+    private func openSyncSettingsThroughExactRoles(in app: XCUIApplication) {
+        tapReaderAction("readerOpenSyncSettingsAction", in: app, timeout: 20)
+
+        XCTAssertTrue(app.otherElements["syncSettingsScreen"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(
+            waitForElementToBecomeHittable(
+                app.buttons["syncBackendPicker"].firstMatch,
+                timeout: 20
+            ),
+            "The reopened Sync Settings route must publish its exact backend action row."
+        )
     }
 
     /**

@@ -1544,3 +1544,6 @@
 
 /* Android shared translations */
 "error_key_not_in_document2" = "%1$@, ஆவணம் %2$@ இல் இல்லை.";
+
+/* Android shared translations */
+"migrated_my_notes" = "என் குறிப்புகளை நகர்த்தியது";

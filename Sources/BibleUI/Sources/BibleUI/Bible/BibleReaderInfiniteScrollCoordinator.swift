@@ -4,7 +4,7 @@
  - Side effects: None; this is a value payload.
  - Failure modes: None; callers provide only already-normalized book/chapter values.
  */
-struct BibleReaderInfiniteScrollChapter: Equatable {
+struct BibleReaderInfiniteScrollChapter: Equatable, Hashable {
     /// Display book name from the active reader versification.
     let book: String
 
@@ -34,6 +34,9 @@ struct BibleReaderInfiniteScrollCoordinator {
     /// Latest chapter currently loaded in the WebView, or Genesis 0 before the first render.
     private var upperBound = BibleReaderInfiniteScrollChapter(book: "Genesis", chapter: 0)
 
+    /// Exact chapters retained by the current Vue document generation.
+    private var loadedChapters: Set<BibleReaderInfiniteScrollChapter> = []
+
     /**
      Resets the loaded range to the currently rendered Bible chapter.
 
@@ -48,6 +51,21 @@ struct BibleReaderInfiniteScrollCoordinator {
         let chapter = BibleReaderInfiniteScrollChapter(book: book, chapter: chapter)
         lowerBound = chapter
         upperBound = chapter
+        loadedChapters = [chapter]
+    }
+
+    /**
+     Reports whether a chapter belongs to the current Vue document generation.
+
+     - Parameters:
+       - book: Display book name from the active module versification.
+       - chapter: One-based chapter number.
+     - Returns: `true` only after the base replacement or a successful prepend/append committed it.
+     - Side effects: None.
+     - Failure modes: Returns `false` before the first render and for failed adjacent loads.
+     */
+    func contains(book: String, chapter: Int) -> Bool {
+        loadedChapters.contains(BibleReaderInfiniteScrollChapter(book: book, chapter: chapter))
     }
 
     /**
@@ -106,6 +124,7 @@ struct BibleReaderInfiniteScrollCoordinator {
      */
     mutating func commitPrevious(_ chapter: BibleReaderInfiniteScrollChapter) {
         lowerBound = chapter
+        loadedChapters.insert(chapter)
     }
 
     /**
@@ -117,5 +136,6 @@ struct BibleReaderInfiniteScrollCoordinator {
      */
     mutating func commitNext(_ chapter: BibleReaderInfiniteScrollChapter) {
         upperBound = chapter
+        loadedChapters.insert(chapter)
     }
 }

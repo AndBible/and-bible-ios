@@ -269,12 +269,12 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         let document = MyDocument(name: "Notes", initials: "MyNotes")
         let page = MyDocumentPage(title: "Page", pageKey: "page", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Selected source text")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
@@ -721,12 +721,12 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         let document = MyDocument(name: "Speech Collision", initials: "SpeechCollision")
         let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Local collision speech")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let controller = BibleReaderController(bridge: BibleBridge(), swordManagerOverride: manager)
@@ -774,12 +774,12 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         let document = MyDocument(name: "Local Speech Full Name", initials: "MySpeechNotes")
         let page = MyDocumentPage(title: "Entry", pageKey: "ENTRY", contentType: .markdown)
         let content = MyDocumentPageContent(pageId: page.id, content: "Authorized local speech")
-        page.pageContent = content
-        page.document = document
-        document.pages = [page]
         context.insert(document)
         context.insert(page)
         context.insert(content)
+        page.pageContent = content
+        page.document = document
+        document.pages = [page]
         try context.save()
 
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
@@ -802,7 +802,7 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
 
     /** Verifies a MyDocument process checkpoint retains exact page and local ordinal identity. */
     @MainActor
-    func testMyDocumentCheckpointReconstructsExactGenericCursor() throws {
+    func testMyDocumentCheckpointReconstructsExactGenericCursor() async throws {
         let container = try makeMyDocumentModelContainer()
         let context = ModelContext(container)
         let document = MyDocument(name: "Notes", initials: "MyNotes")
@@ -810,21 +810,25 @@ final class BibleReaderSpeechRoutingTests: BibleUISwordFixtureTestCase {
         let second = MyDocumentPage(title: "Second", pageKey: "second", orderNumber: 1)
         let firstContent = MyDocumentPageContent(pageId: first.id, content: "First page")
         let secondContent = MyDocumentPageContent(pageId: second.id, content: "Second page")
-        first.pageContent = firstContent
-        second.pageContent = secondContent
-        first.document = document
-        second.document = document
-        document.pages = [first, second]
         context.insert(document)
         context.insert(first)
         context.insert(second)
         context.insert(firstContent)
         context.insert(secondContent)
+        first.pageContent = firstContent
+        second.pageContent = secondContent
+        first.document = document
+        second.document = document
+        document.pages = [first, second]
         try context.save()
 
         let controller = BibleReaderController(bridge: BibleBridge(), initializesSword: false)
         controller.myDocumentStore = MyDocumentStore(modelContext: context)
         XCTAssertTrue(controller.loadMyDocumentPage(bookInitials: "MyNotes", pageKey: "second"))
+        try await awaitReaderCondition("My Documents page acceptance") {
+            controller.currentCategory == .generalBook
+                && controller.currentGeneralBookKey == "second"
+        }
         let service = makeSpeechService()
         controller.speakService = service
         let session = try XCTUnwrap(controller.defaultSpeechSession(service: service))

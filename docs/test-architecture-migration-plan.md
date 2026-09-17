@@ -1,20 +1,24 @@
-# Test Architecture Migration Plan - Colocate Tests in Package Targets
+# Test architecture: behavioral contracts, execution, and feedback cost
 
-Status: in progress (Phase 4 app-host retirement and CI/docs alignment started)
+Status: in progress; contract replacement, integrated execution, and cost acceptance remain open
 Owner: TBD
-Last updated: 2026-06-29
+Last updated: 2026-09-14
 
 ## Why (adversarial review summary)
 
-The test suite's slowness and brittleness are structural, not per-test flakiness.
+The original migration found substantial package-owned coverage in app-hosted
+targets. That placement was a structural source of cost, but the historical
+counts and timings below do not establish the dominant cost of the current
+suite. Current execution and runner-cost measurements remain required before
+changing shard counts, timeouts, or build reuse.
 
-Root cause: ~38,000 lines of pure package-logic unit tests live inside the
-app-target XCUITest bundle (`AndBibleTests/`), so every "unit" test pays the full
-app-build + simulator-boot + app-install tax and cannot use the fast `swift test`
-path. The sharding scripts, timing files, retry-upload steps, and 400+ `.xcresult`
-rerun bundles are machinery built to cope with that root cause rather than remove it.
+The original placement problem has largely been addressed. Moving tests does not establish that
+an assertion measures the intended behavior, that its observer is valid, or that CI executes it.
+Current work replaces implementation-shaped expectations, verifies real rendering and persistence,
+and measures compilation, fixtures, test bodies, and teardown separately. Dependency reach determines
+validation coverage; it is not a reason to preserve an obsolete implementation or cap the work.
 
-Evidence captured during review:
+Historical evidence captured during the original review:
 
 | Signal | Value | Source |
 |---|---|---|
@@ -22,24 +26,23 @@ Evidence captured during review:
 | Of those, files importing the app module | 0 (all `@testable import` package modules) | grep |
 | Test funcs in actual package test targets | 42 (fast lane nearly empty) | `Sources/*/Tests/` |
 | UI tests | 68 funcs / 184 asserts (~2.7 asserts/test) | `AndBibleUITests/` |
-| UI suite serial wall-clock | ~150 min, avg 145s/test, slowest 317s | `Tests/UI/Fixtures/ui_test_timings.json` |
+| UI suite serial wall-clock estimate | ~150 min, avg 145s/test, slowest 317s/test | Historical measurements now recorded with provenance in `Tests/UI/Fixtures/ui_test_timings.json` |
 | App relaunches | 66 `app.launch()` ~ one cold launch per test | grep |
 | Brittleness machinery | 102 polling loops, 463 `firstMatch`, sharding-by-timings, retry-upload | grep / `ios-ci.yml` |
 | `.xcresult` rerun artifacts on disk | 434 (`rerun`/`fix`/`reliab`/`flak`/`retry`) | `.artifacts/` |
 | Does CI ever run `swift test`? | No | `.github/workflows/ios-ci.yml` |
 
-### Findings (most to least severe)
-- **F1** Package-logic tests misfiled into the app-target bundle (root cause of "slow"). 26 of 27 `AndBibleTests/` files import only package modules. Genuinely app/source-aware tests are a small minority and live inside `+AppAndReader.swift` (80 funcs total): `AndBibleApplicationDelegate.sceneConfiguration` (line 2328) and `testContentViewDoesNotContainLegacyRootSidebarShell` (line 2361, reads `AndBible/ContentView.swift` from disk). The other ~78 funcs in that file are BibleUI logic.
+### Historical findings and their current interpretation
+- **F1** Package-logic tests were historically misfiled into the app-target bundle. The package-owned slices have moved to their lowest practical owners, and the source guard moved to repo standards. `AndBibleTests+AppAndReader.swift` now contains only `AndBibleApplicationDelegate.sceneConfiguration`, the genuine app-target scene bootstrap contract.
 - **F2** "God partial class": 633 tests on a single `AndBibleTests: XCTestCase` split across 27 `extension AndBibleTests` files (largest 4,168 lines), sharing setUp/tearDown state - ordering coupling, no per-file parallelism, merge-conflict magnet. Same pattern in `AndBibleUITests` (~11,700 lines of `...Support.swift` behind 68 tests).
-- **F3** UI tests are full-app E2E doing unit/integration work (for example, a single settings navigation check measured 317s to assert one route). Launch+seed dominates wall-clock.
+- **F3** Some UI cases mixed package contracts with live navigation. The historical 317-second Settings case did not isolate setup from body and teardown, so it cannot establish launch/seed dominance. Recent execution has separately exposed product layout stalls, expensive accessibility observation, and a teardown crash-report wait.
 - **F4** Scattered layout: app-target bundle vs package targets vs host-side fixture tool, with no single "where does my test go" rule.
-- **F5** CI is largely flake-mitigation scaffolding (dynamic shard planner, build-product reuse experiment, duplicated retry-upload steps, 90-min UI timeout, 8+ python tests about the harness itself).
+- **F5** CI carried substantial flake-mitigation scaffolding (dynamic shard planning, duplicated retry-upload steps, a 90-minute UI timeout, and process-shape guardrails). Product reuse was previously optional even though separate-runner execution had succeeded.
 - **F6** `CLAUDE.md` + `.github/copilot-instructions.md` steer contributors toward the slow app-target lane ("`swift test` is supplemental").
 
 ## Decision
 
-Converge on **colocated package tests** (idiomatic SPM, biggest speed win).
-Reserve app-target bundles for tests that genuinely need the running app.
+Place each contract at its lowest executable owning boundary. Package colocation avoids app-host work where it is unnecessary; its cost benefit must be measured. Use a real app, framework host, or WebKit/Vue integration whenever the claimed behavior requires that boundary. Do not add production abstractions solely to relocate a test.
 
 Target structure:
 
@@ -51,18 +54,25 @@ Sources/
   BibleUI/Tests/BibleUITests/          <- view-model / catalog / navigation logic (no live app)
 Tests/
   AppHost/AndBibleTests/               <- AndBibleTests target; ONLY app-host unit tests (AppDelegate/scene/bootstrap)
-  UI/AndBibleUITests/                  <- AndBibleUITests target; ONLY true end-to-end journeys, trimmed smoke set
+  UI/AndBibleUITests/                  <- AndBibleUITests target; visible interaction and rendering contracts requiring the app
   UI/Fixtures/                         <- UI fixture manifest and timing manifest consumed by XCUITest/CI
   Support/UITestFixtureTool/           <- host-side SwiftPM fixture executable for UI tests
 ```
 
-Current progress as of 2026-06-30:
+Historical tracked-source snapshot captured on 2026-09-13 (not current discovery):
 
 | Lane | Current state |
 |---|---|
-| App-host unit tests | 1 func; only the scene-configuration sentinel remains |
-| Package tests | 706 funcs across SwordKit, BibleCore, BibleView, and BibleUI package lanes |
-| UI tests | 15 funcs after demoting duplicate seeded-index, Strong's Search data-contract, Search scope/word-mode duplicate launches, Search route/seeded-query launch, duplicate Search multi-translation launch, BookmarkList projection/delete/filter-reset persistence, duplicate bookmark StudyPad handoff launch, duplicate label-assignment route launch, label-assignment mutation persistence, StudyPad mutation persistence, My Notes mutation persistence, Sync category-row catalog coverage, Sync mutation-only duplicate launches, Settings feature-shortcut route metadata, Settings `ListPreference` row presentation, History clear/delete persistence, duplicate Downloads route coverage, duplicate Text Display/Color Settings route coverage, repeated Backup & Restore database-destination launches, Backup & Restore picker-target state, duplicate Search entry/result launches, duplicate Reading Plan lifecycle launches, duplicate Bookmarks route launches, duplicate reader All Text Options launches, duplicate reader About route launches, duplicate Label Manager route launch, standalone History route launch, standalone invalid-URL Sync route launch, duplicate pane-menu Close launch, third-window active-pane isolation launches, standalone StudyPads route launch, standalone Color Settings reset launch, standalone Workspace selector launch, and duplicate host-process developer-directory test entries. The inactive fixture-group runner scaffold has been removed; CI uses direct shard-selected xcodebuild invocations plus per-test fixture seeding. |
+| App-host unit tests | 1 candidate `test…` declaration: the genuine scene-configuration bootstrap contract. CI selects the full target and reconciles its reported identity. |
+| Package tests | 2,317 candidate `test…` declarations across SwordKit, BibleCore, BibleView, and BibleUI package lanes in that working tree snapshot. Declaration counts are an inventory aid, not discovered/executed totals. |
+| UI tests | 31 candidate `test…` declarations: 29 product journeys and 2 observation-only harness helpers. Each CI shard uses direct selected `xcodebuild` execution plus per-test fixture seeding. No arbitrary journey-count target establishes correctness. |
+
+CI now reconciles three identities for selected app-host and UI runs: source
+discovery where target-wide selection needs expansion, the exact
+`-only-testing` request, and the structured `xcresulttool get test-results`
+report. A green summary or positive test count is insufficient when a requested
+identity is absent, unexpected, or skipped. This runner evidence is the basis
+for execution coverage; source declaration counts alone do not prove discovery.
 
 ## Destination mapping
 
@@ -92,18 +102,18 @@ confirms or lowers each destination.
 | **BibleCoreTests** | `+AndroidModuleBackup`, `RemoteSyncMyDocumentRestoreTests`, `WorkspaceSyncRestoreTests`, plus most `+RemoteSync*` and `+AndroidDatabaseBackup` once UI imports are dropped | per-target simulator scheme baseline; optional macOS `swift test` only under option (a) | SwiftData host compatibility is still useful, but not required for the baseline migration |
 | **BibleViewTests** | `+Bridge*` (bridge payload/contract behavior) once decoupled from UI support | per-target simulator scheme baseline; optional macOS `swift test` only under option (a) | reclassify per-file after Phase 0 |
 | **BibleUITests** | genuinely BibleUI-behavior tests only: `+BookCatalog`, `+ReaderNavigation`, `+WindowPaneMenu`, `+WindowTabBarLayout`, `+SettingsIcons`, `+Strongs*`, `+PassageGrid`, `+ExternalDocumentImport`, view-model portions of `+AppAndReader`, `AndBibleTests.swift` (base) | iOS simulator via committed package test scheme (no app host) - see Phase 0 task | BibleUI pulls SwiftUI/UIKit/WebKit -> simulator-bound, but free of the app build/install |
-| **stays in `AndBibleTests` (app host)** | `+AppAndReader` is **81 test funcs**, mostly BibleUI logic -> BibleUITests. App/source-aware ones that must NOT silently move: `AndBibleApplicationDelegate.sceneConfiguration` (app host) and the legacy `ContentView` root-sidebar source scan (now repo-standards source guard) | app host or repo-standards | split the file deliberately; `AndBibleApplicationDelegate.sceneConfiguration` stays app-hosted, while the `ContentView` source-scan guard belongs in `scripts/check_repo_standards.py` rather than BibleUITests |
+| **stays in `AndBibleTests` (app host)** | `AndBibleApplicationDelegate.sceneConfiguration` | app host | The target now contains only the scene/bootstrap behavior that requires the application module. |
 
-## Phases (CI stays green after every phase - strangler approach: stand up new, prove parity, then delete old)
+## Migration history and remaining execution work
+
+Phases 0–3 below record the earlier target migration and its command decisions. Their counts and proposed sequencing are historical, not proof of current behavioral coverage. Preserve a useful assertion until its replacement boundary is verified; failed product behavior remains a failure even when a migration compiles.
 
 ### Phase 0 - Shared test-support strategy (keystone; no test moves yet)
 Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` every test calls via `self`.
 - Create a **`BibleTestSupport`** helper library target for framework-agnostic fixtures needing no `@testable` access: `MockURLProtocol`, `FakeSpeechSynthesizer`, `Android*Row` structs, `webDAVMultiStatusXML`, dir-copy utils. Each package test target depends on it.
 - Helpers needing `@testable` internals (`makeInMemorySettingsStore`/`ModelContainer`, SWORD-module seeding) become free functions / a base `XCTestCase` subclass **inside** the relevant test target (`BibleCoreTestCase`, `BibleUITestCase`).
 - Replace the single `final class AndBibleTests` with a small per-target base carrying `temporarySwordModulePaths` teardown; moved files become `final class ...Tests: BibleUITestCase`.
-- **Toolchain (do first - blocks all `swift`-driven work).** The machine's default toolchain is the Command Line Tools (`xcode-select -p` -> `/Library/Developer/CommandLineTools`), under which `swift build`/`swift test` fail. Run under the installed full Xcode (`/Applications/Xcode.app`, verified present):
-  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test`
-  (or a one-time `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`).
+- **Toolchain.** Select a fully configured Xcode through an explicit `DEVELOPER_DIR` for each build and test command. Check its setup status before building; do not assume the machine's default selection or installation remains unchanged. Record Xcode, Swift, and simulator SDK version/build before and after producing test artifacts. Paired performance comparisons require matching compiler, SDK, configuration, and source-bound products; an installation change requires a new matched pair. Keep machine-specific installation paths and setup status in local workspace records.
 - **Whole-package SwiftPM compile decision (do first - blocks the macOS `swift test` lane and determines the Phase 1 command).** `swift test` builds the **entire package graph for the macOS host** regardless of `--filter`; it does not build only the filtered target. Today that build **fails**: e.g. `BibleCore` declares `public final class Window` (`Sources/BibleCore/Sources/BibleCore/Models/Window.swift:13`) which collides with `SwiftUI.Window` (macOS 14+) where BibleUI imports SwiftUI, plus other macOS-host errors ("extra `for:` arguments"). Consequences:
   - The "fast macOS `swift test` lane" is **conditional**, not free. Either (a) make the whole package compile for the macOS host (disambiguate `Window`, platform-gate iOS-only code, fix the `for:` sites), or (b) drop macOS-host `swift test` and run every test target on the **iOS simulator via per-target xcodebuild schemes** - still app-host-free (the actual win), just not macOS-host-fast.
   - **Decision required here**: pick (a) or (b) before Phase 1. Recommended default is **(b) per-target simulator schemes** as the baseline mechanism, with macOS-host `swift test` pursued later as a stretch optimization for SwordKit/BibleCore only once the host compile is green. This makes the Phase 1 command a scoped `xcodebuild test -scheme SwordKitTests` (builds only SwordKit + CLibSword), not whole-graph `swift test`.
@@ -171,11 +181,11 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - `AndBibleTests+AppAndReader` module-browser slice has been split by owning module: Downloads filtering/sorting, failed-source cache merge, and startup-default installable-row guards moved to `BibleUITests`; Android metadata token decoding and catalog `InstallSize` byte preservation moved to `SwordKitTests`; the duplicate recommended-document refresh failure test was removed from the app-host bundle because equivalent SwordKit package coverage already exists in `SwordManagerTests`.
 - `AndBibleTests+AppAndReader` module-picker slice has moved to `BibleUITests` because it exercises BibleUI `ChooseDocument` filtering, pseudo-document/add-on rows, document-management actions, category mapping, map routing, and Android full-screen chooser presentation without app delegate/bootstrap behavior.
 - `AndBibleTests+AppAndReader` quick-selector/document-switch behavior slice has moved to `BibleUITests`: pure quick-selector sorting/labeling/action contracts live in `BibleReaderQuickModuleSelectorTests`, and controller-level current-document switch side effects that need SWORD fixtures live in `BibleReaderDocumentSwitchControllerTests`.
-- `AndBibleTests+AppAndReader` reader source-guard slice has moved to `BibleUITests`: quick-selector toolbar source guards and the active-window native-border guard live in `ReaderSourceGuardTests`, with function-boundary extraction shared through `BibleUITestSourceLocator`.
+- `AndBibleTests+AppAndReader` reader coverage has moved to `BibleUITests`. The active-window native-border constraint remains in `ReaderSourceGuardTests`. Commentary quick-selection and Downloads unlocking are owned by executable selector/coordinator tests and real UI journeys; implementation-shaped source scans for private routing helpers are retired. The retained commentary journey proves toolbar activation, visible quick rows, exact selection, and rendered local bodies; it does not assert pixel anchoring or generic-switch retry presentation.
 - `AndBibleTests+AppAndReader` reader shell construction slice has moved to `BibleUITests` because the speak mini-player, navigation drawer, and side-drawer overlay are package-owned BibleUI views with injected dependencies.
 - `AndBibleTests+AppAndReader` passage chooser source/progress slice has moved to `BibleUITests` because those guards inspect BibleUI reader presentation source for Android full-screen chooser parity, workspace titles, native toolbar avoidance, and captured progress snapshots.
 - `AndBibleTests+AppAndReader` color helper slice has moved to `BibleUITests` because the signed ARGB conversion helpers live with BibleUI color settings and do not require app bootstrap.
-- Current `+AppAndReader` remainder: the app-hosted scene-configuration sentinel only.
+- The final `+AppAndReader` remainder was split by contract: memorization store and Android progress database cases moved to `BibleCoreTests`; reader presentation, WebView surface, document replacement/configuration, and memorization bridge cases moved to `BibleUITests`. Those tests reuse the package settings, SWORD fixture, bridge recorder, and payload parser. The broad Memorization view source-string inventory was retired: its data/percentage contract is asserted through `MemorizationProgressPresentation`, and opening an out-of-book range is asserted through the real reader-controller route. View styling remains a visible UI concern rather than a source-shape gate. Only the scene-configuration sentinel remains app-hosted.
 - **Split `+AppAndReader` deliberately**: `sceneConfiguration` test stays app-hosted; the `ContentView` legacy root-sidebar source scan is now a repo-standards `source-guards` check; any future package-owned tests should move to the lowest owning package target instead of returning to the app-host bundle.
 - `AndBibleTests+ReaderNavigation` bridge/payload slice has moved to `BibleUITests` because compare payloads, reader document JSON factories, auxiliary fallback documents, and rendered-content tokens are BibleUI reader/bridge contracts that do not require app bootstrap.
 - `AndBibleTests+ReaderNavigation` reader interaction-policy slice has moved to `BibleUITests` because double-tap fullscreen gating, horizontal swipe mapping, and auto-fullscreen threshold logic are BibleUI policy/controller contracts with injected settings, not app bootstrap behavior.
@@ -183,44 +193,143 @@ Blocker: `AndBibleTestSupport.swift` is a 2,233-line `extension AndBibleTests` e
 - Run BibleUITests via `xcodebuild test -scheme BibleUITests -destination 'platform=iOS Simulator,...'` against the **committed package test scheme from Phase 0** (no app host).
 - Gate per batch: moved batch green in new target; equal count removed from app bundle; app build still green.
 
-### Phase 4 - Retire scaffolding & lock structure
-- Delete near-empty `AndBibleTests` extensions and `AndBibleTestSupport`; keep only app-host tests. The app-host bundle now contains only the scene-configuration sentinel.
-- Narrow the old simulator unit-test CI job to the app-host scene-configuration sentinel using the dedicated `AndBibleUnitTests` scheme, while keeping `Unit Tests (Simulator)` as an aggregate required gate that fails when any package-test lane fails. Package-owned coverage is enforced by the app-host-free `SwordKitTests`, `BibleCoreTests`, `BibleViewTests`, and `BibleUITests` package lanes.
-- Search UI trim has started: duplicate seeded-index and Strong's Search data-contract assertions moved out of `AndBibleUITests` into app-host-free package coverage. Scope and word-mode result semantics live in `SearchIndexServiceQueryTests`; one combined UI smoke intentionally remains because it proves Android destination chrome, launch-seeded query retention, visible Android-form controls, active-query state mutation, result rerendering, and reader handoff in one Search app launch.
-- Search result-navigation trim merged the live reader handoff into `testSearchOptionControlsMutateVisibleState`, so the retained visible Search workflow proves option-control rerenders and final result selection without a second Search app launch.
-- Bookmark/My Notes/StudyPad trim moved BookmarkList sort/search/label-filter/filter-reset state contracts, destructive row persistence, generic row label filtering, label-assignment create/toggle/favourite persistence, Label Manager create/edit/delete persistence, StudyPad mutation persistence, and My Notes mutation persistence into package tests. Row navigation, StudyPad handoff, label-assignment routing, the Settings Label Manager route, and the My Notes pseudo-document route remain visible app UI smokes. Downloads source-management persistence remains in SwordKit package tests, while one visible route smoke still proves the reader menu opens Downloads and Android's Downloads overflow reaches the repository manager. Sync category-row catalog coverage now lives in `SettingsIconsTests`; invalid-URL validation, category-disable, and backend-switch persistence are merged into one retained direct-reopen workflow, and My Documents now drives the retained adopt/create workflow through the full create-from-device confirmation.
-- Bookmarks route trim merged the drawer route/no-sheet ownership smoke and label-assignment route smoke into `testBookmarkSelectionNavigatesReaderToSeededReference`, so one visible workflow now proves Android-style reader destination ownership, label-assignment reachability, dismissal back to the list, and seeded-row navigation back into the reader.
-- Bookmark StudyPad trim merged the selected-label StudyPad handoff into `testBookmarkSelectionNavigatesReaderToSeededReference`, so the retained visible workflow also proves Android's bookmark-label handoff opens the matching StudyPad document without spending a second `bookmark-studypad` launch.
-- Settings feature shortcut trim moved Settings-root Sync and Reading Progress route metadata into `ApplicationSettingsPresentation` and `SettingsIconsTests`; the retained reader/admin shortcut smoke remains visible UI coverage and now also covers the reader Label Settings route to `LabelManagerView`, while Sync Settings behavioral workflows continue to exercise direct reader-action entry points.
-- Reader About route trim merged the standalone About reader-menu smoke into `testSettingsApplicationShortcutsOpenGlobalTextOptions`, so the retained workflow proves About is reachable and dismissible before continuing through Settings to global Text Display options.
-- History route trim merged the standalone History selection smoke into `testBookmarkSelectionNavigatesReaderToSeededReference` by adding the seeded History row to the same `bookmark-filter` fixture. The retained workflow now proves live History jump-back, Bookmark destination ownership, Label Assignment reachability, and Bookmark row navigation in one app launch.
-- StudyPads route trim folded the drawer-owned StudyPads route/no-sheet assertion into `testBookmarkSelectionNavigatesReaderToSeededReference`, which already proves the selected-label StudyPad document handoff. My Documents and My Notes remain dedicated visible smokes because their terminal document surfaces are separate Android parity contracts not yet replaced by lower-level route-selection coverage.
-- Settings `ListPreference` trim moved compact menu-row metadata and the no-inline-`Picker` renderer guard into `ApplicationSettingsPresentation`/`SettingsIconsTests`; the Settings-root destination smoke test remains as the live navigation workflow.
-- Text Display/Color Settings trim moved repeated route/control assertions into a smaller retained smoke set: one Settings-root smoke now also opens global Text Display options, one reader All Text Options smoke covers workspace scope, the visible Colors route/reset action with seeded custom colors, the workspace-to-global parent link, and Android-style font-family editor presentation, while the pane/window parent-link ladder remains separate because it starts from the active window scope. Package tests continue to own Android row catalogs, scope visibility, justify/editor commit/reset semantics, and color reset ownership rules.
-- Pane-menu trim merged the pane Close transaction into the retained active-window Text Options workflow, so one launch now proves Android's pane menu can route to window-scoped Text Options, climb to workspace scope, return to the reader shell, and close the same pane without invalidating the remaining reader window.
-- Backup & Restore trim merged Android workflow-row coverage, database backup destination copy/cancel, and iOS share-sheet cancel semantics into one visible UI smoke. Android backup/archive/reset/restore persistence remains in BibleCore/SwordKit package tests; Database-vs-Documents restore/import picker ownership now lives in `ImportExportPresentationState` package tests that assert the Android-visible picker sentinels, UTType sets, fallback target behavior, and modal-priority ordering without booting the app.
-- Reading Plans trim merged the drawer destination smoke, built-in plan start, daily-reading advance, active-plan deletion, and custom import affordance into one visible workflow. `ReadingPlanService` package tests continue to own algorithmic plan generation, custom-plan parsing, progress math, and Android sync/restore contracts.
-- Workspace selector trim narrowed the retained UI workflow to the Android-owned reader route, selector-owned create prompt, and return to reader shell, now folded into the Downloads repository-manager route smoke. Workspace creation/switching graph behavior, ordering, clone/delete cleanup, default inheritance, and controller-readiness contracts remain in `WorkspaceWindowStoreTests`, so the UI suite no longer spends standalone selector launches proving package-owned persistence.
-- Search multi-translation trim merged the second-translation commit into `testSearchOptionControlsMutateVisibleState`, so one Search launch now proves Android destination chrome, option-control rerenders, visible picker commit, abbreviation summary, grouped totals, and grouped-row reader handoff. `StrongsAndDictionaryTests` owns Android picker ordering, empty confirmation, and summary formatting semantics; `SearchIndexServiceQueryTests` owns grouped buckets/counts.
-- Third-window active-pane isolation trim moved captured pane routing, bookmark navigation targeting, document switching, and window-scoped Strong's-mode mutation into `ReaderActivePaneIsolationTests`. The UI suite no longer spends three separate three-window launches proving package-owned controller/page-manager invariants, while retained reader workflows still cover visible pane-menu and document/search routes.
-- Host-process harness trim kept fixture-bootstrap coverage inside the XCUITest host runner, where macOS subprocess behavior is real, but merged the sub-second user-directory, selected-Xcode, and CommandLineTools fallback assertions into one environment/toolchain test. Moving those tests into the existing package lanes would lose coverage because those lanes run on an iOS Simulator destination, not on the macOS host.
-- UI fixture-runner trim removed the inactive `run_ui_test_groups.py` grouped-execution harness and its tests. The active workflow has already converged on direct shard-selected `xcodebuild` invocations via `run_xcodebuild_with_test_selection.py`, while fixture seeding remains per test through `UITestFixtureTool` and `Tests/UI/Fixtures/ui_test_fixture_manifest.json`.
-- UI shard documentation has been refreshed for the current 15-test smoke suite and 3-shard planner output; no shard-count change was made because the current planner already stays under the cap and changing the limits should be backed by runtime data.
-- App-host and UI smoke files now live under `Tests/AppHost/AndBibleTests/` and `Tests/UI/AndBibleUITests/`, while preserving target, scheme, and `-only-testing` identifiers. The UI fixture manifests live under `Tests/UI/Fixtures/`, and the host-side `UITestFixtureTool` source lives under `Tests/Support/UITestFixtureTool/`.
-- Simplify CI: replace `ios-simulator-unit-tests` app-build path with app-host-free package-test lanes. Baseline is per-target simulator schemes; macOS `swift test` is an optimization only for targets proven to compile under SwiftPM. The optional build-product-reuse experiment is retired; reassess the shard planner and timings file as UI coverage continues moving into package lanes.
-- Trim `AndBibleUITests` to an explicit smoke set (target <=15 journeys); demote/convert the rest.
-- Update `CLAUDE.md` + `.github/copilot-instructions.md`: replace "swift test is supplemental" with the actual placement rule - *new tests go in the lowest package test target that owns the behavior after imports are minimized; app-host only for true app-delegate/scene/bootstrap behavior.*
+### Phase 4 — Complete the behavioral and execution migration
+
+The app-host target now owns only the scene-configuration contract. Package lanes own source,
+controller, store, archive, and policy contracts. The UI suite owns the visible interactions that
+those lower boundaries cannot establish. A route catalog is not proof that a user can reach its
+screen; a recorded bridge command is not proof that Vue rendered it; a persisted setting is not
+proof of displayed color. Name tests and report results at the boundary they actually exercise.
+
+Current work and acceptance:
+
+- Search's ordinary text journey types and submits through the production form, observes a real
+  result row, and selects it once. The launch-driven Search hook and hidden grouped-row token are
+  removed. Reference-range and Strong's submission journeys have passed after separating submission
+  from outcome observation; their production-wiring source guard is removed. Package tests retain
+  malformed query, grouping, index readiness, lexical, exact-source, and versification contracts.
+  These results belong to their recorded products; final integrated execution remains required.
+- History and My Notes have dedicated journeys. Bookmarks retains label filtering, StudyPad handoff,
+  label assignment, and row navigation in its own flow. A separate populated-list case requires
+  visible notes, usable viewport geometry, and a reachable Back action. Both complete Bookmark
+  assignment, child-Back, dismissal, and reopen journeys now pass on iOS17/26. The earlier stalled
+  runs remain in the execution record; unrelated Downloads interaction failures remain open.
+- Scoped SwiftData source observation replaces an unreliable notification dependency for bookmark
+  row content. The retained layout, rendering, row-observation, and source-invalidation contracts
+  pass on iOS17/26. Relationship-prefetch work still requires matched validation of independent
+  note/link changes and saves from another context while the list remains mounted.
+- Settings UI exercises the actual AI setup/disclaimer and Global Text Options routes. Package
+  tests own the full row catalog. The latest native policy/draft/reset selection passes on both
+  runtimes, but its visible replacement journeys are not accepted. They exposed a durable color
+  save followed by a stale displayed workspace value, an incorrect font-list accessibility query,
+  and a parent-link query that omitted scrolling. Unresolved iOS17 interaction and XCTest logging
+  quarantine failures remain recorded. Correct those boundaries before retiring the corresponding
+  source guards; lower test duration alone cannot establish product performance.
+- Sync Settings credential journeys now verify URL-first and username-first setup through real
+  editors and route reopening. Invalid URL input produces the visible error and preserves the
+  accepted address. Native tests cover partial configuration and independent field edits, including
+  preservation of a password whose secret-store read is unavailable. These contracts and the
+  prepared-runtime manual-sync journey pass on iOS17.5/26.5. Three superseded source-string tests
+  for URL validation/private helpers are removed; route chrome, the DEBUG CloudKit seam, and
+  button reachability guards remain pending their own review. In-memory settings tests do not
+  establish disk recovery or all-writer runtime retirement.
+- Real WebKit/Vue tests complement native payload tests. Visible reader text uses screenshot
+  recognition where WebKit's editable element does not expose its child text to accessibility.
+  That observer currently covers English, single-pane fixtures; it does not establish screen-reader
+  semantics, other locales, or chrome colors. Observation must not perform an extra interaction.
+- The issue-402 parity-orchestrator checker no longer treats three reader service type names or
+  the placement of `BibleReaderInstalledModuleResolver` construction and `resolveDocumentOwner`
+  calls in `BibleReaderController` as behavior contracts. Moving those tokens behind forwarding
+  methods would not change ownership. Exact installed/local owner precedence, locked and replacement
+  rejection, category-safe restore dispatch, bookmark commit preflight, source-generation capture,
+  and publication reauthorization remain protected by executable native tests. Repository guards for
+  Search transaction ownership, Sword registry/backend ownership, and Strong's backend boundaries
+  remain enforced.
+- Remove source substrings, private-helper inventories, and exact branch/event counts when they
+  preserve implementation rather than an explicit structural requirement. Existing Search and
+  delayed-reader-routing source guards remain open work. Derive expected behavior from pinned
+  Android sources or independent vectors, and exercise cancellation, replacement, rejection, and
+  ready-time replay through the actual owner. Do not rewrite expectations merely to turn a failure
+  green.
+
+Fixture and execution ownership:
+
+- Persistence tests use the actual app model partitions and disk stores when they claim durable
+  commit, failure recovery, or cross-context visibility. Keep the stores alive for the container's
+  lifetime and verify committed outcomes through a fresh context. A cached object or an in-memory
+  fixture does not prove a disk outcome. Cross-context restore tests must exercise the actual
+  replacement contract, including already registered rows and active selection when relevant.
+- Query UI controls by their observed accessibility role and identifier. Reuse explicit queries
+  within a journey, reveal offscreen controls before one action, and retain the visible outcome
+  assertions. Do not extend a name-based role heuristic, scan every element type, or repeat actions
+  until a test passes. Existing heuristic helpers remain migration work, not the target pattern.
+  Diagnose missing elements with retained screenshots, hierarchy, and exact process logs before
+  changing the product or its accessibility identifiers.
+- Test observers record production outputs without introducing new production obligations.
+  A synchronous bridge recorder must not manufacture native reentrancy during a message that
+  WebKit only queues. Exercise real selection/persistence and navigation callbacks when validating
+  reentrancy, and retain source-generation checks for actual concurrent source changes. Emitted
+  JavaScript, accepted queueing, and rendered content are distinct outcomes.
+- `run_xcodebuild_with_test_selection.py` owns a private macOS fixture service for one invocation.
+  It resolves and validates `UITargetAppPath` from the selected xctestrun and installs that exact
+  simulator app before fixture preparation. The service confirms the prior process stopped,
+  resolves its authoritative data container, and runs one reset/seed operation. XCTest then launches
+  normally. No discovery launch, guessed container, simulator-side host subprocess, or shared
+  mutable fixture substitutes for that boundary.
+- Normal UI teardown uses `XCUIApplication.terminate()`. The fixture service independently verifies
+  termination before later mutation. Process-group cancellation and cleanup remain covered by
+  behavioral host tests. The removed stop-request path caused an approximately twenty-second
+  unexpected-termination report wait in earlier UI runs.
+- Two observation-only XCUI helper cases remain with their real harness dependencies. A separate
+  support target is justified only by measured cost and an equally faithful boundary. Detailed
+  exports no longer change autofocus or pane-button fading, but their computation and observation
+  cost still require validation; an opt-in flag is not proof that diagnostics are cheap.
+- Reconcile compiled discovery, exact selected identities, executed results, skips, duplicates,
+  and infrastructure failures for each lane. Preserve the first failing result and its evidence.
+  A focused selection must cover the discovered impact, including indirect and dynamic callers.
+- UI shards consume one validated same-run app/test/fixture archive. Validate revision, Xcode,
+  SDK, architecture, signing settings, resources, modes, symlinks, and digests. For Debug apps, hash
+  `AndBible.debug.dylib` as well as the executable stub. A relocated consumer must run using its
+  own artifact inputs with producer paths unavailable. Repeat that check for the final products.
+- Historical CI run `33124610055` measured 70 minutes 6 seconds elapsed and 174.60 raw job minutes,
+  including 27.8 repeated app-build and 10.15 repeated fixture-build minutes. These establish the
+  baseline for product reuse. Final cold/warm feedback and runner-cost budgets still require a
+  current complete run. Missing/stale per-test timing estimates must remain explicit rather than
+  borrowing a renamed case's time or inventing a value.
+
+Keep changing per-run measurements and source/product manifests with execution artifacts. This
+file describes ownership and completion criteria; it is not a canonical feature-parity tracker.
 
 ## Risks & mitigations
 - **`@testable` re-export from shared lib** - can't re-expose internals; keep internal-touching helpers inside test targets (Phase 0).
 - **Hidden inter-test state on shared `AndBibleTests` class** - per-class conversion may expose order-dependence; run each migrated file in isolation (`-only-testing`) early.
 - **SwiftData/CLibSword on macOS host** - verify in Phase 2 that BibleCore links libsword on macOS; route any simulator-only slice to the simulator job rather than blocking the macOS lane.
-- **Large diff churn** - batch by module/theme, parity-then-delete, never bulk-move in one PR.
+- **Shared ownership** — coordinate edits to common controllers and helpers. Choose coherent implementation boundaries and validate all affected callers; a file-count limit is not a correctness rule.
 - **Missing package test scheme / toolchain** - Phase 3 simulator runs and all `swift test` runs are blocked until the Phase 0 tasks (prove synthesized package-test schemes or commit explicit shared package test schemes; standardize `DEVELOPER_DIR` on full Xcode) are done and verified. CI's package-test lanes must use the same full-Xcode toolchain and must not rely on user-local Xcode state. A macOS `swift test` lane must additionally prove the whole package graph compiles under SwiftPM before it becomes required.
 - **Classification by polluted imports** - placing files by today's `@testable import` set sends BibleCore-behavior tests into the simulator-bound BibleUITests and forfeits the speed win. Always re-minimize imports after Phase 0 and place at the lowest module that compiles.
 
 ## Success criteria
-- ~38k lines of logic tests build against libraries, not the app. Baseline execution is app-host-free per-target package schemes; framework-agnostic targets may later run via macOS `swift test` once SwiftPM host compile is proven.
-- `Tests/AppHost/AndBibleTests` holds only app-host tests; `Tests/UI/AndBibleUITests` is a small intentional smoke set.
-- CI has fast app-host-free package-test lanes; the old app-host unit-test simulator job and much sharding machinery are retired. A macOS `swift test` lane is a stretch optimization, not a prerequisite for the migration's main win.
-- One documented rule for test placement.
+
+- Tests assert independently justified behavior at the boundary their names and reports claim.
+  Superseded runtime paths and implementation-shaped expectations are removed after replacement
+  contracts are proven. No selected feature ends at a permanent reduced-scope alignment.
+- Package-owned contracts run without the app host. App-host tests cover genuine bootstrap;
+  UI, native hosting, and real WebKit/Vue tests cover the remaining visible and lifecycle contracts.
+  There is no arbitrary UI count, smoke-set size, or source-line reduction target.
+- Every required lane executes its intended identities exactly, with omissions, skips, retries,
+  infrastructure faults, and unsupported runtimes visible. Shared artifacts execute from an
+  independent consumer with isolated fixture mutation.
+- Controlled cold/warm feedback and total runner minutes meet budgets established from the
+  baseline. Product Release latency, work counts, and supported-device results have separate gates;
+  faster test teardown cannot establish a faster app.
+- Guidance and documentation reflect the final ownership and known limits. Migration placement,
+  compilation, or a partial passing selection alone cannot close this work.
+
+
+## Speech ownership checks after main integration
+
+The app-host source scans for canonical speech-service forwarding and initialization order are retired. They asserted private property-wrapper spellings and source order through a removed source loader; they did not execute app startup or background playback. Restoring that helper would reintroduce the source-reading app-host infrastructure this migration removed.
+
+`ReaderShellConstructionTests.testBibleReaderUsesInjectedSpeechServiceIdentity` checks the actual injected reader object identity. Core speech policy/service tests cover suppression of media identity and remote commands in discrete mode, and clearing existing ownership when the policy changes. App compilation checks the required `ContentView` dependency and the merged composition. These boundaries do not establish that the one-shot UI-test preferences precede canonical service initialization during real app startup, or that reader reconstruction preserves playback end to end. Those bootstrap and lifecycle outcomes remain explicit UI/app integration coverage work; the package construction test must not be presented as their replacement proof.
+
+The bookmark row structural guard retains shared interaction ownership and navigation closure checks. Tap/hold behavior is covered by actual UI journeys; the guard no longer freezes the gesture owner's private helper names or state transitions. The restored UI-product command test supplies an explicit Xcode-directory fixture so it is independent of the host's installed tools; missing-directory rejection remains separately tested.

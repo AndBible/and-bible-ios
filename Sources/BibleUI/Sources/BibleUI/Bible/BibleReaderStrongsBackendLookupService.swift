@@ -125,6 +125,18 @@ enum BibleReaderStrongsBackendLookupService {
                 )
             }
 
+            if let fragment = try? module.rawOSISFragment(forKey: selectedStoredKey),
+               fragment.key.utf16.elementsEqual(key.utf16) {
+                return .init(
+                    actualKey: fragment.keyName,
+                    osisID: fragment.key,
+                    osisRef: fragment.osisRef,
+                    rawEntry: fragment.originalXML,
+                    renderedText: fragment.originalXML,
+                    payloadReadyXML: fragment.xml
+                )
+            }
+
             let inspection = module.setKeyAndInspect(selectedStoredKey)
             let accepted = inspection.actualKey.utf16.elementsEqual(key.utf16)
             strongsBackendLookupLogger.info(
@@ -134,7 +146,8 @@ enum BibleReaderStrongsBackendLookupService {
             return .init(
                 actualKey: selectedStoredKey,
                 rawEntry: inspection.rawEntry,
-                renderedText: inspection.renderedText
+                renderedText: inspection.renderedText,
+                requiresRenderOptionAuthorization: true
             )
         }
         return nil

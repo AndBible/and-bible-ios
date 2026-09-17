@@ -517,7 +517,12 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
     /// Reference to the web view for sending responses.
     public weak var webView: WKWebView?
 
-    /// Test-only observer used to record emitted JavaScript without constructing a live WKWebView.
+    /**
+     Test-only recorder for emitted JavaScript when no live WKWebView is constructed.
+
+     Its synchronous invocation is not a production WebKit reentrancy boundary. Tests that need
+     to supersede publication must do so through a native callback or an asynchronous phase.
+     */
     var javaScriptEvaluationObserver: ((String) -> Void)?
 
     /// Whether the ambiguous selection modal should be size-limited.
@@ -1230,17 +1235,21 @@ public final class BibleBridge: NSObject, WKScriptMessageHandler {
 
      JavaScript Promise-based bridge methods include a numeric `callId`; native code must answer
      with `bibleView.response(callId, value)` once the async work completes.
+
+     - Returns: `true` only when an attached web view or recording observer accepted the script.
      */
-    public func sendResponse(callId: Int, value: String) {
+    @discardableResult
+    public func sendResponse(callId: Int, value: String) -> Bool {
         let js = "bibleView.response(\(callId), \(value));"
-        evaluateJavaScript(js)
+        return evaluateJavaScript(js)
     }
 
     /// Encodes an async response payload as JSON and sends it back to JavaScript.
-    public func sendResponse<T: Encodable>(callId: Int, value: T) {
+    @discardableResult
+    public func sendResponse<T: Encodable>(callId: Int, value: T) -> Bool {
         guard let data = try? bridgeEncoder.encode(value),
-              let json = String(data: data, encoding: .utf8) else { return }
-        sendResponse(callId: callId, value: json)
+              let json = String(data: data, encoding: .utf8) else { return false }
+        return sendResponse(callId: callId, value: json)
     }
 
     /**

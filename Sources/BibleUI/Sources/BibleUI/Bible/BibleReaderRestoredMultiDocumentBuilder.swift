@@ -50,6 +50,14 @@ struct BibleReaderRestoredMultiDocumentRequest {
    the generated `MultiDocument` id, which intentionally mirrors the transient document payloads.
  */
 struct BibleReaderRestoredMultiDocumentBuilder {
+    /** Copied restored fragments ready for pure JSON encoding outside native source access. */
+    struct Capture: Sendable {
+        let fragments: [OsisFragment]
+        let renderedKey: String
+        let pageKey: String
+        let contentType: String?
+    }
+
     /// Resolves source modules named in Android `BookAndKey` children.
     private let moduleResolver: BibleReaderInstalledModuleResolver
 
@@ -116,6 +124,29 @@ struct BibleReaderRestoredMultiDocumentBuilder {
        `mapNotNull` restore behavior; returns `nil` if all children drop or encoding fails.
      */
     func build(pageKey: String?) -> BibleReaderRestoredMultiDocumentRequest? {
+        guard let capture = capture(pageKey: pageKey) else { return nil }
+        let payload = MultiFragmentDocumentPayload(
+            id: "multi-\(UUID().uuidString)",
+            type: "multi",
+            osisFragments: capture.fragments,
+            compare: false,
+            contentType: capture.contentType,
+            state: nil
+        )
+        guard let data = try? bridgeEncoder.encode(payload),
+              let documentJSON = String(data: data, encoding: .utf8) else {
+            restoredMultiDocumentBuilderLogger.error("Failed to encode restored Android Multi bridge document")
+            return nil
+        }
+        return BibleReaderRestoredMultiDocumentRequest(
+            documentJSON: documentJSON,
+            renderedKey: capture.renderedKey,
+            pageKey: capture.pageKey
+        )
+    }
+
+    /** Resolves restored source content into copied fragments without serializing the payload. */
+    func capture(pageKey: String?) -> Capture? {
         let references = AndroidSpecialDocumentIdentity.parseBookAndKeyListReference(pageKey)
         guard !references.isEmpty, let pageKey else { return nil }
 
@@ -133,23 +164,11 @@ struct BibleReaderRestoredMultiDocumentBuilder {
         let renderedKey = hasStrongsOrMorphologyContent
             ? AndroidSpecialDocumentIdentity.strongsRenderedKey
             : AndroidSpecialDocumentIdentity.multiRenderedKey
-        let payload = MultiFragmentDocumentPayload(
-            id: "multi-\(UUID().uuidString)",
-            type: "multi",
-            osisFragments: fragments,
-            compare: false,
-            contentType: hasStrongsOrMorphologyContent ? "strongs" : nil,
-            state: nil
-        )
-        guard let data = try? bridgeEncoder.encode(payload),
-              let documentJSON = String(data: data, encoding: .utf8) else {
-            restoredMultiDocumentBuilderLogger.error("Failed to encode restored Android Multi bridge document")
-            return nil
-        }
-        return BibleReaderRestoredMultiDocumentRequest(
-            documentJSON: documentJSON,
+        return Capture(
+            fragments: fragments,
             renderedKey: renderedKey,
-            pageKey: pageKey
+            pageKey: pageKey,
+            contentType: hasStrongsOrMorphologyContent ? "strongs" : nil
         )
     }
 

@@ -163,6 +163,39 @@ func makeInMemorySettingsContainer() throws -> ModelContainer {
 }
 
 /**
+ Creates one persistent-store directory owned for the lifetime of the current test process.
+
+ SwiftData has no public iOS 17 API that synchronously closes a `ModelContainer`. Tests must keep
+ these files intact until the xctest process exits. A harness running on a retained simulator is
+ responsible for verifying that exact process exited and removing only its PID subdirectory;
+ disposable CI simulator deletion owns cleanup when no retained simulator remains.
+
+ - Parameter label: Stable diagnostic label for the test family.
+ - Returns: A newly created unique directory beneath the process-owned fixture root.
+ - Side effects: Emits the stable owner-PID marker and creates the shared process root and one
+   unique child directory.
+ - Failure modes: Rethrows filesystem directory-creation errors.
+ */
+func makeProcessLifetimePersistentStoreDirectory(label: String) throws -> URL {
+    let processIdentifier = ProcessInfo.processInfo.processIdentifier
+    print("[AndBibleSwiftDataFixtureOwner] pid=\(processIdentifier)")
+    let ownerRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "andbible-swiftdata-process-fixtures",
+        isDirectory: true
+    )
+    let processRoot = ownerRoot.appendingPathComponent(
+        String(processIdentifier),
+        isDirectory: true
+    )
+    let directory = processRoot.appendingPathComponent(
+        "\(label)-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/**
  Decompresses gzip bytes produced by remote-sync archive services for fixture inspection.
 
  - Parameter data: Gzip-compressed archive bytes.

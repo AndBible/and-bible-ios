@@ -12,9 +12,11 @@ enum BibleReaderDocumentHeaderMode: Equatable {
 /**
  Renders the reader document header without owning reader state.
 
- The parent coordinator supplies resolved titles, button enablement, and callbacks. This keeps the
- iPad-sensitive conditional header tree out of `BibleReaderView` while preserving the explicit
- branch type-erasure that avoided the device-only header crash tracked in issue #11.
+ The parent coordinator supplies resolved titles, button enablement, and callbacks. Every document
+ mode invokes the same injected Android action cluster; contextual modes retain their Back and
+ browse controls beside it. This keeps the iPad-sensitive conditional header tree out of
+ `BibleReaderView` while preserving the explicit branch type-erasure that avoided the device-only
+ header crash tracked in issue #11.
  */
 struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
     private let mode: BibleReaderDocumentHeaderMode
@@ -129,6 +131,13 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
         }
     }
 
+    /**
+     Renders My Notes navigation together with the shared reader actions.
+
+     The Back control and title remain native header context while the injected action cluster
+     preserves Android's direct Bible/commentary switching from the My Notes page. The header owns
+     no navigation state; button effects and missing-controller handling remain parent-owned.
+     */
     private var myNotesHeader: some View {
         Group {
             Button(action: onReturnFromMyNotes) {
@@ -140,6 +149,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(String(localized: "back_to_bible"))
             .accessibilityIdentifier("readerReturnFromMyNotesButton")
+            .layoutPriority(2)
 
             Spacer()
 
@@ -148,10 +158,18 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 .accessibilityIdentifier("readerMyNotesTitle")
 
             Spacer()
-            Color.clear.frame(width: 80, height: 1)
+            toolbarActions()
+                .layoutPriority(1)
         }
     }
 
+    /**
+     Renders StudyPad navigation together with the shared reader actions.
+
+     The Back control and StudyPad title remain available while the injected cluster preserves
+     Android's direct document switching. The parent owns every resulting navigation side effect;
+     an unavailable controller leaves its supplied actions disabled.
+     */
     private func studyPadHeader(title: String) -> some View {
         Group {
             Button(action: onReturnFromStudyPad) {
@@ -159,6 +177,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
             }
             .accessibilityLabel(String(localized: "back_to_bible"))
             .accessibilityIdentifier("readerReturnFromStudyPadButton")
+            .layoutPriority(2)
 
             Spacer()
 
@@ -168,10 +187,23 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 .accessibilityIdentifier("readerStudyPadTitle")
 
             Spacer()
-            Color.clear.frame(width: 80, height: 1)
+            toolbarActions()
+                .layoutPriority(1)
         }
     }
 
+    /**
+     Renders an auxiliary document's Back, title, browser, and shared reader actions.
+
+     - Parameters:
+       - title: Active dictionary, general-book, map, or EPUB title.
+       - subtitle: Optional exact key or page title.
+       - browseSystemImageName: System icon for the category-specific browser.
+     - Returns: Contextual auxiliary navigation that also preserves Android's direct document
+       switching actions.
+     - Side effects: Delegates Back, browse, and toolbar actions to parent-owned callbacks.
+     - Failure modes: None; missing destinations are handled by the supplied callbacks.
+     */
     private func auxiliaryHeader(
         title: String,
         subtitle: String?,
@@ -182,6 +214,7 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 backToBibleLabel
             }
             .accessibilityLabel(String(localized: "back_to_bible"))
+            .layoutPriority(2)
 
             Spacer()
 
@@ -203,6 +236,10 @@ struct BibleReaderDocumentHeader<ToolbarActions: View>: View {
                 Image(systemName: browseSystemImageName)
                     .font(.body)
             }
+            .layoutPriority(2)
+
+            toolbarActions()
+                .layoutPriority(1)
         }
     }
 
