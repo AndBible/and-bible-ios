@@ -6014,7 +6014,7 @@ public struct BibleReaderView: View {
        - direction: Swipe direction detected by the native web-view wrapper.
      - Side effects: May trigger chapter navigation through the focused `BibleReaderController` or
        emit page-scroll commands into the active web view. Records the dispatch or rejection reason
-       in diagnostic logs without reader content or model identifiers.
+       at notice level so failure archives retain it, without reader content or model identifiers.
      - Failure modes: Returns without action when the gesture did not originate from the active
        window, no focused controller is registered, an in-page text selection is active, the Vue
        client reports an open modal, the rendered document blocks host page navigation, or the
@@ -6025,11 +6025,11 @@ public struct BibleReaderView: View {
         direction: NativeHorizontalSwipeDirection
     ) {
         guard windowManager.activeWindow?.id == window.id else {
-            readerGestureLogger.info("Horizontal swipe rejected: inactive pane")
+            readerGestureLogger.notice("Horizontal swipe rejected: inactive pane")
             return
         }
         guard let ctrl = windowManager.controllers[window.id] as? BibleReaderController else {
-            readerGestureLogger.info("Horizontal swipe rejected: missing controller")
+            readerGestureLogger.notice("Horizontal swipe rejected: missing controller")
             return
         }
         let action = ReaderHorizontalSwipePolicy.action(
@@ -6039,7 +6039,7 @@ public struct BibleReaderView: View {
             hasOpenModal: ctrl.webModalIsOpen,
             allowsDocumentNavigation: ctrl.allowsHorizontalDocumentNavigation
         )
-        readerGestureLogger.info("Horizontal swipe dispatch: action=\(String(describing: action), privacy: .public) mode=\(bibleViewSwipeMode, privacy: .public) selection=\(ctrl.hasActiveSelection, privacy: .public) modal=\(ctrl.webModalIsOpen, privacy: .public) pageable=\(ctrl.allowsHorizontalDocumentNavigation, privacy: .public)")
+        readerGestureLogger.notice("Horizontal swipe dispatch: action=\(String(describing: action), privacy: .public) mode=\(bibleViewSwipeMode, privacy: .public) selection=\(ctrl.hasActiveSelection, privacy: .public) modal=\(ctrl.webModalIsOpen, privacy: .public) pageable=\(ctrl.allowsHorizontalDocumentNavigation, privacy: .public)")
         switch action {
         case .navigateNextChapter:
             ctrl.navigateNext()
