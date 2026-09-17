@@ -138,7 +138,7 @@ extension AndBibleUITests {
 
         let viewport = app.webViews.firstMatch
         XCTAssertTrue(elementHasUsableFrame(viewport) && app.frame.contains(viewport.frame))
-        /// Reads upper-third OCR lines without altering scroll position or suggesting expected words.
+        /// Reads complete upper-third OCR lines without altering scroll position or suggesting expected words.
         func upperReaderLines() throws -> [String] {
             let pixels = try XCTUnwrap(viewport.screenshot().image.cgImage)
             let request = VNRecognizeTextRequest()
@@ -147,7 +147,10 @@ extension AndBibleUITests {
             request.recognitionLanguages = ["en-US"]
             try VNImageRequestHandler(cgImage: pixels, options: [:]).perform([request])
             return (request.results ?? [])
-                .filter { $0.boundingBox.midY > 0.67 }
+                // Vision can invent a different first character when a line is clipped by the
+                // viewport's top edge. Use only lines whose complete recognition box sits inside
+                // the upper third so the marker describes pixels that can be compared exactly.
+                .filter { $0.boundingBox.minY >= 0.67 && $0.boundingBox.maxY <= 0.97 }
                 .sorted { $0.boundingBox.midY > $1.boundingBox.midY }
                 .compactMap { $0.topCandidates(1).first?.string }
                 .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
@@ -176,9 +179,17 @@ extension AndBibleUITests {
         }
         waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
 
-        let marker = try XCTUnwrap(try upperReaderLines().first {
-            $0.count >= 24 && freshBlockTop.range(of: $0, options: .caseInsensitive) == nil
-        }, "The fixed reading gestures must reach a passage distinct from the following block's top.")
+        let scrolledUpperLines = try upperReaderLines()
+        let markerLines = try XCTUnwrap(
+            zip(scrolledUpperLines, scrolledUpperLines.dropFirst()).first { pair in
+                let marker = [pair.0, pair.1].joined(separator: " ")
+                return marker.count >= 48
+                    && freshBlockTop.range(of: marker, options: .caseInsensitive) == nil
+            },
+            "The fixed reading gestures must reach two complete upper-third lines distinct from "
+                + "the following block's top."
+        )
+        let marker = [markerLines.0, markerLines.1].joined(separator: " ")
         let before = XCTAttachment(screenshot: viewport.screenshot())
         before.name = "Calvin following block before leaving: \(marker)"
         before.lifetime = .keepAlways
@@ -194,7 +205,8 @@ extension AndBibleUITests {
         waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
         let restored = waitForUITestCondition("Same commentary passage remains near viewport top", timeout: 15) {
             guard let lines = try? upperReaderLines() else { return false }
-            return lines.joined(separator: " ").range(of: marker, options: .caseInsensitive) != nil
+            let upperThird = lines.joined(separator: " ")
+            return upperThird.range(of: marker, options: .caseInsensitive) != nil
         }
         let after = XCTAttachment(screenshot: viewport.screenshot())
         after.name = "Calvin passage after returning"
