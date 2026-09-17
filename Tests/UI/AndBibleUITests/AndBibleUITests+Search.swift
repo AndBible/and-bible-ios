@@ -162,7 +162,14 @@ extension AndBibleUITests {
         nextBlock.tap()
         waitForElementValue("bookChooserButton", toContain: "Genesis 1:24", in: app)
         waitForVisibleReaderText(containing: "He descends to the sixth day", in: app)
-        let freshBlockTop = try upperReaderLines().joined(separator: " ")
+        let freshTopLines = try upperReaderLines()
+        XCTAssertTrue(
+            zip(freshTopLines, freshTopLines.dropFirst()).contains { pair in
+                [pair.0, pair.1].joined(separator: " ").count >= 48
+            },
+            "Expected two readable complete lines for the fresh-top negative control."
+        )
+        let freshBlockTop = freshTopLines.joined(separator: " ")
         let freshTop = XCTAttachment(screenshot: viewport.screenshot())
         freshTop.name = "Calvin following block fresh-top negative control"
         freshTop.lifetime = .keepAlways
