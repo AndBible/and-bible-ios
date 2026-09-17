@@ -258,29 +258,83 @@ extension AndBibleUITests {
         let app = makeApp()
         app.launch()
 
-        tapReaderAction("readerOpenAISettingsAction", in: app, timeout: 20)
-        XCTAssertTrue(requireElement("aiSettingsTopAppBarBackButton", in: app, timeout: 20).exists)
+        // This long workflow deliberately uses one exact live role for each known control.
+        // App-wide multi-role fallback queries accumulate enough XCTest accessibility logging to
+        // quarantine the instrumented app before the later assertions can execute.
+        func workflowButton(_ identifier: String, timeout: TimeInterval = 10) -> XCUIElement {
+            let element = app.buttons[identifier].firstMatch
+            XCTAssertTrue(
+                element.waitForExistence(timeout: timeout),
+                "Expected button '\(identifier)' in the AI and Settings workflow."
+            )
+            return element
+        }
+        func workflowScreen(_ identifier: String, timeout: TimeInterval = 10) -> XCUIElement {
+            let element = app.otherElements[identifier].firstMatch
+            XCTAssertTrue(
+                element.waitForExistence(timeout: timeout),
+                "Expected screen '\(identifier)' in the AI and Settings workflow."
+            )
+            return element
+        }
+        func tapWorkflowDialogAction(_ actionIdentifier: String, screenIdentifier: String) {
+            let action = workflowButton(actionIdentifier)
+            tapElementReliably(action, timeout: 10)
+            XCTAssertTrue(
+                waitForUITestCondition("Dismiss \(screenIdentifier)", timeout: 10) {
+                    !action.exists && !app.otherElements[screenIdentifier].firstMatch.exists
+                },
+                "Expected '\(actionIdentifier)' to dismiss '\(screenIdentifier)'."
+            )
+        }
+        func tapReaderDrawerAction(_ actionIdentifier: String) {
+            let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
+            let drawerButton = readerHeader.buttons["readerNavigationDrawerButton"].firstMatch
+            XCTAssertTrue(
+                waitForElementToBecomeHittable(drawerButton, timeout: 20),
+                "Expected the reader header's navigation drawer button."
+            )
+            drawerButton.tap()
+
+            let drawer = app.scrollViews["readerNavigationDrawer"].firstMatch
+            XCTAssertTrue(
+                drawer.waitForExistence(timeout: 20) && elementHasUsableFrame(drawer),
+                "Expected the identified reader drawer after one header-button activation."
+            )
+            let action = drawer.buttons[actionIdentifier].firstMatch
+            for _ in 0..<4 where !isElementHittable(action) {
+                drawer.swipeUp()
+            }
+            XCTAssertTrue(
+                waitForElementToBecomeHittable(action, timeout: 10),
+                "Expected '\(actionIdentifier)' inside the identified reader drawer."
+            )
+            action.tap()
+        }
+
+        tapReaderDrawerAction("readerOpenAISettingsAction")
+        XCTAssertTrue(workflowButton("aiSettingsTopAppBarBackButton", timeout: 20).exists)
         waitForReaderRenderedContentState(containing: "readerDestination=aiSettings", in: app, timeout: 10)
         XCTAssertTrue(
             app.staticTexts["Configure AI"].waitForExistence(timeout: 10),
             "Expected Android's centered Configure AI state before any provider exists."
         )
-        XCTAssertTrue(requireElement("aiConfigureConnectionButton", in: app, timeout: 10).exists)
-        XCTAssertFalse(unresolvedElement("aiQuickSetupButton", in: app).exists)
-        XCTAssertFalse(unresolvedElement("aiAddProviderLink", in: app).exists)
+        XCTAssertTrue(workflowButton("aiConfigureConnectionButton", timeout: 10).exists)
+        XCTAssertFalse(app.buttons["aiQuickSetupButton"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["aiAddProviderLink"].firstMatch.exists)
 
-        tapElementReliably(requireElement("aiConfigureConnectionButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("aiQuickSetupButton", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("aiProvidersLink", in: app, timeout: 10).exists)
+        tapElementReliably(workflowButton("aiConfigureConnectionButton", timeout: 10), timeout: 10)
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiQuickSetupButton", timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiProvidersLink", timeout: 10).exists)
         XCTAssertFalse(
-            unresolvedElement("aiModelsLink", in: app).exists,
+            app.buttons["aiModelsLink"].firstMatch.exists,
             "Android hides Models, Behavior, Advanced, and Usage until a provider exists."
         )
 
-        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10).exists)
+        tapElementReliably(workflowButton("aiQuickSetupButton", timeout: 10), timeout: 10)
+        XCTAssertTrue(workflowScreen("aiDisclaimerScreen", timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiDisclaimerAcceptButton", timeout: 10).exists)
         let localizedDisclaimerPoint = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH %@", "AI can make mistakes")
         ).firstMatch
@@ -290,44 +344,34 @@ extension AndBibleUITests {
         )
         XCTAssertFalse(app.staticTexts["ai_disclaimer_point1"].exists)
         XCTAssertFalse(
-            unresolvedElement("aiQuickSetupButton", in: app).isHittable,
+            app.buttons["aiQuickSetupButton"].firstMatch.isHittable,
             "Android's modal disclaimer must block the underlying Quick Setup row."
         )
         XCTAssertFalse(
-            requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).isHittable,
+            workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).isHittable,
             "Android's modal disclaimer must block the underlying app-owned action bar."
         )
-        tapAppOwnedDialogAction(
-            "aiDisclaimerCancelButton",
-            dialogIdentifier: "aiDisclaimerScreen",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapWorkflowDialogAction("aiDisclaimerCancelButton", screenIdentifier: "aiDisclaimerScreen")
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
 
-        tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
-        tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(workflowButton("aiProvidersLink", timeout: 10), timeout: 10)
+        XCTAssertTrue(workflowButton("aiProvidersTopAppBarBackButton", timeout: 10).exists)
+        tapElementReliably(workflowButton("aiAddProviderLink", timeout: 10), timeout: 10)
         XCTAssertTrue(
-            requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
+            workflowScreen("aiDisclaimerScreen", timeout: 10).exists,
             "Add Provider must use Android's same explicit disclaimer gate."
         )
-        tapAppOwnedDialogAction(
-            "aiDisclaimerCancelButton",
-            dialogIdentifier: "aiDisclaimerScreen",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapWorkflowDialogAction("aiDisclaimerCancelButton", screenIdentifier: "aiDisclaimerScreen")
+        XCTAssertTrue(workflowButton("aiProvidersTopAppBarBackButton", timeout: 10).exists)
         tapElementReliably(
-            requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10),
+            workflowButton("aiProvidersTopAppBarBackButton", timeout: 10),
             timeout: 10
         )
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
 
-        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(workflowButton("aiQuickSetupButton", timeout: 10), timeout: 10)
         XCTAssertTrue(
-            requireElement("aiDisclaimerScreen", in: app, timeout: 10).exists,
+            workflowScreen("aiDisclaimerScreen", timeout: 10).exists,
             "Cancelling the disclaimer must not count as acceptance."
         )
         let disclaimerScrollView = app.scrollViews["aiDisclaimerScrollView"].firstMatch
@@ -335,7 +379,7 @@ extension AndBibleUITests {
             disclaimerScrollView.waitForExistence(timeout: 10),
             "Expected the app-owned disclaimer's visible scroll container."
         )
-        let disclaimerAcceptButton = requireElement("aiDisclaimerAcceptButton", in: app, timeout: 10)
+        let disclaimerAcceptButton = workflowButton("aiDisclaimerAcceptButton", timeout: 10)
         for _ in 0..<8 where !disclaimerAcceptButton.isHittable {
             disclaimerScrollView.swipeUp()
         }
@@ -345,108 +389,76 @@ extension AndBibleUITests {
         )
         tapElementReliably(disclaimerAcceptButton, timeout: 10)
         XCTAssertTrue(
-            requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10).exists,
+            workflowButton("aiQuickSetupProvider_GEMINI", timeout: 10).exists,
             "Explicit acceptance must resume Android's Quick Setup provider chooser."
         )
-        tapElementReliably(requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiQuickSetupCredentialScreen", in: app, timeout: 10).exists)
-        XCTAssertTrue(requireElement("aiQuickSetupSaveButton", in: app, timeout: 10).exists)
-        tapAppOwnedDialogAction(
-            "aiQuickSetupCancelButton",
-            dialogIdentifier: "aiQuickSetupCredentialScreen",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapElementReliably(workflowButton("aiQuickSetupProvider_GEMINI", timeout: 10), timeout: 10)
+        XCTAssertTrue(workflowScreen("aiQuickSetupCredentialScreen", timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiQuickSetupSaveButton", timeout: 10).exists)
+        tapWorkflowDialogAction("aiQuickSetupCancelButton", screenIdentifier: "aiQuickSetupCredentialScreen")
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
 
-        tapElementReliably(requireElement("aiQuickSetupButton", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(workflowButton("aiQuickSetupButton", timeout: 10), timeout: 10)
         XCTAssertTrue(
-            requireElement("aiQuickSetupProvider_GEMINI", in: app, timeout: 10).exists,
+            workflowButton("aiQuickSetupProvider_GEMINI", timeout: 10).exists,
             "Persisted acceptance must bypass the disclaimer on later protected actions."
         )
-        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
-        tapAppOwnedDialogAction(
-            "aiQuickSetupCancelButton",
-            dialogIdentifier: "aiQuickSetupProviderList",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        XCTAssertFalse(app.otherElements["aiDisclaimerScreen"].firstMatch.exists)
+        tapWorkflowDialogAction("aiQuickSetupCancelButton", screenIdentifier: "aiQuickSetupProviderList")
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
 
-        tapElementReliably(requireElement("aiProvidersLink", in: app, timeout: 10), timeout: 10)
-        tapElementReliably(requireElement("aiAddProviderLink", in: app, timeout: 10), timeout: 10)
-        XCTAssertTrue(requireElement("aiProviderTypeSelectionScreen", in: app, timeout: 10).exists)
-        XCTAssertFalse(unresolvedElement("aiDisclaimerScreen", in: app).exists)
-        tapElementReliably(requireElement("aiProviderType_GEMINI", in: app, timeout: 10), timeout: 10)
+        tapElementReliably(workflowButton("aiProvidersLink", timeout: 10), timeout: 10)
+        tapElementReliably(workflowButton("aiAddProviderLink", timeout: 10), timeout: 10)
+        XCTAssertTrue(workflowScreen("aiProviderTypeSelectionScreen", timeout: 10).exists)
+        XCTAssertFalse(app.otherElements["aiDisclaimerScreen"].firstMatch.exists)
+        tapElementReliably(workflowButton("aiProviderType_GEMINI", timeout: 10), timeout: 10)
         XCTAssertTrue(
-            requireElement("aiProviderSaveButton", in: app, timeout: 10).exists,
+            workflowButton("aiProviderSaveButton", timeout: 10).exists,
             "Persisted acceptance must resume Add Provider without another disclaimer."
         )
-        tapAppOwnedDialogAction(
-            "aiProviderCancelButton",
-            dialogIdentifier: "aiProviderEditorScreen",
-            in: app,
-            timeout: 10
-        )
-        XCTAssertTrue(requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10).exists)
+        tapWorkflowDialogAction("aiProviderCancelButton", screenIdentifier: "aiProviderEditorScreen")
+        XCTAssertTrue(workflowButton("aiProvidersTopAppBarBackButton", timeout: 10).exists)
         tapElementReliably(
-            requireElement("aiProvidersTopAppBarBackButton", in: app, timeout: 10),
+            workflowButton("aiProvidersTopAppBarBackButton", timeout: 10),
             timeout: 10
         )
-        XCTAssertTrue(requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10).exists)
+        XCTAssertTrue(workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10).exists)
         tapElementReliably(
-            requireElement("aiConnectionSettingsTopAppBarBackButton", in: app, timeout: 10),
+            workflowButton("aiConnectionSettingsTopAppBarBackButton", timeout: 10),
             timeout: 10
         )
-        let aiSettingsBackButton = requireElement("aiSettingsTopAppBarBackButton", in: app, timeout: 10)
+        let aiSettingsBackButton = workflowButton("aiSettingsTopAppBarBackButton", timeout: 10)
         tapElementReliably(aiSettingsBackButton, timeout: 10)
         XCTAssertTrue(
             waitForReaderShellReady(in: app, timeout: 20),
             "Expected AI Settings back navigation to return to the reader shell."
         )
 
-        let readerHeader = app.otherElements["readerDocumentHeader"].firstMatch
-        let drawerButton = readerHeader.buttons["readerNavigationDrawerButton"].firstMatch
+        tapReaderDrawerAction("readerOpenSettingsAction")
+        let settingsForm = workflowScreen("settingsForm", timeout: 20)
         XCTAssertTrue(
-            waitForElementToBecomeHittable(drawerButton, timeout: 20),
-            "Expected the reader header's navigation drawer button after leaving AI Settings."
+            waitForUITestCondition("Settings form becomes visible", timeout: 20) {
+                self.elementHasUsableFrame(settingsForm) && app.frame.intersects(settingsForm.frame)
+            },
+            "Expected the identified Settings form inside the visible app viewport."
         )
-        drawerButton.tap()
 
-        let drawer = app.scrollViews["readerNavigationDrawer"].firstMatch
-        XCTAssertTrue(
-            drawer.waitForExistence(timeout: 20) && elementHasUsableFrame(drawer),
-            "Expected the identified reader drawer after one header-button activation."
-        )
-        let settingsButton = drawer.buttons["readerOpenSettingsAction"].firstMatch
-        for _ in 0..<4 where !isElementHittable(settingsButton) {
-            drawer.swipeUp()
-        }
-        XCTAssertTrue(
-            waitForElementToBecomeHittable(settingsButton, timeout: 10),
-            "Expected the Settings action inside the identified reader drawer."
-        )
-        settingsButton.tap()
-        XCTAssertTrue(
-            waitForSettingsReady(in: app, timeout: 20),
-            "Expected Settings after one scoped reader-drawer action."
-        )
-        XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
-
-        tapSettingsElement("settingsAISettingsLink", in: app, timeout: 20)
-        let nestedAISettingsBackButton = requireElement(
-            "aiSettingsTopAppBarBackButton",
-            in: app,
-            timeout: 20
-        )
+        tapElementReliably(workflowButton("settingsAISettingsLink", timeout: 20), timeout: 10)
+        let nestedAISettingsBackButton = workflowButton("aiSettingsTopAppBarBackButton", timeout: 20)
         tapElementReliably(nestedAISettingsBackButton, timeout: 10)
-        XCTAssertTrue(requireElement("settingsForm", in: app, timeout: 10).exists)
+        XCTAssertTrue(workflowScreen("settingsForm", timeout: 10).exists)
 
-        tapSettingsElement("settingsGlobalTextOptionsLink", in: app, timeout: 20)
-        XCTAssertTrue(requireElement("textDisplaySettingsScreen", in: app, timeout: 20).exists)
-        waitForElementValue("textDisplaySettingsScreen", toContain: "scope=global", in: app, timeout: 10)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenWorkspaceSettingsButton", in: app).exists)
-        XCTAssertFalse(unresolvedElement("textDisplayOpenGlobalSettingsButton", in: app).exists)
+        tapElementReliably(workflowButton("settingsGlobalTextOptionsLink", timeout: 20), timeout: 10)
+        XCTAssertTrue(workflowScreen("textDisplaySettingsScreen", timeout: 20).exists)
+        XCTAssertTrue(
+            waitForUITestCondition("Global text scope", timeout: 10) {
+                String(describing: app.otherElements["textDisplaySettingsScreen"].firstMatch.value)
+                    .contains("scope=global")
+            },
+            "Expected Global text options to publish scope=global."
+        )
+        XCTAssertFalse(app.buttons["textDisplayOpenWorkspaceSettingsButton"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["textDisplayOpenGlobalSettingsButton"].firstMatch.exists)
     }
 
     /**
