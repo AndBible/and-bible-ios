@@ -320,7 +320,7 @@ extension AndBibleUITests {
                 "Expected the identified Settings scroll viewport."
             )
             let action = settingsScrollView.buttons[actionIdentifier].firstMatch
-            if waitForElementToBecomeHittable(action, timeout: 2) {
+            if isElementHittable(action) {
                 action.tap()
                 return
             }
@@ -334,11 +334,9 @@ extension AndBibleUITests {
                 } else {
                     settingsScrollView.swipeUp()
                 }
-                let revealed = waitForUITestCondition("Reveal \(actionIdentifier)", timeout: 1) {
-                    self.isElementHittable(action)
-                        || (action.exists && self.isElementVisible(action, within: settingsScrollView))
-                }
-                if revealed {
+                if isElementHittable(action)
+                    || (action.exists && isElementVisible(action, within: settingsScrollView))
+                {
                     break
                 }
             }
