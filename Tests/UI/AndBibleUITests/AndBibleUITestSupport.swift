@@ -21,7 +21,7 @@ extension AndBibleUITests {
      *   - terminates a previously tracked app directly before reusing the current test instance
      *   - assigns a fresh `UITEST_SESSION_ID` and standard locale/accessibility launch flags
      *   - prepares the fixture scenario declared for the current test method; fixture preparation
-     *     owns the stale-process launch barrier when host-side mutation is required
+     *     owns the stale-process termination barrier when host-side mutation is required
      * - Failure modes:
      *   - records an XCTest failure and skips fixture mutation when app-process isolation cannot
      *     be established
@@ -68,37 +68,34 @@ extension AndBibleUITests {
     }
 
     /**
-     Establishes an XCTest-owned process boundary before the fixture tool mutates the app container.
+     Establishes an observable stopped-process boundary before mutating the app container.
      *
-     * A new XCTestCase instance has no handle for the preceding test's process, and host-side
-     * `simctl terminate` can stall while CoreSimulator is under load. Launching with the dedicated
-     * bootstrap-exit contract forces XCTest to replace any stale process, then gives this test a
-     * handle whose stopped state can be observed deterministically.
+     * The configured `XCUIApplication` proxy addresses the installed application even when a prior
+     * XCTestCase launched the surviving process. Terminating through that proxy avoids starting
+     * application persistence or sync services with state retained by the preceding test. A bounded
+     * CoreSimulator termination is recovery only; fixture mutation still requires XCTest to observe
+     * `.notRunning` before this function succeeds.
      *
-     * - Parameter app: Fresh application handle that the caller will configure and launch again
-     *   after fixture preparation.
-     * - Returns: `true` when the bootstrap process exits or is stopped through its owned handle.
+     * - Parameter app: Configured application proxy that the caller will launch after fixture
+     *   preparation.
+     * - Returns: `true` only when XCTest observes the installed application as not running.
      * - Side effects:
-     *   - launches the installed app once with `UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH=1`
-     *   - may create the simulator data container before the fixture tool resets it
-     *   - removes the temporary bootstrap environment flag before returning
+     *   - requests termination through XCTest without launching the application
+     *   - may invoke bounded CoreSimulator termination if XCTest's first request does not stop it
      * - Failure modes:
-     *   - returns `false` when neither the app's two-second bootstrap exit nor direct XCTest
-     *     termination reaches `.notRunning` within the bounded waits
+     *   - returns `false` when neither direct nor host-assisted termination reaches an XCTest-visible
+     *     `.notRunning` state within the bounded waits
      * - Important: The fixture tool must run only after this function returns `true`.
      */
     func synchronizeAppProcessBeforeFixtureMutation(_ app: XCUIApplication) -> Bool {
-        app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
-        defer {
-            app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
-        }
-
-        app.launch()
-        if waitForAppToStop(app, timeout: 10) {
+        app.terminate()
+        if waitForAppToStop(app, timeout: 5) {
             return true
         }
 
-        app.terminate()
+        guard terminateInstalledAppProcessIfPresent(timeout: 5) else {
+            return false
+        }
         return waitForAppToStop(app, timeout: 5)
     }
 
@@ -107,7 +104,7 @@ extension AndBibleUITests {
      *
      * - Side effects:
      *   - resolves the app data container from the current simulator UDID
-     *   - runs an XCTest-owned bootstrap-exit launch before any host-side fixture mutation
+     *   - terminates any surviving app process without launching it before host-side fixture mutation
      *   - runs `UITestFixtureTool reset` and `seed` against that installed app container
      *   - passes the fixture tool's encoded preference seed to the first app launch
      *   - skips host-side fixture work when the manifest uses the `none` sentinel for a
@@ -144,7 +141,7 @@ extension AndBibleUITests {
             return
         }
         let bundleID = environment["UITEST_BUNDLE_ID"] ?? "org.andbible.ios"
-        guard synchronizeAppProcessBeforeFixtureMutation(XCUIApplication()) else {
+        guard synchronizeAppProcessBeforeFixtureMutation(app) else {
             XCTFail(
                 "Unable to establish an app-process boundary before fixture mutation.",
                 file: file,
@@ -236,10 +233,12 @@ extension AndBibleUITests {
      * - Side effects:
      *   - performs one bootstrap launch/terminate cycle when the simulator has not yet created the
      *     app data container
-     *   - best-effort terminates the bootstrap app before fixture reset and seed work begins
+     *   - requires the shared process barrier to observe the bootstrap app stopped before returning
      * - Failure modes:
      *   - records an XCTest failure when the bootstrap launch cannot materialize the data
      *     container before fixture seeding needs it
+     *   - records an XCTest failure when the bootstrap process cannot be observably stopped before
+     *     fixture mutation
      */
     func ensureInstalledAppDataContainer(
         for app: XCUIApplication,
@@ -260,7 +259,7 @@ extension AndBibleUITests {
         }
 
         print("Bootstrapping app container for bundle '\(bundleIdentifier)' before fixture seeding.")
-        var usedXCTestBootstrap = simulatorID == nil || forceXCTestBootstrap
+        var useXCTestBootstrap = simulatorID == nil || forceXCTestBootstrap
         if forceXCTestBootstrap {
             print("Forcing XCTest bootstrap launch for bundle '\(bundleIdentifier)'.")
         } else if let simulatorID {
@@ -269,25 +268,7 @@ extension AndBibleUITests {
                 arguments: ["simctl", "launch", simulatorID, bundleIdentifier],
                 timeout: 20
             )
-            if launchResult.status == 0 {
-                if let bootstrappedPath = waitForInstalledAppDataContainer(
-                    simulatorID: simulatorID,
-                    bundleIdentifier: bundleIdentifier,
-                    timeout: 30
-                ) {
-                    _ = runHostProcess(
-                        executablePath: "/usr/bin/xcrun",
-                        arguments: ["simctl", "terminate", simulatorID, bundleIdentifier],
-                        timeout: 10
-                    )
-                    return bootstrappedPath
-                }
-                _ = runHostProcess(
-                    executablePath: "/usr/bin/xcrun",
-                    arguments: ["simctl", "terminate", simulatorID, bundleIdentifier],
-                    timeout: 10
-                )
-            } else {
+            if launchResult.status != 0 {
                 print(
                     """
                     simctl bootstrap launch failed for '\(bundleIdentifier)'; falling back to XCTest launch.
@@ -297,47 +278,32 @@ extension AndBibleUITests {
                     \(launchResult.stderr)
                     """
                 )
-                usedXCTestBootstrap = true
+                useXCTestBootstrap = true
             }
         }
 
-        if usedXCTestBootstrap {
+        if useXCTestBootstrap {
             app.launchEnvironment["UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH"] = "1"
             defer {
                 app.launchEnvironment.removeValue(forKey: "UITEST_EXIT_AFTER_BOOTSTRAP_LAUNCH")
             }
             app.launch()
-            if let bootstrappedPath = waitForInstalledAppDataContainer(
-                simulatorID: simulatorID,
-                bundleIdentifier: bundleIdentifier,
-                timeout: 45
-            ) {
-                if !waitForAppToStop(app, timeout: 5),
-                   !terminateInstalledAppProcessIfPresent(
-                       bundleIdentifier: bundleIdentifier,
-                       simulatorID: simulatorID,
-                       timeout: 10
-                   ) {
-                    print(
-                        "Bootstrap app '\(bundleIdentifier)' did not report stopped after data container creation; continuing after best-effort cleanup."
-                    )
-                }
-                return bootstrappedPath
-            }
-            if !waitForAppToStop(app, timeout: 5) {
-                _ = terminateInstalledAppProcessIfPresent(
-                    bundleIdentifier: bundleIdentifier,
-                    simulatorID: simulatorID,
-                    timeout: 10
-                )
-            }
         }
 
-        if let bootstrappedPath = waitForInstalledAppDataContainer(
+        let bootstrappedPath = waitForInstalledAppDataContainer(
             simulatorID: simulatorID,
             bundleIdentifier: bundleIdentifier,
             timeout: 45
-        ) {
+        )
+        guard synchronizeAppProcessBeforeFixtureMutation(app) else {
+            XCTFail(
+                "Unable to confirm bootstrap app termination before fixture mutation.",
+                file: file,
+                line: line
+            )
+            return nil
+        }
+        if let bootstrappedPath {
             return bootstrappedPath
         }
 
