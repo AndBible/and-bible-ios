@@ -48,11 +48,13 @@ class RecordingRunner:
     def __init__(self, container: pathlib.Path) -> None:
         self.container = container
         self.commands: list[list[str]] = []
+        self.timeouts: list[float] = []
         self.results: dict[str, CommandResult | Exception | list[CommandResult | Exception]] = {}
 
-    def __call__(self, command, _timeout, _cancellation) -> CommandResult:
+    def __call__(self, command, timeout, _cancellation) -> CommandResult:
         command = list(command)
         self.commands.append(command)
+        self.timeouts.append(timeout)
         operation = self._operation(command)
         overridden = self.results.get(operation)
         if isinstance(overridden, list):
@@ -1006,13 +1008,73 @@ class FixtureServiceTestCase(unittest.TestCase):
             ["terminate"],
         )
 
+    def test_terminate_uses_remaining_request_budget_and_timeout_blocks_mutation(self) -> None:
+        observed_timeouts: list[float] = []
+        commands: list[list[str]] = []
+
+        def timed_terminate(command, timeout, _cancellation) -> CommandResult:
+            command = list(command)
+            commands.append(command)
+            observed_timeouts.append(timeout)
+            raise FixtureHostCommandTimeout(
+                command=command,
+                timeout_seconds=timeout,
+                pid=5151,
+                elapsed_seconds=timeout,
+                returncode=-signal.SIGTERM,
+                termination_signals_attempted=("SIGTERM",),
+                direct_child_reaped=True,
+                process_group_gone=True,
+                cleanup_error=None,
+                stdout="",
+                stderr="",
+            )
+
+        configuration = FixtureServiceConfiguration(
+            directory=self.root / "timeout-service",
+            simulator_id=SIMULATOR_ID,
+            bundle_identifier=BUNDLE_ID,
+            fixture_tool_path=self.fixture_tool,
+            fixture_manifest_path=self.manifest,
+            sword_fixture_path=self.sword_fixture,
+            request_timeout_seconds=37,
+        )
+        service = UITestFixtureService(configuration, command_runner=timed_terminate)
+        original_service_directory = self.service_directory
+        self.service_directory = configuration.directory
+        try:
+            with service:
+                response = self.request()
+        finally:
+            self.service_directory = original_service_directory
+
+        self.assertFalse(response["succeeded"])
+        self.assertRegex(
+            response["error"],
+            "simulator app termination timed out after 37.0s.*"
+            "direct child reaped: True; process group gone: True",
+        )
+        self.assertEqual(len(commands), 1)
+        self.assertIn("terminate", commands[0])
+        self.assertGreater(observed_timeouts[0], 36)
+        self.assertLessEqual(observed_timeouts[0], 37)
+
     def test_missing_container_bootstraps_then_stops_app_before_fixture_mutation(self) -> None:
         """A first-run container is created by one launch and stopped before reset and seed."""
         self.runner.results["get_app_container"] = [
             CommandResult(2, "", "container unavailable"),
             CommandResult(0, f"{self.container}\n", ""),
         ]
-        with UITestFixtureService(self.configuration, command_runner=self.runner):
+        configuration = FixtureServiceConfiguration(
+            directory=self.service_directory,
+            simulator_id=SIMULATOR_ID,
+            bundle_identifier=BUNDLE_ID,
+            fixture_tool_path=self.fixture_tool,
+            fixture_manifest_path=self.manifest,
+            sword_fixture_path=self.sword_fixture,
+            request_timeout_seconds=37,
+        )
+        with UITestFixtureService(configuration, command_runner=self.runner):
             response = self.request()
 
         self.assertTrue(response["succeeded"])
@@ -1020,6 +1082,13 @@ class FixtureServiceTestCase(unittest.TestCase):
             [RecordingRunner._operation(command) for command in self.runner.commands],
             ["terminate", "get_app_container", "launch", "terminate", "get_app_container", "reset", "seed"],
         )
+        terminate_timeouts = [
+            timeout
+            for command, timeout in zip(self.runner.commands, self.runner.timeouts)
+            if "terminate" in command
+        ]
+        self.assertEqual(len(terminate_timeouts), 2)
+        self.assertTrue(all(36 < timeout <= 37 for timeout in terminate_timeouts))
 
     def test_failed_bootstrap_stop_prevents_container_lookup_and_mutation(self) -> None:
         """A launched bootstrap process must reach the stop boundary before any fixture write."""

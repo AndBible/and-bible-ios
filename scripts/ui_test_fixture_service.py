@@ -1324,17 +1324,26 @@ class UITestFixtureService:
         return response
 
     def _terminate_app(self, deadline: float) -> None:
-        result = self._run(
-            [
-                "/usr/bin/xcrun",
-                "simctl",
-                "terminate",
-                self.configuration.simulator_id,
-                self.configuration.bundle_identifier,
-            ],
-            deadline,
-            15,
-        )
+        try:
+            result = self._run(
+                [
+                    "/usr/bin/xcrun",
+                    "simctl",
+                    "terminate",
+                    self.configuration.simulator_id,
+                    self.configuration.bundle_identifier,
+                ],
+                deadline,
+                self.configuration.request_timeout_seconds,
+            )
+        except FixtureHostCommandTimeout as error:
+            raise FixtureServiceError(
+                "simulator app termination timed out after "
+                f"{error.timeout_seconds:.1f}s within the fixture request deadline; "
+                f"command: {' '.join(error.command)}; "
+                f"direct child reaped: {error.direct_child_reaped}; "
+                f"process group gone: {error.process_group_gone}"
+            ) from error
         diagnostic = f"{result.stdout}\n{result.stderr}".lower()
         if result.returncode != 0 and not any(
             marker in diagnostic
