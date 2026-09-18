@@ -35,12 +35,6 @@ AndBible açık kaynaklı bir topluluk projesidir. Pratikte bu, uygun becerilere
 
 Profesyonel bir yazılım mühendisi ya da testçi iseniz lütfen projeye katkıda bulunmayı düşünün. Nasıl katkıda bulunacağınız hakkında daha fazla bilgi sahibi olmak için lütfen bakınız https://git.io/JUnaj.
 
-Geliştirme süresine sponsor ederek destek olun!
-
-Projeye katkıda bulunmak için zamanınız veya beceriniz yoksa, profesyonel geliştirici çalışma süresine sponsor ederek da projeyi destekleyebilirsiniz.
-
-Seçenekleri görün: https://shop.andbible.org/
-
 Bağlantılar
 
  * Ana Sayfa: https://andbible.org

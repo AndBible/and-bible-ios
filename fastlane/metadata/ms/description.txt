@@ -35,12 +35,6 @@ AndBible adalah projek komuniti sumber terbuka. Pada praktiknya, ini bermakna se
 
 Jika anda jurutera perisian atau penguji profesional, sila pertimbangkan untuk menyumbang kepada projek. Untuk maklumat lanjut tentang cara menyumbang, sila lihat https://git.io/JUnaj.
 
-Sokong dengan membeli masa pembangunan!
-
-Jika anda tidak mempunyai masa atau kemahiran untuk sumbangan projek, anda juga boleh menyokong projek dengan membeli masa kerja pembangun profesional.
-
-Lihat pilihan: https://shop.andbible.org/
-
 Pautan
 
  * Laman utama: https://andbible.org

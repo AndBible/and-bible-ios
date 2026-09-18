@@ -35,12 +35,6 @@
 
 {{paragraph_4_1 }}
 
-{{buy_title}}
-
-{{buy_1}}
-
-{{buy_2}}: {{buy_development_link}}
-
 {{subtitle_4}}
 
  * {{link_1}}

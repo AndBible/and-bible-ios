@@ -35,12 +35,6 @@ AndBible is an open-source community project. In practice, this means that anyon
 
 If you are a professional software engineer or tester, please consider contributing to the project. For more information on how to contribute, please see https://git.io/JUnaj.
 
-Support by sponsoring development time!
-
-If you don't have time or skills for code contribution, you can support AndBible by sponsoring development time.
-
-See sponsorship options here:: https://shop.andbible.org/
-
 Links
 
  * Homepage: https://andbible.org

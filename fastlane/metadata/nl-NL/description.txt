@@ -35,12 +35,6 @@ And Bible is een open-source project. Dat betekent in de praktijk dat iedereen m
 
 Als je een professionele software-ontwikkelaar bent, of -tester, overweeg dan aan het project bij te dragen. Zie https://git.io/JUnaj voor meer informatie.
 
-Ondersteuning met het kopen van ontwikkelingstijd!
-
-Als je niet de tijd of de vaardigheden hebt voor dit project, kun je ook ondersteuning geven door tijd te kopen voor de ontwikkeling.
-
-Zie de opties: https://shop.andbible.org/
-
 Links
 
  * Homepagina: https://andbible.org

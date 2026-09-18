@@ -35,12 +35,6 @@ Projekt And Bible je komunitní otevřený software. V praxi to znamená, že kd
 
 Pokud jste profesionální vývojář softwaru nebo tester, zvažte prosím, zda můžete k projektu přispět. Více informací najdete na https://git.io/JUnaj.
 
-Podpořte nákupem času pro vývoj!
-
-Jestliže nemáte čas nebo dovednosti pro přispění do projektu, pak můžete také podpořit vývoj nákupem času profesionálního vývojáře.
-
-Podívejte se na možnosti: https://shop.andbible.org/
-
 Odkazy
 
  * Domovská stránka: https://andbible.org

@@ -35,12 +35,6 @@ AndBible é um projeto comunitário de código aberto. Na prática, isso signifi
 
 Se é um engenheiro de software ou testador profissional, considere contribuir para o projeto. Para obter mais informações sobre como contribuir, consulte https://git.io/JUnaj.
 
-Suporte através da compra de tempo de desenvolvimento
-
-Se não tiver tempo ou habilidades para contribuir com o projeto é possível também suportar o projeto comprando tempo de trabalho de um desenvolvedor profissional.
-
-Ver opções: https://shop.andbible.org/
-
 Atalhos
 
  * Página inicial: https://andbible.org

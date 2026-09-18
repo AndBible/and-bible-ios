@@ -35,12 +35,6 @@ AndBible on yhteisöllinen avoimen lähdekoodin projekti. Käytännössä se tar
 
 Jos olet ohjelmistoalan ammattilainen (kehittäjä tai testaaja), pyydämme sinua harkistemaan aikasi antamista tälle projektille. Lue lisää tietoa siitä kuinka voit osallistua:  https://git.io/JUnaj.
 
-Tue ostamalla kehitysaikaa!
-
-Jos sinulla ei ole aikaa tai taitoja olla mukana projektissa, voit myös tukea projektia ostamalla sovelluskehittäjän työaikaa.
-
-Katso vaihtoehdot: https://shop.andbible.org/
-
 Linkkejä
 
  * Kotisivu: https://andbible.org

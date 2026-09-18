@@ -35,12 +35,6 @@ AndBible este un proiect comunitar care are codul sursă public. În practică, 
 
 Dacă ești programator sau ai experiență la încercarea aplicațiilor, te rugăm să contribui la acest proiect. Pentru mai multe informații despre cum să contribuiți, vă rugăm să consultați https://git.io/JUnaj.
 
-Sprijină prin cumpărarea de timp de programare!
-
-Dacă nu ai timp sau abilități pentru a contribui la proiect, poți susține proiectul prin cumpărarea de timp de lucru pentru un programator profesionist.
-
-Vezi opțiunile: https://shop.andbible.org/
-
 Legături
 
  * Pagina principală: https://andbible.org

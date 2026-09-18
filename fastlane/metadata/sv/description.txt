@@ -35,12 +35,6 @@ AndBible är ett projekt med öppen källkod som utvecklas av en nätgemenskap. 
 
 Om du är en professionell mjukvaruingenjör eller testare, överväg gärna att bidra till projektet. Mer information om hur man bidrar finns här: https://git.io/JUnaj.
 
-Understöd genom att köpa apputvecklingstid!
-
-Om du inte har tid eller kunskap för att bidra till projektet kan du också understöda det genom att köpa arbetstid av en professionell utvecklare.
-
-Se alternativ: https://shop.andbible.org/
-
 Länkar
 
  * Webbplats: https://andbible.org

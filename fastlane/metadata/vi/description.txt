@@ -35,12 +35,6 @@ AndBible là một dự án cộng đồng mã nguồn mở. Trên thực tế, 
 
 Nếu bạn là kỹ sư phần mềm hoặc người kiểm thử chuyên nghiệp, hãy cân nhắc đóng góp cho dự án. Để biết thêm thông tin về cách đóng góp, vui lòng xem https://git.io/JUnaj.
 
-Hỗ trợ bằng cách mua thời gian phát triển!
-
-Nếu bạn không có thời gian hoặc kỹ năng để đóng góp cho dự án, bạn cũng có thể hỗ trợ dự án bằng cách mua thời gian làm việc của nhà phát triển chuyên nghiệp.
-
-Xem các tùy chọn: https://shop.andbible.org/
-
 Liên kết
 
  * Trang chủ: https://andbible.org

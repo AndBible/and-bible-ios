@@ -35,12 +35,6 @@ Az And Bible nyílt forráskódú közösségi projekt. Bárkit, aki megfelelő 
 
 Ha hivatásos szoftverfejlesztő vagy tesztelő, kérjük vegyen részt az alkalmazás feljlesztésében! Bővebb információ: https://git.io/JUnaj.
 
-Támogasd as projektet fejlesztőidő vásárlásával!
-
-Ha nem rendelkezik megfelelő képességekkel, támogathatja a projektet fejlesztőidő vásárlásával.
-
-Lehetőségek: https://shop.andbible.org/
-
 Hivatkozások
 
  * Internetcím: https://andbible.org

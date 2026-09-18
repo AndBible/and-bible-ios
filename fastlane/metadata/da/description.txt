@@ -35,12 +35,6 @@ AndBible er et open source-fællesskabsprojekt. I praksis betyder det, at alle m
 
 Er du professionel softwareudvikler eller tester, er du velkommen til at bidrage til projektet. For mere information om, hvordan du bidrager, se https://git.io/JUnaj.
 
-Støt projektet ved at købe udviklingstid!
-
-Har du ikke tid eller færdigheder til at bidrage til projektet, kan du også støtte det ved at købe professionel udviklerarbejdstid.
-
-Se muligheder: https://shop.andbible.org/
-
 Links
 
  * Hjemmeside: https://andbible.org

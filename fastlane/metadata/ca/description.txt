@@ -35,12 +35,6 @@ AndBible és un projecte comunitari de codi obert. En la pràctica, això signif
 
 Si sou un enginyer de programari o provador professional, considereu contribuir al projecte. Per a més informació sobre com col·laborar, consulteu https://git.io/JUnaj.
 
-Doneu suport comprant temps de desenvolupament!
-
-Si no teniu temps ni habilitats per contribuir al projecte, també podeu donar suport al projecte comprant temps de treball de desenvolupadors professionals.
-
-Vegeu les opcions: https://shop.andbible.org/
-
 Enllaços
 
  * Pàgina web: https://andbible.org

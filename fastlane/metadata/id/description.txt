@@ -35,12 +35,6 @@ AndBible adalah proyek komunitas open-source. Dalam praktiknya, ini berarti siap
 
 Jika Anda adalah insinyur perangkat lunak atau penguji profesional, pertimbangkanlah untuk berkontribusi pada proyek ini. Untuk informasi lebih lanjut tentang cara berkontribusi, silakan lihat https://git.io/JUnaj.
 
-Dukung dengan membeli waktu pengembangan!
-
-Jika Anda tidak memiliki waktu atau keahlian untuk kontribusi proyek, Anda juga dapat mendukung proyek dengan membeli waktu kerja pengembang profesional.
-
-Lihat pilihan: https://shop.andbible.org/
-
 Tautan
 
  * Beranda: https://andbible.org

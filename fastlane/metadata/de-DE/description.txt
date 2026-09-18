@@ -35,12 +35,6 @@ Bibel+ (AndBibel) ist ein Opensource Gemeinschaftprojekt. Das bedeutet in der Pr
 
 Wenn du professioneller Softwareingenieur oder -tester bist, überlege dir bitte, ob du zu dem Projekt beitragen willst. Für mehr Informationen dazu, bitte lies https://git.io/JUnaj.
 
-Unterstütze uns, indem du Entwicklungszeit kaufst!
-
-Wenn Du keine Zeit oder Fähigkeiten für Projektbeiträge hast, kannst du das Projekt auch durch den Kauf von professioneller Entwicklerarbeitszeit unterstützen.
-
-Optionen anzeigen: https://shop.andbible.org/
-
 Links
 
  * Homepage: https://andbible.org

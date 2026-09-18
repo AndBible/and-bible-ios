@@ -35,12 +35,6 @@ AndBible je komunitný projekt s otvoreným kódom. V praxi to znamená, že kto
 
 Ak ste profesionálny softvérový inžinier alebo tester, zvážte zapojenie sa do projektu. Ďalšie informácie o tom, ako prispieť, nájdete na stránke https://git.io/JUnaj.
 
-Podporte aplikáciu nákupom času vývoja!
-
-Ak nemáte čas alebo zručnosti na prispievanie do projektu, môžete projekt podporiť aj zakúpením pracovného času profesionálneho vývojára.
-
-Pozrite si možnosti: https://shop.andbible.org/
-
 Odkazy
 
  * Domovská stránka: https://andbible.org

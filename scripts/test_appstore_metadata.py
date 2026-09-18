@@ -313,6 +313,38 @@ class RenderedPlatformNameTests(unittest.TestCase):
         )
 
 
+class NoExternalPurchaseRouteTests(unittest.TestCase):
+    """App Store Review Guideline 3.1.1 covers metadata as well as the app.
+
+    Apple rejected 1.0 for linking out to the shop from the app; the same
+    external purchase route sat in all 34 descriptions. The approved
+    configuration of the developer's other iOS app mentions sponsorship
+    in-app and nowhere in its store copy, and that is what this asserts.
+    """
+
+    def test_no_rendered_description_links_to_the_shop(self) -> None:
+        metadata_root = REPO_ROOT / "fastlane" / "metadata"
+        offenders: list[str] = []
+        for locale_dir in sorted(
+            path for path in metadata_root.iterdir() if path.is_dir()
+        ):
+            if locale_dir.name == "review_information":
+                continue
+            description = locale_dir / "description.txt"
+            self.assertTrue(
+                description.is_file(),
+                f"{locale_dir.name}: no description.txt in the committed tree",
+            )
+            if "shop.andbible.org" in description.read_text(encoding="utf-8"):
+                offenders.append(locale_dir.name)
+        self.assertEqual(
+            offenders,
+            [],
+            "these descriptions still carry an external purchase route "
+            "(guideline 3.1.1 names metadata explicitly)",
+        )
+
+
 class PlaceholderTests(unittest.TestCase):
     def test_substitutes_a_variable(self) -> None:
         self.assertEqual(
