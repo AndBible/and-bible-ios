@@ -253,6 +253,66 @@ class InflectedAndroidFormsTests(unittest.TestCase):
         )
 
 
+# Every `paragraph_1_1` translates an English source that names the platform,
+# so after substitution the rendered text must name ours. Measured on the
+# committed tree at the time this guard was written, exactly three locales
+# failed it - zh-Hans, ko and he, the three Apple rejected 1.0 over (plus he,
+# which Apple did not catch). No locale legitimately omits the platform, so
+# this set is empty. If a future translation genuinely drops the word, add it
+# here with a comment saying why - do not weaken the assertion.
+LOCALES_WITH_NO_PLATFORM_REFERENCE: frozenset[str] = frozenset()
+
+
+class RenderedPlatformNameTests(unittest.TestCase):
+    """Catch a platform reference the forbidden-terms list cannot spell.
+
+    `FORBIDDEN_PLATFORM_REFERENCE_TERMS` is ASCII-only and `validate_fields`
+    lowercases before substring-matching, so a locale that transliterates the
+    platform name into its own script (zh-Hans, ko, he) passed the check while
+    shipping the word Apple rejected the app for. This guard is structural
+    instead of lexical: it asserts the substitution FIRED, which fails for an
+    unknown transliteration nobody has listed.
+
+    It reads the committed rendered tree rather than the Android source on
+    purpose. `android_root_or_skip` skips whenever the checkout is off the
+    locked SHA - the normal state of a dev container - and a guard that skips
+    on the machine doing the fix is no guard at all.
+    """
+
+    def test_every_rendered_first_paragraph_names_our_platform(self) -> None:
+        metadata_root = REPO_ROOT / "fastlane" / "metadata"
+        missing: list[str] = []
+        for locale_dir in sorted(
+            path for path in metadata_root.iterdir() if path.is_dir()
+        ):
+            locale = locale_dir.name
+            if locale == "review_information":
+                continue
+            if locale in LOCALES_WITH_NO_PLATFORM_REFERENCE:
+                continue
+            description = locale_dir / "description.txt"
+            self.assertTrue(
+                description.is_file(),
+                f"{locale}: no description.txt in the committed tree",
+            )
+            lines = description.read_text(encoding="utf-8").split("\n")
+            self.assertGreater(
+                len(lines),
+                2,
+                f"{locale}: description.txt is shorter than the template",
+            )
+            paragraph_1_1 = lines[2]
+            if "iOS" not in paragraph_1_1:
+                missing.append(locale)
+        self.assertEqual(
+            missing,
+            [],
+            "these locales' first paragraph does not name iOS, so the "
+            "platform_substitutions rule for them never fired - add a rule in "
+            "appstore/locales.yml for the spelling that language uses",
+        )
+
+
 class PlaceholderTests(unittest.TestCase):
     def test_substitutes_a_variable(self) -> None:
         self.assertEqual(
