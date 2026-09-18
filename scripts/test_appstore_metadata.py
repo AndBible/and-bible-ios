@@ -411,6 +411,23 @@ class ValidationTests(unittest.TestCase):
             meta.validate_fields("fi", {"support_url": "https://" + "x" * 500}), []
         )
 
+    def test_transliterated_platform_names_are_forbidden(self) -> None:
+        """The contract must be able to spell the defect, not just Latin forms.
+
+        `validate_fields` lowercases and substring-matches; lowercasing is a
+        no-op for CJK, Hebrew, Arabic, Thai and Devanagari and case-correct for
+        Cyrillic, so each spelling is stored lowercase and matched directly.
+        """
+        for spelling in ("安卓", "안드로이드", "אנדרואיד", "アンドロイド", "андроид"):
+            with self.subTest(spelling=spelling):
+                problems = meta.validate_fields(
+                    "test", {"description": f"A Bible app for {spelling}."}
+                )
+                self.assertTrue(
+                    any("forbidden platform reference" in p for p in problems),
+                    f"{spelling!r} passed validation",
+                )
+
 
 def build_fixture_sources() -> meta.LoadedSources:
     config = meta.LocaleConfig(
