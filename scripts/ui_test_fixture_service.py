@@ -1234,6 +1234,16 @@ class UITestFixtureService:
             with self._download_server_lock:
                 download_fixture = self.download_fixture
             if download_fixture is None:
+                # `stop()` signals the service before it removes the transport, so a transport that
+                # is absent while the stop is signalled means teardown took it. Reporting it as an
+                # unavailable transport would blame a defect for an ordinary shutdown, and would
+                # depend on which side won the race.
+                if self._stop_event.is_set():
+                    raise FixtureServiceCancelled(
+                        "fixture service stopped before releasing the Downloads transport"
+                        if request.operation == "releaseDownload"
+                        else "fixture service stopped while waiting for Downloads transport state"
+                    )
                 raise FixtureServiceError("download fixture transport is unavailable")
             if request.operation == "releaseDownload":
                 snapshot = download_fixture.release()
