@@ -746,6 +746,56 @@ class FixtureServiceTestCase(unittest.TestCase):
         finally:
             service.stop()
 
+    def test_download_control_after_teardown_reports_the_service_stop(self) -> None:
+        """A control request that loses the race against teardown still reports the stop.
+
+        `_serve` marks a request processed before `_handle_request_file` reads the transport, so a
+        concurrent `stop()` can remove the transport inside that window. The worker then observes a
+        stopped service with no published transport, which is the state reproduced here.
+        """
+        expected_errors = {
+            "releaseDownload": "fixture service stopped before releasing the Downloads transport",
+            "awaitDownloadConnected": (
+                "fixture service stopped while waiting for Downloads transport state"
+            ),
+            "awaitDownloadCancelled": (
+                "fixture service stopped while waiting for Downloads transport state"
+            ),
+            "awaitDownloadCompleted": (
+                "fixture service stopped while waiting for Downloads transport state"
+            ),
+        }
+        service = UITestFixtureService(self.configuration, command_runner=self.runner)
+        service.start()
+        try:
+            self.assertTrue(self.request(scenario="downloads-row-order")["succeeded"])
+        finally:
+            service.stop()
+
+        for operation, expected_error in expected_errors.items():
+            with self.subTest(operation=operation):
+                request_id = str(uuid4()).upper()
+                payload = {
+                    "requestID": request_id,
+                    "operation": operation,
+                    "simulatorID": SIMULATOR_ID,
+                    "bundleIdentifier": BUNDLE_ID,
+                }
+                temporary = self.service_directory / f".{request_id}.request.tmp"
+                request = self.service_directory / f"{request_id}.request.json"
+                temporary.write_text(json.dumps(payload), encoding="utf-8")
+                os.replace(temporary, request)
+
+                service._handle_request_file(request)
+
+                response = json.loads(
+                    (self.service_directory / f"{request_id}.response.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertFalse(response["succeeded"])
+                self.assertEqual(response["error"], expected_error)
+
     def test_valid_prepare_runs_stop_lookup_reset_seed_and_returns_preferences(self) -> None:
         request_id = str(uuid4()).upper()
         with UITestFixtureService(self.configuration, command_runner=self.runner):
