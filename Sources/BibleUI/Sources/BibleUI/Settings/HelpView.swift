@@ -97,7 +97,7 @@ enum AndroidHelpTopic: CaseIterable, Hashable {
  Displays the canonical content portion of Android's Help dialog.
 
  The view is presentation-neutral: an app-owned dialog or full route supplies outer chrome, while
- this content owns topic order, localized copy, tutorial/manual links, project support, and optional
+ this content owns topic order, localized copy, tutorial/manual links, and optional
  version text. Filtered feature help and complete reader help therefore cannot drift into parallel
  content implementations.
 
@@ -107,7 +107,7 @@ enum AndroidHelpTopic: CaseIterable, Hashable {
 
  Output: scrollable, AppCompat-palette help content
 
- Side effects: opens explicit tutorial, documentation, and support links after user taps
+ Side effects: opens explicit tutorial and documentation links after user taps
 
  Failure modes: topics whose canonical Android URL is absent simply omit that link
  */
@@ -147,19 +147,6 @@ struct HelpView: View {
                     String(localized: "help_full_documentation_link", defaultValue: "Browse the full documentation"),
                     destination: URL(string: "https://docs.andbible.org/en/latest/")!
                 )
-                .font(.system(size: 17))
-
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    AndBibleIconView(name: "DrawerSponsorDevelopment", size: 20)
-                        .foregroundStyle(AndroidDialogSurfacePalette.secondaryText(for: colorScheme))
-                        .accessibilityHidden(true)
-                    Text(String(localized: "buy_development2", defaultValue: "Support project") + ":")
-                        .fontWeight(.semibold)
-                    AndroidDialogLink(
-                        String(localized: "buy_development", defaultValue: "Sponsor app development"),
-                        destination: URL(string: "https://shop.andbible.org")!
-                    )
-                }
                 .font(.system(size: 17))
 
                 if showsVersion {

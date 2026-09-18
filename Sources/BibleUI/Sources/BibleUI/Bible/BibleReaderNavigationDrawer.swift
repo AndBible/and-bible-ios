@@ -17,7 +17,6 @@ enum BibleReaderNavigationDrawerAction {
     case aiSettings
     case settings
     case help
-    case sponsorDevelopment
     case needHelp
     case contribute
     case appLicense
@@ -194,12 +193,6 @@ struct BibleReaderNavigationDrawer: View {
                         icon: .asset("DrawerHelp"),
                         identifier: "readerOpenHelpAction",
                         action: .help
-                    )
-                    drawerRow(
-                        title: localizedDrawerString("buy_development", default: "Sponsor app development"),
-                        icon: .asset("DrawerSponsorDevelopment"),
-                        identifier: "readerSponsorDevelopmentAction",
-                        action: .sponsorDevelopment
                     )
                     drawerRow(
                         title: localizedDrawerString("questions_title", default: "Questions?"),

@@ -5189,10 +5189,6 @@ public struct BibleReaderView: View {
             }
         case .help:
             dismissReaderNavigationDrawerAndPerform { presentHelpDialog() }
-        case .sponsorDevelopment:
-            dismissReaderNavigationDrawerAndPerform {
-                openExternalLink("https://shop.andbible.org")
-            }
         case .needHelp:
             dismissReaderNavigationDrawerAndPerform {
                 openExternalLink("https://github.com/AndBible/and-bible/wiki/Support")

@@ -35,12 +35,6 @@ AndBible jest otwartoźródłowym projektem społecznościowym. Oznacza to, że 
 
 Jeżeli jesteś zawodowym programistą lub testerem, prosimy rozważyć włączenie się w rozwój aplikacji. Więcej informacji znajduje się na stronie https://git.io/JUnaj
 
-Wspomóż poprzez opłacenie czasu programisty!
-
-Jeżeli nie masz czasu lub zdolności programistycznych, wciąż możesz wspomóc projekt wykupując czas pracy profesjonalnego programisty.
-
-Czytaj więcej: https://shop.andbible.org/
-
 Odnośniki
 
  * strona programu: https://andbible.org

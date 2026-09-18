@@ -5,6 +5,39 @@ Status: approved, not yet implemented
 Scope: App Store Connect **text** metadata for the iOS app, generated from source
 and pushed with `fastlane deliver`. Screenshots are explicitly out of scope.
 
+## Amendment (2026-09-14): what this design got wrong
+
+This spec's "invariant proper noun" premise (§ "1. The platform name") was
+disproven in production, and one of its "Risks and open items" was since
+closed. Neither the original design intent nor the sections below are
+rewritten — this note records what actually happened and points at the
+sections corrected in light of it:
+
+- **The platform name is not invariant across scripts.** The 1.0 submission
+  (Apple submission id `a2d0a338`) was rejected under Guideline 2.3.10 on
+  2026-09-08 because zh-Hans, ko and he transliterate "Android" into their own
+  script (安卓 / 안드로이드 / אנדרואיד) rather than borrowing the Latin word, so
+  the Latin-only `default`/inflection rule set this spec proposed never fired
+  for them and the word shipped. The fix (`fix(app-review): rewrite
+  transliterated platform names (2.3.10)`, then `fix(app-review): teach the
+  platform contract non-Latin scripts`) added explicit `zh-Hans`/`ko`/`he`
+  substitution rules and a structural backstop,
+  `scripts/platform_reference_contract.py`'s `FORBIDDEN_PLATFORM_REFERENCE_TERMS`
+  (now twelve terms: three Latin plus nine transliterations), consumed by both
+  the metadata validator and `RenderedPlatformNameTests`. The code snippet
+  below is stale accordingly — see `appstore/locales.yml` for the current
+  rule set.
+- **The `shop.andbible.org` external-purchase risk flagged below is
+  resolved**, not merely "should be resolved before the first submission" —
+  see the amendment note against that item.
+- The same 1.0 submission was also rejected under Guideline 3.1.1 for the
+  in-app sponsorship purchase route and the same route in all 34 rendered
+  descriptions; that fix (`fix(app-review): drop the external purchase route
+  from store copy (3.1.1)`, `fix(app-review): remove the sponsorship route
+  from the app`) is outside this design's original scope (it only ever
+  proposed generating text, not vetting it for other guidelines) and is noted
+  here only because it landed in the same remediation round.
+
 ## Problem
 
 `and-bible-ios` has an automated binary pipeline (`make testflight` →
@@ -133,10 +166,19 @@ satisfy Apple.
 
 `paragraph_1_1` says "…offline Bible study app for Android…". App Store Review
 Guideline 2.3.10 forbids other-platform names in metadata. The word occurs
-**exactly once per translation file**, in 43 of the 51 translations, and is an
-invariant proper noun in most languages (Finnish "Androidille" → "iOS:lle").
+**exactly once per translation file**, in 43 of the 51 translations, and was
+assumed here to be an invariant proper noun in most languages (Finnish
+"Androidille" → "iOS:lle") — **this premise turned out to be false; see the
+amendment above.** Several scripts (zh-Hans, ko, he) transliterate the
+platform name instead of borrowing the Latin word.
 
-Handled by a post-render substitution driven by `locales.yml`:
+Handled by a post-render substitution driven by `locales.yml`, plus a
+validator backstop for words the substitution rules miss. **The snippet below
+is the design's original 2026-08-07 proposal and is stale — it predates the
+zh-Hans/ko/he transliteration rules, and it still carries the `sl` rule that
+was removed the same day (Slovenian is not an App Store locale, so the rule
+could never fire); see `appstore/locales.yml` for the current rule set and
+`scripts/platform_reference_contract.py` for the validator backstop:**
 
 ```yaml
 platform_substitutions:
@@ -402,10 +444,15 @@ for iOS-only text), how to refresh translations, and how to bump
 
 ## Risks and open items
 
-- **`shop.andbible.org` in-app link.** `BibleReaderView.swift`, `HelpView.swift`
-  and `AndroidTextDisplayHelpDialog.swift` link to an external shop. That is a
-  Guideline 3.1.1 risk (external purchase link). It is an app change, out of
-  scope here, but it should be resolved before the first submission.
+- **`shop.andbible.org` in-app link — RESOLVED, see the amendment above.**
+  `BibleReaderView.swift`, `HelpView.swift` and `AndroidTextDisplayHelpDialog.swift`
+  linked to an external shop, which was a Guideline 3.1.1 risk (external
+  purchase link) at the time this was written. It was in fact NOT resolved
+  before the first submission, the 1.0 App Store rejection on 2026-09-08
+  cited it, and it was then removed from the app (`fix(app-review): remove
+  the sponsorship route from the app`) and from all 34 rendered descriptions
+  (`fix(app-review): drop the external purchase route from store copy
+  (3.1.1)`), with `NoExternalPurchaseRouteTests` added as a regression guard.
 - **Privacy policy URL** must be live at `https://andbible.org/privacy.html`
   before the first upload, and should also be linked from the app's settings.
 - **The listing must exist in App Store Connect first.** `deliver` updates an

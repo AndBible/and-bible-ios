@@ -44,13 +44,21 @@ mappings:
   zh-TW: zh-Hant
 
 # App Store Review Guideline 2.3.10 forbids other-platform names in metadata.
-# The word occurs exactly once per translation, in paragraph_1_1, and is an
-# invariant proper noun in most languages. Locales that inflect it get an
-# explicit rule so the result is the hyphenated/colon spelling they actually
-# use. Rules exist only for locales that are actually generated (present in
-# `mappings` above) — a rule for a locale that can never appear there (e.g.
-# the former `sl` entry, removed 2026-08-07: Slovenian is not an App Store
-# locale) can never fire and only looks like coverage it isn't.
+# The word occurs exactly once per translation, in paragraph_1_1. It is NOT an
+# invariant proper noun across languages: the Android source spells it as the
+# Latin word "Android" in most translations (so the `default` rule below
+# handles ar/hi/ja/ru/th/uk too), but zh-Hans, ko and he transliterate it into
+# their own script instead — the `default` rule cannot match those, and their
+# missing rules are exactly what let the word through and cost the Apple
+# submission a2d0a338 a rejection on 2026-09-08 (see
+# `scripts/platform_reference_contract.py` for the full non-Latin term list
+# the validator now also checks as a backstop). Locales that inflect or
+# transliterate it get an explicit rule so the result is the
+# hyphenated/colon/transliterated spelling they actually use. Rules exist
+# only for locales that are actually generated (present in `mappings` above)
+# — a rule for a locale that can never appear there (e.g. the former `sl`
+# entry, removed 2026-08-07: Slovenian is not an App Store locale) can never
+# fire and only looks like coverage it isn't.
 platform_substitutions:
   default:
     - from: Android
@@ -67,6 +75,19 @@ platform_substitutions:
   fi:
     - from: Androidille
       to: "iOS:lle"
+  zh-Hans:
+    - from: 安卓
+      to: iOS
+  ko:
+    - from: 안드로이드
+      to: iOS
+  # Hebrew attaches the preposition ב directly to the noun, so the rule has to
+  # consume the prefix: replacing only אנדרואיד yields "בiOS". Hebrew writes a
+  # prefix onto a Latin-script foreign word with a hyphen, the same shape as the
+  # hu/pl/fi rules above.
+  he:
+    - from: באנדרואיד
+      to: ב-iOS
   # cs (Androidu) intentionally has NO rule here: Czech attaches a case
   # ending directly to an initialism, with no separator, so the default
   # rule's "iOSu" is already the grammatically correct spelling. This is a

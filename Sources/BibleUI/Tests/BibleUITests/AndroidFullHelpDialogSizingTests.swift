@@ -29,7 +29,7 @@ final class AndroidFullHelpDialogSizingTests: XCTestCase {
 
         let measured = host.sizeThatFits(in: CGSize(width: 342, height: 700))
 
-        XCTAssertGreaterThan(measured.height, 300)
+        XCTAssertGreaterThan(measured.height, 250)
         XCTAssertLessThan(measured.height, 650)
     }
 }

@@ -35,12 +35,6 @@ And Bibel er et åpen kildekode-prosjekt. I praksis betyr dette at hvem som hels
 
 Dersom du er en profesjonell programvareutvikler eller programvaretester, vennligst vurder å bidra i prosjektet. For mer informasjon om hvordan du kan bidra, vennligst besøk https://git.io/JUnaj.
 
-Støtt ved å kjøpe utviklingstid!
-
-Hvis du ikke har tid eller ferdigheter til å bidra til prosjektet, kan du også støtte prosjektet ved å kjøpe profesjonell utviklertid.
-
-Se alternativer: https://shop.andbible.org/
-
 Lenker
 
  * Hjemmeside: https://andbible.org

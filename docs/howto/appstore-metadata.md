@@ -152,9 +152,25 @@ rewrites "Android" to "iOS" in the rendered text, with per-locale
 substitution rules for the languages that inflect it (e.g. Polish "Androida"
 → "iOS-a", not the default rule's ungrammatical "iOSa").
 
-`scripts/appstore_metadata.py`'s validator also rejects the literal words
-"android", "google play" and "play store" (case-insensitively) in **every**
-rendered field — not just `description`. It applies equally to `subtitle`,
+`appstore/description_template.txt` also deliberately omits the Android
+template's `buy_*` section (the "Support by sponsoring development time!"
+heading and its shop link) — App Store Review Guideline 3.1.1 covers metadata
+as well as the app itself, so an external purchase route in the description
+is rejected exactly like one in the app. The `buy_*` keys remain in the
+Android source (`play/playstore-description.yml`) because Android still
+ships that section; do not port them into `appstore/ios_source.yml` or back
+into the template when resyncing against Android's copy.
+
+`scripts/appstore_metadata.py`'s validator also rejects a fixed list of
+platform-reference terms (`scripts/platform_reference_contract.py`,
+`FORBIDDEN_PLATFORM_REFERENCE_TERMS`) case-insensitively in **every** rendered
+field — not just `description`. As of the 2.3.10 fix that list is twelve
+terms, not three: the Latin `"android"`, `"google play"`, `"play store"`, plus
+the platform name transliterated into every non-Latin script AndBible ships
+(zh-Hans/zh-Hant `安卓`, ko `안드로이드`, he `אנדרואיד`, ja `アンドロイド`, ru/bg
+`андроид`, uk `андроїд`, ar `أندرويد`, hi `एंड्रॉइड`, th `แอนดรอยด์`) — the
+gap that let zh-Hans/ko/he ship the word and cost the Apple submission
+a2d0a338 rejection on 2026-09-08. It applies equally to `subtitle`,
 `keywords`, `promotional_text` and the rest, as a backstop against a
 substitution rule missing a locale.
 
@@ -227,8 +243,18 @@ Run `make appstore-metadata` afterwards to restore the tree, and check
 python3 -m unittest discover -s scripts -p 'test_*.py'    # scripts/ test suite
 make appstore-validate                                     # drift + rules
 python3 .claude/skills/appstore-copy/find_stale.py          # missing/stale locales
-grep -ril 'android' fastlane/metadata/ || echo "clean"       # no leaked platform refs
+python3 -m unittest discover -s scripts -p 'test_appstore_metadata.py' -t scripts
+                                                             # platform-reference + purchase-route guards
 ```
+
+Do **not** substitute a bare `grep -ril 'android' fastlane/metadata/` for the
+last command: that check is ASCII-only and reported "clean" on a tree that
+was shipping the transliterated platform name in zh-Hans, ko and he
+(`安卓`/`안드로이드`/`אנדרואיד`) — the exact gap that cost the Apple submission
+a2d0a338 rejection on 2026-09-08. The unittest run above exercises
+`RenderedPlatformNameTests`, which is driven by the full
+`FORBIDDEN_PLATFORM_REFERENCE_TERMS` contract (`scripts/platform_reference_contract.py`)
+and covers every script, not only Latin ones.
 
 All four are safe to run repeatedly and touch nothing outside `fastlane/metadata/`
 (and only `make appstore-metadata`, not `--validate`/`--check`, writes there).

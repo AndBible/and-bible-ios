@@ -32,6 +32,13 @@ APPLE_SUPPORTED_LOCALES = {
     "zh-Hant",
 }
 
+# The number of locales `appstore/locales.yml` maps and this repo therefore
+# renders into `fastlane/metadata/`. Defined once here and reused by every
+# test that needs to assert it actually inspected the whole rendered tree
+# (not an empty or partially-deleted one) rather than just hard-coding a
+# second copy of the number.
+EXPECTED_LOCALE_COUNT = 34
+
 
 class LocaleConfigTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -186,7 +193,7 @@ class RealLocaleMapTests(unittest.TestCase):
         self.config = meta.load_locale_config(REPO_ROOT / "appstore" / "locales.yml")
 
     def test_generates_thirty_four_locales(self) -> None:
-        self.assertEqual(len(self.config.mappings), 34)
+        self.assertEqual(len(self.config.mappings), EXPECTED_LOCALE_COUNT)
 
     def test_every_target_is_an_app_store_locale(self) -> None:
         for _, apple in self.config.mappings:
@@ -250,6 +257,170 @@ class InflectedAndroidFormsTests(unittest.TestCase):
             "these locales inflect 'Android' but have neither a "
             "platform_substitutions rule nor a documented reason the default "
             "rule is correct for them",
+        )
+
+
+# Every `paragraph_1_1` translates an English source that names the platform,
+# so after substitution the rendered text must name ours. Measured on the
+# committed tree at the time this guard was written, exactly three locales
+# failed it - zh-Hans, ko and he, the three Apple rejected 1.0 over (plus he,
+# which Apple did not catch). No locale legitimately omits the platform, so
+# this set is empty. If a future translation genuinely drops the word, add it
+# here with a comment saying why - do not weaken the assertion.
+LOCALES_WITH_NO_PLATFORM_REFERENCE: frozenset[str] = frozenset()
+
+
+class RenderedPlatformNameTests(unittest.TestCase):
+    """Catch a platform reference the forbidden-terms list cannot spell.
+
+    `FORBIDDEN_PLATFORM_REFERENCE_TERMS` is ASCII-only and `validate_fields`
+    lowercases before substring-matching, so a locale that transliterates the
+    platform name into its own script (zh-Hans, ko, he) passed the check while
+    shipping the word Apple rejected the app for. This guard is structural
+    instead of lexical: it asserts the substitution FIRED, which fails for an
+    unknown transliteration nobody has listed.
+
+    It reads the committed rendered tree rather than the Android source on
+    purpose. `android_root_or_skip` skips whenever the checkout is off the
+    locked SHA - the normal state of a dev container - and a guard that skips
+    on the machine doing the fix is no guard at all.
+    """
+
+    def test_every_rendered_first_paragraph_names_our_platform(self) -> None:
+        metadata_root = REPO_ROOT / "fastlane" / "metadata"
+        # Derive the line index from the template rather than hard-coding it,
+        # so a future reshuffle of description_template.txt can't silently
+        # misalign this assertion against the wrong line.
+        template_lines = (
+            (REPO_ROOT / "appstore" / "description_template.txt")
+            .read_text(encoding="utf-8")
+            .split("\n")
+        )
+        paragraph_1_1_index = template_lines.index("{{paragraph_1_1}}")
+        missing: list[str] = []
+        inspected: list[str] = []
+        for locale_dir in sorted(
+            path for path in metadata_root.iterdir() if path.is_dir()
+        ):
+            locale = locale_dir.name
+            if locale == "review_information":
+                continue
+            inspected.append(locale)
+            if locale in LOCALES_WITH_NO_PLATFORM_REFERENCE:
+                continue
+            description = locale_dir / "description.txt"
+            self.assertTrue(
+                description.is_file(),
+                f"{locale}: no description.txt in the committed tree",
+            )
+            lines = description.read_text(encoding="utf-8").split("\n")
+            self.assertGreater(
+                len(lines),
+                paragraph_1_1_index,
+                f"{locale}: description.txt is shorter than the template",
+            )
+            paragraph_1_1 = lines[paragraph_1_1_index]
+            if "iOS" not in paragraph_1_1:
+                missing.append(locale)
+        # A guard that iterates an empty (or partially rendered) directory
+        # passes vacuously - assert the whole rendered tree was actually
+        # inspected, not just an empty `missing` list.
+        self.assertEqual(
+            len(inspected),
+            EXPECTED_LOCALE_COUNT,
+            f"expected to inspect {EXPECTED_LOCALE_COUNT} locales under "
+            f"{metadata_root}, found {len(inspected)} instead - an empty or "
+            "partially-rendered metadata tree would otherwise pass this "
+            "guard vacuously",
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "these locales' first paragraph does not name iOS, so the "
+            "platform_substitutions rule for them never fired - add a rule in "
+            "appstore/locales.yml for the spelling that language uses",
+        )
+
+
+# Matches any "shop.<domain>" reference, not just the one shop domain Apple
+# actually rejected. The project has since grown a second shop domain
+# (`shop.tuomasairaksinen.fi`, see README.md), and a guard hard-coded to
+# `shop.andbible.org` would wave that one through - or any future shop link -
+# without ever noticing it's the same external-purchase route.
+SHOP_LINK_PATTERN = re.compile(r"shop\.[a-z0-9-]+\.[a-z]{2,}", re.IGNORECASE)
+
+# The Android description template's donation section: a heading plus a
+# paragraph linking to the shop (`{{buy_title}}`, `{{buy_1}}`, `{{buy_2}}`,
+# `{{buy_development_link}}`). Re-adding just these placeholders to
+# `appstore/description_template.txt` would restore the "Support by
+# sponsoring development time!" route while still passing a URL-only check,
+# since the URL itself only appears after rendering.
+BUY_TEMPLATE_KEY_PATTERN = re.compile(r"\{\{\s*buy_\w*\s*\}\}")
+
+
+class NoExternalPurchaseRouteTests(unittest.TestCase):
+    """App Store Review Guideline 3.1.1 covers metadata as well as the app.
+
+    Apple rejected 1.0 for linking out to the shop from the app; the same
+    external purchase route sat in all 34 descriptions. The approved
+    configuration of the developer's other iOS app mentions sponsorship
+    in-app and nowhere in its store copy, and that is what this asserts.
+
+    This guards the ROUTE, not one URL: it matches any `shop.<domain>` link
+    (the project has two - `shop.andbible.org` and
+    `shop.tuomasairaksinen.fi`), and separately asserts the template's
+    `buy_*` placeholders - the heading and paragraph that route points to -
+    are not referenced at all, so restoring them can't slip past a
+    rendered-text-only check.
+    """
+
+    def test_no_rendered_description_links_to_a_shop_domain(self) -> None:
+        metadata_root = REPO_ROOT / "fastlane" / "metadata"
+        offenders: list[str] = []
+        inspected: list[str] = []
+        for locale_dir in sorted(
+            path for path in metadata_root.iterdir() if path.is_dir()
+        ):
+            if locale_dir.name == "review_information":
+                continue
+            inspected.append(locale_dir.name)
+            description = locale_dir / "description.txt"
+            self.assertTrue(
+                description.is_file(),
+                f"{locale_dir.name}: no description.txt in the committed tree",
+            )
+            if SHOP_LINK_PATTERN.search(description.read_text(encoding="utf-8")):
+                offenders.append(locale_dir.name)
+        # A guard that iterates an empty (or partially rendered) directory
+        # passes vacuously - assert the whole rendered tree was actually
+        # inspected, not just an empty `offenders` list.
+        self.assertEqual(
+            len(inspected),
+            EXPECTED_LOCALE_COUNT,
+            f"expected to inspect {EXPECTED_LOCALE_COUNT} locales under "
+            f"{metadata_root}, found {len(inspected)} instead - an empty or "
+            "partially-rendered metadata tree would otherwise pass this "
+            "guard vacuously",
+        )
+        self.assertEqual(
+            offenders,
+            [],
+            "these descriptions still carry an external purchase route "
+            "(guideline 3.1.1 names metadata explicitly)",
+        )
+
+    def test_description_template_does_not_reference_buy_keys(self) -> None:
+        template = REPO_ROOT / "appstore" / "description_template.txt"
+        text = template.read_text(encoding="utf-8")
+        found = BUY_TEMPLATE_KEY_PATTERN.findall(text)
+        self.assertEqual(
+            found,
+            [],
+            "appstore/description_template.txt references buy_* keys - "
+            "re-adding the donation/sponsorship section would restore the "
+            "external purchase route Apple rejected 1.0 over (guideline "
+            "3.1.1); the Android source keeps these keys deliberately, do "
+            "not port them into the iOS template",
         )
 
 
@@ -350,6 +521,23 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(
             meta.validate_fields("fi", {"support_url": "https://" + "x" * 500}), []
         )
+
+    def test_transliterated_platform_names_are_forbidden(self) -> None:
+        """The contract must be able to spell the defect, not just Latin forms.
+
+        `validate_fields` lowercases and substring-matches; lowercasing is a
+        no-op for CJK, Hebrew, Arabic, Thai and Devanagari and case-correct for
+        Cyrillic, so each spelling is stored lowercase and matched directly.
+        """
+        for spelling in ("安卓", "안드로이드", "אנדרואיד", "アンドロイド", "андроид"):
+            with self.subTest(spelling=spelling):
+                problems = meta.validate_fields(
+                    "test", {"description": f"A Bible app for {spelling}."}
+                )
+                self.assertTrue(
+                    any("forbidden platform reference" in p for p in problems),
+                    f"{spelling!r} passed validation",
+                )
 
 
 def build_fixture_sources() -> meta.LoadedSources:
