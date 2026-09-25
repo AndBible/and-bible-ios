@@ -1781,6 +1781,48 @@ struct BibleWindowPane: View {
      - Failure modes: Missing controller makes the selected command a no-op.
      */
     private var selectionBookmarkPopup: some View {
+        BibleSelectionBookmarkMenu(
+            colorScheme: colorScheme,
+            surfacePalette: surfacePalette,
+            onSelection: {
+                isSelectionBookmarkMenuPresented = false
+                controller?.bookmarkSelection(wholeVerse: false)
+            },
+            onWholeVerse: {
+                isSelectionBookmarkMenuPresented = false
+                controller?.bookmarkSelection(wholeVerse: true)
+            }
+        )
+    }
+}
+
+/**
+ Renders Android's two-command bookmark popup as one vertically laid-out menu surface.
+
+ The explicit zero-spacing stack gives the shared surface one content view and preserves the
+ Selection, divider, and Verses order. Actions only forward the selected bookmark scope; popup
+ dismissal and bookmark persistence remain owned by the caller.
+
+ - Inputs: Active color scheme and reader palette plus synchronous Selection and Verses commands.
+ - Outputs: A deterministic popup menu view with stable accessibility identifiers.
+ - Side effects: Invokes exactly one supplied command when its corresponding row is tapped.
+ - Failure modes: None; callback-specific failures are handled by the caller.
+ */
+struct BibleSelectionBookmarkMenu: View {
+    /// Active scheme used by the shared popup surface.
+    let colorScheme: ColorScheme
+
+    /// Reader-owned colors applied to the popup surface, rows, and divider.
+    let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Command forwarded when the Selection row is tapped.
+    let onSelection: () -> Void
+
+    /// Command forwarded when the Verses row is tapped.
+    let onWholeVerse: () -> Void
+
+    /// Vertically composes the two commands without changing their bookmark payload semantics.
+    var body: some View {
         AndroidPopupMenuSurface(
             colorScheme: colorScheme,
             accessibilityIdentifier: "selectionBookmarkMenuSurface",
@@ -1789,23 +1831,21 @@ struct BibleWindowPane: View {
             secondaryTextColor: surfacePalette.secondaryForegroundColor,
             accentColor: surfacePalette.controlAccentColor
         ) {
-            AndroidPopupMenuRow(
-                title: String(localized: "add_bookmark3", defaultValue: "Selection"),
-                accessibilityIdentifier: "selectionBookmarkSelectionAction"
-            ) {
-                isSelectionBookmarkMenuPresented = false
-                controller?.bookmarkSelection(wholeVerse: false)
-            }
-            Divider().overlay(surfacePalette.inactiveBorderColor)
-            AndroidPopupMenuRow(
-                title: String(
-                    localized: "add_bookmark_whole_verse1",
-                    defaultValue: "Verses"
-                ),
-                accessibilityIdentifier: "selectionBookmarkWholeVerseAction"
-            ) {
-                isSelectionBookmarkMenuPresented = false
-                controller?.bookmarkSelection(wholeVerse: true)
+            VStack(spacing: 0) {
+                AndroidPopupMenuRow(
+                    title: String(localized: "add_bookmark3", defaultValue: "Selection"),
+                    accessibilityIdentifier: "selectionBookmarkSelectionAction",
+                    action: onSelection
+                )
+                Divider().overlay(surfacePalette.inactiveBorderColor)
+                AndroidPopupMenuRow(
+                    title: String(
+                        localized: "add_bookmark_whole_verse1",
+                        defaultValue: "Verses"
+                    ),
+                    accessibilityIdentifier: "selectionBookmarkWholeVerseAction",
+                    action: onWholeVerse
+                )
             }
         }
     }

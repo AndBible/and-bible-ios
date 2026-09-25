@@ -142,12 +142,51 @@ struct AndroidReadingProgressActivityView<Content: View>: View {
             estimatedMenuHeight: onOpenSettings == nil ? 50 : 100,
             accessibilityIdentifier: "readingProgressOverflowMenu"
         ) {
-            overflowMenu
+            ReadingProgressOverflowMenu(
+                colorScheme: colorScheme,
+                surfacePalette: surfacePalette,
+                onOpenSettings: onOpenSettings.map { onOpenSettings in
+                    {
+                        showsOverflowMenu = false
+                        onOpenSettings()
+                    }
+                },
+                onOpenHelp: {
+                    showsOverflowMenu = false
+                    onOpenHelp()
+                }
+            )
         }
     }
+}
 
-    /// Shared popup surface with Android menu order and exact resource labels.
-    private var overflowMenu: some View {
+/**
+ Renders Android's Reading Progress overflow commands as one vertically laid-out menu surface.
+
+ Settings remains optional and precedes Help when supplied. The explicit zero-spacing stack gives
+ the shared surface one content view so both rows occupy distinct vertical positions. Navigation
+ and popup dismissal remain owned by the callbacks supplied by the activity shell.
+
+ - Inputs: Active color scheme, reader palette, optional Settings command, and required Help command.
+ - Outputs: A deterministic popup menu view with stable labels and accessibility identifiers.
+ - Side effects: Invokes exactly one supplied command when its corresponding row is tapped.
+ - Failure modes: Omits Settings when its callback is `nil`; callback failures remain caller-owned.
+ */
+struct ReadingProgressOverflowMenu: View {
+    /// Active scheme used to resolve the shared AppCompat accent.
+    let colorScheme: ColorScheme
+
+    /// Reader-owned colors applied to the popup surface and rows.
+    let surfacePalette: ReaderThemeSurfacePalette
+
+    /// Optional command forwarded by the Settings row; `nil` removes that row.
+    let onOpenSettings: (() -> Void)?
+
+    /// Command forwarded when the Help row is tapped.
+    let onOpenHelp: () -> Void
+
+    /// Vertically composes the available commands in Android menu order.
+    var body: some View {
         AndroidPopupMenuSurface(
             colorScheme: colorScheme,
             accessibilityIdentifier: "readingProgressOverflowMenuSurface",
@@ -156,25 +195,23 @@ struct AndroidReadingProgressActivityView<Content: View>: View {
             secondaryTextColor: surfacePalette.secondaryForegroundColor,
             accentColor: AndroidDialogSurfacePalette.accent(for: colorScheme)
         ) {
-            if let onOpenSettings {
-                AndroidPopupMenuRow(
-                    title: String(
-                        localized: "reading_progress_settings",
-                        defaultValue: "Progress & memorization"
-                    ),
-                    accessibilityIdentifier: "readingProgressSettingsAction"
-                ) {
-                    showsOverflowMenu = false
-                    onOpenSettings()
+            VStack(spacing: 0) {
+                if let onOpenSettings {
+                    AndroidPopupMenuRow(
+                        title: String(
+                            localized: "reading_progress_settings",
+                            defaultValue: "Progress & memorization"
+                        ),
+                        accessibilityIdentifier: "readingProgressSettingsAction",
+                        action: onOpenSettings
+                    )
                 }
-            }
 
-            AndroidPopupMenuRow(
-                title: String(localized: "help", defaultValue: "Help"),
-                accessibilityIdentifier: "readingProgressHelpAction"
-            ) {
-                showsOverflowMenu = false
-                onOpenHelp()
+                AndroidPopupMenuRow(
+                    title: String(localized: "help", defaultValue: "Help"),
+                    accessibilityIdentifier: "readingProgressHelpAction",
+                    action: onOpenHelp
+                )
             }
         }
     }
