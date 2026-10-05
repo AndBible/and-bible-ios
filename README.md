@@ -20,7 +20,7 @@ A powerful, yet easy to use, offline Bible study application.
   <tr>
     <td align="center" valign="middle"><a href="https://github.com/AndBible/and-bible/releases"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/refs/heads/main/assets/graphics/badge_obtainium.png" alt="Get it on Github" height="55"></a></td>
     <td align="center" valign="middle"><a href="https://accrescent.app/app/org.andbible.andbible"><img src="https://accrescent.app/badges/get-it-on.png" alt="Get it on Accrescent" height="80"></a></td>
-    <td align="center" valign="middle"><img src="https://developer.apple.com/licensing-trademarks/images/badge-example-preferred.svg" alt="Download on the App Store" height="55"><br><sub>iOS release link will be added here when public.</sub></td>
+    <td align="center" valign="middle"><a href="https://apps.apple.com/app/id6774904527"><img src="https://developer.apple.com/licensing-trademarks/images/badge-example-preferred.svg" alt="Download on the App Store" height="55"></a></td>
   </tr>
 </table>
 

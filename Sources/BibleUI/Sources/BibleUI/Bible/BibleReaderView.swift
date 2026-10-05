@@ -11,9 +11,6 @@ import BibleView
 import BibleCore
 import SwordKit
 import os.log
-#if os(iOS)
-import StoreKit
-#endif
 
 /// Records native gesture dispatch and policy rejection without logging reader content or identifiers.
 private let readerGestureLogger = Logger(subsystem: "org.andbible", category: "ReaderGesture")
@@ -3004,24 +3001,6 @@ public struct BibleReaderView: View {
         isLicenseDialogPresented = true
     }
 
-    /**
-     Requests Apple's platform-owned review prompt without a custom rating interstitial.
-
-     - Side effects: Asks StoreKit to present from the foreground-active window scene. Apple may
-       apply its own display-frequency policy and decline to show the prompt.
-     - Failure modes: Missing foreground scene support is a safe no-op; no app-owned fallback is
-       shown because custom review prompts are not permitted.
-     */
-    private func requestSystemReview() {
-        #if os(iOS)
-        if let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }) {
-            SKStoreReviewController.requestReview(in: scene)
-        }
-        #endif
-    }
-
     /// Cancels collection or consent without opening a system handoff.
     private func dismissBugReportDialog() {
         manualBugReportCoordinator.cancel()
@@ -5120,7 +5099,13 @@ public struct BibleReaderView: View {
         }
     }
 
-    /// Runs the coordinator-owned side effect for one drawer row.
+    /**
+     Runs the coordinator-owned side effect after dismissing the selected drawer row.
+
+     Rate & Review opens the published App Store review page for this explicit user action;
+     it does not request a frequency-limited StoreKit prompt that Apple may decline to display.
+     External destinations use the host application and cannot guarantee a network handoff.
+     */
     private func handleReaderNavigationDrawerAction(_ action: BibleReaderNavigationDrawerAction) {
         switch action {
         case .chooseDocument:
@@ -5204,7 +5189,9 @@ public struct BibleReaderView: View {
                 shareText = String(localized: "tell_friend_message")
             }
         case .rateApp:
-            dismissReaderNavigationDrawerAndPerform { requestSystemReview() }
+            dismissReaderNavigationDrawerAndPerform {
+                openExternalLink("https://apps.apple.com/app/id6774904527?action=write-review")
+            }
         case .reportBug:
             dismissReaderNavigationDrawerAndPerform { presentBugReportDialog() }
         }
