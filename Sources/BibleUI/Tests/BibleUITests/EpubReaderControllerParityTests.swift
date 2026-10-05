@@ -476,9 +476,9 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
     /**
      Preserves a worker-resolved EPUB selection when its first bridge replacement is rejected.
 
-     - Setup: Activates a real EPUB through a bridge with no evaluator, requests its second entry,
-       waits for prepared publication to settle, then attaches the ordinary bridge observer and
-       sends client-ready.
+     - Setup: Activates a real EPUB through a bridge with no evaluator, awaits the second entry's
+       request-owned terminal publication disposition, then attaches the ordinary bridge observer
+       and sends client-ready.
      - Expected result: The exact canonical key is persisted before the rejected dispatch while
        committed render state stays empty; client-ready replays the selected entry and only then
        advances rendered identity.
@@ -498,12 +498,11 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         controller.activeWindow = window
         controller.switchEpub(identifier: identifier)
 
-        controller.loadEpubEntry(key: "2")
-        try await awaitReaderCondition("worker-resolved EPUB selection intent") {
-            controller.currentGeneralBookKey == "2"
-                && window.pageManager?.generalBookKey == "2"
-        }
+        let disposition = await controller.loadEpubEntryAwaitingSelection(key: "2")
 
+        XCTAssertEqual(disposition, .bridgeRejected)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
         XCTAssertEqual(controller.currentCategory, .generalBook)
         XCTAssertEqual(controller.activeGeneralBookModuleName, reader.initials)
         XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)

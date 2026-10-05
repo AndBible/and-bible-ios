@@ -44,11 +44,12 @@ func makeRecordingBridge() -> (BibleBridge, () -> [String]) {
    - scripts: Recorder returned by `makeRecordingBridge`.
    - event: Vue event name that must appear.
    - boundary: Script count captured immediately before the action.
-   - timeout: Maximum duration allowed for the worker and main-actor publication phases.
+   - timeout: Polling deadline before one final observation after the last suspension resumes.
  - Returns: Every script recorded after `boundary` once the requested event is present.
  - Side effects: Suspends briefly between observations; it does not invoke the controller or bridge.
  - Failure modes: Throws `CancellationError` when the task is cancelled and records an XCTest
-   failure when the event is not observed before the timeout.
+   failure when the event remains absent from the final post-deadline observation. Success at that
+   observation proves only that the event is then visible, not that it arrived before the deadline.
  */
 @MainActor
 func awaitBridgeEmission(
@@ -73,9 +74,14 @@ func awaitBridgeEmission(
         try await Task.sleep(for: .milliseconds(5))
     } while clock.now < deadline
 
-    XCTFail("Expected a \(event) bridge emission after script \(boundary)", file: file, line: line)
+    try Task.checkCancellation()
     let recorded = scripts()
-    return boundary < recorded.count ? Array(recorded.dropFirst(boundary)) : []
+    let bounded = boundary < recorded.count ? Array(recorded.dropFirst(boundary)) : []
+    if bounded.contains(where: { $0.contains(prefix) }) {
+        return bounded
+    }
+    XCTFail("Expected a \(event) bridge emission after script \(boundary)", file: file, line: line)
+    return bounded
 }
 
 /**
@@ -83,11 +89,12 @@ func awaitBridgeEmission(
 
  - Parameters:
    - description: Concrete state expected from the already-dispatched action.
-   - timeout: Maximum duration allowed for asynchronous source work and main-owner publication.
+   - timeout: Polling deadline before one final observation after the last suspension resumes.
    - condition: Main-owner observation that becomes true when the action has settled as expected.
  - Side effects: Suspends briefly between observations; never invokes production behavior.
  - Failure modes: Throws on task cancellation and records an XCTest failure at the caller when the
-   condition remains false at the deadline.
+   condition remains false on the final post-deadline observation. Success on that observation
+   proves only the state then exists, not that it changed before the deadline.
  */
 @MainActor
 func awaitReaderCondition(
@@ -105,6 +112,8 @@ func awaitReaderCondition(
         await Task.yield()
         try await Task.sleep(for: .milliseconds(5))
     } while clock.now < deadline
+    try Task.checkCancellation()
+    if condition() { return }
     XCTFail("Expected reader condition: \(description)", file: file, line: line)
 }
 
