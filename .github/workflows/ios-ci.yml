@@ -1329,12 +1329,54 @@ jobs:
           UITEST_BUNDLE_ID: org.andbible.ios
           UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
         run: |
+          mkdir -p .artifacts
+          resource_samples_path=".artifacts/simulator-resource-samples.log"
+          resource_collector_pid=""
+
+          # Stops the background sampler identified by resource_collector_pid and clears its PID.
+          # It accepts no arguments, produces no output, and mutates only that shell variable.
+          # kill/wait failures are intentionally absorbed so EXIT cleanup cannot replace the test status;
+          # repeated calls are safe, and the foreground shell is the sampler's sole lifecycle owner.
+          stop_resource_collector() {
+            if [[ -n "${resource_collector_pid}" ]]; then
+              kill "${resource_collector_pid}" 2>/dev/null || true
+              wait "${resource_collector_pid}" 2>/dev/null || true
+              resource_collector_pid=""
+            fi
+          }
+
+          trap stop_resource_collector EXIT
+          (
+            initial_sample=true
+            while true; do
+              date -u '+sample_time=%Y-%m-%dT%H:%M:%SZ'
+              if [[ "${initial_sample}" == "true" ]]; then
+                sysctl -n hw.memsize
+                sysctl -n hw.ncpu
+                initial_sample=false
+              fi
+              sysctl -n vm.loadavg
+              sysctl vm.swapusage
+              vm_stat
+              ps -axo pid=,ppid=,%cpu=,rss=,comm=
+              sleep 10
+            done
+          ) >> "${resource_samples_path}" 2>&1 &
+          resource_collector_pid=$!
+
+          set +e
           python3 -u scripts/run_xcodebuild_with_test_selection.py \
             --xctestrun-path "${{ steps.ui_test_products.outputs.xctestrun_path }}" \
             --destination "${{ steps.simulator.outputs.destination }}" \
             --result-bundle-path "${TEST_XCRESULT_BUNDLE_PATH}" \
             --code-signing-allowed NO \
             --action test-without-building
+          test_status=$?
+          set -e
+
+          stop_resource_collector
+          trap - EXIT
+          exit "${test_status}"
 
       - name: Collect reader gesture diagnostics
         continue-on-error: true
@@ -1348,6 +1390,18 @@ jobs:
             --predicate 'subsystem == "org.andbible" AND (eventMessage BEGINSWITH "Native horizontal swipe" OR eventMessage BEGINSWITH "Horizontal swipe" OR eventMessage BEGINSWITH "reader ")' \
             > .artifacts/reader-gestures.log 2>&1
 
+      - name: Collect WebKit and reader lifecycle diagnostics
+        continue-on-error: true
+        if: always() && steps.simulator.outputs.simulator_created == 'true'
+        env:
+          DIAGNOSTIC_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
+        run: |
+          mkdir -p .artifacts
+          xcrun simctl spawn "${DIAGNOSTIC_SIMULATOR_ID}" log show \
+            --style compact --info --debug --last 90m \
+            --predicate 'subsystem == "org.andbible" OR (subsystem == "com.apple.WebKit" AND (eventMessage CONTAINS[c] "took" OR eventMessage CONTAINS[c] "unresponsive" OR eventMessage CONTAINS[c] "GPU process exited" OR eventMessage CONTAINS[c] "gpuProcessExited" OR eventMessage CONTAINS[c] "didCommit" OR eventMessage CONTAINS[c] "layer tree"))' \
+            > .artifacts/webkit-reader.log 2>&1
+
       - name: Upload xcodebuild test result bundle
         id: upload_ui_xcresult
         if: always() && needs.repo-standards.outputs.required_checks_only != 'true'
@@ -1358,6 +1412,8 @@ jobs:
           path: |
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
+            .artifacts/simulator-resource-samples.log
+            .artifacts/webkit-reader.log
             .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
@@ -1371,6 +1427,8 @@ jobs:
           path: |
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
+            .artifacts/simulator-resource-samples.log
+            .artifacts/webkit-reader.log
             .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
           include-hidden-files: true
