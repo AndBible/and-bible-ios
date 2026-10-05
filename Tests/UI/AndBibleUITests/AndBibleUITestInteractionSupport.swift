@@ -37,6 +37,25 @@ extension AndBibleUITests {
     }
 
     /**
+     Samples the main app window's viewport for these single-window UI journeys.
+
+     XCTest can omit geometry on the accessibility Application root while its main window and
+     descendants have valid frames. Visibility checks therefore use the window that owns the
+     rendered UI, not `XCUIApplication.frame` or a fabricated screen-sized fallback.
+
+     - Parameter app: Running application whose first window owns the tested reader or form.
+     - Returns: One finite, nonempty window frame, or `nil` while the window is unavailable.
+     - Side effects: Reads XCTest window existence and geometry without changing app state.
+     - Failure modes: Missing or unusable window geometry remains a failed readiness sample.
+     */
+    func mainWindowViewport(in app: XCUIApplication) -> CGRect? {
+        let window = app.windows.firstMatch
+        guard window.exists else { return nil }
+        let frame = window.frame
+        return elementFrameIsUsable(frame) ? frame : nil
+    }
+
+    /**
      Samples hittability only after the element exposes a usable frame.
      */
     func isElementHittable(_ element: XCUIElement) -> Bool {
@@ -576,8 +595,9 @@ extension AndBibleUITests {
     ) -> Bool {
         waitForUITestCondition("Settings form becomes visible", timeout: timeout) {
             guard let form = self.resolvedElement("settingsForm", in: app),
-                  self.elementHasUsableFrame(form) else { return false }
-            return app.frame.intersects(form.frame)
+                  self.elementHasUsableFrame(form),
+                  let viewport = self.mainWindowViewport(in: app) else { return false }
+            return viewport.intersects(form.frame)
         }
     }
 
@@ -721,7 +741,8 @@ extension AndBibleUITests {
 
      Vision reads the actual composited WebView screenshot. WebKit can split scripture across
      accessibility nodes, and an editable note's action label can replace its text in that tree.
-     Screenshot recognition observes both through the same boundary. These journeys use English
+     Screenshot recognition observes both through the same boundary. The main window supplies
+     viewport geometry because XCTest can omit the Application root's frame. These journeys use English
      fixtures; expected text is never supplied to Vision as a recognition hint. Native toolbar
      values and diagnostic snapshots cannot satisfy the check.
 
@@ -744,12 +765,28 @@ extension AndBibleUITests {
     ) {
         var observedText = ""
         var recognitionError: String?
+        var observationStatus = "No viewport sample captured"
         let expectedText = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         let ready = waitForUITestCondition("Visible reader text: \(text)", timeout: timeout) {
             let webView = app.webViews.firstMatch
-            guard webView.exists, self.elementHasUsableFrame(webView),
-                  app.frame.contains(webView.frame),
-                  let pixels = webView.screenshot().image.cgImage else { return false }
+            guard webView.exists else {
+                observationStatus = "WebView is unavailable"
+                return false
+            }
+            guard let viewport = self.mainWindowViewport(in: app) else {
+                observationStatus = "Main window has no usable viewport"
+                return false
+            }
+            let webFrame = webView.frame
+            observationStatus = "Window: \(viewport); WebView: \(webFrame); recognition not attempted"
+            guard self.elementFrameIsUsable(webFrame), viewport.contains(webFrame) else {
+                return false
+            }
+            guard let pixels = webView.screenshot().image.cgImage else {
+                observationStatus += "; screenshot has no CGImage"
+                return false
+            }
+            observationStatus = "Window: \(viewport); WebView: \(webFrame); recognition attempted"
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = false
@@ -778,7 +815,7 @@ extension AndBibleUITests {
                 hierarchy.lifetime = .keepAlways
                 activity.add(hierarchy)
                 let recognition = XCTAttachment(string:
-                    "Recognized visible text: \(observedText)\nError: \(recognitionError ?? "none")"
+                    "Observation: \(observationStatus)\nRecognized visible text: \(observedText)\nError: \(recognitionError ?? "none")"
                 )
                 recognition.lifetime = .keepAlways
                 activity.add(recognition)
@@ -807,7 +844,7 @@ extension AndBibleUITests {
             let filter = app.buttons["bookmarkListLabelFilterButton"]
             let scroll = app.scrollViews.firstMatch
             guard back.exists, filter.exists, scroll.exists else { return false }
-            let appFrame = app.frame
+            guard let appFrame = self.mainWindowViewport(in: app) else { return false }
             let backFrame = back.frame
             let filterFrame = filter.frame
             let scrollFrame = scroll.frame
