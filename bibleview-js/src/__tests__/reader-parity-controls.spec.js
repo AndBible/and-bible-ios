@@ -379,11 +379,13 @@ describe("reading tracker", () => {
      * Mounts a minimal Bible chapter root for exercising read-progress behavior.
      *
      * @param initialReadCount - Persisted read count supplied by native state.
+     * @param ordinalRange - Source-domain bounds owned by the mounted document.
+     * @param chapterNumber - Source chapter number owned by the mounted document.
      * @returns Mounted Vue wrapper plus the composable controls captured from setup.
      * @remarks The mocked IntersectionObserver records observed verse elements and can be triggered
      * manually, making duplicate-read regressions deterministic.
      */
-    function mountReadingTracker(initialReadCount = 0) {
+    function mountReadingTracker(initialReadCount = 0, ordinalRange = [1, 2], chapterNumber = 1) {
         let controls;
         const Harness = defineComponent({
             template: `
@@ -394,7 +396,13 @@ describe("reading tracker", () => {
             `,
             setup() {
                 const containerRef = ref(null);
-                controls = useReadingTracker(containerRef, "KJV", [1, 2], 1, initialReadCount);
+                controls = useReadingTracker(
+                    containerRef,
+                    "KJV",
+                    ordinalRange,
+                    chapterNumber,
+                    initialReadCount,
+                );
                 return {containerRef};
             },
         });
@@ -474,6 +482,30 @@ describe("reading tracker", () => {
         expect(observers[0].disconnect).toHaveBeenCalled();
         expect(android.recordChapterRead).not.toHaveBeenCalled();
         wrapper.unmount();
+    });
+
+    /**
+     * Keeps native read-count updates scoped to the rendered document that originated them.
+     *
+     * The setup mounts two same-numbered chapters with disjoint source ordinals, as can happen when
+     * infinite scroll crosses a book boundary. A source-qualified iOS event updates only its owner,
+     * while the existing chapter-only event remains a compatible Android and legacy broadcast.
+     */
+    it("scopes source-qualified read-count updates without rejecting legacy events", () => {
+        const first = mountReadingTracker(0, [1, 2], 1);
+        const second = mountReadingTracker(0, [100, 101], 1);
+
+        eventBus.emit("update_chapter_read_status", [{chapter: 1, startOrdinal: 100, count: 2}]);
+
+        expect(first.controls.chapterReadCount.value).toBe(0);
+        expect(second.controls.chapterReadCount.value).toBe(2);
+
+        eventBus.emit("update_chapter_read_status", [{chapter: 1, count: 3}]);
+
+        expect(first.controls.chapterReadCount.value).toBe(3);
+        expect(second.controls.chapterReadCount.value).toBe(3);
+        first.wrapper.unmount();
+        second.wrapper.unmount();
     });
 });
 

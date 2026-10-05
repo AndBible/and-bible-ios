@@ -145,8 +145,14 @@ export function useReadingTracker(
         android.openChapterReadHistory(bookInitials, ordinalRange[0], chapterNumber);
     }
 
-    setupEventBusListener("update_chapter_read_status", (data: {chapter: number, count: number}) => {
-        if (data.chapter === chapterNumber) {
+    setupEventBusListener("update_chapter_read_status", (data: {
+        chapter: number,
+        startOrdinal?: number,
+        count: number,
+    }) => {
+        const ownsStartOrdinal = data.startOrdinal === undefined
+            || (data.startOrdinal >= ordinalRange[0] && data.startOrdinal <= ordinalRange[1]);
+        if (data.chapter === chapterNumber && ownsStartOrdinal) {
             chapterReadCount.value = data.count;
             autoTrackDone = data.count > 0;
             if (autoTrackDone) {

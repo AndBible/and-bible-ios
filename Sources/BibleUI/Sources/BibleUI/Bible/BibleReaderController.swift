@@ -20150,16 +20150,21 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     }
 
     /**
-     Resolves the active Bible chapter into the JSword/KJVA identity used by reading progress.
+     Resolves the chapter owned by a rendered document into Android's KJVA progress identity.
+
+     Vue sends the document's first ordinal, which can be a chapter introduction or the book
+     introduction included in chapter one. Infinite-scroll documents remain actionable when the
+     toolbar tracks a different chapter or book, so navigation position is not a persistence key.
 
      - Parameters:
-       - bookInitials: Vue-provided source initials compared with Android-37 Java identity semantics.
-       - startOrdinal: Rendered source ordinal that must belong to the visible chapter.
-       - chapter: Visible source chapter number.
-     - Returns: Verified KJVA progress identity, or `nil` when source identity or coordinates differ.
-     - Side effects: Reads active canon metadata and may perform bounded versification conversion.
-     - Failure modes: Locked/stale sources, Java-distinct Unicode identities, invalid ordinals, and
-       mismatched chapters fail closed before reading-progress history can mutate.
+       - bookInitials: Source initials compared with Android-37 Java identity semantics.
+       - startOrdinal: Exact source-domain ordinal from the rendered chapter.
+       - chapter: One-based chapter recorded by the document's reading tracker.
+     - Returns: Verified KJVA identity and source book name, or `nil` for invalid source data.
+     - Side effects: Holds a module-registry read lease, resolves the source ordinal, and maps the
+       source book's 1:1 anchor to KJVA. SWORD inspection restores its cursor.
+     - Failure modes: Missing/replaced/locked sources, unowned books, mismatched chapters, and
+       unrepresentable KJVA anchors fail closed. No progress mutation occurs during resolution.
      */
     private func readingProgressBridgeTarget(
         bookInitials: String,
@@ -20167,40 +20172,55 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         chapter: Int
     ) -> BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget? {
         let requestedInitials = bookInitials.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let sourceModule = activeModule,
-              let chapterRange = currentChapterOrdinalRange(),
-              currentCategory == .bible,
+        guard currentCategory == .bible,
+              chapter > 0,
+              startOrdinal > 0,
               !requestedInitials.isEmpty,
-              SwordJavaStringIdentity.equalsIgnoreCase(
-                  requestedInitials,
-                  sourceModule.info.name
-              ),
-              startOrdinal >= chapterRange.start,
-              startOrdinal <= chapterRange.end,
-              chapter == currentChapter,
-              !osisBookId(for: currentBook).isEmpty,
-              let sourceBookAnchorOrdinal = verseOrdinal(
-                  osisBookId: osisBookId(for: currentBook),
-                  chapter: 1,
-                  verse: 1
-              ),
-              let verifiedBookAnchor = VerifiedKJVAOrdinalRange(
-                  resolvingSourceBookInitials: sourceModule.info.name,
-                  sourceVersification: activeSourceVersificationName(),
-                  sourceOrdinalStart: sourceBookAnchorOrdinal,
-                  sourceOrdinalEnd: sourceBookAnchorOrdinal
-              ),
-              let identity = ReadingProgressKJVAIdentity(
-                  verifiedBookAnchor: verifiedBookAnchor,
-                  sourceChapter: chapter
-      )
-    else {
+              let manager = swordManager else { return nil }
+        let source: BibleReaderInstalledScriptureSource
+        if let module = activeModule {
+            source = .sword(module)
+        } else if let module = activeSQLiteBibleModule {
+            source = .sqlite(module)
+        } else {
             return nil
         }
-        return BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget(
-            identity: identity,
-            bookName: currentBook
-        )
+        guard SwordJavaStringIdentity.equalsIgnoreCase(requestedInitials, source.info.name) else {
+            return nil
+        }
+        let admittedBooks = moduleBookList
+        return manager.performCurrentModuleRegistryRead { _ in
+            guard let initialIdentity = self.activeBookListSourceIdentity(manager: manager),
+                  let reference = source.verseReference(
+                    ordinal: startOrdinal,
+                    ownsBook: { candidate in admittedBooks.contains { $0.osisId == candidate } }
+                  ),
+                  let book = admittedBooks.first(where: { $0.osisId == reference.osisBookId }),
+                  reference.chapter == chapter
+                    || (chapter == 1 && reference.chapter == 0 && reference.verse == 0),
+                  let anchorOrdinal = source.verseOrdinal(
+                    osisBookId: reference.osisBookId,
+                    chapter: 1,
+                    verse: 1
+                  ),
+                  let verifiedAnchor = VerifiedKJVAOrdinalRange(
+                    resolvingSourceBookInitials: source.info.name,
+                    sourceVersification: source.versificationName,
+                    sourceOrdinalStart: anchorOrdinal,
+                    sourceOrdinalEnd: anchorOrdinal
+                  ),
+                  let identity = ReadingProgressKJVAIdentity(
+                    verifiedBookAnchor: verifiedAnchor,
+                    sourceChapter: chapter
+                  ),
+                  self.activeBookListSourceIdentity(manager: manager) == initialIdentity else {
+                return nil
+            }
+            return BibleReaderProgressBridgeCoordinator.ReadingProgressBridgeTarget(
+                identity: identity,
+                bookName: book.name
+            )
+        } ?? nil
     }
 
     /**
