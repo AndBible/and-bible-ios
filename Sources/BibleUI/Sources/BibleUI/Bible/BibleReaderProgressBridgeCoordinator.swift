@@ -21,7 +21,8 @@ extension Notification.Name {
  Inputs:
  - bridge callback payloads from the shared BibleView JavaScript runtime
  - local `ReadingProgressStore` and `MemorizationProgressStore` suppliers
- - resolver closure that validates the active Bible chapter and maps it to JSword/KJVA book ordinal
+ - resolver closure that validates a rendered source-owned chapter and maps it to JSword/KJVA
+   book ordinal
  - native presentation callbacks for reading progress, settings, and chapter read history
 
  Outputs:
@@ -36,8 +37,8 @@ extension Notification.Name {
  - invokes native UI callbacks supplied by the owning reader
 
  Failure modes:
- - reading-progress requests with missing stores or invalid active chapter targets return without
-   side effects, matching Android's guards around missing books/versifications
+ - reading-progress requests with missing stores or invalid rendered chapter targets return
+   without side effects, matching Android's guards around missing books/versifications
  - malformed reading-progress settings JSON returns without persistence or bridge events
  - persistence and mutation-journal failures are reported through the injected failure callback
  - memorization target persistence is skipped when no memorization store exists, while `memorize`
@@ -85,7 +86,7 @@ struct BibleReaderProgressBridgeCoordinator {
     private let memorizationStore: () -> MemorizationProgressStore?
     /// Supplies the active reading-progress store.
     private let readingStore: () -> ReadingProgressStore?
-    /// Resolves and validates a bridge chapter target against the current reader document.
+    /// Resolves and validates a bridge chapter target against its active installed source.
     private let resolveReadingTarget: (String, Int, Int) -> ReadingProgressBridgeTarget?
     /// Resolves rendered verse ordinals into Android's KJVA memorization storage domain.
     private let resolveMemorizationRange: (String, Int, Int) -> MemorizationOrdinalResolution?
@@ -110,7 +111,8 @@ struct BibleReaderProgressBridgeCoordinator {
      - Parameters:
        - memorizationStore: Supplier for local memorization persistence.
        - readingStore: Supplier for local reading-progress persistence.
-       - resolveReadingTarget: Closure that validates bridge chapter identity and returns KJVA data.
+       - resolveReadingTarget: Closure that validates source-owned bridge chapter identity and
+         returns KJVA data, including for retained infinite-scroll documents.
        - resolveMemorizationRange: Closure validating source module identity and projecting rendered
          ordinals into Android KJVA storage with durable source provenance.
        - loadMemorizeDocument: Closure opening the Memorize document for a selected range.
@@ -230,13 +232,17 @@ struct BibleReaderProgressBridgeCoordinator {
                 identity: target.identity,
                 source: ReadingProgressSource(bridgeValue: source)
             )
-            emitChapterReadStatus(chapter: chapter, count: count)
+            emitChapterReadStatus(
+                chapter: chapter,
+                startOrdinal: startOrdinal,
+                count: count
+            )
         } catch {
             reportPersistenceFailure(error)
         }
     }
 
-    /// Opens native chapter-read history for the active Bible chapter identity.
+    /// Opens native chapter-read history for the rendered source-owned chapter identity.
     func openChapterReadHistory(bookInitials: String, startOrdinal: Int, chapter: Int) {
         guard readingStore() != nil,
               let target = resolveReadingTarget(bookInitials, startOrdinal, chapter) else {
@@ -288,7 +294,11 @@ struct BibleReaderProgressBridgeCoordinator {
                 kjvBookOrdinal: target.identity.kjvBookOrdinal,
                 chapter: chapter
             )
-            emitChapterReadStatus(chapter: chapter, count: count)
+            emitChapterReadStatus(
+                chapter: chapter,
+                startOrdinal: startOrdinal,
+                count: count
+            )
         } catch {
             reportPersistenceFailure(error)
         }
@@ -404,11 +414,24 @@ struct BibleReaderProgressBridgeCoordinator {
         emit(event: "update_memorization_data", data: json)
     }
 
-    /// Emits a shared-client chapter-read status update for one chapter.
-    private func emitChapterReadStatus(chapter: Int, count: Int) {
+    /**
+     Emits a shared-client chapter-read status update for one rendered document.
+
+     The additive start ordinal lets iOS Vue listeners distinguish same-numbered chapters from
+     different books retained by infinite scroll. Android's chapter-only payload remains valid
+     because the listener treats a missing start ordinal as the legacy broadcast contract.
+
+     - Parameters:
+       - chapter: One-based source chapter whose persisted count changed.
+       - startOrdinal: Exact rendered source ordinal accepted for the mutation.
+       - count: Persisted read count after the mutation.
+     - Side effects: Emits one synchronous bridge event; it does not mutate persistence.
+     - Failure modes: None. All values are integers interpolated into valid JSON.
+     */
+    private func emitChapterReadStatus(chapter: Int, startOrdinal: Int, count: Int) {
         emit(
             event: "update_chapter_read_status",
-            data: "{\"chapter\":\(chapter),\"count\":\(count)}"
+            data: "{\"chapter\":\(chapter),\"startOrdinal\":\(startOrdinal),\"count\":\(count)}"
         )
     }
 

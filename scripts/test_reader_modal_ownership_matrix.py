@@ -1177,12 +1177,12 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
         self.assertIn("AndroidLicenseDialog", source)
         self.assertIn('Bundle.module.url(forResource: "LICENSE", withExtension: "txt")', license_dialog)
 
-    def test_rate_review_uses_system_prompt_without_custom_interstitial(self) -> None:
-        """Rate & Review must invoke StoreKit directly and keep feedback actions separate.
+    def test_rate_review_links_to_app_store_without_custom_interstitial(self) -> None:
+        """Statically guard the explicit App Store destination and separate feedback actions.
 
-        Apple disallows custom review prompts, so the drawer action may dismiss presentation state
-        but must not route through an app-owned rating dialog. Support and bug reporting remain
-        separate drawer actions rather than being used to steer negative reviewers.
+        The user-initiated drawer action links to Apple's write-review page without an app-owned
+        rating dialog or a suppressible StoreKit prompt. This source guard does not exercise the
+        operating system's external URL handoff or the App Store review interface.
         """
         source = READER_VIEW.read_text(encoding="utf-8")
         drawer_handler = swift_function_body(source, "handleReaderNavigationDrawerAction")
@@ -1197,12 +1197,15 @@ class ReaderModalOwnershipMatrixTests(unittest.TestCase):
             / "AndroidRateReviewDialog.swift"
         )
 
-        self.assertIn("requestSystemReview", rate_body)
+        self.assertIn(
+            'openExternalLink("https://apps.apple.com/app/id6774904527?action=write-review")',
+            rate_body,
+        )
         self.assertNotIn("presentRateReviewDialog", source)
         self.assertNotIn("rateReviewDialogOverlay", source)
         self.assertNotIn("AndroidRateReviewDialog", source)
         self.assertFalse(rate_dialog_path.exists())
-        self.assertIn("SKStoreReviewController.requestReview", source)
+        self.assertNotIn("SKStoreReviewController.requestReview", rate_body)
         self.assertIn("case .needHelp:", drawer_handler)
         self.assertIn("case .reportBug:", drawer_handler)
 
