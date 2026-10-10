@@ -1,0 +1,4 @@
+Pembaruan ini berisi perbaikan bug:
+- Pasal yang Anda baca kini tercatat dengan andal dalam kemajuan membaca Anda.
+- Pilihan menu penanda dan kemajuan kini tetap terlihat.
+- Beri Nilai & Ulasan kini membuka halaman aplikasi di App Store.

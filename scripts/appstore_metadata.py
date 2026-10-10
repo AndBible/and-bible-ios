@@ -334,19 +334,19 @@ LOCALE_FIELD_FILES = {
     "privacy_url": "privacy_url.txt",
 }
 
-# The App Store locale that release notes are written in. "What's New" is
-# deliberately NOT localised: it describes one release, is rewritten for the
-# next one, and would sit stale in the other 33 locales long before a
-# translator saw it. App Store Connect shows the primary locale's text in a
-# storefront whose localisation has none, so English-only degrades cleanly.
-RELEASE_NOTES_LOCALE = "en-US"
-
-# Rendered into RELEASE_NOTES_LOCALE only, and only when there is text to
-# render: a blank appstore/release_notes.txt emits no release_notes file
+# The App Store locale whose release notes are the English master. "What's
+# New" is required in every localisation of an update, so every locale gets a
+# release_notes file: its translation from
+# appstore/release_notes_translations/<apple-locale>.yml when that was made
+# against the current English text (see release_notes_digest), otherwise the
+# English text. A blank appstore/release_notes.txt emits no release_notes file
 # anywhere, which is what a first release wants - there is no previous version
 # for "What's New" to describe, and App Store Connect rejects release notes on
 # an app's very first version.
-ENGLISH_ONLY_FIELD_FILES = {
+RELEASE_NOTES_LOCALE = "en-US"
+RELEASE_NOTES_KEY = "release_notes"
+
+RELEASE_NOTES_FIELD_FILES = {
     "release_notes": "release_notes.txt",
 }
 
@@ -390,6 +390,9 @@ class LoadedSources:
     app_info: Mapping[str, str]
     release_notes: str
     review_information: Mapping[str, str]
+    release_notes_translations: Mapping[str, Mapping[str, str]] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 def replace_sources(sources: LoadedSources, **changes: object) -> LoadedSources:
@@ -427,6 +430,12 @@ def load_sources(android_root: Path, appstore_root: Path) -> LoadedSources:
         for _, apple_locale in locale_config.mappings
         if (ios_translations_dir / f"{apple_locale}.yml").is_file()
     }
+    release_notes_dir = appstore_root / "release_notes_translations"
+    release_notes_translations = {
+        apple_locale: load_yaml_mapping(release_notes_dir / f"{apple_locale}.yml")
+        for _, apple_locale in locale_config.mappings
+        if (release_notes_dir / f"{apple_locale}.yml").is_file()
+    }
     return LoadedSources(
         locale_config=locale_config,
         constants=load_yaml_mapping(play / "constants.yml"),
@@ -447,6 +456,44 @@ def load_sources(android_root: Path, appstore_root: Path) -> LoadedSources:
             if (appstore_root / REVIEW_INFORMATION_LOCAL_FILE).is_file()
             else {},
         ),
+        release_notes_translations=release_notes_translations,
+    )
+
+
+def release_notes_digest(release_notes: str) -> str:
+    """Digest of the English release notes, recorded as a translation's source_sha."""
+    return hashlib.sha256(release_notes.strip().encode("utf-8")).hexdigest()
+
+
+def release_notes_for_locale(sources: LoadedSources, apple_locale: str) -> str:
+    """The release notes to ship for one locale; empty when there are none.
+
+    A translation is used only if it records the digest of the current English
+    text, so last release's translation can never be shipped for this one.
+    """
+    english = sources.release_notes.strip()
+    if not english or apple_locale == RELEASE_NOTES_LOCALE:
+        return english
+    translation = sources.release_notes_translations.get(apple_locale, {})
+    if translation.get(SOURCE_SHA_KEY) == release_notes_digest(english):
+        return translation.get(RELEASE_NOTES_KEY, "").strip() or english
+    return english
+
+
+def untranslated_release_notes_locales(sources: LoadedSources) -> list[str]:
+    """Locales with no translation of the current English release notes."""
+    english = sources.release_notes.strip()
+    if not english:
+        return []
+    digest = release_notes_digest(english)
+    return sorted(
+        apple_locale
+        for _, apple_locale in sources.locale_config.mappings
+        if apple_locale != RELEASE_NOTES_LOCALE
+        and sources.release_notes_translations.get(apple_locale, {}).get(
+            SOURCE_SHA_KEY
+        )
+        != digest
     )
 
 
@@ -482,8 +529,9 @@ def build_locale_fields(
     }
     for field in IOS_ONLY_FIELDS:
         fields[field] = variables[field]
-    if apple_locale == RELEASE_NOTES_LOCALE and sources.release_notes.strip():
-        fields["release_notes"] = sources.release_notes.strip()
+    release_notes = release_notes_for_locale(sources, apple_locale)
+    if release_notes:
+        fields["release_notes"] = release_notes
     return {
         field: normalize_whitespace(
             apply_platform_substitutions(value, apple_locale, sources.locale_config)
@@ -499,7 +547,7 @@ def render_tree(sources: LoadedSources) -> dict[str, str]:
         fields = build_locale_fields(sources, play_locale, apple_locale)
         for field, filename in LOCALE_FIELD_FILES.items():
             tree[f"{apple_locale}/{filename}"] = fields[field] + "\n"
-        for field, filename in ENGLISH_ONLY_FIELD_FILES.items():
+        for field, filename in RELEASE_NOTES_FIELD_FILES.items():
             if field in fields:
                 tree[f"{apple_locale}/{filename}"] = fields[field] + "\n"
     for key, filename in APP_LEVEL_FILES.items():

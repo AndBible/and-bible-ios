@@ -1,0 +1,4 @@
+Deze update bevat bugfixes:
+- Hoofdstukken die je leest worden nu betrouwbaar vastgelegd in je leesvoortgang.
+- De keuzes in het menu voor bladwijzers en voortgang blijven nu zichtbaar.
+- Beoordeel en schrijf een recensie opent nu de App Store-pagina van de app.

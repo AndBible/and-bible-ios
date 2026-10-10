@@ -120,25 +120,35 @@ same script with `--require-pinned`, which turns both a mismatch **and** a
 missing/SHA-less lock file into a hard failure — a render that can't be tied
 to a specific Android commit is not allowed to reach `main`.
 
-## Release notes are English-only, and optional
+## Release notes ("What's New") for every locale
 
-Unlike every other locale field, "What's New" is rendered into `en-US` alone
-(`RELEASE_NOTES_LOCALE` in `scripts/appstore_metadata.py`). It describes one
-release and is rewritten for the next, so a translated copy would sit stale in
-the other 33 locales long before a translator saw it; App Store Connect shows
-the primary locale's text in any storefront whose localisation has none, so
-English-only degrades cleanly rather than leaving a gap.
+App Store Connect requires "What's New" in every localization of an update, so
+`make appstore-metadata` renders `release_notes.txt` into **all** 34 locales.
 
-An **empty** `appstore/release_notes.txt` renders no `release_notes.txt`
-anywhere at all, and `deliver` then leaves the field untouched. That is the
-correct state for a first release — there is no previous version for "What's
-New" to describe, and App Store Connect rejects release notes on an app's very
-first version. It is also why the tree is 276 files rather than 310: 34 locales
-× 8 fields, plus the three app-level files and the reviewer notes.
+- `appstore/release_notes.txt` is the English master, rewritten each release.
+- `appstore/release_notes_translations/<apple-locale>.yml` holds a locale's
+  translation (`source_sha` + `release_notes`). It is used only while its
+  `source_sha` equals the digest of the current English text, so a previous
+  release's translation can never ship for the next one; a locale without a
+  current translation ships the English text instead of an empty field.
+- An **empty** `release_notes.txt` renders no `release_notes.txt` anywhere. That
+  is the correct state for a first release: App Store Connect rejects release
+  notes on an app's very first version.
 
-Before shipping an update, put the English text in `appstore/release_notes.txt`
-and re-run `make appstore-metadata`; `en-US/release_notes.txt` reappears and no
-other locale gains one.
+Per-release routine:
+
+```bash
+$EDITOR appstore/release_notes.txt     # English text for this version
+make appstore-release-notes            # lists locales still on English, renders the tree
+# translate those locales with the appstore-copy skill (release notes section)
+make appstore-release-notes            # should report all locales current
+make appstore-validate
+make appstore-deliver                  # also uploads promotional text (below)
+```
+
+`promotional_text` is part of the same upload. It is per-version in App Store
+Connect and appears empty on a new version until `deliver` sets it, so run
+`make appstore-deliver` for every release.
 
 ## Why the description differs from Play's
 

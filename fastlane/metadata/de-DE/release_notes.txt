@@ -1,0 +1,4 @@
+Dieses Update enthält Fehlerbehebungen:
+- Gelesene Kapitel werden jetzt zuverlässig in deinem Lesefortschritt erfasst.
+- Die Optionen im Menü für Lesezeichen und Fortschritt bleiben jetzt sichtbar.
+- „Bewerten & Rezension“ öffnet jetzt die App-Store-Seite der App.

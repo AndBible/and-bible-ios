@@ -20,6 +20,11 @@ testflight: ## Archive and upload a build to TestFlight (ASC API key decrypted v
 appstore-metadata: ## Generate the App Store metadata tree from the Android store copy
 	@python3 scripts/assemble_appstore_metadata.py
 
+.PHONY: appstore-release-notes
+appstore-release-notes: ## Show which locales still ship English "What's New"; render release notes into every locale
+	@python3 scripts/appstore_release_notes.py
+	@python3 scripts/assemble_appstore_metadata.py
+
 .PHONY: appstore-validate
 appstore-validate: ## Check the metadata tree for drift and rule violations (offline)
 	@python3 scripts/assemble_appstore_metadata.py --check

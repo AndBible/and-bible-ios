@@ -1,0 +1,4 @@
+Această actualizare conține remedieri de erori:
+- Capitolele pe care le citești sunt acum înregistrate în mod fiabil în progresul tău de citire.
+- Opțiunile din meniul de marcaje și progres rămân acum vizibile.
+- „Evaluează și scrie o recenzie” deschide acum pagina aplicației din App Store.

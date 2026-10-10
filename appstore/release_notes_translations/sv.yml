@@ -1,0 +1,6 @@
+source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+release_notes: |-
+  Den här uppdateringen innehåller felrättningar:
+  - Kapitel du läser registreras nu pålitligt i din läsframsteg.
+  - Valen i menyn för bokmärken och framsteg förblir nu synliga.
+  - Betygsätt och recensera öppnar nu appens sida i App Store.

@@ -1,0 +1,6 @@
+source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+release_notes: |-
+  Ovo ažuriranje sadrži ispravke grešaka:
+  - Poglavlja koja pročitate sada se pouzdano bilježe u vašem napretku čitanja.
+  - Opcije izbornika za knjižne oznake i napredak sada ostaju vidljive.
+  - Ocijeni i recenziraj sada otvara stranicu aplikacije u App Storeu.

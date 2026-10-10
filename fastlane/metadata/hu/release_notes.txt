@@ -1,0 +1,4 @@
+Ez a frissítés hibajavításokat tartalmaz:
+- Az elolvasott fejezetek mostantól megbízhatóan rögzítésre kerülnek az olvasási haladásban.
+- A könyvjelző- és haladásmenü lehetőségei mostantól látszanak.
+- Az Értékelés és vélemény mostantól megnyitja az alkalmazás App Store-oldalát.
