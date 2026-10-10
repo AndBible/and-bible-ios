@@ -102,3 +102,25 @@ make appstore-validate
 `appstore-validate` enforces every limit, including the 4000-character
 description total. If a locale overflows, send it back to a subagent with the
 measured length — do not truncate it yourself.
+
+## Release notes ("What's New") - every release
+
+`appstore/release_notes.txt` is the English text for the version being shipped.
+Translations live in `appstore/release_notes_translations/<apple-locale>.yml`:
+
+```yaml
+source_sha: <output of python3 scripts/appstore_release_notes.py --digest>
+release_notes: |-
+  <translated text, same bullet structure as the English>
+```
+
+1. `python3 scripts/appstore_release_notes.py --list` prints the locales without a
+   translation of the *current* English text (all of them after the text changes).
+2. Dispatch one subagent per locale (or translate the short text directly when it
+   is a few lines), matching the register of the existing translations. Limit 4000
+   characters; never write Android, Google Play or Play Store; CJK locales must not
+   put spaces between two CJK characters.
+3. `make appstore-release-notes` must report all locales current, then
+   `make appstore-validate`.
+
+A locale left untranslated ships the English text, never an empty field.

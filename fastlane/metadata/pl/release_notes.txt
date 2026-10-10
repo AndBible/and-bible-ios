@@ -1,0 +1,4 @@
+Ta aktualizacja zawiera poprawki błędów:
+- Przeczytane rozdziały są teraz niezawodnie zapisywane w postępie czytania.
+- Opcje w menu zakładek i postępu pozostają teraz widoczne.
+- Opcja Oceń i napisz recenzję otwiera teraz stronę aplikacji w App Store.

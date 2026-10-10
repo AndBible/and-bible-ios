@@ -1,0 +1,6 @@
+source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+release_notes: |-
+  Tato aktualizace obsahuje opravy chyb:
+  - Přečtené kapitoly se nyní spolehlivě zaznamenávají do postupu čtení.
+  - Volby v nabídce záložek a postupu nyní zůstávají viditelné.
+  - Položka Ohodnotit a napsat recenzi nyní otevře stránku aplikace v App Storu.

@@ -1,0 +1,4 @@
+Aquesta actualització conté correccions d'errors:
+- Els capítols que llegeixes ara es registren de manera fiable al progrés de lectura.
+- Les opcions del menú de marcadors i progrés ara continuen visibles.
+- «Valora i opina» ara obre la pàgina de l'aplicació a l'App Store.

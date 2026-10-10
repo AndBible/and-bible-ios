@@ -1,0 +1,4 @@
+Esta actualización incluye correcciones de errores:
+- Los capítulos que lees ahora se registran de forma fiable en tu progreso de lectura.
+- Las opciones del menú de marcadores y progreso ahora permanecen visibles.
+- «Valorar y reseñar» ahora abre la página de la app en la App Store.

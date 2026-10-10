@@ -1,0 +1,4 @@
+Tämä päivitys sisältää virhekorjauksia:
+- Lukemasi luvut tallentuvat nyt luotettavasti lukuedistymiseesi.
+- Kirjanmerkki- ja edistymisvalikon valinnat pysyvät nyt näkyvissä.
+- Arvostele ja kirjoita arvostelu avaa nyt sovelluksen App Store -sivun.

@@ -1,0 +1,4 @@
+Bản cập nhật này có các bản sửa lỗi:
+- Các chương bạn đọc giờ được ghi lại đáng tin cậy vào tiến độ đọc của bạn.
+- Các lựa chọn trong menu dấu trang và tiến độ giờ luôn hiển thị.
+- Đánh giá & Nhận xét giờ mở trang ứng dụng trên App Store.

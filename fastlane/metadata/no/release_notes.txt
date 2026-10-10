@@ -1,0 +1,4 @@
+Denne oppdateringen inneholder feilrettinger:
+- Kapitler du leser registreres nå pålitelig i leseframdriften din.
+- Valgene i menyen for bokmerker og framdrift forblir nå synlige.
+- Vurder og skriv anmeldelse åpner nå appens side i App Store.

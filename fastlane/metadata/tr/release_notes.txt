@@ -1,0 +1,4 @@
+Bu güncelleme hata düzeltmeleri içerir:
+- Okuduğunuz bölümler artık okuma ilerlemenize güvenilir şekilde kaydediliyor.
+- Yer imi ve ilerleme menüsündeki seçenekler artık görünür kalıyor.
+- Puanla ve Yorum Yaz artık uygulamanın App Store sayfasını açıyor.

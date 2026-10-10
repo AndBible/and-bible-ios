@@ -1,0 +1,4 @@
+Táto aktualizácia obsahuje opravy chýb:
+- Prečítané kapitoly sa teraz spoľahlivo zaznamenávajú do postupu čítania.
+- Možnosti v ponuke záložiek a postupu teraz zostávajú viditeľné.
+- Možnosť Ohodnotiť a napísať recenziu teraz otvorí stránku aplikácie v App Store.

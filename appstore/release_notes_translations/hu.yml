@@ -1,0 +1,6 @@
+source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+release_notes: |-
+  Ez a frissítés hibajavításokat tartalmaz:
+  - Az elolvasott fejezetek mostantól megbízhatóan rögzítésre kerülnek az olvasási haladásban.
+  - A könyvjelző- és haladásmenü lehetőségei mostantól látszanak.
+  - Az Értékelés és vélemény mostantól megnyitja az alkalmazás App Store-oldalát.

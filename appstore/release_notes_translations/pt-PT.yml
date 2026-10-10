@@ -1,0 +1,6 @@
+source_sha: ec3ee68281075e2ccd2d5fbceb3a5470242917e09aaaed626d13c20a3220861b
+release_notes: |-
+  Esta atualização contém correções de erros:
+  - Os capítulos que lê são agora registados de forma fiável no seu progresso de leitura.
+  - As opções do menu de marcadores e progresso permanecem agora visíveis.
+  - «Avaliar e comentar» abre agora a página da app na App Store.

@@ -1,0 +1,4 @@
+Denne opdatering indeholder fejlrettelser:
+- Kapitler, du læser, registreres nu pålideligt i din læsefremgang.
+- Valgmulighederne i menuen for bogmærker og fremgang forbliver nu synlige.
+- Bedøm og anmeld åbner nu appens side i App Store.
