@@ -300,37 +300,47 @@ final class BibleReaderNavigationCoordinator {
      Navigates to the next Bible chapter, wrapping into the next book when available.
 
      - Parameter context: Controller-owned state and lookup callbacks.
+     - Returns: Whether a destination was admitted and applied.
      - Side effects: Delegates to `navigateTo` when a next chapter exists.
      - Failure modes: Does nothing at the final chapter or while Android synthetic Multi content is
        visible, matching the existing reader controls.
      */
-    func navigateNext(context: BibleReaderNavigationContext) {
-        guard !context.isShowingAndroidMultiDocument() else { return }
+    @discardableResult
+    func navigateNext(context: BibleReaderNavigationContext) -> Bool {
+        guard !context.isShowingAndroidMultiDocument() else { return false }
         let position = context.currentPosition()
         let maxChapter = context.chapterCount(position.book)
         if position.chapter < maxChapter {
-            navigateTo(book: position.book, chapter: position.chapter + 1, context: context)
+            return navigateTo(book: position.book, chapter: position.chapter + 1, context: context)
         } else if let nextBook = context.nextBook(position.book) {
-            navigateTo(book: nextBook, chapter: 1, context: context)
+            return navigateTo(book: nextBook, chapter: 1, context: context)
         }
+        return false
     }
 
     /**
      Navigates to the previous Bible chapter, wrapping into the previous book when available.
 
      - Parameter context: Controller-owned state and lookup callbacks.
+     - Returns: Whether a destination was admitted and applied.
      - Side effects: Delegates to `navigateTo` when a previous chapter exists.
      - Failure modes: Does nothing at the first chapter or while Android synthetic Multi content is
        visible, matching the existing reader controls.
      */
-    func navigatePrevious(context: BibleReaderNavigationContext) {
-        guard !context.isShowingAndroidMultiDocument() else { return }
+    @discardableResult
+    func navigatePrevious(context: BibleReaderNavigationContext) -> Bool {
+        guard !context.isShowingAndroidMultiDocument() else { return false }
         let position = context.currentPosition()
         if position.chapter > 1 {
-            navigateTo(book: position.book, chapter: position.chapter - 1, context: context)
+            return navigateTo(book: position.book, chapter: position.chapter - 1, context: context)
         } else if let previousBook = context.previousBook(position.book) {
-            navigateTo(book: previousBook, chapter: context.chapterCount(previousBook), context: context)
+            return navigateTo(
+                book: previousBook,
+                chapter: context.chapterCount(previousBook),
+                context: context
+            )
         }
+        return false
     }
 
     /**

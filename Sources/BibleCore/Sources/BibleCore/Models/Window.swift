@@ -135,15 +135,17 @@ public final class PageManager {
     /// Persisted versification name for the Bible position.
     public var bibleVersification: String?
 
-    /// Book identity interpreted by `bibleBookEncoding`; older rows contain a module-list index.
+    /// JSword BibleBook ordinal interpreted by `bibleBookEncoding`.
     public var bibleBibleBook: Int?
 
     /**
-     Encoding of the persisted book integer. Nil preserves the legacy module-list interpretation.
+     Encoding of the persisted book integer. Nil identifies a row written before canonical JSword
+     book identity was introduced.
 
      New positions use JSword's stable `BibleBook.ordinal()` values, which do not change when an
-     installed module exposes a different subset or ordering of books. An explicit marker avoids
-     silently reinterpreting existing iOS positions as Android ordinals during store migration.
+     installed module exposes a different subset or ordering of books. Startup normalization resets
+     unmarked and unknown encodings to Android's complete Genesis 1:1 default rather than relabeling
+     an ambiguous integer.
      */
     public var bibleBookEncoding: String?
 
@@ -201,7 +203,8 @@ public final class PageManager {
      - Parameters:
        - id: Identifier that should match the owning `Window`.
        - currentCategoryName: Raw category name that should be active when the window opens.
-     - Note: Category-specific fields are left nil until the user first visits that category.
+     - Note: The Bible position starts at Android's canonical Genesis 1:1 default. Other category
+       fields remain nil until the user first visits those categories.
      */
     public init(
         id: UUID = UUID(),
@@ -209,6 +212,12 @@ public final class PageManager {
     ) {
         self.id = id
         self.currentCategoryName = currentCategoryName
+        let biblePosition = PageManagerBiblePosition.androidDefault
+        self.bibleVersification = biblePosition.versification
+        self.bibleBibleBook = biblePosition.bookOrdinal
+        self.bibleChapterNo = biblePosition.chapter
+        self.bibleVerseNo = biblePosition.verse
+        self.bibleBookEncoding = Self.jswordBibleBookEncoding
     }
 }
 

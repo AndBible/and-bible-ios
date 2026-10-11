@@ -210,9 +210,9 @@ final class WorkspaceWindowStoreTests: XCTestCase {
         XCTAssertEqual(clonedPsalm.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
         XCTAssertEqual(clonedPsalm.bibleChapterNo, 119)
         XCTAssertEqual(clonedPsalm.bibleVerseNo, 1)
-        XCTAssertNil(clonedWindows.first(where: {
+        XCTAssertEqual(clonedWindows.first(where: {
             $0.orderNumber == secondaryWindow.orderNumber
-        })?.pageManager?.bibleBookEncoding)
+        })?.pageManager?.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
 
         store.delete(clone)
 

@@ -43,6 +43,11 @@ PROVENANCE = ToolchainProvenance(
     runner_architecture="arm64",
 )
 
+WESTMINSTER_FIXTURE_SCENARIOS = (
+    "document-navigation-westminster-split",
+    "document-navigation-westminster-legacy-bible-position",
+)
+
 
 class ManageUITestProductsTests(unittest.TestCase):
     """Exercises product discovery, provenance checks, and payload integrity."""
@@ -267,74 +272,68 @@ class ManageUITestProductsTests(unittest.TestCase):
     def test_westminster_ui_product_round_trip_restores_composed_fixture(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
         westminster = repository_root / "Tests/UI/Fixtures/westminster-sword"
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
-            shutil.copytree(westminster, fixture_manifest.parent / "westminster-sword")
-            fixture_manifest.write_text(
-                json.dumps(
-                    {
-                        "AndBibleUITests/testWestminster":
-                            "document-navigation-westminster-split"
-                    }
-                ),
-                encoding="utf-8",
-            )
-            archive = root / "ui-test-products.tar.gz"
-            package_products(
-                products_path=products,
-                fixture_tool=fixture,
-                fixture_manifest=fixture_manifest,
-                sword_fixture=sword_fixture,
-                output_path=archive,
-                commit_sha="abc123",
-                configuration="Debug",
-                code_signing_allowed="NO",
-                provenance=PROVENANCE,
-                architecture_reader=self.fake_architectures,
-            )
-            destination = root / "restored"
-            destination.mkdir()
-            verify_products(
-                archive_path=archive,
-                destination=destination,
-                expected_commit_sha="abc123",
-                expected_configuration="Debug",
-                expected_code_signing_allowed="NO",
-                provenance=PROVENANCE,
-                architecture_reader=self.fake_architectures,
-            )
-            restored = destination / ".ui-test/fixtures/sword"
-            validate_westminster_fixture(restored)
-            self.assertTrue((restored / "mods.d/kjv.conf").is_file())
+        for scenario in WESTMINSTER_FIXTURE_SCENARIOS:
+            with self.subTest(scenario=scenario):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+                    shutil.copytree(westminster, fixture_manifest.parent / "westminster-sword")
+                    fixture_manifest.write_text(
+                        json.dumps({"AndBibleUITests/testWestminster": scenario}),
+                        encoding="utf-8",
+                    )
+                    archive = root / "ui-test-products.tar.gz"
+                    package_products(
+                        products_path=products,
+                        fixture_tool=fixture,
+                        fixture_manifest=fixture_manifest,
+                        sword_fixture=sword_fixture,
+                        output_path=archive,
+                        commit_sha="abc123",
+                        configuration="Debug",
+                        code_signing_allowed="NO",
+                        provenance=PROVENANCE,
+                        architecture_reader=self.fake_architectures,
+                    )
+                    destination = root / "restored"
+                    destination.mkdir()
+                    verify_products(
+                        archive_path=archive,
+                        destination=destination,
+                        expected_commit_sha="abc123",
+                        expected_configuration="Debug",
+                        expected_code_signing_allowed="NO",
+                        provenance=PROVENANCE,
+                        architecture_reader=self.fake_architectures,
+                    )
+                    restored = destination / ".ui-test/fixtures/sword"
+                    validate_westminster_fixture(restored)
+                    self.assertTrue((restored / "mods.d/kjv.conf").is_file())
 
     def test_westminster_manifest_requires_adjacent_reviewed_fixture(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
-            fixture_manifest.write_text(
-                json.dumps(
-                    {
-                        "AndBibleUITests/testWestminster":
-                            "document-navigation-westminster-split"
-                    }
-                ),
-                encoding="utf-8",
-            )
+        for scenario in WESTMINSTER_FIXTURE_SCENARIOS:
+            with self.subTest(scenario=scenario):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+                    fixture_manifest.write_text(
+                        json.dumps({"AndBibleUITests/testWestminster": scenario}),
+                        encoding="utf-8",
+                    )
 
-            with self.assertRaisesRegex(ProductArchiveError, "Westminster21 fixture"):
-                package_products(
-                    products_path=products,
-                    fixture_tool=fixture,
-                    fixture_manifest=fixture_manifest,
-                    sword_fixture=sword_fixture,
-                    output_path=root / "archive.tar.gz",
-                    commit_sha="abc123",
-                    configuration="Debug",
-                    code_signing_allowed="NO",
-                    provenance=PROVENANCE,
-                    architecture_reader=self.fake_architectures,
-                )
+                    with self.assertRaisesRegex(ProductArchiveError, "Westminster21 fixture"):
+                        package_products(
+                            products_path=products,
+                            fixture_tool=fixture,
+                            fixture_manifest=fixture_manifest,
+                            sword_fixture=sword_fixture,
+                            output_path=root / "archive.tar.gz",
+                            commit_sha="abc123",
+                            configuration="Debug",
+                            code_signing_allowed="NO",
+                            provenance=PROVENANCE,
+                            architecture_reader=self.fake_architectures,
+                        )
 
     def test_exported_consumer_paths_work_outside_the_restoring_directory(self) -> None:
         """A separate consumer can read every emitted path after relative restoration."""

@@ -180,7 +180,7 @@ public struct RemoteSyncCurrentWorkspacePageManagerRow: Sendable, Equatable, Cod
     /// Android persisted versification.
     public let bibleVersification: String
 
-    /// Android persisted Bible book index.
+    /// Android persisted JSword `BibleBook.ordinal()` value.
     public let bibleBook: Int
 
     /// Android persisted Bible chapter number.
@@ -244,7 +244,7 @@ public struct RemoteSyncCurrentWorkspacePageManagerRow: Sendable, Equatable, Cod
        - windowID: Android-compatible window identifier that owns the page-manager row.
        - bibleDocument: Android Bible module initials.
        - bibleVersification: Android persisted versification.
-       - bibleBook: Android persisted Bible book index.
+       - bibleBook: Android persisted JSword `BibleBook.ordinal()` value.
        - bibleChapterNo: Android persisted Bible chapter number.
        - bibleVerseNo: Android persisted Bible verse number.
        - commentaryDocument: Android commentary module initials.
@@ -476,13 +476,6 @@ enum RemoteSyncWorkspaceSnapshotError: Error, Equatable {
    `ModelContext` and `SettingsStore`
  */
 public final class RemoteSyncWorkspaceSnapshotService {
-    private enum Defaults {
-        static let bibleVersification = "KJVA"
-        static let bibleBook = 2 // JSword BibleBook.GEN; ordinal zero is Intro.Bible.
-        static let bibleChapter = 1
-        static let bibleVerse = 1
-    }
-
     /// Local-only setting containing the revisioned accepted workspace generation.
     static let acceptedBaselineKey = "remote_sync.workspaces.accepted_baseline"
 
@@ -671,13 +664,14 @@ public final class RemoteSyncWorkspaceSnapshotService {
 
                 let pageManager = window.pageManager
                 let pageManagerFidelity = pageManagerFidelityByWindowID[window.id]
+                let biblePosition = pageManager?.biblePositionForAndroid ?? .androidDefault
                 let pageManagerRow = RemoteSyncCurrentWorkspacePageManagerRow(
                     windowID: window.id,
                     bibleDocument: pageManager?.bibleDocument,
-                    bibleVersification: pageManager?.bibleVersification ?? Defaults.bibleVersification,
-                    bibleBook: pageManager?.bibleBibleBook ?? Defaults.bibleBook,
-                    bibleChapterNo: pageManager?.bibleChapterNo ?? Defaults.bibleChapter,
-                    bibleVerseNo: pageManager?.bibleVerseNo ?? Defaults.bibleVerse,
+                    bibleVersification: biblePosition.versification,
+                    bibleBook: biblePosition.bookOrdinal,
+                    bibleChapterNo: biblePosition.chapter,
+                    bibleVerseNo: biblePosition.verse,
                     commentaryDocument: pageManager?.commentaryDocument,
                     commentaryAnchorOrdinal: pageManager?.commentaryAnchorOrdinal,
                     commentarySourceBookAndKey: pageManagerFidelity?.commentarySourceBookAndKey,

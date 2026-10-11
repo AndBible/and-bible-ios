@@ -1248,7 +1248,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -1409,7 +1411,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1533,7 +1537,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1621,7 +1627,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 24
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -1694,7 +1702,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 24
         retainReaderWindowGraph(window, attaching: pageManager)
@@ -2098,7 +2108,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 2
         window.pageManager = pageManager
@@ -2259,7 +2271,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -2568,7 +2582,11 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let pageManager = try XCTUnwrap(window.pageManager)
         windowManager.setActiveWorkspace(workspace)
         let target = try XCTUnwrap(windowManager.addWindow(from: window))
-        window.pageManager?.bibleBibleBook = 0
+        window.pageManager?.bibleBibleBook = try XCTUnwrap(
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        window.pageManager?.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        window.pageManager?.bibleVersification = "KJV"
         window.pageManager?.bibleChapterNo = 1
         window.pageManager?.bibleVerseNo = 2
         window.isSynchronized = true
@@ -2690,7 +2708,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -3045,7 +3065,9 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 22
         retainReaderWindowGraph(window, attaching: pageManager)

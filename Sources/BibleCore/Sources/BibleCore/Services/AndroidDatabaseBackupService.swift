@@ -1856,14 +1856,15 @@ public final class AndroidDatabaseBackupService {
             }.map { window in
                 let pageManager = window.pageManager
                 let pageFidelity = pageManagerFidelityByWindowID[window.id]
+                let biblePosition = pageManager?.biblePositionForAndroid ?? .androidDefault
                 let androidPageManager = RemoteSyncAndroidWorkspacePageManager(
                     windowID: window.id,
                     bibleDocument: pageManager?.bibleDocument,
-                    bibleVersification: pageManager?.bibleVersification,
-                    bibleBook: pageManager?.bibleBibleBook,
-                    bibleBookEncoding: pageManager?.bibleBookEncoding,
-                    bibleChapterNo: pageManager?.bibleChapterNo,
-                    bibleVerseNo: pageManager?.bibleVerseNo,
+                    bibleVersification: biblePosition.versification,
+                    bibleBook: biblePosition.bookOrdinal,
+                    bibleBookEncoding: PageManager.jswordBibleBookEncoding,
+                    bibleChapterNo: biblePosition.chapter,
+                    bibleVerseNo: biblePosition.verse,
                     commentaryDocument: pageManager?.commentaryDocument,
                     commentaryAnchorOrdinal: pageManager?.commentaryAnchorOrdinal,
                     commentarySourceBookAndKey: pageFidelity?.commentarySourceBookAndKey,

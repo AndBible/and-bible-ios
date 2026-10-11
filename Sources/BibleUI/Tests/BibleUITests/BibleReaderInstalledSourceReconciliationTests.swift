@@ -125,6 +125,7 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
         let window = makeBibleWindow(savedDocument: "KJV")
         controller.activeWindow = window
         controller.restoreSavedPosition()
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 23, verse: 1))
         controller.bridgeDidSetClientReady(bridge)
 
         try FileManager.default.removeItem(
@@ -132,6 +133,8 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
         )
         try removeModuleCache(in: modulePath)
         let boundary = scripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
         controller.reconcileInstalledSources()
         let emissions = try await awaitBridgeEmission(
             from: scripts,
@@ -141,6 +144,14 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
 
         XCTAssertEqual(controller.activeModuleName, "LOCKEDDEFAULT")
         XCTAssertEqual(window.pageManager?.bibleDocument, "LOCKEDDEFAULT")
+        XCTAssertEqual(
+            window.pageManager?.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Ps")
+        )
+        XCTAssertEqual(window.pageManager?.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, 23)
+        XCTAssertEqual(window.pageManager?.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
         XCTAssertNil(controller.activeModule)
         XCTAssertTrue(
             controller.installedModules(for: .bible).contains {
@@ -173,6 +184,7 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
         let window = makeBibleWindow(savedDocument: "KJV")
         controller.activeWindow = window
         controller.restoreSavedPosition()
+        XCTAssertTrue(controller.navigateTo(book: "Psalms", chapter: 23, verse: 1))
         controller.bridgeDidSetClientReady(bridge)
 
         try FileManager.default.removeItem(
@@ -180,6 +192,8 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
         )
         try removeModuleCache(in: modulePath)
         let boundary = scripts().count
+        var persistCount = 0
+        controller.onPersistState = { persistCount += 1 }
         controller.reconcileInstalledSources()
         let emissions = try await awaitBridgeEmission(
             from: scripts,
@@ -189,8 +203,30 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
 
         XCTAssertEqual(controller.activeModuleName, "ZSavedDefault")
         XCTAssertEqual(window.pageManager?.bibleDocument, "ZSavedDefault")
-        XCTAssertTrue(emissions.joined().contains("ZSavedDefault"))
-        XCTAssertTrue(emissions.joined().contains("In the beginning"))
+        XCTAssertEqual(controller.currentBook, "Psalms")
+        XCTAssertEqual(controller.currentChapter, 23)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(
+            window.pageManager?.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Ps")
+        )
+        XCTAssertEqual(window.pageManager?.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, 23)
+        XCTAssertEqual(window.pageManager?.bibleVerseNo, 1)
+        XCTAssertEqual(persistCount, 1)
+        let document = try XCTUnwrap(
+            bridgeEmissionPayload(from: emissions, event: "add_documents") as? [String: Any]
+        )
+        let fragment = try XCTUnwrap(document["osisFragment"] as? [String: Any])
+        let renderedText = try XCTUnwrap(
+            installedSourceReconciliationXMLCharacterText(
+                try XCTUnwrap(fragment["xml"] as? String)
+            )
+        )
+        XCTAssertEqual(document["bookInitials"] as? String, "ZSavedDefault")
+        XCTAssertEqual(document["key"] as? String, "Ps.23")
+        XCTAssertEqual(fragment["osisRef"] as? String, "Ps.23")
+        XCTAssertTrue(renderedText.contains("The Lord is my shepherd"), renderedText)
     }
 
     /**
@@ -413,6 +449,26 @@ final class BibleReaderInstalledSourceReconciliationTests: BibleUISwordFixtureTe
         if FileManager.default.fileExists(atPath: cacheURL.path) {
             try FileManager.default.removeItem(at: cacheURL)
         }
+    }
+}
+
+/** Extracts normalized character data across inline OSIS markup in emitted reader content. */
+private func installedSourceReconciliationXMLCharacterText(_ xml: String) -> String? {
+    let collector = InstalledSourceReconciliationXMLTextCollector()
+    let parser = XMLParser(
+        data: Data("<installed-source-reconciliation-root>\(xml)</installed-source-reconciliation-root>".utf8)
+    )
+    parser.delegate = collector
+    guard parser.parse() else { return nil }
+    return collector.text.split(whereSeparator: \Character.isWhitespace).joined(separator: " ")
+}
+
+/** Test-only XML delegate that preserves text split by SWORD's inline word elements. */
+private final class InstalledSourceReconciliationXMLTextCollector: NSObject, XMLParserDelegate {
+    private(set) var text = ""
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        text += string
     }
 }
 

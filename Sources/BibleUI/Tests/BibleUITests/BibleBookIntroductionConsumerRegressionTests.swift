@@ -348,9 +348,8 @@ final class BibleBookIntroductionConsumerRegressionTests: BibleUISwordFixtureTes
      */
     func testDurableBookIntroductionRestoresExactViewport() async throws {
         let manager = try XCTUnwrap(SwordManager(modulePath: makeTemporarySwordFixturePath()))
-        let module = try XCTUnwrap(manager.module(named: "KJV"))
-        let matthewIndex = try XCTUnwrap(
-            module.getBookList().firstIndex(where: { $0.osisId == "Matt" })
+        let matthewOrdinal = try XCTUnwrap(
+            JSwordBibleBook.ordinal(forOSIS: "Matt")
         )
         let sourceIntroduction = try XCTUnwrap(
             SwordVersification.referenceIndex(
@@ -367,7 +366,9 @@ final class BibleBookIntroductionConsumerRegressionTests: BibleUISwordFixtureTes
         let pageManager = PageManager(id: window.id)
         pageManager.bibleDocument = "KJV"
         pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
-        pageManager.bibleBibleBook = matthewIndex
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleBibleBook = matthewOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
         pageManager.bibleChapterNo = 0
         pageManager.bibleVerseNo = 0
         window.pageManager = pageManager

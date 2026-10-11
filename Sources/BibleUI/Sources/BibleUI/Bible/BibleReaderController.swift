@@ -461,8 +461,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /// State machine for Android-style Bible navigation and visible-position persistence.
     @ObservationIgnored
     private let navigationCoordinator = BibleReaderNavigationCoordinator()
-    /// Keeps rejected persisted Bible fields intact until an accepted explicit navigation replaces them.
-    private var preservesRejectedSavedBibleTuple = false
+    /// Keeps a complete canonical tuple whose source is currently unavailable from passive rewrite.
+    private var preservesUnavailableCanonicalBibleTuple = false
     /// Source-aware link range consumed by the next Bible document setup emission.
     private var pendingLinkNavigationOrdinalRange: [Int]?
 
@@ -3117,7 +3117,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           verse: passage.start.verse,
           context: makeNavigationContext()
         )
-        if accepted { preservesRejectedSavedBibleTuple = false }
+        if accepted { preservesUnavailableCanonicalBibleTuple = false }
       },
       speak: { [self] passages in
         guard let service = speakService else { return false }
@@ -9373,21 +9373,25 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
    - Failure modes: Locked, wrong-category, unreadable, and SWORD-shadowed SQLite selections never
      activate content handles. Missing installed selections resolve the category's Android global
      default, then its first readable BookSet entry. Invalid SQLite dictionary keys are cleared
-     rather than normalized. Unknown book encodings and incomplete or unaddressable Bible tuples
-     leave the prior runtime position and raw persisted fields unchanged. The method is a no-op
-     before `activeWindow` is attached.
+     rather than normalized. Legacy, unknown, and incomplete Bible positions reset to Android's
+     canonical Genesis 1:1 identity without interpreting the old integer. Complete canonical
+     tuples whose versification or coordinate cannot be validated retain their raw location fields
+     and cannot be overwritten by passive scroll telemetry. The method is a no-op before `activeWindow`
+     is attached.
    - Note: Canonicalized fields invoke `onPersistState` once after all restore decisions.
      */
     public func restoreSavedPosition(preparesPersistedMyNotesContent: Bool = true) {
         guard let pm = activeWindow?.pageManager else { return }
-        let savedBibleDocument = pm.bibleDocument
+        let normalizedPersistedBiblePosition =
+            pm.normalizeBibleBookEncodingToJSwordOrdinal()
         let savedBibleVersification = pm.bibleVersification
         let savedBibleBook = pm.bibleBibleBook
         let savedBibleBookEncoding = pm.bibleBookEncoding
         let savedBibleChapter = pm.bibleChapterNo
         let savedBibleVerse = pm.bibleVerseNo
         var normalizedPersistedSelection = false
-        var normalizedPersistedBibleSelection = false
+        var normalizedPersistedBibleDocument = false
+        let normalizedPersistedBibleTuple = normalizedPersistedBiblePosition
         let auxiliaryModuleResolver = installedModuleResolver()
         if let restoreCategory = androidDefaultRestoreCategory(for: pm.currentCategoryName),
            applyAndroidDocumentDefaultPreferences(
@@ -9396,7 +9400,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                resolver: auxiliaryModuleResolver
            ) {
             if restoreCategory == .bible {
-                normalizedPersistedBibleSelection = true
+                normalizedPersistedBibleDocument = true
             } else {
                 normalizedPersistedSelection = true
             }
@@ -9420,7 +9424,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           SwordJavaStringIdentity.equals($0, canonicalSaved)
         }) != true {
           pm.bibleDocument = canonicalSaved
-          normalizedPersistedBibleSelection = true
+          normalizedPersistedBibleDocument = true
         }
             refreshBookList()
             logger.info("Restored saved Bible module: \(saved)")
@@ -9435,7 +9439,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           SwordJavaStringIdentity.equals($0, mod.info.name)
         }) != true {
           pm.bibleDocument = mod.info.name
-          normalizedPersistedBibleSelection = true
+          normalizedPersistedBibleDocument = true
         }
         refreshBookList()
         logger.info("Restored saved SQLite Bible module: \(saved)")
@@ -9710,7 +9714,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             return (chapter >= 0 && savedBibleVerse == 0)
                 || (chapter > 0 && savedBibleVerse > 0)
         } == true
-        let activeBibleOwnsSavedDocument = savedBibleDocument.map {
+        // Android owns the Bible coordinate independently from the selected document. Resolve the
+        // saved coordinate through the readable document selected by normal default/fallback policy.
+        let activeBibleOwnsSelectedDocument = pm.bibleDocument.map {
             SwordJavaStringIdentity.equals($0, activeModuleName)
         } == true
         let restoredReference: SwordVersification.Reference?
@@ -9720,7 +9726,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                 in: .whitespacesAndNewlines
             )
             let activeVersification = activeSourceVersificationName()
-            if activeBibleOwnsSavedDocument,
+            if activeBibleOwnsSelectedDocument,
                let bookOrdinal = savedBibleBook,
                let savedOSISBookID = JSwordBibleBook.osisID(forOrdinal: bookOrdinal),
                let savedBibleChapter,
@@ -9738,37 +9744,6 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                  to: activeVersification
                ) {
                 restoredReference = conversion.reference
-            } else {
-                restoredReference = nil
-            }
-        case nil:
-            if activeBibleOwnsSavedDocument,
-               let bookIndex = savedBibleBook,
-               bookIndex >= 0,
-               bookIndex < bookList.count,
-               let savedBibleChapter,
-               let savedBibleVerse,
-               hasCompleteCoordinate {
-                let legacyReference = SwordVersification.Reference(
-                    osisBookId: bookList[bookIndex].osisId,
-                    chapter: savedBibleChapter,
-                    verse: savedBibleVerse
-                )
-                let savedVersification = savedBibleVersification?.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                )
-                let activeVersification = activeSourceVersificationName()
-                if let savedVersification, !savedVersification.isEmpty {
-                    restoredReference = VersificationMapper.convertStrictly(
-                        osisBookId: legacyReference.osisBookId,
-                        chapter: legacyReference.chapter,
-                        verse: legacyReference.verse,
-                        from: savedVersification,
-                        to: activeVersification
-                    )?.reference
-                } else {
-                    restoredReference = legacyReference
-                }
             } else {
                 restoredReference = nil
             }
@@ -9793,28 +9768,36 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         } else {
             restoredPosition = nil
         }
-        let hasSavedBibleTuple = savedBibleBook != nil
-            || savedBibleChapter != nil
-            || savedBibleVerse != nil
-        preservesRejectedSavedBibleTuple = hasSavedBibleTuple && restoredPosition == nil
-        if preservesRejectedSavedBibleTuple {
-            pm.bibleDocument = savedBibleDocument
+        preservesUnavailableCanonicalBibleTuple = restoredPosition == nil
+        if preservesUnavailableCanonicalBibleTuple {
             pm.bibleVersification = savedBibleVersification
             pm.bibleBibleBook = savedBibleBook
             pm.bibleBookEncoding = savedBibleBookEncoding
             pm.bibleChapterNo = savedBibleChapter
             pm.bibleVerseNo = savedBibleVerse
-            normalizedPersistedBibleSelection = false
         }
         if migratedLegacyEpub
             || normalizedPersistedSelection
-            || normalizedPersistedBibleSelection {
+            || normalizedPersistedBibleDocument
+            || normalizedPersistedBibleTuple {
             onPersistState?()
         }
         if let restoredPosition {
             currentBook = restoredPosition.book
             currentChapter = restoredPosition.chapter
             currentVerse = restoredPosition.verse
+        } else if normalizedPersistedBiblePosition,
+                  let savedBibleBook,
+                  let osisBookID = JSwordBibleBook.osisID(forOrdinal: savedBibleBook),
+                  let bookName = Self.bookName(forOsisId: osisBookID),
+                  let savedBibleChapter,
+                  let savedBibleVerse {
+            // A one-way reset owns the reader's runtime position even when the selected partial
+            // module cannot render Genesis. Content loading will publish no-content for that exact
+            // reset target instead of retaining a prior pane's unrelated runtime coordinate.
+            currentBook = bookName
+            currentChapter = savedBibleChapter
+            currentVerse = savedBibleVerse
         }
         navigationCoordinator.restoreSavedPosition(
             BibleReaderNavigationPosition(
@@ -9944,7 +9927,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     destinationVersification: activeSourceVersificationName()
                   ) else { return false }
             let accepted = admitMyNotesIntent(intent, recordsHistory: true)
-            if accepted { preservesRejectedSavedBibleTuple = false }
+            if accepted { preservesUnavailableCanonicalBibleTuple = false }
             return accepted
         }
         let accepted = navigationCoordinator.navigateTo(
@@ -9954,7 +9937,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             verifiedIntroductionOrdinal: verifiedIntroductionOrdinal,
             context: makeNavigationContext()
         )
-        if accepted { preservesRejectedSavedBibleTuple = false }
+        if accepted { preservesUnavailableCanonicalBibleTuple = false }
         return accepted
     }
 
@@ -10198,8 +10181,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         case .dictionary, .generalBook, .map:
             _ = navigateGenericDocument(forward: true)
         case .bible:
-            preservesRejectedSavedBibleTuple = false
-            navigationCoordinator.navigateNext(context: makeNavigationContext())
+            if navigationCoordinator.navigateNext(context: makeNavigationContext()) {
+                preservesUnavailableCanonicalBibleTuple = false
+            }
         case .commentary, .epub, .dailyDevotion:
             break
         }
@@ -10225,8 +10209,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         case .dictionary, .generalBook, .map:
             _ = navigateGenericDocument(forward: false)
         case .bible:
-            preservesRejectedSavedBibleTuple = false
-            navigationCoordinator.navigatePrevious(context: makeNavigationContext())
+            if navigationCoordinator.navigatePrevious(context: makeNavigationContext()) {
+                preservesUnavailableCanonicalBibleTuple = false
+            }
         case .commentary, .epub, .dailyDevotion:
             break
         }
@@ -10654,7 +10639,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
       _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
       return
     }
-    guard !preservesRejectedSavedBibleTuple else {
+    guard !preservesUnavailableCanonicalBibleTuple else {
       _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
       return
     }
@@ -15800,7 +15785,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     if !accepted {
       pendingLinkNavigationOrdinalRange = nil
     }
-    if accepted { preservesRejectedSavedBibleTuple = false }
+    if accepted { preservesUnavailableCanonicalBibleTuple = false }
     return accepted
   }
 
@@ -16179,7 +16164,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
       pendingLinkNavigationOrdinalRange = nil
       throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
     }
-    preservesRejectedSavedBibleTuple = false
+    preservesUnavailableCanonicalBibleTuple = false
   }
 
   /**

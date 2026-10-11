@@ -610,6 +610,19 @@ struct AndBibleApp: App {
         ).migrate()
     }
 
+    /**
+     Resets ambiguous PageManager Bible positions before readers, journals, or sync can observe them.
+
+     - Parameter context: Context bound to the newly loaded app container.
+     - Side effects: May reset unmarked, unknown-encoding, or incomplete Bible tuples to Android's
+       Genesis 1:1 default and save the context once.
+     - Failure modes: Rethrows SwiftData fetch and save errors so startup cannot publish a partially
+       normalized workspace graph.
+     */
+    private static func migratePageManagerBibleBookEncoding(in context: ModelContext) throws {
+        _ = try PageManagerBibleBookEncodingMigrationService(modelContext: context).migrate()
+    }
+
     init() {
         #if DEBUG
         Self.applyPendingUITestPreferencesIfNeeded()
@@ -654,6 +667,7 @@ struct AndBibleApp: App {
 
             // Initialize services that need ModelContext
             let context = container.mainContext
+            try Self.migratePageManagerBibleBookEncoding(in: context)
             try Self.migratePersistedOrdinalTrust(in: context)
             let workspaceStore = WorkspaceStore(modelContext: context)
             let windowMgr = WindowManager(workspaceStore: workspaceStore)
@@ -942,6 +956,7 @@ struct AndBibleApp: App {
             ? requestedEnabled
             : startupResult.effectiveICloudEnabled
         let context = container.mainContext
+        try Self.migratePageManagerBibleBookEncoding(in: context)
         try Self.migratePersistedOrdinalTrust(in: context)
         let workspaceStore = WorkspaceStore(modelContext: context)
         let windowMgr = WindowManager(workspaceStore: workspaceStore)

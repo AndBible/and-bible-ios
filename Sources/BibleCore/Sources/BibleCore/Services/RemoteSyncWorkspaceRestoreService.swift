@@ -101,10 +101,14 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
     /// Android Bible versification name.
     public let bibleVersification: String?
 
-    /// Android persisted JSword BibleBook ordinal, unless local merge provenance says otherwise.
+    /// Android persisted JSword BibleBook ordinal. Local noncanonical inputs reset before use.
     public let bibleBook: Int?
 
-    /// Local merge provenance only; not an Android Room column or wire-format change.
+    /**
+     Local merge provenance only; not an Android Room column or wire-format change.
+
+     Nil and unknown values cause the complete Bible tuple to reset before materialization.
+     */
     public let bibleBookEncoding: String?
 
     /// Android persisted Bible chapter number.
@@ -161,6 +165,17 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
     /// Raw Android serialized JS state blob.
     public let jsState: String?
 
+    /// Complete JSword position safe to materialize into local persistence.
+    public var biblePositionForAndroid: PageManagerBiblePosition {
+        PageManagerBiblePosition.canonicalOrAndroidDefault(
+            encoding: bibleBookEncoding,
+            versification: bibleVersification,
+            bookOrdinal: bibleBook,
+            chapter: bibleChapterNo,
+            verse: bibleVerseNo
+        )
+    }
+
     /**
      Creates one staged Android workspace page-manager row.
 
@@ -169,8 +184,8 @@ public struct RemoteSyncAndroidWorkspacePageManager: Sendable, Equatable {
        - bibleDocument: Android Bible module initials.
        - bibleVersification: Android Bible versification name.
        - bibleBook: Android persisted JSword BibleBook ordinal.
-       - bibleBookEncoding: Explicit identity encoding; local merges pass through the stored marker
-         (including nil) while Android input uses the canonical default.
+       - bibleBookEncoding: Explicit identity encoding. Android input uses the canonical default;
+         nil and unknown local values reset the complete Bible tuple before materialization.
        - bibleChapterNo: Android persisted Bible chapter number.
        - bibleVerseNo: Android persisted Bible verse number.
        - commentaryDocument: Android commentary module initials.
@@ -881,11 +896,12 @@ public final class RemoteSyncWorkspaceRestoreService {
                     )
                     pageManager.window = window
                     pageManager.bibleDocument = windowSnapshot.pageManager.bibleDocument
-                    pageManager.bibleVersification = windowSnapshot.pageManager.bibleVersification
-                    pageManager.bibleBibleBook = windowSnapshot.pageManager.bibleBook
-                    pageManager.bibleBookEncoding = windowSnapshot.pageManager.bibleBookEncoding
-                    pageManager.bibleChapterNo = windowSnapshot.pageManager.bibleChapterNo
-                    pageManager.bibleVerseNo = windowSnapshot.pageManager.bibleVerseNo
+                    let biblePosition = windowSnapshot.pageManager.biblePositionForAndroid
+                    pageManager.bibleVersification = biblePosition.versification
+                    pageManager.bibleBibleBook = biblePosition.bookOrdinal
+                    pageManager.bibleChapterNo = biblePosition.chapter
+                    pageManager.bibleVerseNo = biblePosition.verse
+                    pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
                     pageManager.commentaryDocument = windowSnapshot.pageManager.commentaryDocument
                     pageManager.commentaryAnchorOrdinal = windowSnapshot.pageManager.commentaryAnchorOrdinal
                     pageManager.dictionaryDocument = windowSnapshot.pageManager.dictionaryDocument

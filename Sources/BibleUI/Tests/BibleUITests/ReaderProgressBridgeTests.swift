@@ -462,7 +462,10 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
         controller.settingsStore = settingsStore
         let window = Window()
         let pageManager = PageManager(id: window.id)
-        pageManager.bibleBibleBook = 0
+        let genesisBookOrdinal = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBibleBook = genesisBookOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         window.pageManager = pageManager
@@ -516,7 +519,7 @@ final class ReaderProgressBridgeTests: BibleUISwordFixtureTestCase {
             atChapterTop: false
         )
         XCTAssertEqual(controller.currentVerse, 1)
-        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, genesisBookOrdinal)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 1)
         XCTAssertEqual(pageManager.commentaryAnchorOrdinal, ordinal)

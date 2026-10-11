@@ -63,6 +63,8 @@ private enum FixtureScenario: String, CaseIterable {
     case documentSwitchCustomTheme = "document-switch-custom-theme"
     case documentSwitchCustomNightTheme = "document-switch-custom-night-theme"
     case documentNavigationWestminsterSplit = "document-navigation-westminster-split"
+    case documentNavigationWestminsterLegacyBiblePosition =
+        "document-navigation-westminster-legacy-bible-position"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkNavigationThreeWindows = "bookmark-navigation-three-windows"
     case bookmarkMultiRow = "bookmark-multirow"
@@ -545,7 +547,15 @@ private final class FixtureContext {
             seedScopedThemeColorSettings(baseline: baseline)
             seedReaderNightMode()
         case .documentNavigationWestminsterSplit:
-            try seedWestminsterDocumentNavigation(baseline: baseline)
+            try seedWestminsterDocumentNavigation(
+                baseline: baseline,
+                biblePosition: .canonicalGenesisThree
+            )
+        case .documentNavigationWestminsterLegacyBiblePosition:
+            try seedWestminsterDocumentNavigation(
+                baseline: baseline,
+                biblePosition: .legacyUnmarkedPsalm119Index
+            )
         case .bookmarkNavigation:
             try seedBookmarkNavigation()
         case .bookmarkNavigationThreeWindows:
@@ -1815,20 +1825,35 @@ private final class FixtureContext {
         try removeCachedSwordModuleConfig(in: destinationModsDURL)
     }
 
+    /** Bible-position shape paired with the pinned Westminster fixture. */
+    private enum WestminsterBiblePosition {
+        /// Production-shaped Android identity used by the ordinary split-navigation journey.
+        case canonicalGenesisThree
+
+        /// Pre-marker iOS module-list index that startup must reset without reinterpretation.
+        case legacyUnmarkedPsalm119Index
+    }
+
     /**
-     Installs Westminster21 and seeds the reported pinned general-book/Bible split reader.
+     Installs Westminster21 and seeds a pinned general-book/Bible split reader.
 
      The real CrossWire RawGenBook keeps spaces in its leaf keys. Exact-key validation prevents a
      synthetic `Ch6` spelling or libsword nearest-key snapping from making the fixture appear valid.
 
-     - Parameter baseline: Baseline KJV workspace graph returned by `ensureBaseline()`.
+     - Parameters:
+       - baseline: Baseline KJV workspace graph returned by `ensureBaseline()`.
+       - biblePosition: Canonical Genesis 3 state for the reader journey, or the exact unmarked
+         module-list tuple used to verify the one-way breaking migration.
      - Side effects: Copies Westminster21 into the simulator SWORD root, configures pane zero at
-       `/Westminster21/Westminster21/WCF/Ch 6`, adds pane one at KJV Genesis 3:1, pins both panes,
-       and persists the workspace graph.
+       `/Westminster21/Westminster21/WCF/Ch 6`, adds and pins a KJV pane, writes the requested Bible
+       position shape, and persists the workspace graph.
      - Failure modes: Throws when the retained module is incomplete, either exact chapter key is
        unavailable, or SwiftData cannot save the seeded graph.
      */
-    private func seedWestminsterDocumentNavigation(baseline: BaselineState) throws {
+    private func seedWestminsterDocumentNavigation(
+        baseline: BaselineState,
+        biblePosition: WestminsterBiblePosition
+    ) throws {
         let chapterSixKey = "/Westminster21/Westminster21/WCF/Ch 6"
         let chapterSevenKey = "/Westminster21/Westminster21/WCF/Ch 7"
         let swordURL = try installWestminsterFixtureModule()
@@ -1885,11 +1910,20 @@ private final class FixtureContext {
         }
         biblePageManager.currentCategoryName = "bible"
         biblePageManager.bibleDocument = "KJV"
-        biblePageManager.bibleVersification = "KJVA"
-        biblePageManager.bibleBibleBook = 2
-        biblePageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
-        biblePageManager.bibleChapterNo = 3
-        biblePageManager.bibleVerseNo = 1
+        switch biblePosition {
+        case .canonicalGenesisThree:
+            biblePageManager.bibleVersification = "KJVA"
+            biblePageManager.bibleBibleBook = 2
+            biblePageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+            biblePageManager.bibleChapterNo = 3
+            biblePageManager.bibleVerseNo = 1
+        case .legacyUnmarkedPsalm119Index:
+            biblePageManager.bibleVersification = "KJVA"
+            biblePageManager.bibleBibleBook = 17
+            biblePageManager.bibleBookEncoding = nil
+            biblePageManager.bibleChapterNo = 119
+            biblePageManager.bibleVerseNo = 1
+        }
 
         try modelContext.save()
     }

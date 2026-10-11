@@ -31,7 +31,9 @@ final class BibleReaderChapterHistoryParityTests: XCTestCase {
         let workspace = workspaceStore.createWorkspace(name: "Issue 421 navigation")
         let pageManager = try XCTUnwrap(workspace.windows?.first?.pageManager)
         pageManager.bibleDocument = "KJV"
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = JSwordKJVAVersification.name
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
         let books = [

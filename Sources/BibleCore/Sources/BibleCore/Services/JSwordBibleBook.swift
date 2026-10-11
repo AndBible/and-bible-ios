@@ -58,7 +58,118 @@ public enum JSwordBibleBook {
     }
 }
 
+/**
+ One complete Android-compatible Bible position stored by a `PageManager`.
+
+ The default mirrors Android's `CurrentBibleVerse`: JSword's default KJV versification at
+ Genesis 1:1. Keeping the four coordinates in one value prevents callers from combining part of a
+ legacy tuple with part of the Android default.
+ */
+public struct PageManagerBiblePosition: Sendable, Equatable {
+    /// JSword's current default versification name (`SystemKJV.V11N_NAME`).
+    public static let androidDefaultVersification = "KJV"
+
+    /// Complete initial position used by Android's `CurrentBibleVerse`.
+    public static let androidDefault = PageManagerBiblePosition(
+        versification: androidDefaultVersification,
+        bookOrdinal: 2,
+        chapter: 1,
+        verse: 1
+    )
+
+    /// JSword versification that owns the coordinate tuple.
+    public let versification: String
+
+    /// Stable JSword `BibleBook.ordinal()` value.
+    public let bookOrdinal: Int
+
+    /// One-based chapter number, including JSword's supported introduction zero when explicit.
+    public let chapter: Int
+
+    /// One-based verse number, including JSword's supported introduction zero when explicit.
+    public let verse: Int
+
+    /** Creates one complete persisted Bible position without validating its source versification. */
+    public init(versification: String, bookOrdinal: Int, chapter: Int, verse: Int) {
+        self.versification = versification
+        self.bookOrdinal = bookOrdinal
+        self.chapter = chapter
+        self.verse = verse
+    }
+
+    /**
+     Projects persisted fields into one complete Android position.
+
+     - Returns: The stored tuple only when its encoding is canonical and every coordinate exists;
+       otherwise Android's complete Genesis 1:1 default.
+     - Side Effects: None.
+     - Failure Modes: Unknown versification names on explicitly canonical tuples are retained for
+       the source-aware reader to validate; this boundary does not relabel or convert them.
+     */
+    public static func canonicalOrAndroidDefault(
+        encoding: String?,
+        versification: String?,
+        bookOrdinal: Int?,
+        chapter: Int?,
+        verse: Int?
+    ) -> PageManagerBiblePosition {
+        guard encoding == PageManager.jswordBibleBookEncoding,
+              let versification,
+              let bookOrdinal,
+              let chapter,
+              let verse else {
+            return .androidDefault
+        }
+        return PageManagerBiblePosition(
+            versification: versification,
+            bookOrdinal: bookOrdinal,
+            chapter: chapter,
+            verse: verse
+        )
+    }
+}
+
 public extension PageManager {
+    /// Complete position safe to restore or export using Android's JSword identity contract.
+    var biblePositionForAndroid: PageManagerBiblePosition {
+        PageManagerBiblePosition.canonicalOrAndroidDefault(
+            encoding: bibleBookEncoding,
+            versification: bibleVersification,
+            bookOrdinal: bibleBibleBook,
+            chapter: bibleChapterNo,
+            verse: bibleVerseNo
+        )
+    }
+
+    /**
+     Replaces an unmarked, unknown-encoding, or incomplete position with Android's complete default.
+
+     - Returns: `true` when the persisted tuple changed.
+     - Side Effects: Resets only Bible versification/book/chapter/verse and publishes the canonical
+       marker last. The selected Bible document and every auxiliary category remain unchanged.
+     - Failure Modes: None. An explicitly canonical, complete tuple is retained without validating
+       or converting its versification metadata.
+     */
+    @discardableResult
+    func normalizeBibleBookEncodingToJSwordOrdinal() -> Bool {
+        if bibleBookEncoding == Self.jswordBibleBookEncoding,
+           bibleVersification != nil,
+           bibleBibleBook != nil,
+           bibleChapterNo != nil,
+           bibleVerseNo != nil {
+            return false
+        }
+
+        let reset = PageManagerBiblePosition.androidDefault
+        bibleBookEncoding = nil
+        bibleVersification = reset.versification
+        bibleBibleBook = reset.bookOrdinal
+        bibleChapterNo = reset.chapter
+        bibleVerseNo = reset.verse
+        bibleBookEncoding = Self.jswordBibleBookEncoding
+        return true
+    }
+
     /**
      Resolves the persisted Bible book only when its identity encoding is canonical.
 

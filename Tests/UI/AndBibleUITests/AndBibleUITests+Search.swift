@@ -2989,17 +2989,19 @@ extension AndBibleUITests {
     }
 
     /**
-     Verifies a native Psalm 119 selection survives relaunch beside the pinned Westminster pane.
+     Verifies one-way legacy reset followed by native Psalm 119 persistence beside Westminster.
 
-     This journey creates the Psalm location through the production KJV passage chooser instead of
-     pre-seeding a book integer. Relaunch then exercises the persisted identity contract: the first
-     pane must still resolve the exact Westminster chapter 6 TreeKey, and the second must resolve
-     Psalms 119 in KJV rather than reinterpret the saved book as another module-list position.
+     The fixture seeds the old unmarked KJV module-list integer 17 with chapter 119. Startup must
+     replace that complete ambiguous tuple with Android's canonical Genesis 1:1 default instead of
+     relabeling the integer as a JSword ordinal. The journey then creates Psalm 119 through the
+     production chooser. Relaunch must retain both that new canonical position and Westminster's
+     exact chapter 6 TreeKey.
 
-     - Side effects: Navigates the lower Bible pane to Psalm 119, terminates the app, relaunches the
-       same prepared data container, and focuses both restored panes.
-     - Failure modes: Fails if native selection cannot reach Psalm 119, relaunch loses either pinned
-       document identity, or the persisted Bible location resolves to a different book.
+     - Side effects: Launches a legacy PageManager fixture, observes its startup migration, navigates
+       the lower Bible pane to Psalm 119, terminates the app, relaunches the same prepared data
+       container, and focuses both restored panes.
+     - Failure modes: Fails if startup reinterprets the old integer, native selection cannot reach
+       Psalm 119, or relaunch loses either pinned document identity.
      */
     func testPsalm119NativeNavigationRelaunchPreservesSplitDocumentIdentity() {
         let app = makeApp()
@@ -3013,13 +3015,13 @@ extension AndBibleUITests {
 
         focusVisibleReaderPane(1, in: app, timeout: 20)
         waitForReaderRenderedContentState(
-            containing: "category=bible;module=KJV;book=Genesis;chapter=3",
+            containing: "category=bible;module=KJV;book=Genesis;chapter=1",
             in: app,
             timeout: 20
         )
         waitForElementValue(
             "bookChooserButton",
-            toEqual: "Genesis 3:1, \(kjvDescription)",
+            toEqual: "Genesis 1:1, \(kjvDescription)",
             in: app,
             timeout: 20
         )

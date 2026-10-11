@@ -127,12 +127,13 @@ final class BibleReaderPersistedBibleReferenceTests: XCTestCase {
 
     /** Legacy, unknown, and invalid identity domains stay unlabeled without a live source owner. */
     @MainActor
-    func testDetachedReferencesFailClosedWithoutCanonicalBookEncoding() {
+    func testDetachedReferencesFailClosedWithoutCanonicalBookEncoding() throws {
         let pageManager = PageManager()
         pageManager.currentCategoryName = DocumentCategory.bible.pageManagerKey
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = nil
         pageManager.bibleVersification = JSwordKJVAVersification.name
-        pageManager.bibleChapterNo = 119
+        pageManager.bibleChapterNo = 3
         pageManager.bibleVerseNo = 1
         let window = BibleCore.Window()
         window.pageManager = pageManager
@@ -142,6 +143,13 @@ final class BibleReaderPersistedBibleReferenceTests: XCTestCase {
         XCTAssertNil(
             BibleWindowPaneMenuSnapshotFactory.referenceName(for: window, controller: nil)
         )
+
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        XCTAssertEqual(
+            BibleReaderPersistedBibleReference(pageManager: pageManager)?.localizedVerseName,
+            "Genesis 3:1"
+        )
+        XCTAssertEqual(WindowTabBar.detachedShortReference(for: window), "Gen 3")
 
         pageManager.bibleBookEncoding = "futureEncoding"
         XCTAssertNil(BibleReaderPersistedBibleReference(pageManager: pageManager))

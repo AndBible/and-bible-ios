@@ -26,7 +26,11 @@ final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(bridge: bridge, initializesSword: false)
         let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
-        window.pageManager?.bibleBibleBook = 0
+        window.pageManager?.bibleBibleBook = try XCTUnwrap(
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        window.pageManager?.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        window.pageManager?.bibleVersification = "KJV"
         window.pageManager?.bibleChapterNo = 9
         window.pageManager?.bibleVerseNo = 1
         retainReaderWindowGraph(window)

@@ -38,7 +38,12 @@ SWORD_MODULE_PAYLOAD_FAMILIES = frozenset(
 CALVIN_SCENARIOS = frozenset(
     {"calvin-commentary-performance", "calvin-commentary-scroll-restoration"}
 )
-WESTMINSTER_SCENARIOS = frozenset({"document-navigation-westminster-split"})
+WESTMINSTER_SCENARIOS = frozenset(
+    {
+        "document-navigation-westminster-split",
+        "document-navigation-westminster-legacy-bible-position",
+    }
+)
 WESTMINSTER_ARCHIVE_URL = (
     "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/Westminster21.zip"
 )
