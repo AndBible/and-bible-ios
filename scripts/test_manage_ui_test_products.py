@@ -23,6 +23,7 @@ from manage_ui_test_products import (
     ToolchainProvenance,
     _resolve_xctestrun_product_path,
     _write_github_output,
+    add_westminster_fixture,
     current_toolchain_provenance,
     compose_sword_fixture,
     inventory_payload,
@@ -30,6 +31,8 @@ from manage_ui_test_products import (
     strip_runner_local_ui_test_environment,
     validate_calvin_fixture,
     validate_baseline_fixture_excludes_calvin,
+    validate_baseline_fixture_excludes_westminster,
+    validate_westminster_fixture,
     verify_products,
 )
 
@@ -48,6 +51,12 @@ class ManageUITestProductsTests(unittest.TestCase):
         repository_root = Path(__file__).resolve().parents[1]
         validate_calvin_fixture(
             repository_root / "Tests/UI/Fixtures/calvin-sword"
+        )
+
+    def test_checked_in_westminster_fixture_matches_reviewed_provenance(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        validate_westminster_fixture(
+            repository_root / "Tests/UI/Fixtures/westminster-sword"
         )
 
     def test_shared_sword_fixture_retains_exact_pre_calvin_baseline(self) -> None:
@@ -77,6 +86,37 @@ class ManageUITestProductsTests(unittest.TestCase):
             expected,
         )
         validate_baseline_fixture_excludes_calvin(baseline)
+        validate_baseline_fixture_excludes_westminster(baseline)
+
+    def test_ui_product_composition_adds_westminster_without_mutating_sources(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        baseline = repository_root / "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword"
+        westminster = repository_root / "Tests/UI/Fixtures/westminster-sword"
+        baseline_before = {
+            path.relative_to(baseline).as_posix(): path.read_bytes()
+            for path in baseline.rglob("*") if path.is_file()
+        }
+        westminster_before = {
+            path.relative_to(westminster).as_posix(): path.read_bytes()
+            for path in westminster.rglob("*") if path.is_file()
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            destination = Path(temporary_directory) / "composite"
+            shutil.copytree(baseline, destination)
+            add_westminster_fixture(westminster, destination)
+            validate_westminster_fixture(destination)
+            self.assertTrue((destination / "mods.d/kjv.conf").is_file())
+            self.assertFalse((baseline / "mods.d/westminster21.conf").exists())
+        self.assertEqual(
+            {path.relative_to(baseline).as_posix(): path.read_bytes()
+             for path in baseline.rglob("*") if path.is_file()},
+            baseline_before,
+        )
+        self.assertEqual(
+            {path.relative_to(westminster).as_posix(): path.read_bytes()
+             for path in westminster.rglob("*") if path.is_file()},
+            westminster_before,
+        )
 
     def test_ui_product_composition_adds_reviewed_calvin_to_baseline_copy(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
@@ -211,6 +251,78 @@ class ManageUITestProductsTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ProductArchiveError, "Calvin fixture"):
+                package_products(
+                    products_path=products,
+                    fixture_tool=fixture,
+                    fixture_manifest=fixture_manifest,
+                    sword_fixture=sword_fixture,
+                    output_path=root / "archive.tar.gz",
+                    commit_sha="abc123",
+                    configuration="Debug",
+                    code_signing_allowed="NO",
+                    provenance=PROVENANCE,
+                    architecture_reader=self.fake_architectures,
+                )
+
+    def test_westminster_ui_product_round_trip_restores_composed_fixture(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        westminster = repository_root / "Tests/UI/Fixtures/westminster-sword"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+            shutil.copytree(westminster, fixture_manifest.parent / "westminster-sword")
+            fixture_manifest.write_text(
+                json.dumps(
+                    {
+                        "AndBibleUITests/testWestminster":
+                            "document-navigation-westminster-split"
+                    }
+                ),
+                encoding="utf-8",
+            )
+            archive = root / "ui-test-products.tar.gz"
+            package_products(
+                products_path=products,
+                fixture_tool=fixture,
+                fixture_manifest=fixture_manifest,
+                sword_fixture=sword_fixture,
+                output_path=archive,
+                commit_sha="abc123",
+                configuration="Debug",
+                code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+            destination = root / "restored"
+            destination.mkdir()
+            verify_products(
+                archive_path=archive,
+                destination=destination,
+                expected_commit_sha="abc123",
+                expected_configuration="Debug",
+                expected_code_signing_allowed="NO",
+                provenance=PROVENANCE,
+                architecture_reader=self.fake_architectures,
+            )
+            restored = destination / ".ui-test/fixtures/sword"
+            validate_westminster_fixture(restored)
+            self.assertTrue((restored / "mods.d/kjv.conf").is_file())
+
+    def test_westminster_manifest_requires_adjacent_reviewed_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            products, fixture, fixture_manifest, sword_fixture = self.make_products(root)
+            fixture_manifest.write_text(
+                json.dumps(
+                    {
+                        "AndBibleUITests/testWestminster":
+                            "document-navigation-westminster-split"
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ProductArchiveError, "Westminster21 fixture"):
                 package_products(
                     products_path=products,
                     fixture_tool=fixture,

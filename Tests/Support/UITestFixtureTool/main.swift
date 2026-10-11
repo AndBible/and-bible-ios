@@ -62,6 +62,7 @@ private enum FixtureScenario: String, CaseIterable {
     case searchMultiTranslation = "search-multi-translation"
     case documentSwitchCustomTheme = "document-switch-custom-theme"
     case documentSwitchCustomNightTheme = "document-switch-custom-night-theme"
+    case documentNavigationWestminsterSplit = "document-navigation-westminster-split"
     case bookmarkNavigation = "bookmark-navigation"
     case bookmarkNavigationThreeWindows = "bookmark-navigation-three-windows"
     case bookmarkMultiRow = "bookmark-multirow"
@@ -543,6 +544,8 @@ private final class FixtureContext {
             seedCustomColorSettings()
             seedScopedThemeColorSettings(baseline: baseline)
             seedReaderNightMode()
+        case .documentNavigationWestminsterSplit:
+            try seedWestminsterDocumentNavigation(baseline: baseline)
         case .bookmarkNavigation:
             try seedBookmarkNavigation()
         case .bookmarkNavigationThreeWindows:
@@ -1812,6 +1815,155 @@ private final class FixtureContext {
         try removeCachedSwordModuleConfig(in: destinationModsDURL)
     }
 
+    /**
+     Installs Westminster21 and seeds the reported pinned general-book/Bible split reader.
+
+     The real CrossWire RawGenBook keeps spaces in its leaf keys. Exact-key validation prevents a
+     synthetic `Ch6` spelling or libsword nearest-key snapping from making the fixture appear valid.
+
+     - Parameter baseline: Baseline KJV workspace graph returned by `ensureBaseline()`.
+     - Side effects: Copies Westminster21 into the simulator SWORD root, configures pane zero at
+       `/Westminster21/Westminster21/WCF/Ch 6`, adds pane one at KJV Genesis 3:1, pins both panes,
+       and persists the workspace graph.
+     - Failure modes: Throws when the retained module is incomplete, either exact chapter key is
+       unavailable, or SwiftData cannot save the seeded graph.
+     */
+    private func seedWestminsterDocumentNavigation(baseline: BaselineState) throws {
+        let chapterSixKey = "/Westminster21/Westminster21/WCF/Ch 6"
+        let chapterSevenKey = "/Westminster21/Westminster21/WCF/Ch 7"
+        let swordURL = try installWestminsterFixtureModule()
+        guard let manager = SwordManager(modulePath: swordURL.path),
+              let module = manager.module(named: "Westminster21"),
+              try module.containsExactKey(chapterSixKey),
+              try module.containsExactKey(chapterSevenKey) else {
+            throw FixtureToolError.usage(
+                "Westminster21 fixture is missing exact WCF chapter keys with retained spaces."
+            )
+        }
+
+        var windows = workspaceStore.windows(workspaceId: baseline.workspace.id).sorted {
+            if $0.orderNumber != $1.orderNumber {
+                return $0.orderNumber < $1.orderNumber
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        while windows.count < 2 {
+            windows.append(
+                workspaceStore.addWindow(
+                    to: baseline.workspace,
+                    document: "KJV",
+                    category: "bible"
+                )
+            )
+        }
+
+        for (order, window) in windows.enumerated() {
+            window.orderNumber = order
+            window.isPinMode = true
+            window.isSynchronized = false
+            window.isLinksWindow = false
+            window.layoutWeight = 1.0
+            window.layoutState = order < 2 ? "split" : "minimized"
+        }
+
+        let westminsterWindow = windows[0]
+        let westminsterPageManager = westminsterWindow.pageManager ?? baseline.pageManager
+        westminsterPageManager.window = westminsterWindow
+        westminsterPageManager.currentCategoryName = "general_book"
+        westminsterPageManager.generalBookDocument = "Westminster21"
+        westminsterPageManager.generalBookKey = chapterSixKey
+
+        let bibleWindow = windows[1]
+        let biblePageManager: PageManager
+        if let existingPageManager = bibleWindow.pageManager {
+            biblePageManager = existingPageManager
+        } else {
+            let createdPageManager = PageManager(id: bibleWindow.id, currentCategoryName: "bible")
+            createdPageManager.window = bibleWindow
+            modelContext.insert(createdPageManager)
+            biblePageManager = createdPageManager
+        }
+        biblePageManager.currentCategoryName = "bible"
+        biblePageManager.bibleDocument = "KJV"
+        biblePageManager.bibleVersification = "KJVA"
+        biblePageManager.bibleBibleBook = 2
+        biblePageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        biblePageManager.bibleChapterNo = 3
+        biblePageManager.bibleVerseNo = 1
+
+        try modelContext.save()
+    }
+
+    /** Installs the retained Westminster21 fixture without modifying the shared KJV source tree. */
+    private func installWestminsterFixtureModule() throws -> URL {
+        let sourceSwordURL = try westminsterFixtureResourceURL()
+        let destinationSwordURL = paths.documentsURL.appendingPathComponent("sword", isDirectory: true)
+        let sourceConfigurationURL = sourceSwordURL
+            .appendingPathComponent("mods.d", isDirectory: true)
+            .appendingPathComponent("westminster21.conf", isDirectory: false)
+        let sourceDataURL = sourceSwordURL
+            .appendingPathComponent("modules/genbook/rawgenbook/westminster21", isDirectory: true)
+        let destinationModsDURL = destinationSwordURL.appendingPathComponent("mods.d", isDirectory: true)
+        let destinationConfigurationURL = destinationModsDURL
+            .appendingPathComponent("westminster21.conf", isDirectory: false)
+        let destinationDataURL = destinationSwordURL
+            .appendingPathComponent("modules/genbook/rawgenbook/westminster21", isDirectory: true)
+
+        guard fileManager.fileExists(atPath: sourceConfigurationURL.path),
+              fileManager.fileExists(atPath: sourceDataURL.path) else {
+            throw FixtureToolError.missingSwordFixtureResources(sourceSwordURL.path)
+        }
+        try fileManager.createDirectory(at: destinationModsDURL, withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: destinationConfigurationURL.path) {
+            try fileManager.removeItem(at: destinationConfigurationURL)
+        }
+        try fileManager.copyItem(at: sourceConfigurationURL, to: destinationConfigurationURL)
+        try copyDirectoryContents(from: sourceDataURL, to: destinationDataURL, replacingExisting: true)
+        try removeCachedSwordModuleConfig(in: destinationModsDURL)
+        return destinationSwordURL
+    }
+
+    /** Resolves Westminster21 from a composed product fixture or the dedicated source fixture. */
+    private func westminsterFixtureResourceURL() throws -> URL {
+        if let explicitSwordFixtureURL {
+            let explicitConfiguration = explicitSwordFixtureURL
+                .appendingPathComponent("mods.d", isDirectory: true)
+                .appendingPathComponent("westminster21.conf", isDirectory: false)
+            if fileManager.fileExists(atPath: explicitConfiguration.path) {
+                return explicitSwordFixtureURL
+            }
+        }
+
+        var candidateRootURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        while candidateRootURL.path != candidateRootURL.deletingLastPathComponent().path {
+            let dedicatedFixtureURL = candidateRootURL
+                .appendingPathComponent("Tests/UI/Fixtures/westminster-sword", isDirectory: true)
+            let configurationURL = dedicatedFixtureURL
+                .appendingPathComponent("mods.d/westminster21.conf", isDirectory: false)
+            if fileManager.fileExists(atPath: configurationURL.path) {
+                if let explicitSwordFixtureURL {
+                    let localBaselineFixtureURL = candidateRootURL
+                        .appendingPathComponent(
+                            "Sources/BibleUI/Tests/BibleUITests/Fixtures/sword",
+                            isDirectory: true
+                        )
+                        .standardizedFileURL
+                    guard explicitSwordFixtureURL.standardizedFileURL == localBaselineFixtureURL else {
+                        throw FixtureToolError.missingSwordFixtureResources(
+                            explicitSwordFixtureURL.path
+                        )
+                    }
+                }
+                return dedicatedFixtureURL
+            }
+            candidateRootURL.deleteLastPathComponent()
+        }
+
+        throw FixtureToolError.missingSwordFixtureResources(
+            explicitSwordFixtureURL?.path ?? "Tests/UI/Fixtures/westminster-sword"
+        )
+    }
+
     /// Removes SWORD's module cache so newly seeded UI-test modules are discovered on app launch.
     private func removeCachedSwordModuleConfig(in modsDURL: URL) throws {
         let cacheURL = modsDURL.appendingPathComponent("modules-conf.cache", isDirectory: false)
@@ -1986,7 +2138,8 @@ private final class FixtureContext {
         pageManager.currentCategoryName = "bible"
         pageManager.bibleDocument = pageManager.bibleDocument ?? "KJV"
         pageManager.bibleVersification = pageManager.bibleVersification ?? "KJVA"
-        pageManager.bibleBibleBook = 0
+        pageManager.bibleBibleBook = 2
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
         pageManager.bibleChapterNo = 1
         pageManager.bibleVerseNo = 1
 
@@ -2055,7 +2208,8 @@ private final class FixtureContext {
             pageManager.currentCategoryName = "bible"
             pageManager.bibleDocument = pageManager.bibleDocument ?? baseline.pageManager.bibleDocument ?? "KJV"
             pageManager.bibleVersification = pageManager.bibleVersification ?? "KJVA"
-            pageManager.bibleBibleBook = 0
+            pageManager.bibleBibleBook = 2
+            pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
             pageManager.bibleChapterNo = 1
             pageManager.bibleVerseNo = 1
         }

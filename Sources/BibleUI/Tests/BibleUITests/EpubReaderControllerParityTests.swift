@@ -16,6 +16,45 @@ import XCTest
  */
 @MainActor
 final class EpubReaderControllerParityTests: BibleUISwordFixtureTestCase {
+    /** The final EPUB page cannot borrow next navigation from the pane's hidden Bible state. */
+    func testLastEpubPageDisablesNextWithoutBibleFallback() async throws {
+        let archiveURL = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent()) }
+        let identifier = try installDefaultLibraryEpubFixture(epubURL: archiveURL)
+        defer { try? EpubReader.delete(identifier: identifier) }
+        let reader = try XCTUnwrap(EpubReader(identifier: identifier))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, initializesSword: false)
+        let window = makeWindow(category: DocumentCategory.bible.pageManagerKey)
+        window.pageManager?.bibleBibleBook = 0
+        window.pageManager?.bibleChapterNo = 9
+        window.pageManager?.bibleVerseNo = 1
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        controller.bridgeDidSetClientReady(bridge)
+        controller.switchEpub(identifier: identifier)
+
+        let boundary = scripts().count
+        controller.loadEpubEntry(key: "2")
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        XCTAssertEqual(controller.activeEpubIdentifier, identifier)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertTrue(controller.hasPrevious)
+        XCTAssertFalse(controller.hasNext)
+        let navigationBoundary = scripts().count
+        controller.navigateNext()
+        XCTAssertEqual(scripts().count, navigationBoundary)
+        XCTAssertEqual(controller.currentGeneralBookKey, "2")
+        XCTAssertEqual(window.pageManager?.generalBookDocument, reader.initials)
+        XCTAssertEqual(window.pageManager?.generalBookKey, "2")
+        XCTAssertEqual(window.pageManager?.bibleChapterNo, 9)
+    }
+
     /**
      Preserves Android startup admission when an EPUB and My Documents row share one initials token.
 

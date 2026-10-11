@@ -461,6 +461,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /// State machine for Android-style Bible navigation and visible-position persistence.
     @ObservationIgnored
     private let navigationCoordinator = BibleReaderNavigationCoordinator()
+    /// Keeps rejected persisted Bible fields intact until an accepted explicit navigation replaces them.
+    private var preservesRejectedSavedBibleTuple = false
     /// Source-aware link range consumed by the next Bible document setup emission.
     private var pendingLinkNavigationOrdinalRange: [Int]?
 
@@ -507,6 +509,154 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     private(set) var activeMapModule: SwordModule?
     private(set) var activeMapModuleName: String?
     private(set) var currentMapKey: String?
+
+    /// Exact identity semantics used by one auxiliary source's durable keys.
+    private enum GenericNavigationKeyIdentity: Equatable, Sendable {
+        case javaUTF16
+        case sqliteUTF8
+    }
+
+    /// Active backend/key owner captured before adjacent-key enumeration leaves the main actor.
+    private struct GenericNavigationOwner: Sendable {
+        let category: DocumentCategory
+        let moduleName: String
+        let key: String
+        let sourceID: ObjectIdentifier
+        let keyIdentity: GenericNavigationKeyIdentity
+
+        /** Returns true only for the same backend object and exact source identities. */
+        func matches(_ other: GenericNavigationOwner) -> Bool {
+            guard category == other.category,
+                  sourceID == other.sourceID,
+                  keyIdentity == other.keyIdentity,
+                  SwordJavaExactStringIdentity(moduleName)
+                    == SwordJavaExactStringIdentity(other.moduleName) else {
+                return false
+            }
+            switch keyIdentity {
+            case .javaUTF16:
+                return SwordJavaExactStringIdentity(key) == SwordJavaExactStringIdentity(other.key)
+            case .sqliteUTF8:
+                return key.utf8.elementsEqual(other.key.utf8)
+            }
+        }
+
+        /** Returns true for another key owned by this exact backend source. */
+        func matchesSource(of other: GenericNavigationOwner) -> Bool {
+            category == other.category
+                && sourceID == other.sourceID
+                && keyIdentity == other.keyIdentity
+                && SwordJavaExactStringIdentity(moduleName)
+                    == SwordJavaExactStringIdentity(other.moduleName)
+        }
+    }
+
+    /// Exact lookup index built once for one auxiliary backend's immutable source-order keys.
+    private enum GenericNavigationKeyIndex: Sendable {
+        case javaUTF16([SwordJavaExactStringIdentity: Int])
+        case sqliteUTF8([Data: Int])
+
+        /** Returns the first source-order position matching the active backend's exact identity. */
+        func position(for owner: GenericNavigationOwner) -> Int? {
+            switch self {
+            case .javaUTF16(let positions):
+                return positions[SwordJavaExactStringIdentity(owner.key)]
+            case .sqliteUTF8(let positions):
+                return positions[Data(owner.key.utf8)]
+            }
+        }
+    }
+
+    /** One current backend's source-order keys and constant-time exact-key index. */
+    private struct GenericNavigationKeySnapshot: Sendable {
+        let owner: GenericNavigationOwner
+        let keys: [String]
+        let index: GenericNavigationKeyIndex
+
+        /** Builds the immutable adjacency snapshot away from the UI executor. */
+        init(owner: GenericNavigationOwner, sourceKeys: [String]) {
+            self.owner = owner
+            keys = sourceKeys.contains(where: { $0.isEmpty })
+                ? sourceKeys.filter { !$0.isEmpty }
+                : sourceKeys
+
+            switch owner.keyIdentity {
+            case .javaUTF16:
+                var positions: [SwordJavaExactStringIdentity: Int] = [:]
+                positions.reserveCapacity(keys.count)
+                for (position, key) in keys.enumerated() {
+                    let identity = SwordJavaExactStringIdentity(key)
+                    if positions[identity] == nil {
+                        positions[identity] = position
+                    }
+                }
+                index = .javaUTF16(positions)
+            case .sqliteUTF8:
+                var positions: [Data: Int] = [:]
+                positions.reserveCapacity(keys.count)
+                for (position, key) in keys.enumerated() {
+                    let identity = Data(key.utf8)
+                    if positions[identity] == nil {
+                        positions[identity] = position
+                    }
+                }
+                index = .sqliteUTF8(positions)
+            }
+        }
+
+        /** Resolves adjacent keys only for the same backend object and exact active key. */
+        func availability(for currentOwner: GenericNavigationOwner) -> GenericNavigationAvailability {
+            guard owner.matchesSource(of: currentOwner),
+                  let position = index.position(for: currentOwner) else { return .empty }
+            return GenericNavigationAvailability(
+                owner: currentOwner,
+                previousKey: position > keys.startIndex ? keys[keys.index(before: position)] : nil,
+                nextKey: keys.index(after: position) < keys.endIndex
+                    ? keys[keys.index(after: position)]
+                    : nil
+            )
+        }
+    }
+
+    /// Proven adjacent keys for one exact active backend/key owner.
+    private struct GenericNavigationAvailability {
+        let owner: GenericNavigationOwner?
+        let previousKey: String?
+        let nextKey: String?
+
+        static let empty = GenericNavigationAvailability(
+            owner: nil,
+            previousKey: nil,
+            nextKey: nil
+        )
+    }
+
+    /// Immutable source operation captured before generic key enumeration begins.
+    private enum GenericNavigationKeySource: @unchecked Sendable {
+        case dictionary(DictionaryBrowserSource)
+        case sword(SwordModule)
+
+        /** Loads source-order keys for one detached snapshot build. */
+        func loadKeys() throws -> [String] {
+            switch self {
+            case .dictionary(let source):
+                return try source.keys()
+            case .sword(let module):
+                let sourceKeys = try module.loadAllKeys()
+                guard SwordJavaStringIdentity.equalsIgnoreCase(
+                    module.info.moduleDriver,
+                    "RawGenBook"
+                ) else { return sourceKeys }
+                return AndroidJSwordGenBookKeyResolution.presentableSourceKeys(sourceKeys)
+            }
+        }
+    }
+
+    private var genericNavigationAvailability = GenericNavigationAvailability.empty
+    @ObservationIgnored
+    private var genericNavigationKeySnapshot: GenericNavigationKeySnapshot?
+    @ObservationIgnored
+    private var genericNavigationRefreshTask: Task<Void, Never>?
 
     /// EPUB support
     private(set) var activeEpubReader: EpubReader?
@@ -904,7 +1054,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
 
      Actor ordering makes successive actions observe the last accepted intent even when older
      renders are still suspended. History captures the prior accepted document exactly once.
-     PageManager uses its established module-list index representation when the shared book exists.
+     PageManager uses the stable JSword `BibleBook` ordinal and explicit encoding marker when the
+     shared book exists.
 
      - Parameters:
        - intent: Fully validated immutable semantic destination.
@@ -912,8 +1063,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - Returns: `true` after exact-owner admission; invalid or replaced owners return `false`.
      - Side effects: May stage history, update controller/PageManager/category state, persist once,
        and submit a latest-wins My Notes render.
-     - Failure modes: A missing admitted book preserves runtime navigation but cannot update the
-       legacy PageManager tuple. A later journal save failure is the existing recovery obligation;
+     - Failure modes: A missing admitted book or JSword identity preserves runtime navigation but
+       cannot update the PageManager tuple. A later journal save failure is the existing recovery obligation;
        this method does not misdescribe that failure as pre-mutation rejection.
      */
     @discardableResult
@@ -978,12 +1129,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         currentBook = bookName
         currentChapter = intent.sharedPosition.chapter
         currentVerse = intent.sharedVerse
-        if let bookIndex = moduleBookList.firstIndex(where: {
-             $0.osisId == intent.sharedPosition.osisBookId
-           }) {
+        if moduleBookList.contains(where: { $0.osisId == intent.sharedPosition.osisBookId }),
+           let bookOrdinal = JSwordBibleBook.ordinal(
+             forOSIS: intent.sharedPosition.osisBookId
+           ) {
             pageManager.currentCategoryName = Self.myNotesPageManagerCategoryName
             pageManager.bibleVersification = intent.sharedPosition.versification
-            pageManager.bibleBibleBook = bookIndex
+            pageManager.bibleBibleBook = bookOrdinal
+            pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
             pageManager.bibleChapterNo = intent.sharedPosition.chapter
             pageManager.bibleVerseNo = intent.sharedVerse
         }
@@ -1421,6 +1574,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             extractionDependency: extractionDependency
         )
         committedRenderGeneration = contentIntentGeneration
+        Task { @MainActor [weak self] in
+            self?.refreshGenericNavigationAvailability()
+        }
     }
 
     /// Whether the visible page is Android's synthetic `Multi` general-book document.
@@ -2257,6 +2413,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     )
                 } ?? []
             },
+            activeVersification: { [weak self] in
+                self?.activeSourceVersificationName() ?? JSwordKJVAVersification.name
+            },
             isShowingAndroidMultiDocument: { [weak self] in
                 self?.isShowingAndroidMultiDocument ?? false
             },
@@ -2952,12 +3111,13 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           passage.ordinalRange.lowerBound,
           passage.ordinalRange.upperBound,
         ]
-        navigationCoordinator.navigateTo(
+        let accepted = navigationCoordinator.navigateTo(
           book: bookName,
           chapter: passage.start.chapter,
           verse: passage.start.verse,
           context: makeNavigationContext()
         )
+        if accepted { preservesRejectedSavedBibleTuple = false }
       },
       speak: { [self] passages in
         guard let service = speakService else { return false }
@@ -9213,12 +9373,21 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
    - Failure modes: Locked, wrong-category, unreadable, and SWORD-shadowed SQLite selections never
      activate content handles. Missing installed selections resolve the category's Android global
      default, then its first readable BookSet entry. Invalid SQLite dictionary keys are cleared
-     rather than normalized. The method is a no-op before `activeWindow` is attached.
+     rather than normalized. Unknown book encodings and incomplete or unaddressable Bible tuples
+     leave the prior runtime position and raw persisted fields unchanged. The method is a no-op
+     before `activeWindow` is attached.
    - Note: Canonicalized fields invoke `onPersistState` once after all restore decisions.
      */
     public func restoreSavedPosition(preparesPersistedMyNotesContent: Bool = true) {
         guard let pm = activeWindow?.pageManager else { return }
+        let savedBibleDocument = pm.bibleDocument
+        let savedBibleVersification = pm.bibleVersification
+        let savedBibleBook = pm.bibleBibleBook
+        let savedBibleBookEncoding = pm.bibleBookEncoding
+        let savedBibleChapter = pm.bibleChapterNo
+        let savedBibleVerse = pm.bibleVerseNo
         var normalizedPersistedSelection = false
+        var normalizedPersistedBibleSelection = false
         let auxiliaryModuleResolver = installedModuleResolver()
         if let restoreCategory = androidDefaultRestoreCategory(for: pm.currentCategoryName),
            applyAndroidDocumentDefaultPreferences(
@@ -9226,7 +9395,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                category: restoreCategory,
                resolver: auxiliaryModuleResolver
            ) {
-            normalizedPersistedSelection = true
+            if restoreCategory == .bible {
+                normalizedPersistedBibleSelection = true
+            } else {
+                normalizedPersistedSelection = true
+            }
         }
 
         // Restore the saved Bible module only after the manager's fresh access state confirms it is
@@ -9247,7 +9420,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           SwordJavaStringIdentity.equals($0, canonicalSaved)
         }) != true {
           pm.bibleDocument = canonicalSaved
-          normalizedPersistedSelection = true
+          normalizedPersistedBibleSelection = true
         }
             refreshBookList()
             logger.info("Restored saved Bible module: \(saved)")
@@ -9262,7 +9435,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
           SwordJavaStringIdentity.equals($0, mod.info.name)
         }) != true {
           pm.bibleDocument = mod.info.name
-          normalizedPersistedSelection = true
+          normalizedPersistedBibleSelection = true
         }
         refreshBookList()
         logger.info("Restored saved SQLite Bible module: \(saved)")
@@ -9531,42 +9704,117 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             migratedLegacyEpub = true
         default: currentCategory = .bible
         }
-    if migratedLegacyEpub || normalizedPersistedSelection {
+        // Restore a complete, addressable Bible tuple without reinterpreting unresolved identity.
+        let hasCompleteCoordinate = savedBibleChapter.map { chapter in
+            guard let savedBibleVerse else { return false }
+            return (chapter >= 0 && savedBibleVerse == 0)
+                || (chapter > 0 && savedBibleVerse > 0)
+        } == true
+        let activeBibleOwnsSavedDocument = savedBibleDocument.map {
+            SwordJavaStringIdentity.equals($0, activeModuleName)
+        } == true
+        let restoredReference: SwordVersification.Reference?
+        switch savedBibleBookEncoding {
+        case PageManager.jswordBibleBookEncoding:
+            let savedVersification = savedBibleVersification?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let activeVersification = activeSourceVersificationName()
+            if activeBibleOwnsSavedDocument,
+               let bookOrdinal = savedBibleBook,
+               let savedOSISBookID = JSwordBibleBook.osisID(forOrdinal: bookOrdinal),
+               let savedBibleChapter,
+               let savedBibleVerse,
+               hasCompleteCoordinate,
+               activeModule != nil || activeSQLiteBibleModule != nil,
+               let savedVersification,
+               !savedVersification.isEmpty,
+               !activeVersification.isEmpty,
+               let conversion = VersificationMapper.convertStrictly(
+                 osisBookId: savedOSISBookID,
+                 chapter: savedBibleChapter,
+                 verse: savedBibleVerse,
+                 from: savedVersification,
+                 to: activeVersification
+               ) {
+                restoredReference = conversion.reference
+            } else {
+                restoredReference = nil
+            }
+        case nil:
+            if activeBibleOwnsSavedDocument,
+               let bookIndex = savedBibleBook,
+               bookIndex >= 0,
+               bookIndex < bookList.count,
+               let savedBibleChapter,
+               let savedBibleVerse,
+               hasCompleteCoordinate {
+                let legacyReference = SwordVersification.Reference(
+                    osisBookId: bookList[bookIndex].osisId,
+                    chapter: savedBibleChapter,
+                    verse: savedBibleVerse
+                )
+                let savedVersification = savedBibleVersification?.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                let activeVersification = activeSourceVersificationName()
+                if let savedVersification, !savedVersification.isEmpty {
+                    restoredReference = VersificationMapper.convertStrictly(
+                        osisBookId: legacyReference.osisBookId,
+                        chapter: legacyReference.chapter,
+                        verse: legacyReference.verse,
+                        from: savedVersification,
+                        to: activeVersification
+                    )?.reference
+                } else {
+                    restoredReference = legacyReference
+                }
+            } else {
+                restoredReference = nil
+            }
+        default:
+            restoredReference = nil
+        }
+        let restoredPosition: BibleReaderNavigationPosition?
+        if let restoredReference,
+           let restoredBook = bookList.first(where: {
+             $0.osisId == restoredReference.osisBookId
+           }),
+           verseOrdinal(
+             osisBookId: restoredReference.osisBookId,
+             chapter: restoredReference.chapter,
+             verse: restoredReference.verse
+           ) != nil {
+            restoredPosition = BibleReaderNavigationPosition(
+                book: restoredBook.name,
+                chapter: restoredReference.chapter,
+                verse: restoredReference.verse
+            )
+        } else {
+            restoredPosition = nil
+        }
+        let hasSavedBibleTuple = savedBibleBook != nil
+            || savedBibleChapter != nil
+            || savedBibleVerse != nil
+        preservesRejectedSavedBibleTuple = hasSavedBibleTuple && restoredPosition == nil
+        if preservesRejectedSavedBibleTuple {
+            pm.bibleDocument = savedBibleDocument
+            pm.bibleVersification = savedBibleVersification
+            pm.bibleBibleBook = savedBibleBook
+            pm.bibleBookEncoding = savedBibleBookEncoding
+            pm.bibleChapterNo = savedBibleChapter
+            pm.bibleVerseNo = savedBibleVerse
+            normalizedPersistedBibleSelection = false
+        }
+        if migratedLegacyEpub
+            || normalizedPersistedSelection
+            || normalizedPersistedBibleSelection {
             onPersistState?()
         }
-
-        // Restore saved book and chapter
-        var restoredSavedBook = false
-        if let bookIndex = pm.bibleBibleBook,
-      bookIndex >= 0, bookIndex < bookList.count
-    {
-            currentBook = bookList[bookIndex].name
-            restoredSavedBook = true
-        }
-        let savedChapter = pm.bibleChapterNo
-        let savedVerse = pm.bibleVerseNo
-        let restoredIntroduction = restoredSavedBook
-            && savedChapter.map { $0 >= 0 } == true
-            && savedVerse == 0
-            && verseOrdinal(
-              osisBookId: osisBookId(for: currentBook),
-              chapter: savedChapter ?? -1,
-              verse: 0
-            ) != nil
-        if restoredIntroduction {
-            currentChapter = savedChapter ?? 0
-            currentVerse = 0
-        } else if let chapter = savedChapter, chapter > 0 {
-            currentChapter = chapter
-            if let verse = savedVerse, verse > 0 {
-                currentVerse = verse
-            } else {
-                currentVerse = 1
-            }
-        } else if let verse = savedVerse, verse > 0 {
-            currentVerse = verse
-        } else {
-            currentVerse = 1
+        if let restoredPosition {
+            currentBook = restoredPosition.book
+            currentChapter = restoredPosition.chapter
+            currentVerse = restoredPosition.verse
         }
         navigationCoordinator.restoreSavedPosition(
             BibleReaderNavigationPosition(
@@ -9695,15 +9943,19 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
                     verse: verse ?? 1,
                     destinationVersification: activeSourceVersificationName()
                   ) else { return false }
-            return admitMyNotesIntent(intent, recordsHistory: true)
+            let accepted = admitMyNotesIntent(intent, recordsHistory: true)
+            if accepted { preservesRejectedSavedBibleTuple = false }
+            return accepted
         }
-        return navigationCoordinator.navigateTo(
+        let accepted = navigationCoordinator.navigateTo(
             book: book,
             chapter: chapter,
             verse: verse,
             verifiedIntroductionOrdinal: verifiedIntroductionOrdinal,
             context: makeNavigationContext()
         )
+        if accepted { preservesRejectedSavedBibleTuple = false }
+        return accepted
     }
 
     /**
@@ -9774,42 +10026,210 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         return emitted
     }
 
-    /// Navigate to the next chapter, wrapping to the next book if needed.
+    /**
+     Captures the selected installed auxiliary backend and exact current key.
+
+     My Documents and EPUB retain their own ordered-page implementations. Missing, local, and
+     category-mismatched sources return nil instead of borrowing the Bible navigation coordinator.
+     */
+    private func currentGenericNavigationOwner() -> GenericNavigationOwner? {
+        switch currentCategory {
+        case .dictionary:
+            guard let moduleName = activeDictionaryModuleName,
+                  let key = currentDictionaryKey else { return nil }
+            if let module = activeSQLiteDictionaryModule {
+                return GenericNavigationOwner(
+                    category: .dictionary,
+                    moduleName: moduleName,
+                    key: key,
+                    sourceID: ObjectIdentifier(module),
+                    keyIdentity: .sqliteUTF8
+                )
+            }
+            guard let module = activeDictionaryModule else { return nil }
+            return GenericNavigationOwner(
+                category: .dictionary,
+                moduleName: moduleName,
+                key: key,
+                sourceID: ObjectIdentifier(module),
+                keyIdentity: .javaUTF16
+            )
+
+        case .generalBook:
+            guard activeEpubReader == nil,
+                  let module = activeGeneralBookModule,
+                  let moduleName = activeGeneralBookModuleName,
+                  let key = currentGeneralBookKey else { return nil }
+            return GenericNavigationOwner(
+                category: .generalBook,
+                moduleName: moduleName,
+                key: key,
+                sourceID: ObjectIdentifier(module),
+                keyIdentity: .javaUTF16
+            )
+
+        case .map:
+            guard let module = activeMapModule,
+                  let moduleName = activeMapModuleName,
+                  let key = currentMapKey else { return nil }
+            return GenericNavigationOwner(
+                category: .map,
+                moduleName: moduleName,
+                key: key,
+                sourceID: ObjectIdentifier(module),
+                keyIdentity: .javaUTF16
+            )
+
+        case .bible, .commentary, .epub, .dailyDevotion:
+            return nil
+        }
+    }
+
+    /** Captures the immutable key loader owned by the current generic navigation source. */
+    private func currentGenericNavigationKeySource() -> GenericNavigationKeySource? {
+        switch currentCategory {
+        case .dictionary:
+            return activeDictionaryBrowserSource().map(GenericNavigationKeySource.dictionary)
+        case .generalBook:
+            return activeGeneralBookModule.map(GenericNavigationKeySource.sword)
+        case .map:
+            return activeMapModule.map(GenericNavigationKeySource.sword)
+        case .bible, .commentary, .epub, .dailyDevotion:
+            return nil
+        }
+    }
+
+    /**
+     Refreshes adjacent keys from the backend's existing immutable key snapshot.
+
+     Enumeration runs away from the main actor. Publication revalidates the exact backend object,
+     category, module, and current key so an older task cannot enable navigation for a replacement
+     source or a different pane location.
+     */
+    @MainActor
+    private func refreshGenericNavigationAvailability() {
+        genericNavigationRefreshTask?.cancel()
+        genericNavigationAvailability = .empty
+        guard let owner = currentGenericNavigationOwner(),
+              let source = currentGenericNavigationKeySource() else {
+            genericNavigationKeySnapshot = nil
+            return
+        }
+
+        if let snapshot = genericNavigationKeySnapshot,
+           snapshot.owner.matchesSource(of: owner) {
+            genericNavigationAvailability = snapshot.availability(for: owner)
+            return
+        }
+
+        // Retain at most one backend snapshot. Failed loads remain uncached so the next accepted
+        // render can retry instead of converting a transient read failure into empty navigation.
+        genericNavigationKeySnapshot = nil
+        let operation = Task.detached(priority: .utility) {
+            GenericNavigationKeySnapshot(
+                owner: owner,
+                sourceKeys: try source.loadKeys()
+            )
+        }
+        genericNavigationRefreshTask = Task { @MainActor [weak self, owner] in
+            let snapshot: GenericNavigationKeySnapshot
+            do {
+                snapshot = try await withTaskCancellationHandler {
+                    try await operation.value
+                } onCancel: {
+                    operation.cancel()
+                }
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  let currentOwner = self.currentGenericNavigationOwner(),
+                  owner.matches(currentOwner) else { return }
+            self.genericNavigationKeySnapshot = snapshot
+            self.genericNavigationAvailability = snapshot.availability(for: currentOwner)
+        }
+    }
+
+    /** Returns one proven adjacent key only while its captured source still owns current state. */
+    private func genericNavigationDestination(forward: Bool) -> String? {
+        guard let owner = genericNavigationAvailability.owner,
+              let currentOwner = currentGenericNavigationOwner(),
+              owner.matches(currentOwner) else { return nil }
+        return forward
+            ? genericNavigationAvailability.nextKey
+            : genericNavigationAvailability.previousKey
+    }
+
+    /** Dispatches an adjacent exact key through the selected category's ordinary load path. */
+    @discardableResult
+    private func navigateGenericDocument(forward: Bool) -> Bool {
+        guard let key = genericNavigationDestination(forward: forward) else { return false }
+        switch currentCategory {
+        case .dictionary:
+            loadDictionaryEntry(key: key)
+        case .generalBook:
+            loadGeneralBookEntry(key: key)
+        case .map:
+            loadMapEntry(key: key)
+        case .bible, .commentary, .epub, .dailyDevotion:
+            return false
+        }
+        return true
+    }
+
+    /// Navigate to the next page through the active document family's source-owned ordering.
     public func navigateNext() {
         if showingMyNotes {
             _ = navigateMyNotesIntent(forward: true)
             return
         }
-        if currentCategory == .commentary, navigateCommentaryBlock(forward: true) {
+        if currentCategory == .commentary {
+            _ = navigateCommentaryBlock(forward: true)
             return
         }
         if currentCategory == .generalBook,
            let reader = activeEpubReader,
-      let key = reader.nextKey(after: currentGeneralBookKey)
-    {
+           let key = reader.nextKey(after: currentGeneralBookKey) {
             loadEpubEntry(key: key)
             return
         }
-        navigationCoordinator.navigateNext(context: makeNavigationContext())
+        switch currentCategory {
+        case .dictionary, .generalBook, .map:
+            _ = navigateGenericDocument(forward: true)
+        case .bible:
+            preservesRejectedSavedBibleTuple = false
+            navigationCoordinator.navigateNext(context: makeNavigationContext())
+        case .commentary, .epub, .dailyDevotion:
+            break
+        }
     }
 
-    /// Navigate to the previous chapter, wrapping to the previous book if needed.
+    /// Navigate to the previous page through the active document family's source-owned ordering.
     public func navigatePrevious() {
         if showingMyNotes {
             _ = navigateMyNotesIntent(forward: false)
             return
         }
-        if currentCategory == .commentary, navigateCommentaryBlock(forward: false) {
+        if currentCategory == .commentary {
+            _ = navigateCommentaryBlock(forward: false)
             return
         }
         if currentCategory == .generalBook,
            let reader = activeEpubReader,
-      let key = reader.previousKey(before: currentGeneralBookKey)
-    {
+           let key = reader.previousKey(before: currentGeneralBookKey) {
             loadEpubEntry(key: key)
             return
         }
-        navigationCoordinator.navigatePrevious(context: makeNavigationContext())
+        switch currentCategory {
+        case .dictionary, .generalBook, .map:
+            _ = navigateGenericDocument(forward: false)
+        case .bible:
+            preservesRejectedSavedBibleTuple = false
+            navigationCoordinator.navigatePrevious(context: makeNavigationContext())
+        case .commentary, .epub, .dailyDevotion:
+            break
+        }
     }
 
     /** Admits one chapter action synchronously from the last accepted semantic position. */
@@ -9854,14 +10274,23 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /// Whether there's a next chapter available.
     public var hasNext: Bool {
         if showingMyNotes { return myNotesIntentDestination(forward: true) != nil }
-        if currentCategory == .commentary,
-           activeCommentaryModule != nil || activeSQLiteCommentaryModule != nil {
+        switch currentCategory {
+        case .commentary:
             return commentaryNavigationAvailability.next != nil
+        case .generalBook:
+            if let reader = activeEpubReader {
+                return reader.nextKey(after: currentGeneralBookKey) != nil
+            }
+            return genericNavigationDestination(forward: true) != nil
+        case .dictionary, .map:
+            return genericNavigationDestination(forward: true) != nil
+        case .bible:
+            return navigationCoordinator.hasNext(context: makeNavigationContext())
+        case .epub:
+            return activeEpubReader?.nextKey(after: currentGeneralBookKey) != nil
+        case .dailyDevotion:
+            return false
         }
-        if currentCategory == .generalBook, let reader = activeEpubReader {
-            return reader.nextKey(after: currentGeneralBookKey) != nil
-        }
-        return navigationCoordinator.hasNext(context: makeNavigationContext())
     }
 
     /// Whether there's a previous chapter available.
@@ -9872,14 +10301,23 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             else { return false }
             return destination != activeMyNotesIntent.sharedPosition
         }
-        if currentCategory == .commentary,
-           activeCommentaryModule != nil || activeSQLiteCommentaryModule != nil {
+        switch currentCategory {
+        case .commentary:
             return commentaryNavigationAvailability.previous != nil
+        case .generalBook:
+            if let reader = activeEpubReader {
+                return reader.previousKey(before: currentGeneralBookKey) != nil
+            }
+            return genericNavigationDestination(forward: false) != nil
+        case .dictionary, .map:
+            return genericNavigationDestination(forward: false) != nil
+        case .bible:
+            return navigationCoordinator.hasPrevious(context: makeNavigationContext())
+        case .epub:
+            return activeEpubReader?.previousKey(before: currentGeneralBookKey) != nil
+        case .dailyDevotion:
+            return false
         }
-        if currentCategory == .generalBook, let reader = activeEpubReader {
-            return reader.previousKey(before: currentGeneralBookKey) != nil
-        }
-        return navigationCoordinator.hasPrevious(context: makeNavigationContext())
     }
 
     /** Resolves chapter-control availability from accepted intent without touching render state. */
@@ -10199,7 +10637,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      Side effects:
      - persists direct commentary anchors in their document-local ordinal space and applies only
        source references captured with an accepted commentary key transition
-     - updates Bible-family scroll-restoration state and persists chapter/book changes to the page manager
+     - updates Bible scroll-restoration state and persists chapter/book changes only while the
+       bridge's committed document family is Bible
      - notifies the window manager for synchronized scrolling only when this pane is already active
        from explicit user interaction, the callback did not acknowledge sync-origin feedback, and
        the visible Bible position actually changed
@@ -10211,6 +10650,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
       return
     }
     if consumeVisibleMyNotesPosition(ordinal: ordinal) { return }
+    guard committedRenderState.identity?.category == .bible else {
+      _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+      return
+    }
+    guard !preservesRejectedSavedBibleTuple else {
+      _ = synchronizedScrollCoordinator.acknowledgeVisibleOrdinal(ordinal)
+      return
+    }
 
         let previousBook = currentBook
         let previousChapter = currentChapter
@@ -10275,7 +10722,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         let shared = kjvaPosition.sharedPosition
         let sharedVerse = kjvaPosition.sharedVerse
         let book = bookName(forOsisId: shared.osisBookId) ?? shared.osisBookId
-        let bookIndex = moduleBookList.firstIndex(where: { $0.osisId == shared.osisBookId })
+        let bookIsAvailable = moduleBookList.contains(where: { $0.osisId == shared.osisBookId })
         let changed = currentBook != book
             || currentChapter != shared.chapter
             || currentVerse != sharedVerse
@@ -10293,9 +10740,11 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
         currentBook = book
         currentChapter = shared.chapter
         currentVerse = sharedVerse
-        if let bookIndex {
+        if bookIsAvailable,
+           let bookOrdinal = JSwordBibleBook.ordinal(forOSIS: shared.osisBookId) {
             pageManager.bibleVersification = shared.versification
-            pageManager.bibleBibleBook = bookIndex
+            pageManager.bibleBibleBook = bookOrdinal
+            pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
             pageManager.bibleChapterNo = shared.chapter
             pageManager.bibleVerseNo = sharedVerse
         }
@@ -15351,6 +15800,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     if !accepted {
       pendingLinkNavigationOrdinalRange = nil
     }
+    if accepted { preservesRejectedSavedBibleTuple = false }
     return accepted
   }
 
@@ -15729,6 +16179,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
       pendingLinkNavigationOrdinalRange = nil
       throw BibleReaderBookmarkNavigationCommitFailure.destinationChanged
     }
+    preservesRejectedSavedBibleTuple = false
   }
 
   /**

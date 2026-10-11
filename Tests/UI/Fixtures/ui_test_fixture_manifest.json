@@ -13,6 +13,8 @@
   "AndBibleUITests/AndBibleUITests/testDocumentChooserMatchesDownloadDocumentsActivityStructure": "baseline",
   "AndBibleUITests/AndBibleUITests/testDocumentChooserScriptureSwitchPreservesCustomNightTheme": "document-switch-custom-night-theme",
   "AndBibleUITests/AndBibleUITests/testDocumentChooserScriptureSwitchPreservesDayTheme": "document-switch-custom-theme",
+  "AndBibleUITests/AndBibleUITests/testWestminsterGeneralBookSplitNavigationPreservesPaneOwnership": "document-navigation-westminster-split",
+  "AndBibleUITests/AndBibleUITests/testPsalm119NativeNavigationRelaunchPreservesSplitDocumentIdentity": "document-navigation-westminster-split",
   "AndBibleUITests/AndBibleUITests/testDownloadsInstallKeepsRowOrderVisibleDuringActivity": "downloads-row-order",
   "AndBibleUITests/AndBibleUITests/testDownloadsUnlockRetriesSameRealModuleAndMakesContentReadable": "locked-picker-downloads",
   "AndBibleUITests/AndBibleUITests/testDownloadsUsesRemoteAbbreviationForVisibleDisplaySearchAndOrder": "downloads-row-order",

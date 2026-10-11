@@ -478,7 +478,7 @@ enum RemoteSyncWorkspaceSnapshotError: Error, Equatable {
 public final class RemoteSyncWorkspaceSnapshotService {
     private enum Defaults {
         static let bibleVersification = "KJVA"
-        static let bibleBook = 0
+        static let bibleBook = 2 // JSword BibleBook.GEN; ordinal zero is Intro.Bible.
         static let bibleChapter = 1
         static let bibleVerse = 1
     }

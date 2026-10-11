@@ -390,19 +390,10 @@ extension BibleUIAgentDomainAdapter {
     }
 
     private func bibleWindowReference(_ manager: PageManager) -> (osis: String, name: String)? {
-        guard let bookIndex = manager.bibleBibleBook,
-              let chapter = manager.bibleChapterNo,
-              let verse = manager.bibleVerseNo else { return nil }
-        let indexedBook = JSwordKJVAVersification.books.indices.contains(bookIndex)
-            ? JSwordKJVAVersification.books[bookIndex]
-            : nil
-        let book = JSwordKJVAVersification.books.first { $0.bibleBookOrdinal == bookIndex }
-            ?? indexedBook
-        guard let book else { return nil }
-        return (
-            "\(book.osisId).\(chapter).\(verse)",
-            "\(book.longName) \(chapter):\(verse)"
-        )
+        guard let reference = BibleReaderPersistedBibleReference(pageManager: manager) else {
+            return nil
+        }
+        return (reference.osisVerseReference, reference.localizedVerseName)
     }
 
     /**

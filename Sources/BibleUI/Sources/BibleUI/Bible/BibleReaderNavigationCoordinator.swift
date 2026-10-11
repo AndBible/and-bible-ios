@@ -98,6 +98,9 @@ struct BibleReaderNavigationContext {
     /// Returns the active module's ordered book list.
     let bookList: () -> [BibleReaderNavigationBook]
 
+    /// Returns the active Bible source versification persisted with this position.
+    let activeVersification: () -> String
+
     /// Indicates whether the pane is showing Android's synthetic Multi document.
     let isShowingAndroidMultiDocument: () -> Bool
 
@@ -245,6 +248,9 @@ final class BibleReaderNavigationCoordinator {
             introductionOrdinal = nil
         }
 
+        let resolvedVerse = introductionOrdinal == nil ? max(1, verse ?? 1) : 0
+        let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: resolvedVerse)
+        guard canPublish(position: position, context: context) else { return false }
         let previousPosition = context.currentPosition()
         guard context.recordHistory(
             previousPosition.book,
@@ -252,8 +258,6 @@ final class BibleReaderNavigationCoordinator {
             previousPosition.verse
         ) else { return false }
 
-        let resolvedVerse = introductionOrdinal == nil ? max(1, verse ?? 1) : 0
-        let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: resolvedVerse)
         context.setCurrentPosition(position)
 
         if let ordinal = introductionOrdinal {
@@ -278,7 +282,7 @@ final class BibleReaderNavigationCoordinator {
         }
 
         if let pageManager = context.pageManager() {
-            write(position: position, to: pageManager, bookList: context.bookList())
+            write(position: position, to: pageManager, context: context)
         }
         context.persistState()
 
@@ -382,22 +386,24 @@ final class BibleReaderNavigationCoordinator {
         context: BibleReaderNavigationContext
     ) -> Bool {
         let previousPosition = context.currentPosition()
-        lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
 
         let keyParts = key.split(separator: ".", omittingEmptySubsequences: true)
         if keyParts.count >= 2, Int(keyParts[1]) != nil {
-            updateVisiblePositionFromKey(
+            guard updateVisiblePositionFromKey(
                 osisId: String(keyParts[0]),
                 chapterText: String(keyParts[1]),
                 ordinal: ordinal,
                 context: context
-            )
+            ) else { return false }
+            lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
         } else if let reference = context.verseReference(previousPosition.book, ordinal) {
             let position = BibleReaderNavigationPosition(
                 book: previousPosition.book,
                 chapter: reference.chapter,
                 verse: reference.verse
             )
+            guard canPublish(position: position, context: context) else { return false }
+            lastScrollTarget = atChapterTop ? .chapterTop : .ordinal(ordinal)
             let pageManager = context.pageManager()
             _ = applyVisibleBiblePosition(
                 position,
@@ -407,6 +413,8 @@ final class BibleReaderNavigationCoordinator {
             if pageManager != nil {
                 persistVisibleVerseState(immediate: false, persistState: context.persistState)
             }
+        } else {
+            return false
         }
 
         return context.currentPosition() != previousPosition
@@ -442,6 +450,7 @@ final class BibleReaderNavigationCoordinator {
             chapter: reference.chapter,
             verse: reference.verse
         )
+        guard canPublish(position: position, context: context) else { return false }
         lastScrollTarget = .ordinal(reference.ordinal)
         let pageManager = context.pageManager()
         let changes = applyVisibleBiblePosition(
@@ -484,6 +493,7 @@ final class BibleReaderNavigationCoordinator {
         context: BibleReaderNavigationContext
     ) {
         let position = BibleReaderNavigationPosition(book: book, chapter: chapter, verse: verse)
+        guard canPublish(position: position, context: context) else { return }
         originalNavigationOrdinalRange = nil
         lastScrollTarget = .ordinal(ordinal)
         shouldRestoreScroll = true
@@ -611,24 +621,25 @@ final class BibleReaderNavigationCoordinator {
         chapterText: String,
         ordinal: Int,
         context: BibleReaderNavigationContext
-    ) {
+    ) -> Bool {
         let previousPosition = context.currentPosition()
-        guard let chapter = Int(chapterText) else {
-            return
+        guard let chapter = Int(chapterText),
+              let parsedBook = context.bookNameForOsisId(osisId) else {
+            return false
         }
 
         var position = previousPosition
         let isImmediateTransition: Bool
         if chapter != previousPosition.chapter {
             position = BibleReaderNavigationPosition(
-                book: context.bookNameForOsisId(osisId) ?? previousPosition.book,
+                book: parsedBook,
                 chapter: chapter,
                 verse: previousPosition.verse
             )
             isImmediateTransition = true
-        } else if let name = context.bookNameForOsisId(osisId), name != previousPosition.book {
+        } else if parsedBook != previousPosition.book {
             position = BibleReaderNavigationPosition(
-                book: name,
+                book: parsedBook,
                 chapter: previousPosition.chapter,
                 verse: previousPosition.verse
             )
@@ -637,11 +648,13 @@ final class BibleReaderNavigationCoordinator {
             isImmediateTransition = false
         }
 
+        guard canPublish(position: position, context: context) else { return false }
+
         guard let pageManager = context.pageManager() else {
             if isImmediateTransition {
                 context.setCurrentPosition(position)
             }
-            return
+            return true
         }
 
         position = positionByResolvingVerse(from: position, ordinal: ordinal, context: context)
@@ -654,6 +667,7 @@ final class BibleReaderNavigationCoordinator {
             immediate: isImmediateTransition,
             persistState: context.persistState
         )
+        return true
     }
 
     /**
@@ -682,6 +696,17 @@ final class BibleReaderNavigationCoordinator {
         )
     }
 
+    /** Returns whether a position has a stable book identity before any reader state is published. */
+    private func canPublish(
+        position: BibleReaderNavigationPosition,
+        context: BibleReaderNavigationContext
+    ) -> Bool {
+        guard let book = context.bookList().first(where: { $0.name == position.book }) else {
+            return false
+        }
+        return JSwordBibleBook.ordinal(forOSIS: book.osisId) != nil
+    }
+
     /**
      Applies one resolved Bible position without assigning fields that already match.
 
@@ -690,30 +715,41 @@ final class BibleReaderNavigationCoordinator {
        - pageManager: Durable page state for the active window, when one exists.
        - context: Controller-owned observed position and active book catalog.
      - Returns: Independent flags for controller-coordinate and PageManager mutation.
-     - Side effects: Publishes the controller position before mutating only the PageManager fields
-       whose values differ, so immediate persistence observes one coherent target.
+     - Side effects: Publishes the controller position and mutates only the PageManager fields whose
+       values differ after the complete canonical identity is known, so immediate persistence
+       observes one coherent target.
      - Failure modes: A missing PageManager still permits the controller position to advance but
-       produces no durable mutation flag. An unresolved book index preserves the retained index while
-       chapter and verse repairs remain available.
+       produces no durable mutation flag. A position without a canonical JSword book ordinal leaves
+       the complete retained PageManager tuple unchanged.
      */
     private func applyVisibleBiblePosition(
         _ position: BibleReaderNavigationPosition,
         pageManager: PageManager?,
         context: BibleReaderNavigationContext
     ) -> (positionChanged: Bool, pageManagerChanged: Bool) {
+        guard let book = context.bookList().first(where: { $0.name == position.book }),
+              let bookOrdinal = JSwordBibleBook.ordinal(forOSIS: book.osisId) else {
+            return (false, false)
+        }
         let positionChanged = context.currentPosition() != position
         if positionChanged {
             context.setCurrentPosition(position)
         }
-
         guard let pageManager else {
             return (positionChanged, false)
         }
-        let resolvedBookIndex = context.bookList().firstIndex { $0.name == position.book }
         var pageManagerChanged = false
-        if let resolvedBookIndex,
-           pageManager.bibleBibleBook != resolvedBookIndex {
-            pageManager.bibleBibleBook = resolvedBookIndex
+        if pageManager.bibleBibleBook != bookOrdinal {
+            pageManager.bibleBibleBook = bookOrdinal
+            pageManagerChanged = true
+        }
+        if pageManager.bibleBookEncoding != PageManager.jswordBibleBookEncoding {
+            pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+            pageManagerChanged = true
+        }
+        let versification = context.activeVersification()
+        if pageManager.bibleVersification != versification {
+            pageManager.bibleVersification = versification
             pageManagerChanged = true
         }
         if pageManager.bibleChapterNo != position.chapter {
@@ -733,17 +769,22 @@ final class BibleReaderNavigationCoordinator {
      - Parameters:
        - position: Current visible Bible position.
        - pageManager: Durable page state for the owning window.
-       - bookList: Active module book order used to persist Android-style book index.
-     - Side effects: Mutates `bibleBibleBook`, `bibleChapterNo`, and `bibleVerseNo`.
-     - Failure modes: If the book is absent from `bookList`, the book index is written as `nil`
-       while chapter and verse still persist.
+       - bookList: Active module books used to resolve the selected OSIS identity.
+     - Side effects: Mutates the canonical JSword book ordinal, its explicit encoding marker, active
+       versification, chapter, and verse as one coherent PageManager tuple.
+     - Failure modes: If the book is absent from `bookList` or has no canonical JSword ordinal, the
+       retained PageManager tuple remains unchanged.
      */
     private func write(
         position: BibleReaderNavigationPosition,
         to pageManager: PageManager,
-        bookList: [BibleReaderNavigationBook]
+        context: BibleReaderNavigationContext
     ) {
-        pageManager.bibleBibleBook = bookList.firstIndex { $0.name == position.book }
+        guard let book = context.bookList().first(where: { $0.name == position.book }),
+              let bookOrdinal = JSwordBibleBook.ordinal(forOSIS: book.osisId) else { return }
+        pageManager.bibleBibleBook = bookOrdinal
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = context.activeVersification()
         pageManager.bibleChapterNo = position.chapter
         pageManager.bibleVerseNo = position.verse
     }

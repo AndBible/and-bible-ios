@@ -1589,6 +1589,61 @@ extension AndBibleUITests {
     }
 
     /**
+     Focuses one already-visible reader pane through its production pane-owned menu control.
+
+     A bottom window-tab tap owns Android restore-strip visibility and can minimize a visible pinned
+     pane. The pane control owns focus: this helper taps it once, passively observes the matching
+     active-window export, then dismisses the opened menu through its production outside surface.
+
+     - Parameters:
+       - order: Stable window order encoded in pane and tab accessibility identifiers.
+       - app: Running application under test.
+       - timeout: Maximum passive wait for each production state transition.
+       - file: XCTest failure attribution source.
+       - line: XCTest failure attribution line.
+     - Side effects: Opens and dismisses one visible pane's menu, making that pane active.
+     - Failure modes: Fails if the pane control is absent, the single tap does not focus and open
+       its menu, or the outside dismissal does not close that menu.
+     */
+    private func focusVisibleReaderPane(
+        _ order: Int,
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let paneIdentifier = "windowPaneMenuButton::\(order)"
+        let paneControl = requireObservedSettingsElement(
+            app.buttons[paneIdentifier].firstMatch,
+            identifier: paneIdentifier,
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+        openPaneMenu(paneControl, in: app, timeout: timeout, file: file, line: line)
+        waitForElementValue(
+            "windowTabButton::\(order)",
+            toContain: "state=active",
+            in: app,
+            timeout: timeout
+        )
+        tapElementReliably(
+            requireElement("windowPaneMenuDismissArea::\(order)", in: app, timeout: timeout),
+            timeout: timeout,
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            waitForUITestCondition("Pane \(order) menu dismisses", timeout: timeout) {
+                self.resolvedPaneMenuSurface(in: app) == nil
+            },
+            "Expected pane \(order)'s menu to dismiss after one outside tap.",
+            file: file,
+            line: line
+        )
+    }
+
+    /**
      Resolves one Settings control through the concrete accessibility role exported by its shared
      SwiftUI component.
 
@@ -2771,6 +2826,263 @@ extension AndBibleUITests {
             framesByIdentity[anchor] = snapshot.frame
         }
         return framesByIdentity
+    }
+
+    /**
+     Exercises the reported Westminster general-book navigation in a pinned split reader.
+
+     The fixture starts with Westminster Confession chapter 6 above KJV Genesis 3. The journey
+     focuses both panes through their production pane controls, verifies the shared header follows
+     the active pane and highlights the owning category action, then selects the exact spaced
+     RawGenBook chapter 7 key through the production chooser. The inactive Bible tab's complete
+     semantic value is compared before and after selection, then its reader is focused to prove its
+     rendered reference remained Genesis 3:1.
+
+     - Side effects: Launches an isolated two-pane fixture, changes only the upper general-book key,
+       and changes active-pane focus through production controls.
+     - Failure modes: Fails if the shared header reports the wrong owner/title, category-action
+       highlighting drifts, the chooser collapses spaces from exact SWORD keys, or selecting chapter
+       7 mutates the pinned KJV pane.
+     */
+    func testWestminsterGeneralBookSplitNavigationPreservesPaneOwnership() throws {
+        let app = makeApp()
+        app.launch()
+
+        let westminsterDescription =
+            "The Westminster Standards translated into twenty-first century American English"
+        let kjvDescription =
+            "King James Version (1769) with Strongs Numbers and Morphology  and CatchWords"
+        let chapterSixKey = "/Westminster21/Westminster21/WCF/Ch 6"
+        let chapterSevenKey = "/Westminster21/Westminster21/WCF/Ch 7"
+
+        _ = requireElement("readerDocumentHeader", in: app, timeout: 20)
+        waitForElementValue("windowTabButton::0", toContain: "state=active", in: app, timeout: 20)
+        waitForElementValue("windowTabButton::1", toContain: "state=inactive", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=Westminster21",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "key=\(chapterSixKey)", in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 6, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue("readerPreviousPageButton", toEqual: "enabled", in: app, timeout: 20)
+        waitForElementValue("readerNextPageButton", toEqual: "enabled", in: app, timeout: 20)
+        waitForElementValue("readerBibleToolbarButton", toEqual: "inactive", in: app, timeout: 20)
+        waitForElementValue(
+            "readerCommentaryToolbarButton",
+            toEqual: "active",
+            in: app,
+            timeout: 20
+        )
+
+        tapElementReliably(requireButton("readerNextPageButton", in: app, timeout: 20), timeout: 20)
+        waitForReaderRenderedContentState(containing: "key=\(chapterSevenKey)", in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 7, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+        tapElementReliably(
+            requireButton("readerPreviousPageButton", in: app, timeout: 20),
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "key=\(chapterSixKey)", in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 6, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+
+        focusVisibleReaderPane(1, in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Genesis;chapter=3",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Genesis 3:1, \(kjvDescription)",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue("readerBibleToolbarButton", toEqual: "active", in: app, timeout: 20)
+        waitForElementValue(
+            "readerCommentaryToolbarButton",
+            toEqual: "inactive",
+            in: app,
+            timeout: 20
+        )
+
+        focusVisibleReaderPane(0, in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 6, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+        let lowerTabBeforeSelection = try XCTUnwrap(
+            resolvedElementSemanticText("windowTabButton::1", in: app),
+            "The inactive KJV pane must expose its semantic document identity."
+        )
+        XCTAssertTrue(lowerTabBeforeSelection.contains("category=bible"))
+        XCTAssertTrue(lowerTabBeforeSelection.contains("module=KJV"))
+        XCTAssertTrue(
+            lowerTabBeforeSelection.contains("reference=Gen 3"),
+            "The compact Bible tab must retain Genesis 3: \(lowerTabBeforeSelection)"
+        )
+
+        tapElementReliably(requireElement("bookChooserButton", in: app, timeout: 20), timeout: 20)
+        _ = requireElement("generalBookBrowserTopAppBar", in: app, timeout: 20)
+        let chapterSevenRowIdentifier = "generalBookBrowserRow::\(chapterSevenKey)"
+        let chapterSevenRow = unresolvedElement(chapterSevenRowIdentifier, in: app)
+        let keyScrollView = app.scrollViews.firstMatch
+        for _ in 0..<12 where !chapterSevenRow.isHittable {
+            keyScrollView.swipeUp()
+        }
+        XCTAssertEqual(chapterSevenRow.label, "Ch 7")
+        tapElementReliably(chapterSevenRow, timeout: 20)
+
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=Westminster21",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "key=\(chapterSevenKey)", in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 7, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+        XCTAssertEqual(
+            resolvedElementSemanticText("windowTabButton::1", in: app),
+            lowerTabBeforeSelection,
+            "Changing the upper general-book key must not mutate the inactive pinned Bible pane."
+        )
+
+        focusVisibleReaderPane(1, in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Genesis;chapter=3",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Genesis 3:1, \(kjvDescription)",
+            in: app,
+            timeout: 20
+        )
+        focusVisibleReaderPane(0, in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 7, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+    }
+
+    /**
+     Verifies a native Psalm 119 selection survives relaunch beside the pinned Westminster pane.
+
+     This journey creates the Psalm location through the production KJV passage chooser instead of
+     pre-seeding a book integer. Relaunch then exercises the persisted identity contract: the first
+     pane must still resolve the exact Westminster chapter 6 TreeKey, and the second must resolve
+     Psalms 119 in KJV rather than reinterpret the saved book as another module-list position.
+
+     - Side effects: Navigates the lower Bible pane to Psalm 119, terminates the app, relaunches the
+       same prepared data container, and focuses both restored panes.
+     - Failure modes: Fails if native selection cannot reach Psalm 119, relaunch loses either pinned
+       document identity, or the persisted Bible location resolves to a different book.
+     */
+    func testPsalm119NativeNavigationRelaunchPreservesSplitDocumentIdentity() {
+        let app = makeApp()
+        app.launch()
+
+        let westminsterDescription =
+            "The Westminster Standards translated into twenty-first century American English"
+        let kjvDescription =
+            "King James Version (1769) with Strongs Numbers and Morphology  and CatchWords"
+        let chapterSixKey = "/Westminster21/Westminster21/WCF/Ch 6"
+
+        focusVisibleReaderPane(1, in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Genesis;chapter=3",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Genesis 3:1, \(kjvDescription)",
+            in: app,
+            timeout: 20
+        )
+        tapElementReliably(requireElement("bookChooserButton", in: app, timeout: 20), timeout: 20)
+        _ = requireElement("passageChooserScreen", in: app, timeout: 20)
+        tapElementReliably(
+            app.buttons["passageBookCell.Ps"].firstMatch,
+            timeout: 20
+        )
+        tapElementReliably(
+            app.buttons["passageChapterCell.119"].firstMatch,
+            timeout: 20
+        )
+
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Psalms;chapter=119",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Psalms 119:1, \(kjvDescription)",
+            in: app,
+            timeout: 20
+        )
+
+        app.terminate()
+        app.launch()
+
+        waitForElementValue("windowTabButton::0", toContain: "state=active", in: app, timeout: 20)
+        waitForElementValue("windowTabButton::1", toContain: "state=inactive", in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=general_book;module=Westminster21",
+            in: app,
+            timeout: 20
+        )
+        waitForReaderRenderedContentState(containing: "key=\(chapterSixKey)", in: app, timeout: 20)
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Ch 6, \(westminsterDescription)",
+            in: app,
+            timeout: 20
+        )
+
+        focusVisibleReaderPane(1, in: app, timeout: 20)
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Psalms;chapter=119",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "Psalms 119:1, \(kjvDescription)",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue("readerBibleToolbarButton", toEqual: "active", in: app, timeout: 20)
+        waitForElementValue(
+            "readerCommentaryToolbarButton",
+            toEqual: "inactive",
+            in: app,
+            timeout: 20
+        )
     }
 
     /**

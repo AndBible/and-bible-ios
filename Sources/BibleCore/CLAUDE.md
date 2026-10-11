@@ -33,7 +33,6 @@ Each store wraps SwiftData ModelContext operations for a domain:
 Services contain business logic and coordinate between stores and SwordKit:
 - `BookmarkService`: Bookmark CRUD, label management, StudyPad operations
 - `WindowManager`: Window lifecycle, split-screen layout, sync groups
-- `NavigationService`: Book/chapter/verse navigation, history stack
 - `SearchIndexService`: Generated SQLite full-text/Strong's indexes, exact source authorization,
   and analyzer-owned result highlighting
 - `DownloadService`: Module download/install orchestration

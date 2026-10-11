@@ -1,0 +1,45 @@
+{
+  "format_version": 1,
+  "module": "Westminster21",
+  "module_version": "1.0.1",
+  "source_archive_url": "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/Westminster21.zip",
+  "source_archive_sha256": "87c3b890953fc969d443c7ac41f350d96309a5264c52a5c552e11d8b728348db",
+  "distribution_license": "Copyrighted; Freely distributable",
+  "copyright_holder": "Tom Sullivan",
+  "copyright_date": "2018",
+  "copyright": "Copyright 2015, 2017, 2018, Tom Sullivan, Editor. The editor hereby grants to all without restriction full freedom to copy and distribute this work without limitation, in part or in whole, provided that the text shall be unmodified and that all copyright notices are included. The original Westminster Catechisms and Westminster Confession of Faith were authored by the Westminster Divines and are in the public domain, as is Wallis's Explanation.",
+  "copyright_notes": {
+    "intro": "Scripture passages followed by a version designator (ESV NASB, or NKJB) are exact quotes (of at least part of a verse), reproduced under general permission to all authors under the following publisher copyrights:",
+    "ESV": "Scripture quotations are from The Holy Bible, English Standard Version, copyright © 2001 by Crossway Bibles, a division of Good News Publishers. Used by permission. All rights reserved.",
+    "NASB": "Scripture quotations taken from the New American Standard Bible®, Copyright © 1960, 1962, 1963, 1968, 1971, 1972, 1973,1975, 1977, 1995 by The Lockman Foundation. Used by permission. (www.Lockman.org)",
+    "NKJV": "Scripture taken from the New King James Version®. Copyright © 1982 by Thomas Nelson. Used by permission. All rights reserved."
+  },
+  "text_source": "http://beforgiven.info/HostedLiterature.htm",
+  "license_note": "The original module configuration is retained byte-for-byte at mods.d/westminster21.conf and remains the authoritative full copyright and license notice. The fixture is copied without modifying its text or notices.",
+  "entries": {
+    "mods.d/westminster21.conf": {
+      "bytes": 3880,
+      "sha256": "5db909b05a4a440bb0e400321540c7c71719859c0db7c5b7e62b9801bd4de4cb"
+    },
+    "modules/genbook/rawgenbook/westminster21/.dat": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "modules/genbook/rawgenbook/westminster21/images/10000000000000D4000000171045E42024EE64EC.png": {
+      "bytes": 391,
+      "sha256": "9fe9aea8f062402961b3453e93cef9cf9c9a870a12e551cd4ec8e64395661e40"
+    },
+    "modules/genbook/rawgenbook/westminster21/westminster21.bdt": {
+      "bytes": 1088180,
+      "sha256": "7fffc060810c4b47c65804bfa33b21018f46c4b36ce15162b0cf0e189d19af44"
+    },
+    "modules/genbook/rawgenbook/westminster21/westminster21.dat": {
+      "bytes": 5149,
+      "sha256": "4c160f98fdfd76a8329cc5dc03548850f1c1a6bc42c2a99464bf9242816d5f5a"
+    },
+    "modules/genbook/rawgenbook/westminster21/westminster21.idx": {
+      "bytes": 412,
+      "sha256": "74ee441b3828633804312771fe5144a6e61383bbc2bdf40fae5ec96b97805ec6"
+    }
+  }
+}

@@ -43,6 +43,7 @@ final class BibleReaderChapterHistoryParityTests: XCTestCase {
             setCurrentPosition: { state.position = $0 },
             pageManager: { pageManager },
             bookList: { books },
+            activeVersification: { JSwordKJVAVersification.name },
             isShowingAndroidMultiDocument: { false },
             clientReady: { true },
             chapterCount: { name in books.first { $0.name == name }?.chapterCount ?? 0 },

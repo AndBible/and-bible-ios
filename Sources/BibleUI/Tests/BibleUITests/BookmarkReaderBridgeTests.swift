@@ -1468,11 +1468,6 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
         let module = try XCTUnwrap(manager.module(named: "KJV"))
-        // PageManager stores the zero-based index in this active module's admitted book list.
-        // It does not store JSword BibleBook.ordinal (Matthew is 42 in that different domain).
-        let matthewBookIndex = try XCTUnwrap(
-            module.getBookList().firstIndex(where: { $0.osisId == "Matt" })
-        )
         let matthewOne = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
         )
@@ -1507,7 +1502,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Matthew")
         XCTAssertEqual(controller.currentChapter, 1)
         XCTAssertEqual(controller.currentVerse, 1)
-        XCTAssertEqual(pageManager.bibleBibleBook, matthewBookIndex)
+        XCTAssertEqual(
+            pageManager.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Matt")
+        )
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 1)
         var history = workspaceStore.history(windowId: window.id)
@@ -1581,10 +1580,6 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         let matthewOne = try XCTUnwrap(
             module.verseOrdinal(osisBookId: "Matt", chapter: 1, verse: 1)
         )
-        // Assert the fixture's local storage contract rather than JSword's BibleBook ordinal.
-        let markBookIndex = try XCTUnwrap(
-            module.getBookList().firstIndex(where: { $0.osisId == "Mark" })
-        )
         let container = try makeWorkspaceModelContainer()
         let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
         let workspace = workspaceStore.createWorkspace(name: "My Notes passage selection")
@@ -1630,7 +1625,11 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Mark")
         XCTAssertEqual(controller.currentChapter, 1)
         XCTAssertEqual(controller.currentVerse, 7)
-        XCTAssertEqual(pageManager.bibleBibleBook, markBookIndex)
+        XCTAssertEqual(
+            pageManager.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Mark")
+        )
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 7)
         let history = workspaceStore.history(windowId: window.id)
@@ -2001,10 +2000,6 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(renderedKJVAReference.osisId, "Ps")
         XCTAssertEqual(renderedKJVAReference.chapter, 11)
         XCTAssertNotEqual(sourceOrdinal, renderedKJVAOrdinal)
-        let psalmsBookIndex = try XCTUnwrap(
-            module.getBookList().firstIndex(where: { $0.osisId == "Ps" })
-        )
-
         let container = try makeWorkspaceModelContainer()
         let workspaceStore = WorkspaceStore(modelContext: container.mainContext)
         let workspace = workspaceStore.createWorkspace(name: "My Notes Vulgate scroll")
@@ -2066,7 +2061,14 @@ final class BookmarkReaderBridgeTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Psalms")
         XCTAssertEqual(controller.currentChapter, 10)
         XCTAssertEqual(controller.currentVerse, 3)
-        XCTAssertEqual(window.pageManager?.bibleBibleBook, psalmsBookIndex)
+        XCTAssertEqual(
+            window.pageManager?.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Ps")
+        )
+        XCTAssertEqual(
+            window.pageManager?.bibleBookEncoding,
+            PageManager.jswordBibleBookEncoding
+        )
         XCTAssertEqual(window.pageManager?.bibleChapterNo, 10)
         XCTAssertEqual(window.pageManager?.bibleVerseNo, 3)
         let history = workspaceStore.history(windowId: window.id)

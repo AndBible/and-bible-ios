@@ -1861,6 +1861,7 @@ public final class AndroidDatabaseBackupService {
                     bibleDocument: pageManager?.bibleDocument,
                     bibleVersification: pageManager?.bibleVersification,
                     bibleBook: pageManager?.bibleBibleBook,
+                    bibleBookEncoding: pageManager?.bibleBookEncoding,
                     bibleChapterNo: pageManager?.bibleChapterNo,
                     bibleVerseNo: pageManager?.bibleVerseNo,
                     commentaryDocument: pageManager?.commentaryDocument,

@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+@testable import BibleCore
 @testable import BibleUI
 
 /**
@@ -77,7 +78,7 @@ final class ReaderChromeTests: XCTestCase {
      */
     func testBibleReaderDocumentHeaderBuildsBibleModeWithWindowControlInsets() {
         let view = BibleReaderDocumentHeader(
-            mode: .bible(
+            mode: .navigation(
                 title: "Genesis 1:1",
                 subtitle: "King James Version",
                 hasPrevious: false,
@@ -87,17 +88,27 @@ final class ReaderChromeTests: XCTestCase {
             avoidanceInsets: EdgeInsets(top: 10, leading: 56, bottom: 0, trailing: 0),
             onOpenNavigationDrawer: {},
             onNavigatePrevious: {},
-            onShowBookChooser: {},
+            onShowKeyChooser: {},
+            onShowDocumentChooser: {},
             onNavigateNext: {},
             onReturnFromMyNotes: {},
-            onReturnFromStudyPad: {},
-            onReturnFromAuxiliary: {},
-            onBrowseAuxiliary: {}
+            onReturnFromStudyPad: {}
         ) {
             EmptyView()
         }
 
         XCTAssertTrue(String(describing: type(of: view)).contains("BibleReaderDocumentHeader"))
+    }
+
+    /** The document-library action remains selected for every category its quick menu owns. */
+    func testCommentaryDocumentToolbarOwnershipMatchesQuickSelectorCategories() {
+        XCTAssertTrue(DocumentCategory.commentary.usesCommentaryDocumentToolbarAction)
+        XCTAssertTrue(DocumentCategory.dictionary.usesCommentaryDocumentToolbarAction)
+        XCTAssertTrue(DocumentCategory.generalBook.usesCommentaryDocumentToolbarAction)
+        XCTAssertTrue(DocumentCategory.epub.usesCommentaryDocumentToolbarAction)
+        XCTAssertFalse(DocumentCategory.bible.usesCommentaryDocumentToolbarAction)
+        XCTAssertFalse(DocumentCategory.map.usesCommentaryDocumentToolbarAction)
+        XCTAssertFalse(DocumentCategory.dailyDevotion.usesCommentaryDocumentToolbarAction)
     }
 
     /**

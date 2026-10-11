@@ -173,10 +173,7 @@ enum BibleWindowPaneMenuSnapshotFactory {
         guard let pageManager = window.pageManager else { return nil }
         switch pageManager.currentCategoryName {
         case DocumentCategory.bible.pageManagerKey, DocumentCategory.commentary.pageManagerKey:
-            if let book = pageManager.bibleBibleBook, let chapter = pageManager.bibleChapterNo {
-                return "\(book):\(chapter)"
-            }
-            return nil
+            return BibleReaderPersistedBibleReference(pageManager: pageManager)?.localizedChapterName
         case DocumentCategory.dictionary.pageManagerKey:
             return pageManager.dictionaryKey
         case DocumentCategory.generalBook.pageManagerKey:

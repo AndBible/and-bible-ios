@@ -603,6 +603,16 @@ public struct BibleReaderView: View {
         return windowManager.controllers[windowId] as? BibleReaderController
     }
 
+    /** Resolves one gesture-time active pane ID and controller from the same manager snapshot. */
+    private func activeDocumentHeaderOwner() -> (windowID: UUID, controller: BibleReaderController)? {
+        _ = windowManager.controllerVersion
+        guard let windowID = windowManager.activeWindow?.id,
+              let controller = windowManager.controllers[windowID] as? BibleReaderController else {
+            return nil
+        }
+        return (windowID, controller)
+    }
+
     /**
      Controller that owns the currently presented pane-scoped modal flow.
 
@@ -3283,17 +3293,14 @@ public struct BibleReaderView: View {
         let visibleWindows = windowManager.visibleWindows
         let position = (visibleWindows.firstIndex(where: { $0.id == window.id }) ?? 0) + 1
         let controller = self.controller(for: window.id)
-        let document = controller?.activeModuleName(for: controller?.currentCategory ?? .bible)
-            ?? window.pageManager?.bibleDocument
-            ?? ""
-        let reference: String
-        if let controller {
-            reference = "\(controller.currentBook) \(controller.currentChapter)"
-        } else if let chapter = window.pageManager?.bibleChapterNo {
-            reference = "\(chapter)"
-        } else {
-            reference = ""
-        }
+        let document = BibleWindowPaneMenuSnapshotFactory.documentAbbreviation(
+            for: window,
+            controller: controller
+        ) ?? ""
+        let reference = BibleWindowPaneMenuSnapshotFactory.referenceName(
+            for: window,
+            controller: controller
+        ) ?? ""
         return String(
             format: localizedAndroidOverflowString(
                 androidKey: "copy_settings_to_window",
@@ -4683,8 +4690,8 @@ public struct BibleReaderView: View {
     /**
      Builds the top document header bar for the focused pane state.
 
-     The header switches between Bible navigation chrome and category-specific back/navigation
-     controls for notes, study pads, dictionaries, maps, general books, and EPUB content.
+     Standard documents share Android's page-key/document-name navigation control. Notes, study
+     pads, and synthetic Multi documents retain their source-specific header modes.
      */
     private var documentHeader: some View {
         let controller = focusedController
@@ -4701,22 +4708,28 @@ public struct BibleReaderView: View {
                 }
                 readerGestureLogger.notice("reader presentation requested surface=drawer")
             },
-            onNavigatePrevious: { navigatePreviousIfReaderCanHostNavigate(controller) },
-            onShowBookChooser: { presentBookChooser(from: windowManager.activeWindow?.id) },
-            onNavigateNext: { navigateNextIfReaderCanHostNavigate(controller) },
+            onNavigatePrevious: {
+                navigatePreviousIfReaderCanHostNavigate(activeDocumentHeaderOwner()?.controller)
+            },
+            onShowKeyChooser: {
+                let owner = activeDocumentHeaderOwner()
+                presentActivePageKeyChooser(
+                    for: owner?.controller,
+                    from: owner?.windowID
+                )
+            },
+            onShowDocumentChooser: {
+                guard let owner = activeDocumentHeaderOwner() else { return }
+                presentReaderDestination(
+                    .chooseDocument,
+                    from: owner.windowID
+                )
+            },
+            onNavigateNext: {
+                navigateNextIfReaderCanHostNavigate(activeDocumentHeaderOwner()?.controller)
+            },
             onReturnFromMyNotes: { controller?.returnFromMyNotes() },
-            onReturnFromStudyPad: { controller?.returnFromStudyPad() },
-            onReturnFromAuxiliary: { controller?.switchCategory(to: .bible) },
-            onBrowseAuxiliary: {
-                setPanePresentationTarget(windowManager.activeWindow?.id)
-                switch controller?.currentCategory {
-                case .dictionary: presentReaderDestinationPreservingPane(.dictionaryBrowser)
-                case .generalBook: presentReaderDestinationPreservingPane(.generalBookBrowser)
-                case .map: presentReaderDestinationPreservingPane(.mapBrowser)
-                case .epub: presentReaderDestinationPreservingPane(.generalBookBrowser)
-                default: break
-                }
-            }
+            onReturnFromStudyPad: { controller?.returnFromStudyPad() }
         ) {
             readerToolbarActions(controller: controller)
         }
@@ -4756,21 +4769,17 @@ public struct BibleReaderView: View {
                 )
             )
         }
-        if controller?.currentCategory == .dictionary ||
-            controller?.currentCategory == .generalBook ||
-            controller?.currentCategory == .map ||
-            controller?.currentCategory == .epub {
-            let category = controller?.currentCategory ?? .dictionary
-            let title = controller?.activeEpubReader?.title
-                ?? controller?.activeModuleName(for: category)
-                ?? ""
-            return .auxiliary(
-                title: title,
-                subtitle: auxiliaryDocumentSubtitle(for: controller),
-                browseSystemImageName: browseIconName(for: category)
+        if let controller,
+           [DocumentCategory.dictionary, .generalBook, .map, .epub]
+            .contains(controller.currentCategory) {
+            return .navigation(
+                title: auxiliaryPageDisplayName(for: controller),
+                subtitle: auxiliaryDocumentDisplayName(for: controller),
+                hasPrevious: controller.hasPrevious,
+                hasNext: controller.hasNext
             )
         }
-        return .bible(
+        return .navigation(
             title: currentToolbarTitle,
             subtitle: currentToolbarSubtitle,
             hasPrevious: controller?.hasPrevious == true,
@@ -4778,21 +4787,100 @@ public struct BibleReaderView: View {
         )
     }
 
-    /// Subtitle shown beneath auxiliary document titles in the header.
-    private func auxiliaryDocumentSubtitle(for controller: BibleReaderController?) -> String? {
-        switch controller?.currentCategory {
+    /**
+     Resolves Android's visible `currentPage.displayKey.name` for one accepted auxiliary page.
+
+     The committed render keeps the source's display key separate from its durable full path. The
+     identity is used only while it still matches the focused category, module, and exact key, so a
+     pending switch cannot leave a stale page label above a newly selected document.
+     */
+    private func auxiliaryPageDisplayName(for controller: BibleReaderController) -> String {
+        let category = controller.currentCategory
+        let moduleName = controller.activeModuleName(for: category)
+        let currentKey = auxiliaryExactKey(for: controller)
+        if let identity = controller.committedRenderState.identity,
+           identity.category == category,
+           exactJavaString(identity.moduleName, equals: moduleName),
+           exactJavaString(identity.key, equals: currentKey) {
+            return identity.book
+        }
+        if controller.activeEpubReader != nil,
+           let pageTitle = controller.currentEpubTitle,
+           !pageTitle.isEmpty {
+            return pageTitle
+        }
+        return currentKey ?? moduleName ?? ""
+    }
+
+    /** Resolves Android's `currentDocument.name` subtitle for the focused auxiliary source. */
+    private func auxiliaryDocumentDisplayName(for controller: BibleReaderController) -> String {
+        if let epubTitle = controller.activeEpubReader?.title, !epubTitle.isEmpty {
+            return epubTitle
+        }
+        let category = controller.currentCategory
+        guard let moduleName = controller.activeModuleName(for: category) else { return "" }
+        if let info = controller.registeredInstalledModuleInfo(named: moduleName) {
+            let description = info.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            return description.isEmpty ? moduleName : description
+        }
+        if let localDocument = controller.localGeneralBookDocument(named: moduleName),
+           case .myDocument(let document) = localDocument {
+            return document.name
+        }
+        return moduleName
+    }
+
+    /// Returns the selected durable key for the active auxiliary family without reinterpretation.
+    private func auxiliaryExactKey(for controller: BibleReaderController) -> String? {
+        switch controller.currentCategory {
         case .dictionary:
-            return controller?.currentDictionaryKey
+            return controller.currentDictionaryKey
         case .generalBook:
-            return controller?.activeEpubReader == nil
-                ? controller?.currentGeneralBookKey
-                : controller?.currentEpubTitle
+            return controller.currentGeneralBookKey
         case .map:
-            return controller?.currentMapKey
+            return controller.currentMapKey
         case .epub:
-            return controller?.currentEpubTitle
-        default:
+            return controller.currentEpubHref ?? controller.currentGeneralBookKey
+        case .bible, .commentary, .dailyDevotion:
             return nil
+        }
+    }
+
+    /// Compares optional native source identities with Java-exact UTF-16 semantics.
+    private func exactJavaString(_ lhs: String?, equals rhs: String?) -> Bool {
+        switch (lhs, rhs) {
+        case (.none, .none):
+            return true
+        case (.some(let lhs), .some(let rhs)):
+            return SwordJavaExactStringIdentity(lhs) == SwordJavaExactStringIdentity(rhs)
+        case (.none, .some), (.some, .none):
+            return false
+        }
+    }
+
+    /** Opens the focused page family's Android key chooser while retaining pane ownership. */
+    private func presentActivePageKeyChooser(
+        for controller: BibleReaderController?,
+        from windowID: UUID?
+    ) {
+        guard let controller else { return }
+        switch controller.currentCategory {
+        case .bible, .commentary:
+            presentBookChooser(from: windowID)
+        case .dictionary:
+            presentReaderDestination(.dictionaryBrowser, from: windowID)
+        case .generalBook, .epub:
+            if let moduleName = controller.activeGeneralBookModuleName,
+               let localDocument = controller.localGeneralBookDocument(named: moduleName),
+               case .myDocument = localDocument {
+                presentReaderDestination(.myDocuments, from: windowID)
+            } else {
+                presentReaderDestination(.generalBookBrowser, from: windowID)
+            }
+        case .map:
+            presentReaderDestination(.mapBrowser, from: windowID)
+        case .dailyDevotion:
+            break
         }
     }
 
@@ -5217,22 +5305,6 @@ public struct BibleReaderView: View {
         AndBibleAppVersionMetadata.current().drawerFooterText
     }
 
-    /// Category-specific browse icon used when reading non-Bible content.
-    private func browseIconName(for category: DocumentCategory?) -> String {
-        switch category {
-        case .dictionary:
-            return "character.book.closed"
-        case .generalBook:
-            return "books.vertical.fill"
-        case .map:
-            return "map.fill"
-        case .epub:
-            return "book.closed.fill"
-        default:
-            return "list.bullet"
-        }
-    }
-
     /**
      Whether the Strong's toggle should be shown for the active module.
 
@@ -5329,7 +5401,8 @@ public struct BibleReaderView: View {
             strongsMode: displaySettings.strongsMode ?? 0,
             strongsEnabled: strongsEnabled,
             isBibleActive: controller?.currentCategory == .bible,
-            isCommentaryActive: controller?.currentCategory == .commentary,
+            isCommentaryActive:
+                controller?.currentCategory.usesCommentaryDocumentToolbarAction == true,
             searchEnabled: controller?.isCurrentPageSearchable == true,
             speakEnabled: controller?.isCurrentPageSpeakable == true,
             moduleActionsEnabled: controller != nil,

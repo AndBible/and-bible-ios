@@ -1,2 +1,5 @@
 # Preserve provenance-pinned upstream MMSEG dictionary bytes, including CRLF line endings.
 Sources/BibleCore/Sources/BibleCore/Resources/search/mmseg4j/*.dic binary
+
+# RawGenBook indexes address exact byte offsets in the retained upstream module data.
+Tests/UI/Fixtures/westminster-sword/modules/genbook/rawgenbook/westminster21/* binary

@@ -14,6 +14,33 @@ import SwordKit
  */
 enum AndroidJSwordGenBookKeyResolution {
     /**
+     Removes entries whose JSword `TreeKey.name` is empty while preserving exact source paths.
+
+     Android's cached general-book page filters on the visible key name, rather than libsword's
+     full traversal path. A nonempty root path such as `/` can therefore still be non-presentable.
+     Whitespace-only leaf names and duplicates remain in source order.
+     */
+    static func presentableSourceKeys(_ sourceKeys: [String]) -> [String] {
+        sourceKeys.filter {
+            !treeKeyName(forSourceKey: $0).isEmpty
+        }
+    }
+
+    /**
+     Returns Android `TreeKey.name` for one exact libsword traversal key.
+
+     General-book choosers keep the full source path as row identity and selection payload, but
+     Android renders only the selected TreeKey's leaf name. Root and unmatched values retain their
+     source spelling so malformed data stays visible instead of selecting a neighboring entry.
+     */
+    static func displayName(forSourceKey sourceKey: String, sourceKeys: [String]) -> String {
+        let osisRef = sourceKey.utf16.first == 0x002F
+            ? String(sourceKey.dropFirst())
+            : sourceKey
+        return resolve(candidate: osisRef, sourceKeys: sourceKeys)?.keyName ?? sourceKey
+    }
+
+    /**
      Captures the three key identities exposed after selecting one TreeKey.
 
      `sourceKey` reloads libsword, `keyName` is Android `Key.name`, and `osisRef` is both JSword
@@ -138,8 +165,7 @@ enum AndroidJSwordGenBookKeyResolution {
      - Failure modes: None; an empty/root path yields an empty leaf name exactly like TreeKey.
      */
     private static func resolution(from entry: Entry, entries: [Entry]) -> Resolution {
-        let keyName = entry.osisRef.split(separator: "/", omittingEmptySubsequences: false).last
-            .map(String.init) ?? entry.osisRef
+        let keyName = treeKeyName(forSourceKey: entry.sourceKey)
         let descendantPrefix = entry.osisRef.isEmpty ? "" : entry.osisRef + "/"
         let subtreeCardinality = entries.reduce(into: 0) { count, candidate in
             if javaStringEquals(candidate.osisRef, entry.osisRef)
@@ -155,6 +181,15 @@ enum AndroidJSwordGenBookKeyResolution {
             osisRef: entry.osisRef,
             subtreeCardinality: subtreeCardinality
         )
+    }
+
+    /** Returns the final path component exposed by JSword `TreeKey.name`. */
+    private static func treeKeyName(forSourceKey sourceKey: String) -> String {
+        let osisRef = sourceKey.utf16.first == 0x002F
+            ? String(sourceKey.dropFirst())
+            : sourceKey
+        return osisRef.split(separator: "/", omittingEmptySubsequences: false).last
+            .map(String.init) ?? osisRef
     }
 
     /**

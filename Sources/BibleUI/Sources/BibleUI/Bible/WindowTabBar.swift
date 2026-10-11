@@ -546,17 +546,54 @@ struct WindowTabBar: View {
     private func shortReference(for window: BibleCore.Window) -> String {
         guard !isAndroidMultiDocument(window) else { return "" }
 
-        // Use controller's dynamic book list if available, otherwise fallback to static
-        if let ctrl = windowManager.controllers[window.id] as? BibleReaderController {
-            return "\(ctrl.osisBookId(for: ctrl.currentBook)) \(ctrl.currentChapter)"
+        return Self.shortReference(
+            for: window,
+            controller: windowManager.controllers[window.id] as? BibleReaderController
+        )
+    }
+
+    /**
+     Resolves one pre-render tab reference from the active document family.
+
+     A registered controller may already own an auxiliary document while its next render token is
+     still pending. Only Bible and commentary pages use the controller's Bible cursor; every other
+     category keeps the exact persisted key selected for that document family.
+     */
+    static func shortReference(
+        for window: BibleCore.Window,
+        controller: BibleReaderController?
+    ) -> String {
+        if let controller,
+           controller.currentCategory == .bible || controller.currentCategory == .commentary {
+            return "\(controller.osisBookId(for: controller.currentBook)) \(controller.currentChapter)"
         }
-        guard let pm = window.pageManager else { return "" }
-        let books = BibleReaderController.defaultBooks
-        guard let bookIndex = pm.bibleBibleBook,
-              bookIndex >= 0, bookIndex < books.count else { return "" }
-        let book = books[bookIndex]
-        let chapter = pm.bibleChapterNo ?? 1
-        return "\(book.osisId) \(chapter)"
+        return detachedShortReference(for: window)
+    }
+
+    /** Resolves one detached tab label from the persisted identity owned by its active category. */
+    static func detachedShortReference(for window: BibleCore.Window) -> String {
+        guard let pageManager = window.pageManager else { return "" }
+        switch pageManager.currentCategoryName {
+        case DocumentCategory.bible.pageManagerKey, DocumentCategory.commentary.pageManagerKey:
+            return BibleReaderPersistedBibleReference(pageManager: pageManager)?.compactChapterName
+                ?? ""
+        case DocumentCategory.dictionary.pageManagerKey:
+            return pageManager.dictionaryKey ?? ""
+        case DocumentCategory.generalBook.pageManagerKey:
+            if AndroidSpecialDocumentIdentity.isMultiDocument(
+                categoryName: pageManager.currentCategoryName,
+                moduleName: pageManager.generalBookDocument
+            ) {
+                return ""
+            }
+            return pageManager.generalBookKey ?? ""
+        case DocumentCategory.map.pageManagerKey:
+            return pageManager.mapKey ?? ""
+        case DocumentCategory.epub.pageManagerKey:
+            return pageManager.epubHref ?? ""
+        default:
+            return ""
+        }
     }
 
     /**

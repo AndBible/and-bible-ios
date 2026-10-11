@@ -135,8 +135,20 @@ public final class PageManager {
     /// Persisted versification name for the Bible position.
     public var bibleVersification: String?
 
-    /// Book index for the persisted Bible position.
+    /// Book identity interpreted by `bibleBookEncoding`; older rows contain a module-list index.
     public var bibleBibleBook: Int?
+
+    /**
+     Encoding of the persisted book integer. Nil preserves the legacy module-list interpretation.
+
+     New positions use JSword's stable `BibleBook.ordinal()` values, which do not change when an
+     installed module exposes a different subset or ordering of books. An explicit marker avoids
+     silently reinterpreting existing iOS positions as Android ordinals during store migration.
+     */
+    public var bibleBookEncoding: String?
+
+    /// Canonical encoding shared by new native positions and Android workspace imports.
+    public static let jswordBibleBookEncoding = "jswordOrdinal"
 
     /// Chapter number for the persisted Bible position.
     public var bibleChapterNo: Int?

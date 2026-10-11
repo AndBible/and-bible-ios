@@ -21,6 +21,7 @@ extension PageManager {
         bibleDocument = source.bibleDocument
         bibleVersification = source.bibleVersification
         bibleBibleBook = source.bibleBibleBook
+        bibleBookEncoding = source.bibleBookEncoding
         bibleChapterNo = source.bibleChapterNo
         bibleVerseNo = source.bibleVerseNo
 

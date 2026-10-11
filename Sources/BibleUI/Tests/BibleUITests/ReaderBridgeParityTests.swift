@@ -2000,7 +2000,14 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(targetController.currentBook, "Genesis")
         XCTAssertEqual(targetController.currentChapter, expectedChapter)
         XCTAssertEqual(targetController.currentVerse, 0)
-        XCTAssertEqual(targetPageManager.bibleBibleBook, 0)
+        XCTAssertEqual(
+            targetPageManager.bibleBibleBook,
+            JSwordBibleBook.ordinal(forOSIS: "Gen")
+        )
+        XCTAssertEqual(
+            targetPageManager.bibleBookEncoding,
+            PageManager.jswordBibleBookEncoding
+        )
         XCTAssertEqual(targetPageManager.bibleChapterNo, expectedChapter)
         XCTAssertEqual(targetPageManager.bibleVerseNo, 0)
 
@@ -2641,7 +2648,8 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, "Genesis")
         XCTAssertEqual(controller.currentChapter, 1)
         XCTAssertEqual(controller.currentVerse, 1)
-        XCTAssertEqual(pageManager.bibleBibleBook, 0)
+        XCTAssertEqual(pageManager.bibleBibleBook, JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        XCTAssertEqual(pageManager.bibleBookEncoding, PageManager.jswordBibleBookEncoding)
         XCTAssertEqual(pageManager.bibleChapterNo, 1)
         XCTAssertEqual(pageManager.bibleVerseNo, 1)
         XCTAssertEqual(pageManager.commentaryAnchorOrdinal, localAnchor)
@@ -2794,6 +2802,148 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         assertAndroidSetupPayload(try XCTUnwrap(
             bridgeEmissionPayload(from: mapEmissions, event: "setup_content") as? [String: Any]
         ))
+    }
+
+    /**
+     Verifies toolbar adjacency stays inside the active general-book source ordering.
+
+     The reader first accepts its client-ready Bible render, matching the UI boundary before a user
+     can open the document chooser. The real SWORD-backed fixture then begins on its middle key so
+     both directions are available. Next must load the exact following key through the ordinary
+     general-book pipeline, then disable at the source boundary without borrowing the pane's hidden
+     Bible chapter state.
+     */
+    @MainActor
+    func testGeneralBookToolbarNavigationUsesExactSourceAdjacentKeys() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try writeRawLDModule(
+            named: "ToolbarBook",
+            category: "Generic Books",
+            description: "Toolbar General Book",
+            entries: [
+                ("FIRST-ENTRY", "<div><p>First.</p></div>"),
+                ("SECOND-ENTRY", "<div><p>Second.</p></div>"),
+                ("THIRD-ENTRY", "<div><p>Third.</p></div>"),
+            ],
+            in: modulePath
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let toolbarBook = try XCTUnwrap(manager.module(named: "ToolbarBook"))
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = JSwordKJVAVersification.name
+        pageManager.bibleChapterNo = 9
+        pageManager.bibleVerseNo = 1
+        window.pageManager = pageManager
+        retainReaderWindowGraph(window)
+        controller.activeWindow = window
+        let initialBibleBoundary = scripts().count
+        controller.bridgeDidSetClientReady(bridge)
+        let initialBibleEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: initialBibleBoundary
+        )
+        let initialBibleDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: initialBibleEmissions, event: "add_documents")
+                as? [String: Any]
+        )
+        XCTAssertEqual(initialBibleDocument["bookCategory"] as? String, "BIBLE")
+        XCTAssertEqual(
+            controller.switchGeneralBookDocument(to: "ToolbarBook"),
+            .switchedRequiringKeySelection
+        )
+
+        let expectedSourceKeys = ["FIRST-ENTRY", "SECOND-ENTRY", "THIRD-ENTRY"]
+        let sourceKeys = try toolbarBook.loadAllKeys()
+        XCTAssertEqual(sourceKeys, expectedSourceKeys)
+        XCTAssertTrue(try toolbarBook.containsExactKey("SECOND-ENTRY"))
+        let middleFragment = try toolbarBook.rawOSISFragment(forKey: "SECOND-ENTRY")
+        XCTAssertEqual(middleFragment.key, "SECOND-ENTRY")
+        XCTAssertTrue(middleFragment.hasRenderableContent)
+
+        controller.loadGeneralBookEntry(key: "SECOND-ENTRY")
+        try await awaitReaderCondition("accepted middle general-book render") {
+            controller.currentCategory == .generalBook
+                && controller.currentGeneralBookKey == "SECOND-ENTRY"
+                && controller.renderedContentState.contains("module=ToolbarBook")
+                && controller.renderedContentState.contains("key=SECOND-ENTRY")
+        }
+        let renderedSourceKeys = try toolbarBook.loadAllKeys()
+        let currentKey = try XCTUnwrap(controller.currentGeneralBookKey)
+        XCTAssertTrue(
+            controller.activeGeneralBookModule === toolbarBook,
+            "Rendered module differs from enumerated module; currentKey=\(currentKey), keys=\(renderedSourceKeys)"
+        )
+        XCTAssertEqual(
+            renderedSourceKeys,
+            expectedSourceKeys,
+            "RawLD source keys changed after accepted render; currentKey=\(currentKey)"
+        )
+        XCTAssertTrue(
+            renderedSourceKeys.contains {
+                SwordJavaExactStringIdentity($0) == SwordJavaExactStringIdentity(currentKey)
+            },
+            "Committed key is absent by Java-exact identity; currentKey=\(currentKey), keys=\(renderedSourceKeys)"
+        )
+        try await awaitReaderCondition("middle general-book adjacency") {
+            controller.hasPrevious && controller.hasNext
+        }
+
+        var baseline = scripts().count
+        controller.navigateNext()
+        let nextEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let nextDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: nextEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(nextDocument["key"] as? String, "THIRD-ENTRY")
+        XCTAssertEqual(controller.currentGeneralBookKey, "THIRD-ENTRY")
+        XCTAssertEqual(pageManager.generalBookKey, "THIRD-ENTRY")
+        XCTAssertEqual(pageManager.bibleChapterNo, 9)
+        try await awaitReaderCondition("last general-book boundary") {
+            controller.hasPrevious && !controller.hasNext
+        }
+
+        baseline = scripts().count
+        controller.navigatePrevious()
+        let previousEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let previousDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: previousEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(previousDocument["key"] as? String, "SECOND-ENTRY")
+        try await awaitReaderCondition("restored middle general-book adjacency") {
+            controller.hasPrevious && controller.hasNext
+        }
+
+        baseline = scripts().count
+        controller.navigatePrevious()
+        let firstEmissions = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: baseline
+        )
+        let firstDocument = try XCTUnwrap(
+            bridgeEmissionPayload(from: firstEmissions, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(firstDocument["key"] as? String, "FIRST-ENTRY")
+        XCTAssertEqual(controller.currentGeneralBookKey, "FIRST-ENTRY")
+        XCTAssertEqual(pageManager.generalBookKey, "FIRST-ENTRY")
+        XCTAssertEqual(pageManager.bibleChapterNo, 9)
+        try await awaitReaderCondition("first general-book boundary") {
+            !controller.hasPrevious && controller.hasNext
+        }
     }
 
     /**

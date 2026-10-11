@@ -143,6 +143,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
         var bibleDocument: String?
         var bibleVersification: String?
         var bibleBook: Int?
+        var bibleBookEncoding: String? = PageManager.jswordBibleBookEncoding
         var bibleChapterNo: Int?
         var bibleVerseNo: Int?
         var commentaryDocument: String?
@@ -175,6 +176,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                 bibleDocument: bibleDocument,
                 bibleVersification: bibleVersification,
                 bibleBook: bibleBook,
+                bibleBookEncoding: bibleBookEncoding,
                 bibleChapterNo: bibleChapterNo,
                 bibleVerseNo: bibleVerseNo,
                 commentaryDocument: commentaryDocument,
@@ -730,6 +732,7 @@ public final class RemoteSyncWorkspacePatchApplyService {
                     bibleDocument: pageManager?.bibleDocument,
                     bibleVersification: pageManager?.bibleVersification,
                     bibleBook: pageManager?.bibleBibleBook,
+                    bibleBookEncoding: pageManager?.bibleBookEncoding,
                     bibleChapterNo: pageManager?.bibleChapterNo,
                     bibleVerseNo: pageManager?.bibleVerseNo,
                     commentaryDocument: pageManager?.commentaryDocument,
