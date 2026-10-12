@@ -16,6 +16,7 @@ import os
 import re
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -37,6 +38,18 @@ WEBKIT_SERVICE_LABEL_PATTERN = re.compile(
     r"^com\.apple\.WebKit\."
     r"(?:WebContent(?:\.EnhancedSecurity)?|GPU|Networking)"
     r"(?:\.[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12})?$"
+)
+SPINDUMP_STUCK_DIRECTORY = Path("/var/tmp")
+SPINDUMP_STUCK_NAME_PATTERN = re.compile(
+    r"^spindump-stuck-stackshot\.\d{4}-\d{2}-\d{2}-\d{2}:\d{2}:\d{2}\.\d+\.buf$"
+)
+SPINDUMP_STUCK_LOG_PATTERN = re.compile(
+    r"^spindump-stuck: Wrote stackshot to (?P<path>/\S+)$",
+    re.MULTILINE,
+)
+MAX_RAW_STACKSHOT_BYTES = 256 * 1024 * 1024
+RETAINED_RAW_STACKSHOT_NAME_PATTERN = re.compile(
+    r"^xpcproxy-\d+-\d{8}T\d{12}Z\.spindump\.txt\.raw\.buf$"
 )
 INITIAL_RESOURCE_COMMANDS = (
     ("sysctl", "-n", "hw.memsize"),
@@ -149,7 +162,13 @@ def run_bounded_owned_tool(
     launch_error: str | None = None
     cleanup_error: str | None = None
     try:
-        with tool_output_path.open("w", encoding="utf-8") as tool_output:
+        tool_output_fd = os.open(
+            tool_output_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o644,
+        )
+        os.fchmod(tool_output_fd, 0o644)
+        with os.fdopen(tool_output_fd, "w", encoding="utf-8") as tool_output:
             process = subprocess.Popen(
                 command,
                 stdout=tool_output,
@@ -897,7 +916,9 @@ def run_privileged_spindump_helper(arguments: Sequence[str]) -> int:
     """Run only the fixed kernel-aware command beneath non-interactive sudo.
 
     The output must be a new direct child of the declared diagnostics directory.
-    Signals are forwarded only to the helper-owned spindump process.
+    ``-noIPC`` avoids the report-processing daemon dependency observed on hosted
+    runners. Signals are forwarded only to the helper-owned spindump process.
+    A failed report may retain only its newly named root-owned raw stackshot.
     """
 
     parser = argparse.ArgumentParser(add_help=False)
@@ -917,6 +938,8 @@ def run_privileged_spindump_helper(arguments: Sequence[str]) -> int:
     ):
         return 64
 
+    native_log_path = output_path.with_name(output_path.name + ".native.log")
+    existing_stackshots = set(SPINDUMP_STUCK_DIRECTORY.glob("spindump-stuck-stackshot.*.buf"))
     owned_process: subprocess.Popen[str] | None = None
     stop_requested = False
 
@@ -946,18 +969,173 @@ def run_privileged_spindump_helper(arguments: Sequence[str]) -> int:
                 "1",
                 "10",
                 "-onlyTarget",
+                "-noIPC",
                 "-timelimit",
                 "3",
                 "-o",
                 str(output_path),
             ),
-            tool_output_path=output_path.with_name(output_path.name + ".native.log"),
+            tool_output_path=native_log_path,
             timeout=5.0,
             process_started=remember_process,
         )
     finally:
         signal.signal(signal.SIGTERM, previous_term)
         signal.signal(signal.SIGINT, previous_int)
+    if result.launched and result.returncode != 0:
+        retained_path = _retain_failed_spindump_stackshot(
+            native_log_path,
+            output_path.with_name(output_path.name + ".raw.buf"),
+            existing_stackshots=existing_stackshots,
+        )
+        if retained_path is not None:
+            print(f"Retained raw spindump stackshot at {retained_path}")
+    if not result.launched:
+        return 70
+    if result.timed_out or result.cleanup_error is not None:
+        return 124
+    return result.returncode if result.returncode is not None else 70
+
+
+def _retain_failed_spindump_stackshot(
+    native_log_path: Path,
+    destination_path: Path,
+    *,
+    existing_stackshots: set[Path],
+    required_owner_uid: int = 0,
+) -> Path | None:
+    """Copy this capture's new root-owned emergency stackshot without following links."""
+
+    destination_created = False
+    try:
+        matches = SPINDUMP_STUCK_LOG_PATTERN.findall(
+            native_log_path.read_text(encoding="utf-8", errors="replace")
+        )
+        if len(matches) != 1:
+            return None
+        source_path = Path(matches[0])
+        if (
+            not source_path.is_absolute()
+            or source_path.parent.resolve() != SPINDUMP_STUCK_DIRECTORY.resolve()
+            or SPINDUMP_STUCK_NAME_PATTERN.fullmatch(source_path.name) is None
+            or source_path in existing_stackshots
+            or destination_path.exists()
+        ):
+            return None
+        source_fd = os.open(source_path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            source_status = os.fstat(source_fd)
+            if (
+                not stat.S_ISREG(source_status.st_mode)
+                or source_status.st_uid != required_owner_uid
+                or source_status.st_nlink != 1
+                or source_status.st_size <= 0
+                or source_status.st_size > MAX_RAW_STACKSHOT_BYTES
+            ):
+                return None
+            destination_fd = os.open(
+                destination_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o644,
+            )
+            destination_created = True
+            try:
+                os.fchmod(destination_fd, 0o644)
+                bytes_copied = 0
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    bytes_copied += len(chunk)
+                    if bytes_copied > source_status.st_size:
+                        raise OSError("raw stackshot changed while being copied")
+                    remaining = memoryview(chunk)
+                    while remaining:
+                        written = os.write(destination_fd, remaining)
+                        if written <= 0:
+                            raise OSError("raw stackshot copy made no progress")
+                        remaining = remaining[written:]
+                if bytes_copied != source_status.st_size:
+                    raise OSError("raw stackshot changed while being copied")
+            finally:
+                os.close(destination_fd)
+        finally:
+            os.close(source_fd)
+    except OSError:
+        if destination_created:
+            try:
+                destination_path.unlink()
+            except OSError:
+                pass
+        return None
+    return destination_path
+
+
+def format_retained_stackshot(
+    arguments: Sequence[str],
+    *,
+    required_owner_uid: int = 0,
+) -> int:
+    """Format exactly one retained raw stackshot after UI-test observation ends.
+
+    The raw input is always preserved. This makes one bounded local formatting
+    attempt and accepts only the collector's direct-child artifact name.
+    """
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--diagnostics-directory", type=Path, required=True)
+    args = parser.parse_args(arguments)
+    if not args.diagnostics_directory.is_absolute():
+        return 64
+    diagnostics_directory = args.diagnostics_directory.resolve()
+    if not diagnostics_directory.is_dir():
+        return 64
+    candidates = list(diagnostics_directory.glob("*.spindump.txt.raw.buf"))
+    if not candidates:
+        return 0
+    if (
+        len(candidates) != 1
+        or RETAINED_RAW_STACKSHOT_NAME_PATTERN.fullmatch(candidates[0].name) is None
+    ):
+        return 64
+    raw_path = candidates[0]
+    try:
+        raw_status = raw_path.lstat()
+    except OSError:
+        return 64
+    if (
+        raw_path.parent.resolve() != diagnostics_directory
+        or not stat.S_ISREG(raw_status.st_mode)
+        or raw_status.st_uid != required_owner_uid
+        or raw_status.st_nlink != 1
+        or raw_status.st_size <= 0
+        or raw_status.st_size > MAX_RAW_STACKSHOT_BYTES
+    ):
+        return 64
+    formatted_path = raw_path.with_name(raw_path.name.removesuffix(".raw.buf") + ".recovered.txt")
+    tool_log_path = formatted_path.with_suffix(".tool.log")
+    if (
+        formatted_path.exists()
+        or formatted_path.is_symlink()
+        or tool_log_path.exists()
+        or tool_log_path.is_symlink()
+    ):
+        return 64
+    result = run_bounded_owned_tool(
+        (
+            "/usr/sbin/spindump",
+            "-i",
+            str(raw_path),
+            "-noIPC",
+            "-inspectLiveSystem",
+            "-timelimit",
+            "30",
+            "-o",
+            str(formatted_path),
+        ),
+        tool_output_path=tool_log_path,
+        timeout=35.0,
+    )
     if not result.launched:
         return 70
     if result.timed_out or result.cleanup_error is not None:
@@ -971,6 +1149,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     effective_arguments = list(arguments if arguments is not None else sys.argv[1:])
     if effective_arguments[:1] == ["--capture-kernel-spindump"]:
         return run_privileged_spindump_helper(effective_arguments[1:])
+    if effective_arguments[:1] == ["--format-retained-stackshot"]:
+        return format_retained_stackshot(effective_arguments[1:])
     args = parse_args(effective_arguments)
     try:
         collector = SimulatorResourceCollector(

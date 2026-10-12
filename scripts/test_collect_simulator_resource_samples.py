@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,8 @@ from collect_simulator_resource_samples import (
     SimulatorResourceCollector,
     StallCandidate,
     XPCProxyStallDetector,
+    _retain_failed_spindump_stackshot,
+    format_retained_stackshot,
     parse_process_arguments,
     parse_process_snapshots,
     run_bounded_owned_tool,
@@ -185,16 +188,22 @@ class OwnedToolLifecycleTests(unittest.TestCase):
     def test_real_timed_out_child_is_terminated_and_reaped(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             child_pid: list[int] = []
-            result = run_bounded_owned_tool(
-                (sys.executable, "-c", "import time; time.sleep(30)"),
-                tool_output_path=Path(temporary_directory) / "child.log",
-                timeout=0.05,
-                process_started=lambda process: child_pid.append(process.pid),
-            )
+            tool_output_path = Path(temporary_directory) / "child.log"
+            previous_umask = os.umask(0o077)
+            try:
+                result = run_bounded_owned_tool(
+                    (sys.executable, "-c", "import time; time.sleep(30)"),
+                    tool_output_path=tool_output_path,
+                    timeout=0.05,
+                    process_started=lambda process: child_pid.append(process.pid),
+                )
+            finally:
+                os.umask(previous_umask)
 
             self.assertTrue(result.launched)
             self.assertTrue(result.timed_out)
             self.assertIsNotNone(result.returncode)
+            self.assertEqual(stat.S_IMODE(tool_output_path.stat().st_mode), 0o644)
             with self.assertRaises(ProcessLookupError):
                 os.kill(child_pid[0], 0)
 
@@ -210,6 +219,7 @@ class OwnedToolLifecycleTests(unittest.TestCase):
                 self.assertEqual(command[0], "/usr/sbin/spindump")
                 self.assertEqual(command[1:4], ("800", "1", "10"))
                 self.assertIn("-onlyTarget", command)
+                self.assertIn("-noIPC", command)
                 self.assertEqual(command[command.index("-timelimit") + 1], "3")
                 self.assertNotIn("-noSymbolicate", command)
                 self.assertNotIn("-noBinary", command)
@@ -231,6 +241,98 @@ class OwnedToolLifecycleTests(unittest.TestCase):
 
             self.assertEqual(status, 0)
 
+    def test_failed_spindump_retains_only_new_validated_raw_stackshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            raw_directory = root / "var-tmp"
+            raw_directory.mkdir()
+            raw_path = raw_directory / "spindump-stuck-stackshot.2026-10-12-21:30:49.25057.buf"
+            raw_path.write_bytes(b"raw-kcdata")
+            native_log = root / "capture.native.log"
+            native_log.write_text(f"spindump-stuck: Wrote stackshot to {raw_path}\n")
+            destination = root / "capture.raw.buf"
+
+            with patch(
+                "collect_simulator_resource_samples.SPINDUMP_STUCK_DIRECTORY",
+                raw_directory,
+            ):
+                previous_umask = os.umask(0o077)
+                try:
+                    retained = _retain_failed_spindump_stackshot(
+                        native_log,
+                        destination,
+                        existing_stackshots=set(),
+                        required_owner_uid=os.getuid(),
+                    )
+                finally:
+                    os.umask(previous_umask)
+
+            self.assertEqual(retained, destination)
+            self.assertEqual(destination.read_bytes(), b"raw-kcdata")
+            self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o644)
+
+    def test_raw_stackshot_validation_rejects_untrusted_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            raw_directory = root / "var-tmp"
+            raw_directory.mkdir()
+            valid_name = "spindump-stuck-stackshot.2026-10-12-21:30:49.25057.buf"
+            raw_path = raw_directory / valid_name
+            raw_path.write_bytes(b"raw-kcdata")
+            native_log = root / "capture.native.log"
+            destination = root / "capture.raw.buf"
+
+            with patch(
+                "collect_simulator_resource_samples.SPINDUMP_STUCK_DIRECTORY",
+                raw_directory,
+            ):
+                for log_text, existing, owner in (
+                    (f"spindump-stuck: Wrote stackshot to {raw_path}\n", {raw_path}, os.getuid()),
+                    (f"spindump-stuck: Wrote stackshot to {raw_path}\n", set(), os.getuid() + 1),
+                    (f"spindump-stuck: Wrote stackshot to {root / valid_name}\n", set(), os.getuid()),
+                    (f"spindump-stuck: Wrote stackshot to {raw_path}\n"
+                     f"spindump-stuck: Wrote stackshot to {raw_path}\n", set(), os.getuid()),
+                ):
+                    with self.subTest(log_text=log_text, existing=existing, owner=owner):
+                        native_log.write_text(log_text)
+                        self.assertIsNone(
+                            _retain_failed_spindump_stackshot(
+                                native_log,
+                                destination,
+                                existing_stackshots=existing,
+                                required_owner_uid=owner,
+                            )
+                        )
+                        self.assertFalse(destination.exists())
+
+                with patch(
+                    "collect_simulator_resource_samples.MAX_RAW_STACKSHOT_BYTES",
+                    len(b"raw-kcdata") - 1,
+                ):
+                    native_log.write_text(f"spindump-stuck: Wrote stackshot to {raw_path}\n")
+                    self.assertIsNone(
+                        _retain_failed_spindump_stackshot(
+                            native_log,
+                            destination,
+                            existing_stackshots=set(),
+                            required_owner_uid=os.getuid(),
+                        )
+                    )
+                    self.assertFalse(destination.exists())
+
+                raw_path.unlink()
+                raw_path.symlink_to(root / "attacker-controlled")
+                native_log.write_text(f"spindump-stuck: Wrote stackshot to {raw_path}\n")
+                self.assertIsNone(
+                    _retain_failed_spindump_stackshot(
+                        native_log,
+                        destination,
+                        existing_stackshots=set(),
+                        required_owner_uid=os.getuid(),
+                    )
+                )
+                self.assertFalse(destination.exists())
+
     def test_privileged_helper_rejects_output_outside_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             diagnostics = Path(temporary_directory).resolve()
@@ -244,6 +346,129 @@ class OwnedToolLifecycleTests(unittest.TestCase):
                 )
             self.assertEqual(status, 64)
             launch.assert_not_called()
+
+    def test_privileged_helper_retains_raw_stackshot_after_report_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            output = diagnostics / "capture.spindump.txt"
+            process = unittest.mock.MagicMock()
+            process.wait.return_value = 75
+            process.poll.return_value = 75
+
+            with patch(
+                "collect_simulator_resource_samples.subprocess.Popen",
+                return_value=process,
+            ):
+                with patch(
+                    "collect_simulator_resource_samples._retain_failed_spindump_stackshot",
+                    return_value=diagnostics / "capture.spindump.txt.raw.buf",
+                ) as retain:
+                    with patch("builtins.print"):
+                        status = run_privileged_spindump_helper(
+                            (
+                                "--pid", "800",
+                                "--diagnostics-directory", str(diagnostics),
+                                "--output", str(output),
+                            )
+                        )
+
+            self.assertEqual(status, 75)
+            retain.assert_called_once()
+
+    def test_formats_exactly_one_retained_stackshot_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            raw = diagnostics / "xpcproxy-800-20261012T213133986627Z.spindump.txt.raw.buf"
+            raw.write_bytes(b"raw-kcdata")
+            process = unittest.mock.MagicMock()
+            process.wait.return_value = 0
+            process.poll.return_value = 0
+
+            def inspect_command(command: tuple[str, ...], **_kwargs: object) -> object:
+                self.assertEqual(command[0:3], ("/usr/sbin/spindump", "-i", str(raw)))
+                self.assertIn("-noIPC", command)
+                self.assertIn("-inspectLiveSystem", command)
+                self.assertEqual(command[command.index("-timelimit") + 1], "30")
+                Path(command[-1]).write_text("formatted stack")
+                return process
+
+            with patch(
+                "collect_simulator_resource_samples.subprocess.Popen",
+                side_effect=inspect_command,
+            ):
+                status = format_retained_stackshot(
+                    ("--diagnostics-directory", str(diagnostics)),
+                    required_owner_uid=os.getuid(),
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(raw.read_bytes(), b"raw-kcdata")
+            process.wait.assert_called_once_with(timeout=35.0)
+
+    def test_retained_stackshot_formatter_is_noop_when_no_raw_capture_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            with patch("collect_simulator_resource_samples.subprocess.Popen") as launch:
+                status = format_retained_stackshot(
+                    ("--diagnostics-directory", str(diagnostics)),
+                )
+
+            self.assertEqual(status, 0)
+            launch.assert_not_called()
+
+    def test_retained_stackshot_timeout_preserves_raw_and_reaps_formatter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            raw = diagnostics / "xpcproxy-800-20261012T213133986627Z.spindump.txt.raw.buf"
+            raw.write_bytes(b"raw-kcdata")
+            process = unittest.mock.MagicMock()
+            process.wait.side_effect = [
+                subprocess.TimeoutExpired(cmd=["spindump"], timeout=35.0),
+                -15,
+            ]
+            process.poll.return_value = -15
+
+            with patch(
+                "collect_simulator_resource_samples.subprocess.Popen",
+                return_value=process,
+            ):
+                status = format_retained_stackshot(
+                    ("--diagnostics-directory", str(diagnostics)),
+                    required_owner_uid=os.getuid(),
+                )
+
+            self.assertEqual(status, 124)
+            self.assertEqual(raw.read_bytes(), b"raw-kcdata")
+            process.terminate.assert_called_once_with()
+            process.kill.assert_not_called()
+
+    def test_retained_stackshot_formatter_rejects_ambiguous_or_untrusted_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            valid = diagnostics / "xpcproxy-800-20261012T213133986627Z.spindump.txt.raw.buf"
+            malformed = diagnostics / "attacker.spindump.txt.raw.buf"
+            malformed.write_bytes(b"raw-kcdata")
+            with patch("collect_simulator_resource_samples.subprocess.Popen") as launch:
+                self.assertEqual(
+                    format_retained_stackshot(
+                        ("--diagnostics-directory", str(diagnostics)),
+                        required_owner_uid=os.getuid(),
+                    ),
+                    64,
+                )
+                launch.assert_not_called()
+
+                valid.write_bytes(b"raw-kcdata")
+                second = diagnostics / "xpcproxy-801-20261012T213133986628Z.spindump.txt.raw.buf"
+                second.write_bytes(b"raw-kcdata")
+                self.assertEqual(
+                    format_retained_stackshot(
+                        ("--diagnostics-directory", str(diagnostics)),
+                        required_owner_uid=os.getuid(),
+                    ),
+                    64,
+                )
+                launch.assert_not_called()
 
     def test_privileged_helper_honors_stop_during_child_registration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

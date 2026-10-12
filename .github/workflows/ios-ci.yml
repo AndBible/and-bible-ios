@@ -1371,6 +1371,15 @@ jobs:
           trap - EXIT
           exit "${test_status}"
 
+      - name: Format retained simulator stackshot
+        if: always() && needs.repo-standards.outputs.required_checks_only != 'true'
+        continue-on-error: true
+        run: |
+          python3 scripts/collect_simulator_resource_samples.py \
+            --format-retained-stackshot \
+            --diagnostics-directory "${PWD}/.artifacts/simulator-xpcproxy-stalls" \
+            >> .artifacts/simulator-resource-samples.log 2>&1
+
       - name: Collect reader gesture diagnostics
         continue-on-error: true
         if: always() && steps.simulator.outputs.simulator_created == 'true'

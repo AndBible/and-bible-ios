@@ -352,6 +352,7 @@ jobs:
     def test_ui_shards_consume_one_validated_build_without_rebuilding(self) -> None:
         """Keep compilation in the producer and execution in every matrix consumer."""
         workflow_text = (REPO_ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+        workflow = yaml.safe_load(workflow_text)
         producer = workflow_job_block(workflow_text, "ios-ui-foundation")
         consumer = workflow_job_block(workflow_text, "ios-simulator-ui-tests")
         producer_build = workflow_step_run_block(producer, "Build UI tests once")
@@ -360,6 +361,10 @@ jobs:
         consumer_run = workflow_step_run_block(
             consumer,
             "Run selected simulator tests without rebuilding",
+        )
+        formatter_run = workflow_step_run_block(
+            consumer,
+            "Format retained simulator stackshot",
         )
 
         self.assertEqual(1, producer.count("--action build-for-testing"))
@@ -377,7 +382,23 @@ jobs:
         self.assertIn('--diagnostics-directory "${resource_diagnostics_path}"', consumer_run)
         self.assertIn("stop_resource_collector", consumer_run)
         self.assertIn('exit "${test_status}"', consumer_run)
-        self.assertEqual(3, consumer.count(".artifacts/simulator-xpcproxy-stalls"))
+        self.assertIn("--format-retained-stackshot", formatter_run)
+        self.assertIn(
+            '--diagnostics-directory "${PWD}/.artifacts/simulator-xpcproxy-stalls"',
+            formatter_run,
+        )
+        formatter_steps = [
+            step
+            for step in workflow["jobs"]["ios-simulator-ui-tests"]["steps"]
+            if step.get("name") == "Format retained simulator stackshot"
+        ]
+        self.assertEqual(1, len(formatter_steps))
+        self.assertEqual(
+            "always() && needs.repo-standards.outputs.required_checks_only != 'true'",
+            formatter_steps[0]["if"],
+        )
+        self.assertTrue(formatter_steps[0]["continue-on-error"])
+        self.assertEqual(4, consumer.count(".artifacts/simulator-xpcproxy-stalls"))
         self.assertNotIn("--action build-for-testing", consumer)
         self.assertNotIn("swift build", consumer)
         self.assertNotIn("--project", consumer_run)
