@@ -209,6 +209,7 @@ private protocol BibleReaderAnyPreparationOperation: AnyObject {
     var requestID: UInt64 { get }
     var key: BibleReaderDocumentPreparationKey { get }
     func cancel()
+    func abandon()
 }
 
 /**
@@ -296,6 +297,16 @@ private final class BibleReaderPreparationOperation<Result: Sendable>: BibleRead
         completions.removeAll()
         callbacks.forEach { $0(.cancelled) }
     }
+
+    /** Cancels retained work while discarding callbacks owned by a retired JavaScript client. */
+    func abandon() {
+        precondition(Thread.isMainThread)
+        cancellationLock.lock()
+        cancelled = true
+        cancellationLock.unlock()
+        acceptingCompletions = false
+        completions.removeAll()
+    }
 }
 
 /**
@@ -324,6 +335,8 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
     private var activeOperations: [
         BibleReaderDocumentPreparationScope: BibleReaderAnyPreparationOperation
     ] = [:]
+    /// Latest client-ready replay held while visible-content preparation owns publication.
+    private var deferredClientReadyReplay: (() -> Void)?
 
     /** Creates a production coordinator with an injectable deterministic worker for tests. */
     init(
@@ -560,12 +573,56 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
         return activeOperations[.replacement] != nil
     }
 
+    /**
+     Defers one client-ready replay until replacement and transient content work has settled.
+
+     The latest replay replaces an older deferred callback because client readiness describes the
+     current WebView generation. Incremental prepend/append work does not block a full replay.
+
+     - Parameter replay: Main-owner callback that reloads the current native document state.
+     - Returns: `true` when blocking content work retained the callback; otherwise `false`.
+     - Side effects: Replaces the previously deferred replay while a blocking lane is active, or
+       clears an older queued replay when the current ready event can replay immediately.
+     - Failure modes: None; callers run the current callback immediately when this returns `false`.
+     */
+    @discardableResult
+    func deferClientReadyReplayUntilContentWorkSettles(_ replay: @escaping () -> Void) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard hasClientReadyReplayBlocker else {
+            deferredClientReadyReplay = nil
+            return false
+        }
+        deferredClientReadyReplay = replay
+        return true
+    }
+
+    /** Cancels a retained client-ready replay without changing active preparation work. */
+    func cancelDeferredClientReadyReplay() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        deferredClientReadyReplay = nil
+    }
+
+    /**
+     Abandons obsolete old-client prepend and append work without disturbing content replacement.
+
+     Client-ready reconstruction invalidates incremental callbacks promised by the prior Vue client,
+     so they are discarded instead of sending old call IDs through the newly attached bridge.
+     Replacement and transient operations retain their publication ownership and continue.
+     */
+    func cancelIncrementalPreparation() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let incrementalScopes: [BibleReaderDocumentPreparationScope] = [.prepend, .append]
+        let operations = incrementalScopes.compactMap { activeOperations.removeValue(forKey: $0) }
+        operations.forEach { $0.abandon() }
+    }
+
     /** Cancels every pending result and settles its registered completion as cancelled. */
     func cancelAll() {
         dispatchPrecondition(condition: .onQueue(.main))
         let operations = Array(activeOperations.values)
         activeOperations.removeAll()
         operations.forEach { $0.cancel() }
+        enqueueDeferredClientReadyReplayIfIdle()
     }
 
     /** Reserves the new operation before returning displaced work for reentrant-safe settlement. */
@@ -598,6 +655,28 @@ final class BibleReaderDocumentPreparationCoordinator: @unchecked Sendable {
             if self.activeOperations[scope] === operation {
                 self.activeOperations[scope] = nil
             }
+            self.enqueueDeferredClientReadyReplayIfIdle()
+        }
+    }
+
+    /// Whether visible-content work still owns the client-ready publication boundary.
+    private var hasClientReadyReplayBlocker: Bool {
+        activeOperations[.replacement] != nil || activeOperations[.transient] != nil
+    }
+
+    /**
+     Rechecks content ownership on the next main turn and consumes one idle replay before invoking it.
+
+     The deferred turn preserves callbacks across reentrant replacement and across `cancelAll()`
+     followed by same-turn new work. A consumed callback cannot run twice if several settlement
+     paths queue checks for the same operation set.
+     */
+    private func enqueueDeferredClientReadyReplayIfIdle() {
+        guard deferredClientReadyReplay != nil, !hasClientReadyReplayBlocker else { return }
+        DispatchQueue.main.async { [self] in
+            guard !hasClientReadyReplayBlocker, let replay = deferredClientReadyReplay else { return }
+            deferredClientReadyReplay = nil
+            replay()
         }
     }
 

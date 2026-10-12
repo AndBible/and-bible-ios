@@ -30,6 +30,8 @@ struct BibleReaderDocumentReplacementEmitter {
     private let bridge: BibleBridge
     /// Resolves the current config with Android's `initial: true` replacement semantics.
     private let buildInitialConfigJSON: () -> String
+    /// Signals that the current bridge accepted a complete replacement transaction.
+    private let onReplacementAccepted: () -> Void
 
     /**
      Creates a replacement emitter bound to one reader pane.
@@ -37,15 +39,18 @@ struct BibleReaderDocumentReplacementEmitter {
      - Parameters:
        - bridge: Active reader bridge.
        - buildInitialConfigJSON: Closure resolving current pane configuration at dispatch time.
+       - onReplacementAccepted: Callback invoked after the bridge accepts a replacement.
      - Side effects: None during initialization.
      - Failure modes: None.
      */
     init(
         bridge: BibleBridge,
-        buildInitialConfigJSON: @escaping () -> String
+        buildInitialConfigJSON: @escaping () -> String,
+        onReplacementAccepted: @escaping () -> Void = {}
     ) {
         self.bridge = bridge
         self.buildInitialConfigJSON = buildInitialConfigJSON
+        self.onReplacementAccepted = onReplacementAccepted
     }
 
     /**
@@ -63,11 +68,13 @@ struct BibleReaderDocumentReplacementEmitter {
         document: Document,
         setup: ReaderSetupContentPayload
     ) -> Bool {
-        bridge.replaceDocument(
+        let accepted = bridge.replaceDocument(
             configData: buildInitialConfigJSON(),
             document: document,
             setup: setup
         )
+        if accepted { onReplacementAccepted() }
+        return accepted
     }
 
     /**
@@ -85,10 +92,12 @@ struct BibleReaderDocumentReplacementEmitter {
         documentJSON: String,
         setup: ReaderSetupContentPayload
     ) -> Bool {
-        bridge.replaceDocument(
+        let accepted = bridge.replaceDocument(
             configData: buildInitialConfigJSON(),
             documentData: documentJSON,
             setup: setup
         )
+        if accepted { onReplacementAccepted() }
+        return accepted
     }
 }

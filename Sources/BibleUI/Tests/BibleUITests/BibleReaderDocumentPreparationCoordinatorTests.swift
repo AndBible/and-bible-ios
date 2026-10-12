@@ -1083,6 +1083,183 @@ final class BibleReaderDocumentPreparationCoordinatorTests: XCTestCase {
 
 /** Controller integration coverage for request identity and source-work coalescing. */
 final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
+    /** A replacement client replays the requested pending general-book key, not the old commit. */
+    @MainActor
+    func testClientReadyDuringPendingGeneralBookNavigationRetainsRequestedKey() async throws {
+        let worker = DispatchQueue(label: "org.andbible.tests.reader-preparation-client-ready")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let chapterSix = "/Westminster21/Westminster21/WCF/Ch 6"
+        let chapterSeven = "/Westminster21/Westminster21/WCF/Ch 7"
+        let fixture = try makeWestminsterPreparationFixture(coordinator: coordinator)
+
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        _ = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: 0
+        )
+        XCTAssertEqual(fixture.controller.currentGeneralBookKey, chapterSix)
+        let boundary = fixture.scripts().count
+
+        worker.suspend()
+        fixture.controller.loadGeneralBookEntry(key: chapterSeven)
+        // A newly mounted JavaScript client sends this after an actual WebKit page/client reload.
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        worker.resume()
+
+        _ = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let idleTurn = expectation(description: "post-publication replay check drains")
+        DispatchQueue.main.async { idleTurn.fulfill() }
+        await fulfillment(of: [idleTurn], timeout: 2)
+        let replacements = Array(fixture.scripts().dropFirst(boundary)).filter {
+            $0.contains("emit('add_documents'")
+        }
+        XCTAssertEqual(replacements.count, 1)
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: replacements, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["key"] as? String, chapterSeven)
+        XCTAssertEqual(fixture.controller.currentGeneralBookKey, chapterSeven)
+        XCTAssertEqual(fixture.pageManager.generalBookKey, chapterSeven)
+    }
+
+    /** A failed replacement rehydrates the last committed document into the replacement client. */
+    @MainActor
+    func testClientReadyDuringFailedReplacementReplaysCommittedGeneralBook() async throws {
+        let worker = DispatchQueue(label: "org.andbible.tests.reader-preparation-failed-replay")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let fixture = try makeWestminsterPreparationFixture(
+            coordinator: coordinator,
+            seed: { modulePath in
+                try self.seedEmptyRawDictionaryModule(
+                    named: "StrongsGreek",
+                    in: modulePath,
+                    features: ["GreekDef"]
+                )
+            }
+        )
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        _ = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: 0
+        )
+        let boundary = fixture.scripts().count
+
+        worker.suspend()
+        fixture.controller.bridge(
+            fixture.bridge,
+            openExternalLink: "ab-w://?strong=G243"
+        )
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        worker.resume()
+
+        let emitted = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: emitted, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["key"] as? String, fixture.chapterSix)
+        XCTAssertEqual(fixture.controller.currentGeneralBookKey, fixture.chapterSix)
+        XCTAssertEqual(fixture.pageManager.generalBookKey, fixture.chapterSix)
+    }
+
+    /** Outward definition preparation completes before the replacement client gets source content. */
+    @MainActor
+    func testClientReadyDuringOutwardDefinitionReplaysCommittedSourceAfterRouting() async throws {
+        let worker = DispatchQueue(label: "org.andbible.tests.reader-preparation-outward-replay")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let fixture = try makeWestminsterPreparationFixture(coordinator: coordinator)
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        _ = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: 0
+        )
+        let boundary = fixture.scripts().count
+        var routedRequest: BibleReaderDefinitionRenderRequest?
+        fixture.controller.onOpenDefinitionDocumentInLinksWindow = { request in
+            routedRequest = request
+        }
+
+        worker.suspend()
+        fixture.controller.bridge(
+            fixture.bridge,
+            openExternalLink: "ab-w://?strong=H00430"
+        )
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        worker.resume()
+
+        try await awaitReaderCondition("definition routed before source replay") {
+            routedRequest != nil
+        }
+        let request = try XCTUnwrap(routedRequest)
+        guard case .strongs(let items, _) = request.sourceRequest.source else {
+            return XCTFail("Expected routed Strong's source metadata")
+        }
+        XCTAssertEqual(items, [.strong("H00430")])
+        let emitted = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: boundary
+        )
+        let replacements = emitted.filter { $0.contains("emit('add_documents'") }
+        XCTAssertEqual(replacements.count, 1)
+        let payload = try XCTUnwrap(
+            bridgeEmissionPayload(from: replacements, event: "add_documents") as? [String: Any]
+        )
+        XCTAssertEqual(payload["key"] as? String, fixture.chapterSix)
+        XCTAssertEqual(fixture.pageManager.generalBookKey, fixture.chapterSix)
+    }
+
+    /** Retiring a controller cancels deferred replay and prevents a pending key from committing. */
+    @MainActor
+    func testRetirementDuringPendingClientReadyReplayCannotPublishOrCommit() async throws {
+        let worker = DispatchQueue(label: "org.andbible.tests.reader-preparation-retired-replay")
+        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: worker)
+        let fixture = try makeWestminsterPreparationFixture(coordinator: coordinator)
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        _ = try await awaitBridgeEmission(
+            from: fixture.scripts,
+            event: "add_documents",
+            after: 0
+        )
+        let boundary = fixture.scripts().count
+
+        worker.suspend()
+        let pending = Task { @MainActor in
+            await fixture.controller.loadGeneralBookEntryAwaitingSelection(
+                key: fixture.chapterSeven
+            )
+        }
+        await Task.yield()
+        XCTAssertTrue(
+            coordinator.hasActiveReplacement,
+            "The Ch7 request must own the replacement lane before client-ready replay is deferred"
+        )
+        fixture.controller.bridgeDidSetClientReady(fixture.bridge)
+        fixture.controller.windowControllerWillUnregister()
+        worker.resume()
+
+        let disposition = await pending.value
+        XCTAssertEqual(disposition, .cancelled)
+        await Task.yield()
+        XCTAssertTrue(
+            fixture.scripts().dropFirst(boundary).allSatisfy {
+                !$0.contains("emit('add_documents'")
+            }
+        )
+        XCTAssertNil(fixture.controller.activeWindow)
+        XCTAssertNotEqual(fixture.controller.currentGeneralBookKey, fixture.chapterSeven)
+    }
+
     /** Equivalent chapter reloads share native preparation while only the newest intent publishes. */
     @MainActor
     func testEquivalentBibleReloadsCoalesceAndPublishLatestIntentOnce() async throws {
@@ -1393,6 +1570,77 @@ final class BibleReaderPreparationControllerTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(responses.count, 2)
         XCTAssertTrue(responses.contains { $0.hasPrefix("bibleView.response(7401, {") })
         XCTAssertTrue(responses.contains { $0 == "bibleView.response(7402, null);" })
+    }
+
+    /** Builds one isolated, committed-key-capable Westminster controller fixture. */
+    @MainActor
+    private func makeWestminsterPreparationFixture(
+        coordinator: BibleReaderDocumentPreparationCoordinator,
+        seed: ((String) throws -> Void)? = nil
+    ) throws -> (
+        controller: BibleReaderController,
+        bridge: BibleBridge,
+        scripts: () -> [String],
+        pageManager: PageManager,
+        chapterSix: String,
+        chapterSeven: String
+    ) {
+        let modulePath = try makeTemporarySwordFixturePath()
+        try seed?(modulePath)
+        let repositoryRoot = try BibleUITestSourceLocator.repositoryRoot(
+            containing: "Tests/UI/Fixtures/westminster-sword"
+        )
+        try overlayDirectory(
+            repositoryRoot.appendingPathComponent(
+                "Tests/UI/Fixtures/westminster-sword",
+                isDirectory: true
+            ),
+            onto: URL(fileURLWithPath: modulePath, isDirectory: true)
+        )
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        _ = try XCTUnwrap(manager.module(named: "Westminster21"))
+        let chapterSix = "/Westminster21/Westminster21/WCF/Ch 6"
+        let chapterSeven = "/Westminster21/Westminster21/WCF/Ch 7"
+        let pageManager = PageManager(
+            currentCategoryName: DocumentCategory.generalBook.pageManagerKey
+        )
+        pageManager.generalBookDocument = "Westminster21"
+        pageManager.generalBookKey = chapterSix
+        let window = BibleCore.Window()
+        window.pageManager = pageManager
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(
+            bridge: bridge,
+            swordManagerOverride: manager,
+            documentPreparationCoordinator: coordinator
+        )
+        controller.activeWindow = window
+        controller.restoreSavedPosition()
+        return (controller, bridge, scripts, pageManager, chapterSix, chapterSeven)
+    }
+
+    /** Recursively overlays the checked-in Westminster module onto a per-test SWORD root. */
+    private func overlayDirectory(_ source: URL, onto destination: URL) throws {
+        try FileManager.default.createDirectory(
+            at: destination,
+            withIntermediateDirectories: true
+        )
+        for item in try FileManager.default.contentsOfDirectory(
+            at: source,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) {
+            let isDirectory = try item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory
+                == true
+            let target = destination.appendingPathComponent(
+                item.lastPathComponent,
+                isDirectory: isDirectory
+            )
+            if isDirectory {
+                try overlayDirectory(item, onto: target)
+            } else {
+                try FileManager.default.copyItem(at: item, to: target)
+            }
+        }
     }
 
     /** Runs one suspended-source race against a directly mutated bookmark owner graph. */

@@ -1977,6 +1977,7 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      */
     public func windowControllerWillUnregister() {
         dispatchPrecondition(condition: .onQueue(.main))
+        documentPreparationCoordinator.cancelDeferredClientReadyReplay()
         if bridge.delegate === self {
             bridge.delegate = nil
             bridge.onAnyMessage = nil
@@ -10323,17 +10324,28 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     // MARK: - BibleBridgeDelegate — State
 
     /**
-     Handles the initial "client ready" callback from the Vue.js reader.
+     Rehydrates a newly ready Vue client without replacing a pending navigation intent.
 
      - Parameter bridge: Bridge whose web client has finished bootstrapping.
 
      Side effects:
-     - marks the client ready, reloads recent labels and active-language metadata, emits config,
-       and replays the current native document state into the web view
+     - marks the client ready, cancels incremental callbacks belonging to the old client, reloads
+       labels/languages, and emits configuration
+     - preserves pending full-document and outward work; a bridge-accepted full replacement satisfies
+       rehydration, otherwise the last selected document replays after that work settles
+     - replays immediately when no such work is pending
+
+     Failure modes:
+     - preparation failures still allow a fallback replay through the ordinary authorized loader
+     - retiring the pane cancels deferred replay rather than resurrecting its content
+
+     Concurrency: Runs on the bridge's main owner. Deferred replay runs on a later main turn so
+     cancellation followed by a new request cannot replay between the two operations.
      */
     public func bridgeDidSetClientReady(_ bridge: BibleBridge) {
         logger.info("Client ready, sending initial content")
         clientReady = true
+        documentPreparationCoordinator.cancelIncrementalPreparation()
         commentaryNavigationAvailability = .empty
         commentaryInfiniteScrollCoordinator.reset()
     let deferredSynchronizedScrollOrdinal =
@@ -10346,7 +10358,14 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             emitAdmittedAddonReload(using: swordManager, bridge: bridge)
         }
         bridge.emit(event: "set_config", data: buildConfigJSON())
-        reloadVisibleDocumentAfterClientReady()
+        let replayIsDeferred = documentPreparationCoordinator
+            .deferClientReadyReplayUntilContentWorkSettles { [weak self] in
+                guard let self, self.clientReady else { return }
+                self.reloadVisibleDocumentAfterClientReady()
+            }
+        if !replayIsDeferred {
+            reloadVisibleDocumentAfterClientReady()
+        }
         if let deferredSynchronizedScrollOrdinal {
             synchronizedScrollCoordinator.markClientReadyReplayPending(
                 ordinal: deferredSynchronizedScrollOrdinal
@@ -10357,8 +10376,8 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
     /**
      Replays the native controller's current document after the web client bootstraps.
 
-     WKWebView can be recreated by SwiftUI while the pane controller survives. In that case the new
-     JavaScript client has no document/config state even though native state still says the pane is
+     A WebKit page/client can reload while the pane controller survives. The new JavaScript client
+     has no document/config state even though native state still says the pane is
      showing a pending link-result document, My Notes, StudyPad, or the current Bible/category
      document. Rehydrating from the controller state keeps the WebView content and native
      accessibility/export state aligned.
@@ -17032,7 +17051,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      Builds the shared Android-parity replacement emitter for the active reader pane.
 
      - Returns: An emitter bound to the current bridge and a live `initial: true` config builder.
-     - Side effects: None during construction; the returned emitter dispatches only when invoked.
+     - Side effects: None during construction. A bridge-accepted full replacement cancels deferred
+       client-ready replay because that client now owns a complete document; metadata-only updates
+       and failed dispatches do not satisfy rehydration.
      - Failure modes: Configuration encoding failures use the controller's existing `{}` fallback.
      */
     private func documentReplacementEmitter() -> BibleReaderDocumentReplacementEmitter {
@@ -17040,6 +17061,9 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
             bridge: bridge,
             buildInitialConfigJSON: { [weak self] in
                 self?.buildConfigJSON(initial: true) ?? "{}"
+            },
+            onReplacementAccepted: { [weak self] in
+                self?.documentPreparationCoordinator.cancelDeferredClientReadyReplay()
             }
         )
     }
