@@ -1038,22 +1038,41 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
     }
 
     /**
-     Verifies a second Compare request owns completion when the first build finishes later.
+     Verifies a newer Compare request cancels in-flight obsolete work before it can publish.
 
-     - Setup: Two requests are queued before the production preparation queue resumes.
-     - Expected result: Only the newer payload reaches Vue after the queue finishes.
-     - Failure meaning: Compare requests are ordered by completion instead of content intent.
-     - Determinism: A condition-backed gate records invocation order and controls only the first.
+     - Setup: The older request enters source capture and remains blocked while the newer request
+       claims replacement ownership.
+     - Expected result: The older request settles cancelled without emitting, then only the newer
+       payload reaches Vue after source capture resumes.
+     - Failure meaning: Obsolete in-flight Compare work can publish after newer content intent.
+     - Determinism: An explicit source-entry handshake and awaited publication dispositions define
+       ordering without a bridge polling deadline.
      */
     @MainActor
-    func testNewestCompareWinsWhenEarlierBuildCompletesLast() throws {
+    func testNewestCompareCancelsInFlightOlderRequestBeforePublication() async throws {
         let modulePath = try makeTemporarySwordFixturePath()
         let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
         let module = try XCTUnwrap(manager.module(named: "KJV"))
         let firstOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 1))
         let secondOrdinal = try XCTUnwrap(module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 2))
         let workerQueue = DispatchQueue(label: "ReaderBridgeParityTests-newest-compare")
-        let coordinator = BibleReaderDocumentPreparationCoordinator(workerQueue: workerQueue)
+        let olderSourceEntered = expectation(description: "older Compare enters source capture")
+        let captureGate = ReaderBridgeCompareCaptureGate()
+        defer { captureGate.release() }
+        let coordinator = BibleReaderDocumentPreparationCoordinator(
+            workerQueue: workerQueue,
+            phaseObserver: { phase, _, key in
+                guard phase == .sourceCapture,
+                      case .compositeRequest(
+                        .compareOrdinals(_, let startOrdinal, let endOrdinal)
+                      ) = key.annotationIdentity,
+                      startOrdinal == firstOrdinal,
+                      endOrdinal == firstOrdinal,
+                      captureGate.claimFirstCapture() else { return }
+                olderSourceEntered.fulfill()
+                captureGate.blockUntilReleased()
+            }
+        )
         let (bridge, scripts) = makeRecordingBridge()
         let controller = BibleReaderController(
             bridge: bridge,
@@ -1061,27 +1080,45 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             documentPreparationCoordinator: coordinator
         )
         controller.bridgeDidSetClientReady(bridge)
-        XCTAssertTrue(waitUntil { scripts().contains { $0.contains("emit('add_documents'") } })
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: 0
+        )
         let baseline = scripts().count
-        workerQueue.suspend()
 
-        controller.loadCompareDocument(
-            bookInitials: "KJV",
-            startOrdinal: firstOrdinal,
-            endOrdinal: firstOrdinal
-        )
-        controller.loadCompareDocument(
-            bookInitials: "KJV",
-            startOrdinal: secondOrdinal,
-            endOrdinal: secondOrdinal
-        )
-        workerQueue.resume()
-        XCTAssertTrue(waitUntil {
-            (try? bridgeEmissionPayloads(
-                from: Array(scripts().dropFirst(baseline)),
-                event: "add_documents"
-            ))?.contains { ($0 as? [String: Any])?["compare"] as? Bool == true } == true
+        let olderSettled = expectation(description: "older Compare settles after supersession")
+        var olderDisposition: BibleReaderPreparationPublicationDisposition?
+        let older = Task { @MainActor in
+            olderDisposition = await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+                bookInitials: "KJV",
+                startOrdinal: firstOrdinal,
+                endOrdinal: firstOrdinal
+            ))
+            olderSettled.fulfill()
+        }
+        defer { older.cancel() }
+        await fulfillment(of: [olderSourceEntered], timeout: 2)
+        let newerSettled = expectation(description: "newer Compare settles after source release")
+        var newerDisposition: BibleReaderPreparationPublicationDisposition?
+        let newer = Task { @MainActor in
+            newerDisposition = await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+                bookInitials: "KJV",
+                startOrdinal: secondOrdinal,
+                endOrdinal: secondOrdinal
+            ))
+            newerSettled.fulfill()
+        }
+        defer { newer.cancel() }
+        await fulfillment(of: [olderSettled], timeout: 2)
+        XCTAssertEqual(olderDisposition, .cancelled)
+        XCTAssertFalse(scripts().dropFirst(baseline).contains {
+            $0.contains("emit('add_documents'")
         })
+
+        captureGate.release()
+        await fulfillment(of: [newerSettled], timeout: 2)
+        XCTAssertEqual(newerDisposition, .accepted)
 
         let compareDocuments = try bridgeEmissionPayloads(
             from: Array(scripts().dropFirst(baseline)),
@@ -3464,6 +3501,37 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         await fulfillment(of: [persisted], timeout: 1)
         XCTAssertEqual(persistCount, 1)
         withExtendedLifetime((container, store, manager)) {}
+    }
+}
+
+/** One-shot gate that holds the first Compare source phase while newer intent supersedes it. */
+private final class ReaderBridgeCompareCaptureGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var claimed = false
+    private var released = false
+
+    /** Claims only the first observed source capture for blocking. */
+    func claimFirstCapture() -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        guard !claimed else { return false }
+        claimed = true
+        return true
+    }
+
+    /** Blocks the claimed worker until the test admits subsequent preparation. */
+    func blockUntilReleased() {
+        condition.lock()
+        while !released { condition.wait() }
+        condition.unlock()
+    }
+
+    /** Releases the claimed worker; repeated cleanup calls are harmless. */
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
     }
 }
 
