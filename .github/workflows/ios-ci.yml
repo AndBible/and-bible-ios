@@ -1328,9 +1328,12 @@ jobs:
           UITEST_SWORD_FIXTURE_PATH: ${{ steps.ui_test_products.outputs.sword_fixture_path }}
           UITEST_BUNDLE_ID: org.andbible.ios
           UITEST_SIMULATOR_ID: ${{ steps.simulator.outputs.simulator_id }}
+          UITEST_SIMULATOR_NAME: ${{ steps.simulator.outputs.device_name }}
+          UITEST_SIMULATOR_OS_VERSION: ${{ steps.simulator.outputs.os_version }}
         run: |
           mkdir -p .artifacts
           resource_samples_path=".artifacts/simulator-resource-samples.log"
+          resource_diagnostics_path=".artifacts/simulator-xpcproxy-stalls"
           resource_collector_pid=""
 
           # Stops the background sampler identified by resource_collector_pid and clears its PID.
@@ -1346,22 +1349,12 @@ jobs:
           }
 
           trap stop_resource_collector EXIT
-          (
-            initial_sample=true
-            while true; do
-              date -u '+sample_time=%Y-%m-%dT%H:%M:%SZ'
-              if [[ "${initial_sample}" == "true" ]]; then
-                sysctl -n hw.memsize
-                sysctl -n hw.ncpu
-                initial_sample=false
-              fi
-              sysctl -n vm.loadavg
-              sysctl vm.swapusage
-              vm_stat
-              ps -axo pid=,ppid=,%cpu=,rss=,comm=
-              sleep 10
-            done
-          ) >> "${resource_samples_path}" 2>&1 &
+          python3 -u scripts/collect_simulator_resource_samples.py \
+            --simulator-id "${UITEST_SIMULATOR_ID}" \
+            --resource-log "${resource_samples_path}" \
+            --diagnostics-directory "${resource_diagnostics_path}" \
+            --interval-seconds 10 \
+            >> "${resource_samples_path}" 2>&1 &
           resource_collector_pid=$!
 
           set +e
@@ -1413,6 +1406,7 @@ jobs:
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
             .artifacts/simulator-resource-samples.log
+            .artifacts/simulator-xpcproxy-stalls
             .artifacts/webkit-reader.log
             .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
@@ -1428,6 +1422,7 @@ jobs:
             .artifacts/*.xcresult
             .artifacts/reader-gestures.log
             .artifacts/simulator-resource-samples.log
+            .artifacts/simulator-xpcproxy-stalls
             .artifacts/webkit-reader.log
             .artifacts/*.fixture-host-diagnostic.json
           if-no-files-found: warn
