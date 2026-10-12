@@ -121,8 +121,9 @@ public enum EpubPersistedKeyLookupError: Error, Equatable, LocalizedError, Senda
  only after package and index are complete. Runtime calls expose stable Android module initials,
  generation-contained resources, manifest keys, TOC entries, ordinal ranges, navigation, and hits.
 
- - Important: Each instance owns one read-only SQLite connection. Callers must serialize calls on
-   an instance; resource serving opens a fresh instance per request.
+ - Important: Each instance owns one serialized, read-only SQLite connection so replacement reader
+   preparations may finish a displaced native read while the accepted request starts. Resource
+   serving opens a fresh instance per request.
  */
 public final class EpubReader: @unchecked Sendable {
     /** Posted after a default-library EPUB publication succeeds and becomes visible to readers. */
@@ -618,7 +619,7 @@ public final class EpubReader: @unchecked Sendable {
         guard sqlite3_open_v2(
             acquiredLocation.indexURL.path,
             &indexDB,
-            SQLITE_OPEN_READONLY,
+            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
             nil
         ) == SQLITE_OK else {
             sqlite3_close(indexDB)
@@ -728,7 +729,8 @@ public final class EpubReader: @unchecked Sendable {
        state is changed.
      - Throws: `EpubPersistedKeyLookupError` when the key is noncanonical, absent, or the index row
        cannot be read with a nonnegative ordered BVA range.
-     - Important: Calls on one `EpubReader` instance must follow the class's serialization contract.
+     - Important: The instance's serialized SQLite connection permits overlap with a displaced
+       reader preparation that is finishing its current native call.
      */
     public func exactContent(forPersistedKey persistedKey: String) throws -> Content {
         guard let fragmentID = Int64(persistedKey),
