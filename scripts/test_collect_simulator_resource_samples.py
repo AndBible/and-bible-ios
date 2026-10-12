@@ -241,12 +241,55 @@ class SimulatorResourceCollectorCaptureTests(unittest.TestCase):
     def test_manager_identity_rejects_non_launchd_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             collector = self.make_collector(Path(temporary_directory))
-            manager_pid = subprocess.CompletedProcess(["simctl"], 0, "700\n", "")
+            manager_pid = subprocess.CompletedProcess(
+                ["launchctl"], 0,
+                '"Label" = "com.apple.CoreSimulator.SimDevice.SIM-1";\n"PID" = 700;\n', ""
+            )
             wrong_process = snapshot(700, ppid=1, command="/usr/libexec/not-launchd")
 
             with patch.object(collector, "_run_command", return_value=manager_pid):
                 with patch.object(collector, "_process_snapshot", return_value=wrong_process):
                     self.assertIsNone(collector._resolve_manager_snapshot())
+
+    def test_resolves_exact_host_service_without_guest_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            collector = self.make_collector(Path(temporary_directory))
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            result = subprocess.CompletedProcess(
+                ["launchctl"], 0,
+                '{\n\t"PID" = 700;\n\t"Label" = "com.apple.CoreSimulator.SimDevice.SIM-1";\n}', ""
+            )
+            with patch.object(collector, "_run_command", return_value=result) as run:
+                with patch.object(collector, "_process_snapshot", return_value=manager) as read_process:
+                    self.assertEqual(collector._resolve_manager_snapshot(), manager)
+
+            run.assert_called_once_with(
+                ("/bin/launchctl", "list", "com.apple.CoreSimulator.SimDevice.SIM-1")
+            )
+            read_process.assert_called_once_with(700)
+
+    def test_unavailable_or_ambiguous_host_service_never_authorizes_a_process(self) -> None:
+        label = '"Label" = "com.apple.CoreSimulator.SimDevice.SIM-1";\n'
+        valid = label + '"PID" = 700;\n'
+        for status, output in (
+            (1, valid),
+            (0, '"Label" = "com.apple.CoreSimulator.SimDevice.OTHER";\n"PID" = 700;\n'),
+            (0, '"PID" = 700;\n'),
+            (0, label),
+            (0, label + '"PID" = unavailable;\n'),
+            (0, label + '"PID" = 0;\n'),
+            (0, label + '"PID" = -1;\n'),
+            (0, label + valid),
+            (0, valid + '"PID" = 701;\n'),
+        ):
+            with self.subTest(status=status, output=output):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    collector = self.make_collector(Path(temporary_directory))
+                    result = subprocess.CompletedProcess(["launchctl"], status, output, "")
+                    with patch.object(collector, "_run_command", return_value=result):
+                        with patch.object(collector, "_process_snapshot") as read_process:
+                            self.assertIsNone(collector._resolve_manager_snapshot())
+                    read_process.assert_not_called()
 
     def test_request_stop_terminates_only_owned_sample_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

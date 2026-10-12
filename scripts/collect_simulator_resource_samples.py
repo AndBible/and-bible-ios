@@ -400,23 +400,40 @@ class SimulatorResourceCollector:
         return next((item for item in parse_process_snapshots(result.stdout) if item.pid == pid), None)
 
     def _resolve_manager_snapshot(self) -> ProcessSnapshot | None:
-        """Resolve once and validate that the simulator manager is launchd_sim."""
+        """Resolve the exact host service without asking the guest to launch.
+
+        Guest ``simctl spawn`` can block on the same pre-exec dependency this
+        collector observes. The host's existing service registration supplies
+        the PID; both its exact label and the live executable must agree before
+        any child can qualify for capture. Lookup failure disables sampling.
+        """
 
         if self.stop_event.is_set():
             return None
+        service_label = f"com.apple.CoreSimulator.SimDevice.{self.simulator_id}"
         result = self._run_command(
-            ("xcrun", "simctl", "spawn", self.simulator_id, "launchctl", "managerpid")
+            ("/bin/launchctl", "list", service_label)
         )
-        try:
-            manager_pid = int(result.stdout.strip())
-        except ValueError:
+        labels = re.findall(r'^\s*"Label"\s*=\s*"([^"\r\n]*)";\s*$', result.stdout, re.MULTILINE)
+        pids = re.findall(r'^\s*"PID"\s*=\s*([^;\r\n]*);\s*$', result.stdout, re.MULTILINE)
+        if (
+            result.returncode != 0
+            or labels != [service_label]
+            or len(pids) != 1
+            or not pids[0].strip().isascii()
+            or not pids[0].strip().isdigit()
+            or int(pids[0].strip()) <= 0
+        ):
             self._write_event(
                 "manager_identity_error",
+                service_label=service_label,
                 returncode=result.returncode,
-                stdout=result.stdout,
+                labels=labels,
+                pids=pids,
                 stderr=result.stderr,
             )
             return None
+        manager_pid = int(pids[0].strip())
         if self.stop_event.is_set():
             return None
         snapshot = self._process_snapshot(manager_pid)
