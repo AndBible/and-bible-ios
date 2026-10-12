@@ -1087,37 +1087,31 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         let baseline = scripts().count
 
-        let olderSettled = expectation(description: "older Compare settles after supersession")
-        var olderDisposition: BibleReaderPreparationPublicationDisposition?
         let older = Task { @MainActor in
-            olderDisposition = await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+            await controller.loadCompareDocumentAwaitingSelection(.ordinals(
                 bookInitials: "KJV",
                 startOrdinal: firstOrdinal,
                 endOrdinal: firstOrdinal
             ))
-            olderSettled.fulfill()
         }
         defer { older.cancel() }
         await fulfillment(of: [olderSourceEntered], timeout: 2)
-        let newerSettled = expectation(description: "newer Compare settles after source release")
-        var newerDisposition: BibleReaderPreparationPublicationDisposition?
         let newer = Task { @MainActor in
-            newerDisposition = await controller.loadCompareDocumentAwaitingSelection(.ordinals(
+            await controller.loadCompareDocumentAwaitingSelection(.ordinals(
                 bookInitials: "KJV",
                 startOrdinal: secondOrdinal,
                 endOrdinal: secondOrdinal
             ))
-            newerSettled.fulfill()
         }
         defer { newer.cancel() }
-        await fulfillment(of: [olderSettled], timeout: 2)
+        let olderDisposition = await older.value
         XCTAssertEqual(olderDisposition, .cancelled)
         XCTAssertFalse(scripts().dropFirst(baseline).contains {
             $0.contains("emit('add_documents'")
         })
 
         captureGate.release()
-        await fulfillment(of: [newerSettled], timeout: 2)
+        let newerDisposition = await newer.value
         XCTAssertEqual(newerDisposition, .accepted)
 
         let compareDocuments = try bridgeEmissionPayloads(
