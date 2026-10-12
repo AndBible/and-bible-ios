@@ -6356,6 +6356,7 @@ public struct BibleReaderView: View {
        navigation.
 
      Side effects:
+     - records one privacy-safe admission outcome for retained CI diagnostics
      - calls `navigatePrevious()` on the controller when host navigation is allowed
 
      Failure modes:
@@ -6363,7 +6364,21 @@ public struct BibleReaderView: View {
        Vue modal
      */
     private func navigatePreviousIfReaderCanHostNavigate(_ controller: BibleReaderController?) {
-        guard let controller, !controller.webModalIsOpen else { return }
+        guard let controller else {
+            readerGestureLogger.notice(
+                "reader header navigation action=previous outcome=rejected reason=missingController"
+            )
+            return
+        }
+        guard !controller.webModalIsOpen else {
+            readerGestureLogger.notice(
+                "reader header navigation action=previous outcome=rejected reason=webModal"
+            )
+            return
+        }
+        readerGestureLogger.notice(
+            "reader header navigation action=previous outcome=dispatched category=\(controller.currentCategory.rawValue, privacy: .public)"
+        )
         controller.navigatePrevious()
     }
 
@@ -6374,6 +6389,7 @@ public struct BibleReaderView: View {
        navigation.
 
      Side effects:
+     - records one privacy-safe admission outcome for retained CI diagnostics
      - calls `navigateNext()` on the controller when host navigation is allowed
 
      Failure modes:
@@ -6381,7 +6397,21 @@ public struct BibleReaderView: View {
        Vue modal
      */
     private func navigateNextIfReaderCanHostNavigate(_ controller: BibleReaderController?) {
-        guard let controller, !controller.webModalIsOpen else { return }
+        guard let controller else {
+            readerGestureLogger.notice(
+                "reader header navigation action=next outcome=rejected reason=missingController"
+            )
+            return
+        }
+        guard !controller.webModalIsOpen else {
+            readerGestureLogger.notice(
+                "reader header navigation action=next outcome=rejected reason=webModal"
+            )
+            return
+        }
+        readerGestureLogger.notice(
+            "reader header navigation action=next outcome=dispatched category=\(controller.currentCategory.rawValue, privacy: .public)"
+        )
         controller.navigateNext()
     }
 

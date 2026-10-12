@@ -278,10 +278,12 @@ extension AndBibleUITests {
      Selects real EPUB and My Documents owners from Android's shared commentary quick menu.
 
      The fixture installs a production EPUB generation and a SwiftData My Document beside one
-     native commentary so the ordinary toolbar tap must expose the three-owner popup. Each local
+     native commentary so the ordinary toolbar tap must expose all three document owners. Each local
      row then publishes its own first-page body through the app's normal reader entrypoint. While
-     the EPUB is visible, its auxiliary header must retain Back navigation and expose the same
-     commentary action directly for the second selection.
+     the EPUB is visible, Android's shared active-document header must show its page and document
+     names, highlight the commentary/library action, and expose that action for the second
+     selection. Choosing KJV from the ordinary Bible quick menu must return from the local document
+     to the retained passage; a separate auxiliary Back control is not part of that Android contract.
      */
     func testCommentaryQuickMenuSelectsLocalEpubAndMyDocumentsBodies() {
         let app = makeApp()
@@ -316,17 +318,18 @@ extension AndBibleUITests {
             timeout: 20
         )
         let epubHeaderScreenshot = XCTAttachment(screenshot: app.screenshot())
-        epubHeaderScreenshot.name = "EPUB auxiliary document actions"
+        epubHeaderScreenshot.name = "EPUB shared document navigation"
         epubHeaderScreenshot.lifetime = .keepAlways
         add(epubHeaderScreenshot)
 
-        let backToBibleButton = app.buttons.matching(
-            NSPredicate(format: "label == %@", "Back to Bible")
-        ).firstMatch
-        XCTAssertTrue(
-            backToBibleButton.waitForExistence(timeout: 10),
-            "Expected the EPUB auxiliary header to retain its Back to Bible action."
+        waitForElementValue(
+            "bookChooserButton",
+            toEqual: "First, UI Test EPUB",
+            in: app,
+            timeout: 10
         )
+        waitForElementValue("readerBibleToolbarButton", toEqual: "inactive", in: app, timeout: 10)
+        waitForElementValue("readerCommentaryToolbarButton", toEqual: "active", in: app, timeout: 10)
         tapElementReliably(requireElement("readerCommentaryToolbarButton", in: app, timeout: 10))
         _ = requireElement("readerCommentaryQuickSelector", in: app, timeout: 10)
         XCTAssertTrue(requireElement(epubRowID, in: app, timeout: 10).exists)
@@ -343,6 +346,21 @@ extension AndBibleUITests {
             in: app,
             timeout: 20
         )
+        tapElementReliably(requireElement("readerBibleToolbarButton", in: app, timeout: 10))
+        _ = requireElement("readerBibleQuickSelector", in: app, timeout: 10)
+        tapElementReliably(requireElement("readerBibleQuickSelectorRow_KJV", in: app, timeout: 10))
+        waitForReaderRenderedContentState(
+            containing: "category=bible;module=KJV;book=Genesis;chapter=1",
+            in: app,
+            timeout: 20
+        )
+        waitForVisibleReaderText(
+            containing: "God created the heaven and the earth",
+            in: app,
+            timeout: 20
+        )
+        waitForElementValue("readerBibleToolbarButton", toEqual: "active", in: app, timeout: 10)
+        waitForElementValue("readerCommentaryToolbarButton", toEqual: "inactive", in: app, timeout: 10)
     }
 
     /**
