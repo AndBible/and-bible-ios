@@ -3079,9 +3079,12 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
 
      The real Calvin fixture yields document-local ordinal 11 inside Genesis 1:24. The test accepts
      that visible callback, visits the same KJV position, and returns through the public document
-     switches. Vue must receive ordinal 11 in `setup_content`. A later visit to Genesis 1:22 must
-     receive zero, proving an old local ordinal cannot attach to a different commentary block. A
-     recreated controller also receives zero because the raw persisted ordinal lacks a source-key
+     switches. One delayed Genesis 1:22 callback from the outgoing Bible document arrives while the
+     commentary replacement is pending. The stale callback must not rewrite the selected Genesis
+     1:24 intent or its durable PageManager position. Vue must then receive ordinal 11 in
+     `setup_content` without waiting for another scroll callback. A later visit to Genesis 1:22
+     must receive zero, proving an old local ordinal cannot attach to a different commentary block.
+     A recreated controller also receives zero because the raw persisted ordinal lacks a source-key
      receipt.
 
      - Side effects: Installs temporary SWORD fixtures and records bridge replacement emissions.
@@ -3165,6 +3168,21 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         )
         boundary = scripts().count
         XCTAssertEqual(controller.switchCommentaryDocument(to: "CALVINRESTORE"), .switched)
+        let outgoingBibleOrdinal = try XCTUnwrap(
+            manager.module(named: "KJV")?.verseOrdinal(
+                osisBookId: "Gen",
+                chapter: 1,
+                verse: 22
+            )
+        )
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: outgoingBibleOrdinal,
+            key: "Gen.1.22",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentVerse, 24)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
         let restored = try await awaitBridgeEmission(
             from: scripts,
             event: "setup_content",
@@ -3174,6 +3192,10 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
             bridgeEmissionPayload(from: restored, event: "setup_content") as? [String: Any]
         )
         XCTAssertEqual(restoredSetup["jumpToOrdinal"] as? Int, 11)
+        XCTAssertEqual(controller.currentBook, "Genesis")
+        XCTAssertEqual(controller.currentChapter, 1)
+        XCTAssertEqual(controller.currentVerse, 24)
+        XCTAssertEqual(pageManager.bibleVerseNo, 24)
 
         boundary = scripts().count
         XCTAssertEqual(controller.switchBibleDocument(to: "KJV"), .switched)
@@ -3239,6 +3261,76 @@ final class ReaderBridgeParityTests: BibleUISwordFixtureTestCase {
         XCTAssertEqual(controller.currentBook, deletedBook)
         XCTAssertEqual(controller.currentChapter, deletedChapter)
         XCTAssertEqual(controller.currentVerse, deletedVerse)
+    }
+
+    /**
+     Verifies an outgoing Bible document cannot overwrite a newer same-family replacement intent.
+
+     The initial Genesis document reports one delayed visible-position callback after native
+     navigation has selected Exodus but before the replacement is accepted. That old generation
+     must not move the native cursor. Once Exodus is accepted, ordinary telemetry from its DOM must
+     still update the visible verse.
+
+     - Side effects: Installs a temporary KJV fixture and records bridge replacement emissions.
+     - Failure modes: Fixture capture and asynchronous bridge publication can throw or time out.
+     */
+    @MainActor
+    func testPendingBibleReplacementRejectsOutgoingGenerationTelemetry() async throws {
+        let modulePath = try makeTemporarySwordFixturePath()
+        let manager = try XCTUnwrap(SwordManager(modulePath: modulePath))
+        let module = try XCTUnwrap(manager.module(named: "KJV"))
+        let genesisOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Gen", chapter: 1, verse: 22)
+        )
+        let exodusOrdinal = try XCTUnwrap(
+            module.verseOrdinal(osisBookId: "Exod", chapter: 2, verse: 2)
+        )
+        let (bridge, scripts) = makeRecordingBridge()
+        let controller = BibleReaderController(bridge: bridge, swordManagerOverride: manager)
+        let window = Window()
+        let pageManager = PageManager(id: window.id)
+        pageManager.bibleBibleBook = try XCTUnwrap(JSwordBibleBook.ordinal(forOSIS: "Gen"))
+        pageManager.bibleBookEncoding = PageManager.jswordBibleBookEncoding
+        pageManager.bibleVersification = "KJV"
+        pageManager.bibleChapterNo = 1
+        pageManager.bibleVerseNo = 22
+        retainReaderWindowGraph(window, attaching: pageManager)
+        controller.activeWindow = window
+
+        controller.navigateTo(book: "Genesis", chapter: 1, verse: 22)
+        controller.bridgeDidSetClientReady(bridge)
+        _ = try await awaitBridgeEmission(from: scripts, event: "add_documents", after: 0)
+
+        let boundary = scripts().count
+        controller.navigateTo(book: "Exodus", chapter: 2, verse: 1)
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: genesisOrdinal,
+            key: "Gen.1",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 1)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 1)
+        _ = try await awaitBridgeEmission(
+            from: scripts,
+            event: "add_documents",
+            after: boundary
+        )
+
+        controller.bridge(
+            bridge,
+            didScrollToOrdinal: exodusOrdinal,
+            key: "Exod.2",
+            atChapterTop: false
+        )
+        XCTAssertEqual(controller.currentBook, "Exodus")
+        XCTAssertEqual(controller.currentChapter, 2)
+        XCTAssertEqual(controller.currentVerse, 2)
+        XCTAssertEqual(pageManager.bibleChapterNo, 2)
+        XCTAssertEqual(pageManager.bibleVerseNo, 2)
     }
 
 

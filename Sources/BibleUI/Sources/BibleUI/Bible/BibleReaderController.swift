@@ -10646,10 +10646,17 @@ public final class BibleReaderController: NSObject, @MainActor BibleBridgeDelega
      - notifies the window manager for synchronized scrolling only when this pane is already active
        from explicit user interaction, the callback did not acknowledge sync-origin feedback, and
        the visible Bible position actually changed
+
+     Failure modes: While a replacement is pending, telemetry from the outgoing DOM is discarded
+     without acknowledging synchronized-scroll feedback owned by the replacement generation.
      */
   public func bridge(
     _ bridge: BibleBridge, didScrollToOrdinal ordinal: Int, key: String, atChapterTop: Bool
   ) {
+    // A replacement advances native intent before its new DOM is accepted. Ignore telemetry from
+    // the outgoing document during that ownership gap; acknowledging it could also consume sync
+    // feedback that belongs to the new generation.
+    guard committedRenderGeneration == contentIntentGeneration else { return }
     if consumeVisibleCommentaryPosition(ordinal: ordinal, key: key) {
       return
     }
