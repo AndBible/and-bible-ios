@@ -63,6 +63,44 @@ extension AndBibleUITests {
     }
 
     /**
+     Samples hittability only when the element's center is visible in its owning viewport.
+
+     SwiftUI scroll views can publish finite accessibility frames for rows below the fold.
+     Asking XCTest for `isHittable` on those rows can record an invalid-activation-point failure
+     instead of returning false. Reveal helpers pass their real scrolling container; callers whose
+     surface is only an accessibility identity marker use the app window.
+     */
+    func isElementHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        within visibleContainer: XCUIElement? = nil
+    ) -> Bool {
+        guard element.exists, let windowFrame = mainWindowViewport(in: app) else {
+            return false
+        }
+        let elementFrame = element.frame
+        guard elementFrameIsUsable(elementFrame) else {
+            return false
+        }
+        let visibleFrame: CGRect
+        if let visibleContainer {
+            guard visibleContainer.exists else { return false }
+            let containerFrame = visibleContainer.frame
+            guard elementFrameIsUsable(containerFrame) else { return false }
+            visibleFrame = windowFrame.intersection(containerFrame)
+        } else {
+            visibleFrame = windowFrame
+        }
+        guard elementFrameIsUsable(visibleFrame),
+              visibleFrame.contains(
+                  CGPoint(x: elementFrame.midX, y: elementFrame.midY)
+              ) else {
+            return false
+        }
+        return element.isHittable
+    }
+
+    /**
      Waits for a UI-test condition through XCTest's predicate waiter.
 
      - Parameters:
@@ -119,6 +157,27 @@ extension AndBibleUITests {
             timeout: max(0, timeout)
         ) { [weak self] in
             self?.isElementHittable(element) ?? false
+        }
+    }
+
+    /**
+     Waits for an element to become visible in its real viewport and then hittable.
+
+     Pass a scrolling container for controls that may initially exist below its fold. Omit the
+     container when a popup exposes only an accessibility identity marker rather than its bounds.
+     */
+    func waitForElementToBecomeHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        within visibleContainer: XCUIElement? = nil,
+        diagnosticName: String = "resolved UI element",
+        timeout: TimeInterval
+    ) -> Bool {
+        waitForUITestCondition(
+            "Wait for visible \(diagnosticName) to become hittable",
+            timeout: max(0, timeout)
+        ) { [weak self] in
+            self?.isElementHittable(element, in: app, within: visibleContainer) ?? false
         }
     }
 
