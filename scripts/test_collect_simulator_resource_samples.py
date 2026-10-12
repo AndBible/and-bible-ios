@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -15,7 +17,11 @@ from collect_simulator_resource_samples import (
     SimulatorResourceCollector,
     StallCandidate,
     XPCProxyStallDetector,
+    parse_process_arguments,
     parse_process_snapshots,
+    run_bounded_owned_tool,
+    run_privileged_spindump_helper,
+    webkit_service_label,
 )
 
 
@@ -47,6 +53,7 @@ def observe(
 def candidate(process: ProcessSnapshot) -> StallCandidate:
     return StallCandidate(
         process=process,
+        first_observed_monotonic=0.0,
         first_observed_at="2026-10-12T15:57:00Z",
         qualified_at="2026-10-12T15:57:10Z",
         observed_elapsed_seconds=10.0,
@@ -103,6 +110,17 @@ class XPCProxyStallDetectorTests(unittest.TestCase):
         self.assertEqual(observe(detector, [child], 6.0), [])
         self.assertEqual([item.process for item in observe(detector, [child], 11.0)], [child])
 
+    def test_release_allows_failed_classification_to_be_observed_again(self) -> None:
+        detector = XPCProxyStallDetector(minimum_stall_seconds=5.0, capture_limit=3)
+        child = snapshot(800)
+        observe(detector, [child], 0.0)
+        qualified = observe(detector, [child], 5.0)
+        self.assertEqual([item.process for item in qualified], [child])
+
+        detector.release(qualified[0])
+
+        self.assertEqual([item.process for item in observe(detector, [child], 10.0)], [child])
+
 
 class ProcessSnapshotParsingTests(unittest.TestCase):
     def test_parses_launch_identity_state_wait_channel_and_command(self) -> None:
@@ -110,7 +128,6 @@ class ProcessSnapshotParsingTests(unittest.TestCase):
             "  42878  61179 Mon Oct 12 15:57:57 2026 S  waitq "
             "/Library/Developer/CoreSimulator/xpcproxy_sim\n"
         )
-
         self.assertEqual(
             parse_process_snapshots(output),
             [
@@ -123,6 +140,142 @@ class ProcessSnapshotParsingTests(unittest.TestCase):
                 )
             ],
         )
+
+    def test_parses_process_arguments_by_exact_pid(self) -> None:
+        output = (
+            "  42878 /runtime/xpcproxy_sim com.apple.WebKit.WebContent."
+            "9CBD02D2-4267-4CBB-AB4E-CF197214645A\n"
+            "  42879 /runtime/xpcproxy_sim com.apple.backboardd\n"
+        )
+
+        self.assertEqual(
+            parse_process_arguments(output),
+            {
+                42878: (
+                    "/runtime/xpcproxy_sim com.apple.WebKit.WebContent."
+                    "9CBD02D2-4267-4CBB-AB4E-CF197214645A"
+                ),
+                42879: "/runtime/xpcproxy_sim com.apple.backboardd",
+            },
+        )
+
+    def test_recognizes_only_exact_observed_webkit_service_label_shapes(self) -> None:
+        uuid = "9CBD02D2-4267-4CBB-AB4E-CF197214645A"
+        for label in (
+            f"com.apple.WebKit.WebContent.{uuid}",
+            f"com.apple.WebKit.WebContent.EnhancedSecurity.{uuid}",
+            f"com.apple.WebKit.GPU.{uuid}",
+            f"com.apple.WebKit.Networking.{uuid}",
+            "com.apple.WebKit.WebContent",
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(webkit_service_label(f"/runtime/xpcproxy_sim {label}"), label)
+        for arguments in (
+            "/runtime/xpcproxy_sim com.apple.WebKit.WebContent.not-a-uuid",
+            "/runtime/xpcproxy_sim --name=com.apple.WebKit.WebContent",
+            "/runtime/xpcproxy_sim prefix-com.apple.WebKit.GPU",
+            "/runtime/xpcproxy_sim 'com.apple.WebKit.WebContent",
+            "/runtime/xpcproxy_sim com.apple.WebKit.WebContent com.apple.WebKit.GPU",
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertIsNone(webkit_service_label(arguments))
+
+
+class OwnedToolLifecycleTests(unittest.TestCase):
+    def test_real_timed_out_child_is_terminated_and_reaped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            child_pid: list[int] = []
+            result = run_bounded_owned_tool(
+                (sys.executable, "-c", "import time; time.sleep(30)"),
+                tool_output_path=Path(temporary_directory) / "child.log",
+                timeout=0.05,
+                process_started=lambda process: child_pid.append(process.pid),
+            )
+
+            self.assertTrue(result.launched)
+            self.assertTrue(result.timed_out)
+            self.assertIsNotNone(result.returncode)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid[0], 0)
+
+    def test_privileged_helper_accepts_only_fixed_spindump_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            output = diagnostics / "capture.spindump.txt"
+            process = unittest.mock.MagicMock()
+            process.wait.return_value = 0
+            process.poll.return_value = 0
+
+            def inspect_command(command: tuple[str, ...], **_kwargs: object) -> object:
+                self.assertEqual(command[0], "/usr/sbin/spindump")
+                self.assertEqual(command[1:4], ("800", "1", "10"))
+                self.assertIn("-onlyTarget", command)
+                self.assertEqual(command[command.index("-timelimit") + 1], "3")
+                self.assertNotIn("-noSymbolicate", command)
+                self.assertNotIn("-noBinary", command)
+                self.assertEqual(Path(command[-1]), output)
+                output.write_text("kernel stack")
+                return process
+
+            with patch(
+                "collect_simulator_resource_samples.subprocess.Popen",
+                side_effect=inspect_command,
+            ):
+                status = run_privileged_spindump_helper(
+                    (
+                        "--pid", "800",
+                        "--diagnostics-directory", str(diagnostics),
+                        "--output", str(output),
+                    )
+                )
+
+            self.assertEqual(status, 0)
+
+    def test_privileged_helper_rejects_output_outside_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            with patch("collect_simulator_resource_samples.subprocess.Popen") as launch:
+                status = run_privileged_spindump_helper(
+                    (
+                        "--pid", "800",
+                        "--diagnostics-directory", str(diagnostics),
+                        "--output", str(diagnostics.parent / "outside.spindump.txt"),
+                    )
+                )
+            self.assertEqual(status, 64)
+            launch.assert_not_called()
+
+    def test_privileged_helper_honors_stop_during_child_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            diagnostics = Path(temporary_directory).resolve()
+            output = diagnostics / "capture.spindump.txt"
+            child_pid: list[int] = []
+            original_popen = subprocess.Popen
+
+            def launch_then_stop(_command: tuple[str, ...], **kwargs: object) -> object:
+                process = original_popen(
+                    (sys.executable, "-c", "import time; time.sleep(30)"),
+                    **kwargs,
+                )
+                child_pid.append(process.pid)
+                os.kill(os.getpid(), signal.SIGTERM)
+                return process
+
+            with patch(
+                "collect_simulator_resource_samples.subprocess.Popen",
+                side_effect=launch_then_stop,
+            ):
+                status = run_privileged_spindump_helper(
+                    (
+                        "--pid", "800",
+                        "--diagnostics-directory", str(diagnostics),
+                        "--output", str(output),
+                    )
+                )
+
+            self.assertEqual(status, -15)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid[0], 0)
 
 
 class SimulatorResourceCollectorCaptureTests(unittest.TestCase):
@@ -155,6 +308,162 @@ class SimulatorResourceCollectorCaptureTests(unittest.TestCase):
             self.assertEqual(event["first_observed_at"], "2026-10-12T15:57:00Z")
             self.assertEqual(event["observed_elapsed_seconds"], 10.0)
             process.wait.assert_called_once_with(timeout=3.0)
+
+    def test_stop_before_owned_child_registration_terminates_and_reaps_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            collector = self.make_collector(Path(temporary_directory))
+            collector.stop_event.set()
+
+            result = collector._run_owned_capture_tool(
+                (sys.executable, "-c", "import time; time.sleep(30)"),
+                tool_output_path=Path(temporary_directory) / "child.log",
+                timeout=1.0,
+            )
+            self.assertTrue(result.launched)
+            self.assertEqual(result.returncode, -15)
+            self.assertIsNone(collector._owned_capture_process)
+
+    def test_classification_preserves_webkit_capacity_after_one_boot_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            collector = self.make_collector(Path(temporary_directory))
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            boot = candidate(snapshot(800))
+            ignored_boot = candidate(snapshot(801))
+            web_content = candidate(snapshot(802))
+            gpu = candidate(snapshot(803))
+            extra_web_content = candidate(snapshot(804))
+            labels = {
+                800: "/runtime/xpcproxy_sim com.apple.backboardd",
+                801: "/runtime/xpcproxy_sim com.apple.SpringBoard",
+                802: "/runtime/xpcproxy_sim com.apple.WebKit.WebContent",
+                803: "/runtime/xpcproxy_sim com.apple.WebKit.GPU",
+                804: "/runtime/xpcproxy_sim com.apple.WebKit.WebContent",
+            }
+
+            with patch.object(collector, "_process_arguments", return_value=labels):
+                with patch.object(collector, "_capture_stall", return_value=True) as sample_capture:
+                    with patch.object(
+                        collector, "_capture_kernel_stall", return_value=True
+                    ) as kernel_capture:
+                        collector._capture_candidates(
+                            [boot, ignored_boot, web_content, gpu, extra_web_content], manager
+                        )
+
+            self.assertEqual(
+                [(call.args[0].process.pid, call.kwargs.get("service_label")) for call in sample_capture.call_args_list],
+                [(803, "com.apple.WebKit.GPU"), (800, None)],
+            )
+            kernel_capture.assert_called_once_with(
+                web_content, manager, "com.apple.WebKit.WebContent"
+            )
+
+    def test_prelaunch_identity_skip_does_not_consume_a_tool_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            collector = self.make_collector(Path(temporary_directory))
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            first = candidate(snapshot(800))
+            second = candidate(snapshot(801))
+            labels = {
+                800: "/runtime/xpcproxy_sim com.apple.WebKit.WebContent",
+                801: "/runtime/xpcproxy_sim com.apple.WebKit.GPU",
+            }
+
+            with patch.object(collector, "_process_arguments", return_value=labels):
+                with patch.object(
+                    collector, "_capture_kernel_stall", side_effect=[False, True]
+                ) as kernel_capture:
+                    collector._capture_candidates([first, second], manager)
+
+            self.assertEqual(kernel_capture.call_count, 2)
+            self.assertEqual(collector._kernel_capture_count, 1)
+            self.assertEqual(collector._webkit_capture_count, 1)
+
+    def test_unavailable_arguments_defer_without_consuming_capture_slots(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            collector = self.make_collector(Path(temporary_directory))
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            unavailable = candidate(snapshot(800))
+
+            with patch.object(collector, "_process_arguments", return_value={}):
+                with patch.object(collector.detector, "release") as release:
+                    with patch.object(collector, "_capture_stall") as sample_capture:
+                        collector._capture_candidates([unavailable], manager)
+
+            release.assert_called_once_with(unavailable)
+            sample_capture.assert_not_called()
+            self.assertEqual(collector._boot_capture_count, 0)
+            self.assertEqual(collector._webkit_capture_count, 0)
+
+    def test_kernel_capture_uses_bounded_noninteractive_root_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            collector = self.make_collector(root)
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            child = snapshot(800)
+            process = unittest.mock.MagicMock()
+            process.wait.return_value = 0
+            process.returncode = 0
+            process.poll.return_value = 0
+
+            def create_stack(command: tuple[str, ...], **_kwargs: object) -> unittest.mock.MagicMock:
+                self.assertEqual(command[:2], ("/usr/bin/sudo", "-n"))
+                self.assertEqual(Path(command[2]), Path(sys.executable))
+                self.assertEqual(command[4], "--capture-kernel-spindump")
+                self.assertEqual(command[command.index("--pid") + 1], "800")
+                output = Path(command[command.index("--output") + 1])
+                output.write_text("kernel stack")
+                return process
+
+            with patch.object(
+                collector,
+                "_process_snapshot",
+                side_effect=[manager, child, manager, child],
+            ):
+                with patch(
+                    "collect_simulator_resource_samples.subprocess.Popen",
+                    side_effect=create_stack,
+                ):
+                    collector._capture_kernel_stall(
+                        candidate(child), manager, "com.apple.WebKit.WebContent"
+                    )
+
+            event = json.loads((root / "stalls" / "metadata.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(event["event"], "kernel_stall_capture")
+            self.assertTrue(event["stack_valid"])
+            process.wait.assert_called_once_with(timeout=8.0)
+
+    def test_kernel_capture_timeout_reaps_only_owned_sudo_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            collector = self.make_collector(root)
+            manager = snapshot(700, ppid=1, command="launchd_sim")
+            child = snapshot(800)
+            process = unittest.mock.MagicMock()
+            process.wait.side_effect = [
+                subprocess.TimeoutExpired(cmd=["sudo", "spindump"], timeout=5.0),
+                -15,
+            ]
+            process.returncode = -15
+            process.poll.return_value = -15
+
+            with patch.object(
+                collector,
+                "_process_snapshot",
+                side_effect=[manager, child, manager, child],
+            ):
+                with patch(
+                    "collect_simulator_resource_samples.subprocess.Popen",
+                    return_value=process,
+                ):
+                    collector._capture_kernel_stall(
+                        candidate(child), manager, "com.apple.WebKit.WebContent"
+                    )
+
+            event = json.loads((root / "stalls" / "metadata.jsonl").read_text().splitlines()[-1])
+            self.assertTrue(event["timed_out"])
+            self.assertFalse(event["stack_valid"])
+            process.terminate.assert_called_once_with()
+            process.kill.assert_not_called()
 
     def test_timeout_terminates_only_the_owned_sample_child(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -291,12 +600,12 @@ class SimulatorResourceCollectorCaptureTests(unittest.TestCase):
                             self.assertIsNone(collector._resolve_manager_snapshot())
                     read_process.assert_not_called()
 
-    def test_request_stop_terminates_only_owned_sample_process(self) -> None:
+    def test_request_stop_terminates_only_owned_capture_process(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             collector = self.make_collector(Path(temporary_directory))
             sample_process = unittest.mock.MagicMock()
             sample_process.poll.return_value = None
-            collector._owned_sample_process = sample_process
+            collector._owned_capture_process = sample_process
 
             collector.request_stop()
 
