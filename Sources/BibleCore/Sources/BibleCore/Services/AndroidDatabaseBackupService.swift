@@ -1313,7 +1313,8 @@ public final class AndroidDatabaseBackupService {
         let isUnsupportedWorkspaceGeneration = category == .workspaces
             && !RemoteSyncWorkspaceDatabaseMigrator.supportsSourceVersion(databaseVersion)
         if databaseVersion > category.supportedDatabaseVersion
-            || isUnsupportedWorkspaceGeneration {
+            || isUnsupportedWorkspaceGeneration
+            || (category == .bookmarks && !RemoteSyncBookmarkDatabaseMigrator.supportsSourceVersion(databaseVersion)) {
             return .unsupportedVersion(version: databaseVersion, supported: category.supportedDatabaseVersion)
         }
         return .supported

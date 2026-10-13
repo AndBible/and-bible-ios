@@ -98,6 +98,7 @@ let package = Package(
             exclude: ["Fixtures/android-bookmark-room-v12.sql"],
             resources: [
                 .copy("Fixtures/mydocuments"),
+                .copy("Fixtures/bookmark-history"),
                 .copy("Fixtures/search"),
             ]
         ),

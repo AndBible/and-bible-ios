@@ -255,6 +255,10 @@ public final class RemoteSyncInitialBackupRestoreService {
                 at: stagedBackup.databaseFileURL
             )
         }
+        if category == .bookmarks {
+            // Migrate before metadata is read: Android 2→3 renames bookmark LogEntry tables.
+            try RemoteSyncBookmarkDatabaseMigrator.migrateStagedDatabase(at: stagedBackup.databaseFileURL)
+        }
         let metadataSnapshot = try metadataRestoreService.readSnapshot(
             from: stagedBackup.databaseFileURL
         )
