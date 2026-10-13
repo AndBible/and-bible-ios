@@ -9,6 +9,7 @@ import os
 import pathlib
 import plistlib
 import signal
+import shutil
 import socket
 import subprocess
 import threading
@@ -63,6 +64,8 @@ class RecordingRunner:
             raise overridden
         if overridden is not None:
             return overridden
+        if operation == "list":
+            return CommandResult(0, f"PID\tStatus\tLabel\n123\t0\tUIKitApplication:{BUNDLE_ID}[test]\n", "")
         if operation == "get_app_container":
             return CommandResult(0, f"{self.container}\n", "")
         if operation == "seed":
@@ -72,6 +75,8 @@ class RecordingRunner:
 
     @staticmethod
     def _operation(command: list[str]) -> str:
+        if "launchctl" in command and "list" in command:
+            return "list"
         if "terminate" in command:
             return "terminate"
         if "launch" in command:
@@ -813,7 +818,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         )
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container", "reset", "seed"],
+            ["list", "terminate", "get_app_container", "reset", "seed"],
         )
         for fixture_command in self.runner.commands[-2:]:
             self.assertEqual(fixture_command[:2], [
@@ -1014,7 +1019,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         )
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container", "reset"],
+            ["list", "terminate", "get_app_container", "reset"],
         )
 
     def test_confirmed_absent_process_allows_prepare_but_other_stop_failure_blocks_it(self) -> None:
@@ -1055,8 +1060,38 @@ class FixtureServiceTestCase(unittest.TestCase):
         )
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate"],
+            ["list", "terminate"],
         )
+
+    def test_absent_or_stopped_app_skips_termination_before_preparing_fixture(self) -> None:
+        """A successful native job lookup avoids the CI delay without weakening process isolation."""
+        for rows in ["", f"-\t0\tUIKitApplication:{BUNDLE_ID}[test]\n",
+                     f"123\t0\tUIKitApplication:{BUNDLE_ID}.other[test]\n"]:
+            with self.subTest(rows=rows):
+                self.runner.commands.clear()
+                self.runner.results["list"] = CommandResult(0, "PID\tStatus\tLabel\n" + rows, "")
+                with UITestFixtureService(self.configuration, command_runner=self.runner):
+                    response = self.request()
+                shutil.rmtree(self.service_directory)
+                self.assertTrue(response["succeeded"], response)
+                self.assertEqual(
+                    [RecordingRunner._operation(command) for command in self.runner.commands],
+                    ["list", "get_app_container", "reset", "seed"],
+                )
+
+    def test_failed_or_malformed_process_lookup_never_mutates_fixture(self) -> None:
+        """Unavailable process state is an error, never permission to overwrite a live store."""
+        for result in [CommandResult(1, "", "launchd unavailable"),
+                       CommandResult(0, "", ""),
+                       CommandResult(0, "PID\tStatus\tLabel\nmalformed\n", "")]:
+            with self.subTest(result=result):
+                self.runner.commands.clear()
+                self.runner.results["list"] = result
+                with UITestFixtureService(self.configuration, command_runner=self.runner):
+                    response = self.request()
+                shutil.rmtree(self.service_directory)
+                self.assertFalse(response["succeeded"])
+                self.assertEqual(len(self.runner.commands), 1)
 
     def test_terminate_uses_remaining_request_budget_and_timeout_blocks_mutation(self) -> None:
         observed_timeouts: list[float] = []
@@ -1065,6 +1100,8 @@ class FixtureServiceTestCase(unittest.TestCase):
         def timed_terminate(command, timeout, _cancellation) -> CommandResult:
             command = list(command)
             commands.append(command)
+            if "launchctl" in command:
+                return CommandResult(0, f"PID\tStatus\tLabel\n123\t0\tUIKitApplication:{BUNDLE_ID}[test]\n", "")
             observed_timeouts.append(timeout)
             raise FixtureHostCommandTimeout(
                 command=command,
@@ -1107,8 +1144,8 @@ class FixtureServiceTestCase(unittest.TestCase):
             "direct child reaped: True; process group gone: True; "
             "stderr: native simulator termination marker",
         )
-        self.assertEqual(len(commands), 1)
-        self.assertIn("terminate", commands[0])
+        self.assertEqual(len(commands), 2)
+        self.assertIn("terminate", commands[1])
         self.assertGreater(observed_timeouts[0], 36)
         self.assertLessEqual(observed_timeouts[0], 37)
         records = [
@@ -1116,7 +1153,9 @@ class FixtureServiceTestCase(unittest.TestCase):
             for line in diagnostics.getvalue().splitlines()
             if line.startswith("fixture-host-stage ")
         ]
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]["phase"], "simulator app process lookup")
+        records = records[1:]
         self.assertEqual(records[0]["phase"], "simulator app termination")
         self.assertEqual(records[0]["status"], "timeout")
         self.assertEqual(records[0]["stderr"], "native simulator termination marker")
@@ -1144,6 +1183,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertEqual(
             [record["phase"] for record in records],
             [
+                "simulator app process lookup",
                 "simulator app termination",
                 "installed app data-container lookup",
                 "fixture reset",
@@ -1174,7 +1214,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertTrue(response["succeeded"])
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container", "launch", "terminate", "get_app_container", "reset", "seed"],
+            ["list", "terminate", "get_app_container", "launch", "list", "terminate", "get_app_container", "reset", "seed"],
         )
         terminate_timeouts = [
             timeout
@@ -1200,7 +1240,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertIn("simulator app termination failed", response["error"])
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container", "launch", "terminate"],
+            ["list", "terminate", "get_app_container", "launch", "list", "terminate"],
         )
 
     def test_bootstrap_requires_a_real_container_before_fixture_mutation(self) -> None:
@@ -1217,7 +1257,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertIn("did not return one available absolute path", response["error"])
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container", "launch", "terminate", "get_app_container"],
+            ["list", "terminate", "get_app_container", "launch", "list", "terminate", "get_app_container"],
         )
 
     def test_command_timeout_is_returned_without_later_mutation(self) -> None:
@@ -1231,7 +1271,7 @@ class FixtureServiceTestCase(unittest.TestCase):
         self.assertEqual(response["error"], "fixture host command timed out after 0.1s")
         self.assertEqual(
             [RecordingRunner._operation(command) for command in self.runner.commands],
-            ["terminate", "get_app_container"],
+            ["list", "terminate", "get_app_container"],
         )
 
     def test_configured_performance_scale_is_allowed_without_opening_request_values(self) -> None:
