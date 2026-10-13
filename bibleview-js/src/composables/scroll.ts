@@ -70,7 +70,9 @@ export function useScroll(
 ) {
     const {highlightOrdinal, resetHighlights} = highlight;
     const currentScrollAnimation = ref<number | null>(null);
-    const isScrolling = computed(() => currentScrollAnimation.value != null)
+    let nextSetupContentOwnership = 0;
+    const setupContentOwnership = ref<{id: number, generation: number} | null>(null);
+    const isScrolling = computed(() => currentScrollAnimation.value != null || setupContentOwnership.value != null)
     const stopScrollingOnTouchStart = () => stopScrolling();
     let touchScrollCancellationIsRegistered = false;
 
@@ -243,6 +245,19 @@ export function useScroll(
 
     const scrollYAtStart = ref<number>(0);
 
+    /**
+     * Applies the native destination after the current document insertion settles.
+     *
+     * Ownership begins before awaiting `documentPromise`, so layout scroll events caused by DOM
+     * insertion cannot report the document's transient first visible verse. The latest invocation
+     * owns release; an obsolete generation or an older overlapping completion cannot release a
+     * newer setup. The existing scroll animation owns the remaining settlement after this returns.
+     *
+     * @param request Native setup_content offsets, destination, and optional highlight selection.
+     * @returns A promise that settles after the current generation applies or becomes obsolete.
+     * @remarks Mutates toolbar offsets, scroll position, highlights, and programmatic-scroll
+     * ownership. Missing destinations retain scrollToId's existing forced-top behavior.
+     */
     async function setupContent(
         {
             jumpToOrdinal = null,
@@ -268,48 +283,58 @@ export function useScroll(
             osisRef?: Nullable<string>,
         }) {
         const generation = documentGeneration.value;
-        await documentPromise.value;
-        if (generation !== documentGeneration.value) {
-            console.log("setupContent skipped stale generation", {
-                generation,
-                currentGeneration: documentGeneration.value,
-            });
-            return;
+        const ownership = {id: ++nextSetupContentOwnership, generation};
+        setupContentOwnership.value = ownership;
+        const ownershipIsCurrent = () => setupContentOwnership.value?.id === ownership.id
+            && generation === documentGeneration.value;
+        try {
+            await documentPromise.value;
+            if (!ownershipIsCurrent()) {
+                console.log("setupContent skipped stale generation", {
+                    generation,
+                    currentGeneration: documentGeneration.value,
+                });
+                return;
+            }
+            console.log(`setupContent`, jumpToOrdinal, jumpToAnchor, topOffset);
+
+            setToolbarOffset(topOffset, bottomOffset, {immediate: true, doNotScroll: true});
+
+            await nextTick(); // Do scrolling only after view has been settled (fonts etc)
+            if (!ownershipIsCurrent()) {
+                console.log("setupContent skipped stale generation after nextTick", {
+                    generation,
+                    currentGeneration: documentGeneration.value,
+                });
+                return;
+            }
+
+            if (jumpToOrdinal != null) {
+                scrollToId(`o-${jumpToOrdinal}`, {now: true, force: true});
+            } else if (jumpToAnchor !== null) {
+                scrollToId(`o-${jumpToAnchor}`, {
+                    now: true,
+                    force: true,
+                    highlight,
+                    ordinalStart,
+                    ordinalEnd,
+                    bookInitials: bookInitials ?? undefined,
+                    osisRef: osisRef ?? undefined,
+                });
+            } else if (jumpToId !== null) {
+                scrollToId(jumpToId, {now: true, force: true});
+            } else {
+                console.log("scrolling to beginning of document (now)");
+                scrollToId(null, {now: true, force: true});
+            }
+            scrollYAtStart.value = window.scrollY;
+
+            console.log("Content is set ready!");
+        } finally {
+            if (setupContentOwnership.value?.id === ownership.id) {
+                setupContentOwnership.value = null;
+            }
         }
-        console.log(`setupContent`, jumpToOrdinal, jumpToAnchor, topOffset);
-
-        setToolbarOffset(topOffset, bottomOffset, {immediate: true, doNotScroll: true});
-
-        await nextTick(); // Do scrolling only after view has been settled (fonts etc)
-        if (generation !== documentGeneration.value) {
-            console.log("setupContent skipped stale generation after nextTick", {
-                generation,
-                currentGeneration: documentGeneration.value,
-            });
-            return;
-        }
-
-        if (jumpToOrdinal != null) {
-            scrollToId(`o-${jumpToOrdinal}`, {now: true, force: true});
-        } else if (jumpToAnchor !== null) {
-            scrollToId(`o-${jumpToAnchor}`, {
-                now: true,
-                force: true,
-                highlight,
-                ordinalStart,
-                ordinalEnd,
-                bookInitials: bookInitials ?? undefined,
-                osisRef: osisRef ?? undefined,
-            });
-        } else if (jumpToId !== null) {
-            scrollToId(jumpToId, {now: true, force: true});
-        } else {
-            console.log("scrolling to beginning of document (now)");
-            scrollToId(null, {now: true, force: true});
-        }
-        scrollYAtStart.value = window.scrollY;
-
-        console.log("Content is set ready!");
     }
 
     setupEventBusListener("set_offsets", setToolbarOffset)
