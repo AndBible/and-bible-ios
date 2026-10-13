@@ -13,6 +13,14 @@ import Foundation
  - Failure modes: Cross-resolved handles return nil and never enter the cache.
  */
 final class SwordModuleHandleAuthorizationCache {
+    /// Shared storage protects native handles without retaining the manager or this cache.
+    private let nativeStorage: SwordNativeManagerStorage
+
+    /** Retains the allocation owning all handles admitted by this cache; creates no native objects. */
+    init(nativeStorage: SwordNativeManagerStorage) {
+        self.nativeStorage = nativeStorage
+    }
+
     /// Validated wrappers keyed by exact Android initials.
     private var modules: [SwordJavaExactStringIdentity: SwordModule] = [:]
 
@@ -41,6 +49,7 @@ final class SwordModuleHandleAuthorizationCache {
         if let cached = modules[identity] { return cached }
         let module = SwordModule(
             handle: handle,
+            nativeStorage: nativeStorage,
             modulePath: modulePath,
             parsedConfig: config
         )

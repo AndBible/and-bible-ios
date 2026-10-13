@@ -114,12 +114,14 @@ public final class SwordManager: @unchecked Sendable {
         }
     }
 
-    private let handle: UnsafeMutableRawPointer
+    /// Shared native allocation retained independently by every escaped module wrapper.
+    private let nativeStorage: SwordNativeManagerStorage
+    private var handle: UnsafeMutableRawPointer { nativeStorage.handle }
 
     /// Internal access to the C handle for InstallManager operations.
     var rawHandle: UnsafeMutableRawPointer { handle }
     /// Exact native wrapper and verified session-unlock ownership state.
-    private let moduleAuthorizationCache = SwordModuleHandleAuthorizationCache()
+    private let moduleAuthorizationCache: SwordModuleHandleAuthorizationCache
 
     /// One manager-lifetime config/registry capture, invalidated by unlock and explicit refresh.
     private var nativeRegistrySnapshotCache: NativeModuleRegistrySnapshot?
@@ -166,7 +168,9 @@ public final class SwordManager: @unchecked Sendable {
         )
         let generationBeforeConstruction = coordinator.currentMutationGeneration
         guard let h = SwordRuntime.sync({ SWMgr_new(path) }) else { return nil }
-        self.handle = h
+        let storage = SwordNativeManagerStorage(handle: h)
+        self.nativeStorage = storage
+        self.moduleAuthorizationCache = SwordModuleHandleAuthorizationCache(nativeStorage: storage)
         let generationAfterConstruction = coordinator.currentMutationGeneration
         if generationBeforeConstruction == generationAfterConstruction,
            generationAfterConstruction.isMultiple(of: 2) {
@@ -208,7 +212,6 @@ public final class SwordManager: @unchecked Sendable {
             installedRegistryProjectionCache = nil
             admittedAddonModulesCache = nil
             moduleAuthorizationCache.clear()
-            SWMgr_delete(handle)
         }
     }
 
