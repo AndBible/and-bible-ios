@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU General Public License along with AndBible.
  * If not, see http://www.gnu.org/licenses/.
  */
-import {ComputedRef, ref, Ref, watch} from "vue";
+import {ComputedRef, onUnmounted, ref, Ref, watch} from "vue";
 import {setupWindowEventListener} from "@/utils";
 import {throttle} from "lodash";
 import {CalculatedConfig, Config} from "@/composables/config";
@@ -22,6 +22,14 @@ import {UseAndroid} from "@/composables/android";
 import {useScroll} from "@/composables/scroll";
 import {Nullable} from "@/types/common";
 
+/**
+ * Reports positions obtained from user-driven DOM observations to the native bridge.
+ *
+ * Programmatic scrolling and document replacement invalidate both restoration and bridge-report
+ * ownership without emitting feedback. When programmatic scrolling settles, the DOM is observed
+ * silently to restore configuration-change state; only a later unsuppressed scroll reports to the
+ * bridge, including when it returns to the same tuple from an earlier document generation.
+ */
 export function useVerseNotifier(
     config: Config,
     calculatedConfig: CalculatedConfig,
@@ -30,17 +38,27 @@ export function useVerseNotifier(
     topElement: Ref<HTMLElement | null>,
     {isScrolling}: ReturnType<typeof useScroll>,
     lineHeight: ComputedRef<number>,
+    documentGeneration: Ref<number>,
 ) {
     const currentVerse = ref<number | null>(null);
     const currentKey = ref<string>("")
     const currentDocumentId = ref<string | null>(null);
     const currentAtChapterTop = ref(false);
-    watch(
-        () => [currentVerse.value, currentKey.value, currentAtChapterTop.value] as const,
-        ([value, key, atChapterTop]) => {
-            scrolledToOrdinal(key, value, atChapterTop);
-        }
-    );
+    let lastReportedPosition: readonly [string, number, boolean] | null = null;
+
+    /**
+     * Removes the outgoing document's restoration and bridge-report ownership.
+     *
+     * This synchronously clears every observed-position field and emits no bridge callback. Callers
+     * cancel queued observation work first so an older document cannot repopulate the cleared state.
+     */
+    function invalidateObservedPosition() {
+        currentVerse.value = null;
+        currentKey.value = "";
+        currentDocumentId.value = null;
+        currentAtChapterTop.value = false;
+        lastReportedPosition = null;
+    }
 
     let lastDirection = "ltr";
     const step = 10;
@@ -57,10 +75,14 @@ export function useVerseNotifier(
         }
     }
 
-    // Throttle is preferred over debounce because do not want that bible ref display is
-    // totally frozen during scrolling
-    const onScroll = throttle(() => {
-        if (isScrolling.value) return;
+    /**
+     * Scans the rendered document for the first visible ordinal and updates restoration state.
+     *
+     * When `reportToBridge` is true, a changed key/ordinal/chapter-top tuple is also published to
+     * native code. When false, settlement only refreshes restoration state. If no ordinal is found,
+     * the previously invalidated state remains unchanged and no bridge callback is emitted.
+     */
+    function observeVisiblePosition(reportToBridge: boolean) {
         let y = calculatedConfig.value.topOffset + lineHeight.value * 0.3;
 
         // Find element, starting from right
@@ -87,6 +109,18 @@ export function useVerseNotifier(
                             const verseAnchor = document.getElementById(`o-${currentVerse.value}`);
                             const topBoundary = window.scrollY + calculatedConfig.value.topOffset;
                             currentAtChapterTop.value = verseAnchor != null && topBoundary + 1 < verseAnchor.offsetTop;
+                            const position = [
+                                currentKey.value,
+                                currentVerse.value,
+                                currentAtChapterTop.value,
+                            ] as const;
+                            if (reportToBridge && (
+                                lastReportedPosition == null ||
+                                position.some((value, index) => value !== lastReportedPosition![index])
+                            )) {
+                                lastReportedPosition = position;
+                                scrolledToOrdinal(...position);
+                            }
                             return;
                         }
                     }
@@ -94,8 +128,31 @@ export function useVerseNotifier(
                 y += lineHeight.value * 0.6;
             }
         }
+    }
+
+    // Throttle is preferred over debounce because do not want that bible ref display is
+    // totally frozen during scrolling
+    const onScroll = throttle(() => {
+        if (isScrolling.value) return;
+        observeVisiblePosition(true);
     }, 50);
 
+    watch(documentGeneration, () => {
+        onScroll.cancel();
+        invalidateObservedPosition();
+    }, {flush: "sync"});
+    watch(isScrolling, scrolling => {
+        if (scrolling) {
+            onScroll.cancel();
+            invalidateObservedPosition();
+        } else {
+            // Refresh config-change restoration state without feeding the owned destination back
+            // to native code. A later user scroll remains responsible for bridge publication.
+            observeVisiblePosition(false);
+        }
+    }, {flush: "sync"});
+
     setupWindowEventListener('scroll', onScroll)
+    onUnmounted(() => onScroll.cancel());
     return {currentVerse, currentDocumentId, currentAtChapterTop}
 }

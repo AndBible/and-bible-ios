@@ -204,7 +204,16 @@ onMounted(() => {
 })
 onUnmounted(() => mounted.value = false)
 
-const {currentVerse, currentDocumentId, currentAtChapterTop} = useVerseNotifier(config, calculatedConfig, mounted, android, topElement, scroll, lineHeight);
+const {currentVerse, currentDocumentId, currentAtChapterTop} = useVerseNotifier(
+    config,
+    calculatedConfig,
+    mounted,
+    android,
+    topElement,
+    scroll,
+    lineHeight,
+    documentGeneration,
+);
 
 const customFeatures = useCustomFeatures(android);
 provide(customFeaturesKey, customFeatures);
